@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from .models import Finding, SEVERITIES, SEVERITY_RANK
+from .standards import DEFAULT_STANDARD, DEFAULT_STANDARD_CATEGORY, standards_payload
 
 
 SEVERITY_WEIGHTS = {
@@ -36,6 +37,8 @@ TRANSLATIONS = {
         "findings": "Findings",
         "filters": "Filters",
         "scan_directory": "Scan Directory",
+        "scan_standard": "Security Standard",
+        "scan_standard_category": "Standard Category",
         "scan_path_placeholder": "No folder selected",
         "choose_folder": "Choose Folder",
         "scan_now": "Scan",
@@ -45,6 +48,7 @@ TRANSLATIONS = {
         "scan_status_running": "Scanning...",
         "scan_status_done": "Scan complete",
         "scan_status_failed": "Scan failed",
+        "scan_category_not_supported": "No local checks are mapped to this category yet.",
         "folder_selection_cancelled": "Folder selection cancelled.",
         "folder_selection_failed": "Folder selection failed",
         "folder_selected": "Folder selected",
@@ -105,6 +109,8 @@ TRANSLATIONS = {
         "findings": "발견 항목",
         "filters": "필터",
         "scan_directory": "점검 경로",
+        "scan_standard": "보안 기준",
+        "scan_standard_category": "기준 카테고리",
         "scan_path_placeholder": "선택된 폴더 없음",
         "choose_folder": "폴더 선택",
         "scan_now": "점검 실행",
@@ -114,6 +120,7 @@ TRANSLATIONS = {
         "scan_status_running": "점검 중...",
         "scan_status_done": "점검 완료",
         "scan_status_failed": "점검 실패",
+        "scan_category_not_supported": "이 카테고리에 매핑된 로컬 점검이 아직 없습니다.",
         "folder_selection_cancelled": "폴더 선택이 취소되었습니다.",
         "folder_selection_failed": "폴더 선택 실패",
         "folder_selected": "폴더 선택됨",
@@ -460,6 +467,8 @@ def build_dashboard_payload(
     target_paths: dict[str, str] | None = None,
     warnings: tuple[str, ...] = (),
     scan_path: str | None = None,
+    standard: str = DEFAULT_STANDARD,
+    standard_category: str = DEFAULT_STANDARD_CATEGORY,
 ) -> dict[str, object]:
     generated, generated_display = _generated_at()
     summary = _summary(findings, target_names, target_paths)
@@ -469,10 +478,13 @@ def build_dashboard_payload(
         "generated_display": generated_display,
         "language": labels["html_lang"],
         "labels_by_language": TRANSLATIONS,
+        "standards": standards_payload(),
         "scanner": {"name": "local-security-scanner", "version": __version__},
         "summary": summary,
         "scan": {
             "path": scan_path or "",
+            "standard": standard,
+            "standard_category": standard_category,
             "warnings": list(warnings),
         },
         "findings_by_language": {
@@ -489,6 +501,8 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_TITLE__": html.escape(str(labels["title"]), quote=True),
         "__INITIAL_FILTERS__": html.escape(str(labels["filters"]), quote=True),
         "__INITIAL_SCAN_DIRECTORY__": html.escape(str(labels["scan_directory"])),
+        "__INITIAL_SCAN_STANDARD__": html.escape(str(labels["scan_standard"])),
+        "__INITIAL_SCAN_STANDARD_CATEGORY__": html.escape(str(labels["scan_standard_category"])),
         "__INITIAL_SCAN_PATH_PLACEHOLDER__": html.escape(str(labels["scan_path_placeholder"]), quote=True),
         "__INITIAL_CHOOSE_FOLDER__": html.escape(str(labels["choose_folder"])),
         "__INITIAL_SCAN_NOW__": html.escape(str(labels["scan_now"])),
@@ -817,6 +831,21 @@ HTML_TEMPLATE = """<!doctype html>
       align-items: center;
     }
 
+    .scan-standard-form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(220px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+
+    .scan-select {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
     .scan-option {
       display: inline-flex;
       align-items: center;
@@ -1053,7 +1082,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     @media (max-width: 1000px) {
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .filters, .scan-form { grid-template-columns: 1fr 1fr; }
+      .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr 1fr; }
       .grid { grid-template-columns: 1fr; }
       button { width: 100%; }
     }
@@ -1064,7 +1093,7 @@ HTML_TEMPLATE = """<!doctype html>
       .header-side { width: 100%; padding-top: 32px; }
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
-      .metrics, .filters, .scan-form { grid-template-columns: 1fr; }
+      .metrics, .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr; }
       .metric { min-height: 84px; }
       .metric-value { font-size: 26px; }
     }
@@ -1104,6 +1133,16 @@ HTML_TEMPLATE = """<!doctype html>
           <input id="scan-depth" type="number" min="0" max="6" value="2">
         </label>
         <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
+      </div>
+      <div class="scan-standard-form">
+        <label class="scan-select">
+          <span id="scan-standard-label">__INITIAL_SCAN_STANDARD__</span>
+          <select id="scan-standard"></select>
+        </label>
+        <label class="scan-select">
+          <span id="scan-standard-category-label">__INITIAL_SCAN_STANDARD_CATEGORY__</span>
+          <select id="scan-standard-category"></select>
+        </label>
       </div>
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
@@ -1163,6 +1202,8 @@ HTML_TEMPLATE = """<!doctype html>
       scanStatus: "",
       scanStatusClass: "",
       scanRunning: false,
+      scanStandard: (payload.scan && payload.scan.standard) || "local",
+      scanStandardCategory: (payload.scan && payload.scan.standard_category) || "all",
     };
 
     function byId(id) {
@@ -1200,6 +1241,28 @@ HTML_TEMPLATE = """<!doctype html>
       return labels().severity_labels;
     }
 
+    function labelFor(item) {
+      return (item.labels && (item.labels[state.language] || item.labels.en)) || item.id || "";
+    }
+
+    function standardDefinitions() {
+      return payload.standards || [];
+    }
+
+    function currentStandard() {
+      return standardDefinitions().find((standard) => standard.id === state.scanStandard) || standardDefinitions()[0];
+    }
+
+    function currentStandardCategory() {
+      const standard = currentStandard();
+      if (!standard) return null;
+      return (standard.categories || []).find((category) => category.id === state.scanStandardCategory) || null;
+    }
+
+    function firstSupportedCategory(standard) {
+      return (standard.categories || []).find((category) => category.supported) || null;
+    }
+
     function targetDisplay(target) {
       return (summary.target_paths && summary.target_paths[target]) || target || labels().unknown;
     }
@@ -1226,11 +1289,15 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-directory-title", activeLabels.scan_directory);
       byId("scan-path").placeholder = activeLabels.scan_path_placeholder;
       setText("scan-choose", activeLabels.choose_folder);
+      setText("scan-standard-label", activeLabels.scan_standard);
+      setText("scan-standard-category-label", activeLabels.scan_standard_category);
       setText("scan-discover-label", activeLabels.discover_projects);
       setText("scan-depth-label", activeLabels.discovery_depth);
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
       byId("scan-run").disabled = state.scanRunning;
       byId("scan-choose").disabled = state.scanRunning;
+      byId("scan-standard").disabled = state.scanRunning;
+      byId("scan-standard-category").disabled = state.scanRunning;
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
       scanStatus.className = `scan-status ${state.scanStatusClass}`;
@@ -1246,6 +1313,31 @@ HTML_TEMPLATE = """<!doctype html>
       setText("th-action", activeLabels.action);
       byId("lang-ko").classList.toggle("active", state.language === "ko");
       byId("lang-en").classList.toggle("active", state.language === "en");
+    }
+
+    function renderScanStandards() {
+      const standards = standardDefinitions();
+      fillSelect(
+        byId("scan-standard"),
+        standards.map((standard) => [standard.id, labelFor(standard)]),
+        state.scanStandard
+      );
+      const standard = currentStandard();
+      if (!standard) return;
+      const selectedCategory = currentStandardCategory();
+      if (!selectedCategory || !selectedCategory.supported) {
+        const fallback = firstSupportedCategory(standard);
+        state.scanStandardCategory = fallback ? fallback.id : "all";
+      }
+      fillSelectOptions(
+        byId("scan-standard-category"),
+        (standard.categories || []).map((category) => ({
+          value: category.id,
+          label: category.supported ? labelFor(category) : `${labelFor(category)} (${labels().scan_category_not_supported})`,
+          disabled: !category.supported,
+        })),
+        state.scanStandardCategory
+      );
     }
 
     function metric(label, value, sub, colorClass = "") {
@@ -1286,6 +1378,14 @@ HTML_TEMPLATE = """<!doctype html>
 
     function fillSelect(select, entries, selected) {
       select.innerHTML = entries.map(([value, label]) => `<option value="${escapeText(value)}">${escapeText(label)}</option>`).join("");
+      select.value = selected;
+    }
+
+    function fillSelectOptions(select, entries, selected) {
+      select.innerHTML = entries.map((entry) => {
+        const disabled = entry.disabled ? " disabled" : "";
+        return `<option value="${escapeText(entry.value)}"${disabled}>${escapeText(entry.label)}</option>`;
+      }).join("");
       select.value = selected;
     }
 
@@ -1374,6 +1474,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     function render() {
       renderChrome();
+      renderScanStandards();
       renderFilters();
       const items = filteredFindings();
       renderMetrics(items);
@@ -1389,6 +1490,8 @@ HTML_TEMPLATE = """<!doctype html>
       state.severity = "all";
       state.category = "all";
       state.target = "all";
+      state.scanStandard = (payload.scan && payload.scan.standard) || state.scanStandard;
+      state.scanStandardCategory = (payload.scan && payload.scan.standard_category) || state.scanStandardCategory;
       byId("search").value = "";
       render();
     }
@@ -1453,6 +1556,8 @@ HTML_TEMPLATE = """<!doctype html>
             language: state.language,
             discover_projects: byId("scan-discover").checked,
             discovery_depth: Number(byId("scan-depth").value || 0),
+            standard: state.scanStandard,
+            standard_category: state.scanStandardCategory,
             min_severity: "low",
           }),
         });
@@ -1489,6 +1594,17 @@ HTML_TEMPLATE = """<!doctype html>
     });
     byId("target").addEventListener("change", (event) => {
       state.target = event.target.value;
+      render();
+    });
+    byId("scan-standard").addEventListener("change", (event) => {
+      state.scanStandard = event.target.value;
+      const standard = currentStandard();
+      const fallback = standard ? firstSupportedCategory(standard) : null;
+      state.scanStandardCategory = fallback ? fallback.id : "all";
+      render();
+    });
+    byId("scan-standard-category").addEventListener("change", (event) => {
+      state.scanStandardCategory = event.target.value;
       render();
     });
     byId("reset").addEventListener("click", () => {

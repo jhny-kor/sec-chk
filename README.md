@@ -16,7 +16,7 @@ Korean guide: [한국어 안내](#한국어-안내)
 python3 -m security_scanner serve
 ```
 
-Open `http://127.0.0.1:8765/security-dashboard.html`, choose a folder to scan, and run the check from the dashboard.
+Open `http://127.0.0.1:8765/security-dashboard.html`, choose a folder to scan, select a security standard/category such as OWASP Top 10:2021 or Korea SW Development Security 49, and run the check from the dashboard.
 
 To generate a static dashboard file instead:
 
@@ -88,6 +88,8 @@ The HTML dashboard follows common vulnerability-management patterns seen in GitL
 
 This tool is a local static checker, not a replacement for full SAST, dependency advisory databases, container scanners, SBOM analysis, CVSS scoring, or manual security review. It is intended to inventory obvious local risks consistently across project folders.
 
+Security-standard selections are mapping profiles over the local rules. Categories with no mapped local checks are shown as unsupported instead of pretending full standard coverage.
+
 ## 한국어 안내
 
 로컬 프로젝트 폴더를 읽기 전용으로 점검하는 보안 스캐너입니다. 네트워크 호출이나 추가 의존성 설치 없이 설정한 경로를 스캔하고, 하위 프로젝트 자동 탐색과 한국어/영어 토글 대시보드를 제공합니다.
@@ -104,7 +106,7 @@ This tool is a local static checker, not a replacement for full SAST, dependency
 python3 -m security_scanner serve
 ```
 
-브라우저에서 `http://127.0.0.1:8765/security-dashboard.html`을 열고, 대시보드 상단의 `폴더 선택`으로 검사할 폴더를 고른 뒤 `점검 실행`을 누르면 됩니다.
+브라우저에서 `http://127.0.0.1:8765/security-dashboard.html`을 열고, 대시보드 상단의 `폴더 선택`으로 검사할 폴더를 고른 뒤 OWASP Top 10:2021 또는 소프트웨어 개발보안 49 같은 보안 기준과 카테고리를 선택하고 `점검 실행`을 누르면 됩니다.
 
 정적 HTML 대시보드를 파일로 생성하려면 다음 명령을 사용합니다.
 
@@ -169,3 +171,5 @@ SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scann
 ### 참고
 
 이 도구는 로컬 정적 점검기입니다. 전문 SAST, 의존성 취약점 데이터베이스, 컨테이너 스캐너, SBOM 분석, CVSS 산정, 수동 보안 리뷰를 대체하지 않습니다. 여러 로컬 프로젝트 폴더에서 명확한 위험 신호를 일관되게 수집하는 용도입니다.
+
+보안 기준 선택은 현재 로컬 룰을 기준 카테고리에 매핑한 프로파일입니다. 매핑된 로컬 점검이 없는 카테고리는 전체 지원인 것처럼 표시하지 않고 미지원으로 표시합니다.

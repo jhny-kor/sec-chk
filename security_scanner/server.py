@@ -11,6 +11,13 @@ from .config import expand_path
 from .models import CATEGORIES, SEVERITIES, ScannerConfig, TargetConfig
 from .reporting import build_dashboard_payload, filter_by_min_severity, render_html
 from .scanner import SecurityScanner
+from .standards import (
+    DEFAULT_STANDARD,
+    DEFAULT_STANDARD_CATEGORY,
+    SECURITY_STANDARD_IDS,
+    filter_findings_by_standard,
+    resolve_standard_selection,
+)
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -39,6 +46,8 @@ def scan_directory_payload(
     discover_projects: bool = True,
     discovery_depth: int = 2,
     categories: tuple[str, ...] = CATEGORIES,
+    standard: str = DEFAULT_STANDARD,
+    standard_category: str = DEFAULT_STANDARD_CATEGORY,
     max_file_size_bytes: int = 524288,
     base_dir: Path | None = None,
 ) -> dict[str, object]:
@@ -47,6 +56,7 @@ def scan_directory_payload(
     unknown_categories = sorted(set(categories) - set(CATEGORIES))
     if unknown_categories:
         raise ValueError(f"Unsupported categories: {', '.join(unknown_categories)}")
+    standard_selection = resolve_standard_selection(standard, standard_category, categories)
     if discovery_depth < 0:
         raise ValueError("discovery_depth must be zero or greater")
     if max_file_size_bytes <= 0:
@@ -61,14 +71,15 @@ def scan_directory_payload(
     target = TargetConfig(
         name=target_path.name or "scan-target",
         path=target_path,
-        categories=categories,
+        categories=standard_selection.scanner_categories,
         max_file_size_bytes=max_file_size_bytes,
         discover_projects=discover_projects,
         discovery_depth=discovery_depth,
     )
     config = ScannerConfig(targets=(target,))
     scanner = SecurityScanner(config)
-    findings = filter_by_min_severity(scanner.scan(), min_severity)
+    findings = filter_findings_by_standard(scanner.scan(), standard_selection)
+    findings = filter_by_min_severity(findings, min_severity)
     effective_targets = scanner.effective_targets or config.targets
     target_names = tuple(item.name for item in effective_targets)
     target_paths = {item.name: str(item.path) for item in effective_targets}
@@ -79,6 +90,8 @@ def scan_directory_payload(
         target_paths=target_paths,
         warnings=tuple(scanner.warnings),
         scan_path=str(target_path),
+        standard=standard_selection.standard,
+        standard_category=standard_selection.category,
     )
 
 
@@ -114,6 +127,13 @@ def _handler(language: str):
                     discover_projects=bool(request.get("discover_projects", True)),
                     discovery_depth=int(request.get("discovery_depth", 2)),
                     categories=_categories_value(request),
+                    standard=_choice_value(
+                        request,
+                        "standard",
+                        set(SECURITY_STANDARD_IDS),
+                        DEFAULT_STANDARD,
+                    ),
+                    standard_category=_string_value(request, "standard_category", default=DEFAULT_STANDARD_CATEGORY),
                     max_file_size_bytes=int(request.get("max_file_size_bytes", 524288)),
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -208,8 +228,8 @@ def _initial_directory(current_path: str) -> Path:
     return Path.home().resolve()
 
 
-def _string_value(request: dict[str, Any], key: str) -> str:
-    value = request.get(key)
+def _string_value(request: dict[str, Any], key: str, *, default: str | None = None) -> str:
+    value = request.get(key, default)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"'{key}' must be a non-empty string")
     return value

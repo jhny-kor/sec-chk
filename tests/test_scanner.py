@@ -225,15 +225,51 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["target_paths"][root.name], str(root.resolve()))
             self.assertEqual(payload["findings_by_language"]["ko"][0]["title"], "고정되지 않은 Python 의존성")
 
+    def test_dashboard_payload_can_scan_standard_category(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text("OPENAI_API_KEY=sk-1234567890abcdefghijklmnop\n", encoding="utf-8")
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                language="ko",
+                discover_projects=False,
+                standard="owasp-top-10-2021",
+                standard_category="a06-vulnerable-outdated-components",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertIn("dependency.python-unpinned-requirement", rule_ids)
+            self.assertNotIn("secret.openai-key", rule_ids)
+            self.assertEqual(payload["scan"]["standard"], "owasp-top-10-2021")
+            self.assertEqual(payload["scan"]["standard_category"], "a06-vulnerable-outdated-components")
+
+    def test_unsupported_standard_category_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                scan_directory_payload(
+                    tmp,
+                    discover_projects=False,
+                    standard="owasp-top-10-2021",
+                    standard_category="a03-injection",
+                )
+
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")
 
         self.assertIn('id="scan-path"', html)
         self.assertIn('readonly aria-readonly="true"', html)
         self.assertIn('id="scan-choose"', html)
+        self.assertIn('id="scan-standard"', html)
+        self.assertIn('id="scan-standard-category"', html)
         self.assertIn('id="scan-run"', html)
         self.assertIn("점검 경로", html)
         self.assertIn("폴더 선택", html)
+        self.assertIn("보안 기준", html)
+        self.assertIn("기준 카테고리", html)
+        self.assertIn("OWASP Top 10:2021", html)
+        self.assertIn("소프트웨어 개발보안 49", html)
         self.assertIn("점검 실행", html)
 
     def test_sarif_report_contains_rule_results(self) -> None:
