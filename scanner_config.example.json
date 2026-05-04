@@ -1,0 +1,29 @@
+{
+  "targets": [
+    {
+      "name": "security-workspace",
+      "path": ".",
+      "categories": ["secrets", "dependencies", "configuration"],
+      "exclude_globs": [
+        "**/.git/**",
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.next/**",
+        "**/reports/**",
+        "**/.omx/**",
+        "**/.playwright-cli/**",
+        "**/output/**"
+      ],
+      "max_file_size_bytes": 524288
+    }
+  ],
+  "report": {
+    "format": "html",
+    "output": "reports/security-dashboard.html",
+    "min_severity": "low",
+    "language": "en"
+  }
+}

@@ -1,0 +1,12 @@
+[project]
+name = "local-security-scanner"
+version = "0.1.0"
+description = "Read-only local project security scanner with configurable targets and vulnerability categories."
+requires-python = ">=3.10"
+authors = [{ name = "Local" }]
+
+[project.scripts]
+local-security-scan = "security_scanner.cli:main"
+
+[tool.unittest]
+testpaths = ["tests"]

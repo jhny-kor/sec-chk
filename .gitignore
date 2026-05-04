@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+.omx/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+reports/*.md
+reports/*.html
+reports/*.sarif
+.playwright-cli/
+output/

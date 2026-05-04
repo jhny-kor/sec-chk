@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import tempfile
+import unittest
+from pathlib import Path
+
+from security_scanner.config import expand_path
+from security_scanner.discovery import discover_projects
+from security_scanner.models import ScannerConfig, TargetConfig
+from security_scanner.reporting import render_html, render_json, render_sarif
+from security_scanner.scanner import SecurityScanner
+
+
+class ScannerTests(unittest.TestCase):
+    def test_detects_and_redacts_secret_like_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secret_value = "sk-" + "1234567890abcdefghijklmnop"
+            (root / ".env").write_text(f"OPENAI_API_KEY={secret_value}\n", encoding="utf-8")
+
+            findings = _scan(root, categories=("secrets",))
+
+            self.assertTrue(any(finding.rule_id == "secret.openai-key" for finding in findings))
+            self.assertFalse(any(secret_value in finding.evidence for finding in findings))
+
+    def test_ignores_environment_variable_secret_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "settings.py").write_text(
+                "api_key = os.getenv('OKX_API_KEY')\n"
+                "access_token = config.get('access_token')\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("secrets",))
+
+            self.assertEqual(findings, [])
+
+    def test_ignores_secret_words_inside_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "client.py").write_text(
+                "raise RuntimeError(f'token response did not include access_token: {decoded}')\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("secrets",))
+
+            self.assertEqual(findings, [])
+
+    def test_detects_package_json_without_lockfile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({"dependencies": {"left-pad": "latest"}}),
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("dependencies",))
+            rule_ids = {finding.rule_id for finding in findings}
+
+            self.assertIn("dependency.node-missing-lockfile", rule_ids)
+            self.assertIn("dependency.node-unbounded-version", rule_ids)
+
+    def test_detects_risky_configuration_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docker-compose.yml").write_text(
+                "services:\n  app:\n    privileged: true\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("configuration",))
+
+            self.assertTrue(any(finding.rule_id == "config.compose-privileged" for finding in findings))
+
+    def test_excludes_configured_globs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ignored = root / "ignored"
+            ignored.mkdir()
+            env_line = "PASS" + "WORD=verysecretvalue\n"
+            (ignored / ".env").write_text(env_line, encoding="utf-8")
+
+            config = ScannerConfig(
+                targets=(
+                    TargetConfig(
+                        name="tmp",
+                        path=root,
+                        categories=("secrets", "configuration"),
+                        exclude_globs=("ignored/**",),
+                    ),
+                )
+            )
+            findings = SecurityScanner(config).scan()
+
+            self.assertEqual(findings, [])
+
+    def test_json_report_contains_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            findings = _scan(root, categories=("dependencies",))
+            payload = json.loads(render_json(findings))
+
+            self.assertEqual(payload["summary"]["by_category"]["dependencies"], 1)
+
+    def test_discovers_project_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "app"
+            project.mkdir()
+            (project / "pyproject.toml").write_text("[project]\nname = 'app'\n", encoding="utf-8")
+
+            discovered = discover_projects(root, max_depth=1)
+
+            self.assertEqual(len(discovered), 1)
+            self.assertEqual(discovered[0].name, "app")
+            self.assertEqual(discovered[0].ecosystems, ("python",))
+
+    def test_expand_path_supports_env_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            variable = "SEC_CHK_TEST_TARGET"
+            previous = os.environ.pop(variable, None)
+            try:
+                self.assertEqual(expand_path(f"${{{variable}:-.}}", root), root.resolve())
+                os.environ[variable] = str(root / "custom")
+                self.assertEqual(expand_path(f"${{{variable}:-.}}", root), (root / "custom").resolve())
+            finally:
+                if previous is None:
+                    os.environ.pop(variable, None)
+                else:
+                    os.environ[variable] = previous
+
+    def test_discovery_skips_root_marker_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pyproject.toml").write_text("[project]\nname = 'root'\n", encoding="utf-8")
+            child = root / "child"
+            child.mkdir()
+            (child / "package.json").write_text("{}", encoding="utf-8")
+
+            discovered = discover_projects(root, max_depth=1)
+
+            self.assertEqual([project.name for project in discovered], ["child"])
+
+    def test_scanner_expands_discovered_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "web"
+            project.mkdir()
+            (project / "package.json").write_text(
+                json.dumps({"dependencies": {"left-pad": "latest"}}),
+                encoding="utf-8",
+            )
+
+            config = ScannerConfig(
+                targets=(
+                    TargetConfig(
+                        name="docs",
+                        path=root,
+                        categories=("dependencies",),
+                        discover_projects=True,
+                        discovery_depth=1,
+                    ),
+                )
+            )
+            scanner = SecurityScanner(config)
+            findings = scanner.scan()
+
+            self.assertEqual([target.name for target in scanner.effective_targets], ["docs/web"])
+            self.assertTrue(any(finding.target == "docs/web" for finding in findings))
+
+    def test_html_report_contains_dashboard_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            findings = _scan(root, categories=("dependencies",))
+            html = render_html(findings, target_names=("tmp",))
+
+            self.assertIn("Local Security Dashboard", html)
+            self.assertIn("findings-data", html)
+            self.assertIn("dependency.python-unpinned-requirement", html)
+
+    def test_html_report_can_render_korean_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            findings = _scan(root, categories=("dependencies",))
+            html = render_html(findings, target_names=("tmp",), language="ko", target_paths={"tmp": str(root)})
+            payload = _html_payload(html)
+
+            self.assertIn('<html lang="ko">', html)
+            self.assertIn('id="lang-ko"', html)
+            self.assertIn('id="lang-en"', html)
+            self.assertIn("로컬 보안 대시보드", html)
+            self.assertIn("모든 심각도", html)
+            self.assertIn("고정되지 않은 Python 의존성", html)
+            self.assertIn("조치 보기", html)
+            self.assertIn("Local Security Dashboard", html)
+            self.assertEqual(payload["summary"]["target_paths"]["tmp"], str(root))
+            self.assertEqual(payload["language"], "ko")
+            self.assertIn("en", payload["findings_by_language"])
+            self.assertIn("ko", payload["findings_by_language"])
+            self.assertRegex(payload["generated_display"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+            self.assertIsNone(re.search(r"\.\d+|[+-]\d{2}:\d{2}$", payload["generated_display"]))
+
+    def test_sarif_report_contains_rule_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            findings = _scan(root, categories=("dependencies",))
+            payload = json.loads(render_sarif(findings))
+
+            self.assertEqual(payload["version"], "2.1.0")
+            self.assertEqual(payload["runs"][0]["results"][0]["ruleId"], "dependency.python-unpinned-requirement")
+
+
+def _scan(root: Path, categories: tuple[str, ...]):
+    config = ScannerConfig(targets=(TargetConfig(name="tmp", path=root, categories=categories),))
+    return SecurityScanner(config).scan()
+
+
+def _html_payload(content: str) -> dict[str, object]:
+    marker = '<script id="findings-data" type="application/json">'
+    start = content.index(marker) + len(marker)
+    end = content.index("</script>", start)
+    return json.loads(content[start:end])
+
+
+if __name__ == "__main__":
+    unittest.main()

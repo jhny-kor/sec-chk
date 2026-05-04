@@ -1,0 +1,32 @@
+{
+  "targets": [
+    {
+      "name": "local-projects",
+      "path": "${SEC_CHK_TARGET:-.}",
+      "discover_projects": true,
+      "discovery_depth": 2,
+      "categories": ["secrets", "dependencies", "configuration"],
+      "exclude_globs": [
+        "**/.git/**",
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.next/**",
+        "**/reports/**",
+        "**/.omx/**",
+        "**/.playwright-cli/**",
+        "**/output/**",
+        "**/DerivedData/**"
+      ],
+      "max_file_size_bytes": 524288
+    }
+  ],
+  "report": {
+    "format": "html",
+    "output": "reports/local-security-dashboard.html",
+    "min_severity": "low",
+    "language": "ko"
+  }
+}
