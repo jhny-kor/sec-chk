@@ -44,6 +44,39 @@ CONFIGURATION_RULE_IDS = (
     "config.compose-docker-sock",
 )
 
+SENSITIVE_DATA_RULE_IDS = SECRET_RULE_IDS + (
+    "config.env-file-present",
+    "config.private-key-like-file",
+)
+
+INSECURE_TRANSPORT_RULE_IDS = (
+    "dependency.node-insecure-url",
+    "dependency.python-insecure-url",
+    "config.docker-add-http",
+)
+
+REMOTE_EXECUTION_RULE_IDS = (
+    "dependency.remote-shell-script",
+    "dependency.docker-remote-shell",
+    "config.docker-add-http",
+)
+
+SUPPLY_CHAIN_RULE_IDS = DEPENDENCY_RULE_IDS
+
+INTEGRITY_RULE_IDS = (
+    "dependency.node-missing-lockfile",
+    "dependency.node-insecure-url",
+    "dependency.remote-shell-script",
+    "dependency.python-insecure-url",
+    "dependency.docker-remote-shell",
+    "config.docker-add-http",
+)
+
+ERROR_HANDLING_RULE_IDS = (
+    "config.debug-enabled",
+    "config.development-environment",
+)
+
 
 @dataclass(frozen=True)
 class StandardCategory:
@@ -246,7 +279,184 @@ SW_DEV_SECURITY_49 = SecurityStandard(
 )
 
 
-SECURITY_STANDARDS = (LOCAL_STANDARD, OWASP_TOP_10_2021, SW_DEV_SECURITY_49)
+_OWASP_TOP_10_2025_CATEGORIES = (
+    StandardCategory("a01-broken-access-control", {"en": "A01 Broken Access Control", "ko": "A01 접근권한 취약"}),
+    StandardCategory(
+        "a02-security-misconfiguration",
+        {"en": "A02 Security Misconfiguration", "ko": "A02 보안 설정 오류"},
+        scanner_categories=("configuration",),
+        rule_ids=CONFIGURATION_RULE_IDS,
+    ),
+    StandardCategory(
+        "a03-software-supply-chain-failures",
+        {"en": "A03 Software Supply Chain Failures", "ko": "A03 소프트웨어 공급망 실패"},
+        scanner_categories=("dependencies",),
+        rule_ids=SUPPLY_CHAIN_RULE_IDS,
+    ),
+    StandardCategory(
+        "a04-cryptographic-failures",
+        {"en": "A04 Cryptographic Failures", "ko": "A04 암호화 오류"},
+        scanner_categories=("secrets", "configuration", "dependencies"),
+        rule_ids=SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS,
+    ),
+    StandardCategory("a05-injection", {"en": "A05 Injection", "ko": "A05 인젝션"}),
+    StandardCategory("a06-insecure-design", {"en": "A06 Insecure Design", "ko": "A06 안전하지 않은 설계"}),
+    StandardCategory("a07-authentication-failures", {"en": "A07 Authentication Failures", "ko": "A07 인증 실패"}),
+    StandardCategory(
+        "a08-software-data-integrity-failures",
+        {"en": "A08 Software or Data Integrity Failures", "ko": "A08 소프트웨어 또는 데이터 무결성 실패"},
+        scanner_categories=("dependencies", "configuration"),
+        rule_ids=INTEGRITY_RULE_IDS,
+    ),
+    StandardCategory(
+        "a09-security-logging-alerting-failures",
+        {"en": "A09 Security Logging and Alerting Failures", "ko": "A09 보안 로깅 및 알림 실패"},
+    ),
+    StandardCategory(
+        "a10-mishandling-exceptional-conditions",
+        {"en": "A10 Mishandling of Exceptional Conditions", "ko": "A10 예외 상황 처리 부적절"},
+        scanner_categories=("configuration",),
+        rule_ids=ERROR_HANDLING_RULE_IDS,
+    ),
+)
+
+OWASP_TOP_10_2025 = SecurityStandard(
+    "owasp-top-10-2025",
+    {"en": "OWASP Top 10:2025", "ko": "OWASP Top 10:2025"},
+    (
+        _all_category(
+            _OWASP_TOP_10_2025_CATEGORIES,
+            {"en": "All mapped OWASP 2025 checks", "ko": "매핑된 OWASP 2025 항목 전체"},
+        ),
+        *_OWASP_TOP_10_2025_CATEGORIES,
+    ),
+)
+
+
+_OWASP_API_2023_CATEGORIES = (
+    StandardCategory(
+        "api1-broken-object-level-authorization",
+        {"en": "API1 Broken Object Level Authorization", "ko": "API1 객체 수준 권한 부여 취약"},
+    ),
+    StandardCategory("api2-broken-authentication", {"en": "API2 Broken Authentication", "ko": "API2 인증 취약"}),
+    StandardCategory(
+        "api3-broken-object-property-level-authorization",
+        {"en": "API3 Broken Object Property Level Authorization", "ko": "API3 객체 속성 수준 권한 부여 취약"},
+    ),
+    StandardCategory(
+        "api4-unrestricted-resource-consumption",
+        {"en": "API4 Unrestricted Resource Consumption", "ko": "API4 제한 없는 리소스 사용"},
+    ),
+    StandardCategory(
+        "api5-broken-function-level-authorization",
+        {"en": "API5 Broken Function Level Authorization", "ko": "API5 기능 수준 권한 부여 취약"},
+    ),
+    StandardCategory(
+        "api6-unrestricted-access-sensitive-business-flows",
+        {"en": "API6 Unrestricted Access to Sensitive Business Flows", "ko": "API6 민감 비즈니스 흐름 접근 제한 미흡"},
+    ),
+    StandardCategory("api7-server-side-request-forgery", {"en": "API7 Server Side Request Forgery", "ko": "API7 서버사이드 요청 위조"}),
+    StandardCategory(
+        "api8-security-misconfiguration",
+        {"en": "API8 Security Misconfiguration", "ko": "API8 보안 설정 오류"},
+        scanner_categories=("configuration",),
+        rule_ids=CONFIGURATION_RULE_IDS,
+    ),
+    StandardCategory(
+        "api9-improper-inventory-management",
+        {"en": "API9 Improper Inventory Management", "ko": "API9 부적절한 인벤토리 관리"},
+    ),
+    StandardCategory(
+        "api10-unsafe-consumption-of-apis",
+        {"en": "API10 Unsafe Consumption of APIs", "ko": "API10 안전하지 않은 API 사용"},
+        scanner_categories=("dependencies", "configuration"),
+        rule_ids=INSECURE_TRANSPORT_RULE_IDS + REMOTE_EXECUTION_RULE_IDS,
+    ),
+)
+
+OWASP_API_SECURITY_2023 = SecurityStandard(
+    "owasp-api-security-2023",
+    {"en": "OWASP API Security Top 10:2023", "ko": "OWASP API Security Top 10:2023"},
+    (
+        _all_category(
+            _OWASP_API_2023_CATEGORIES,
+            {"en": "All mapped API Security checks", "ko": "매핑된 API Security 항목 전체"},
+        ),
+        *_OWASP_API_2023_CATEGORIES,
+    ),
+)
+
+
+_OWASP_MOBILE_2024_CATEGORIES = (
+    StandardCategory(
+        "m1-improper-credential-usage",
+        {"en": "M1 Improper Credential Usage", "ko": "M1 부적절한 자격증명 사용"},
+        scanner_categories=("secrets", "configuration"),
+        rule_ids=SENSITIVE_DATA_RULE_IDS,
+    ),
+    StandardCategory(
+        "m2-inadequate-supply-chain-security",
+        {"en": "M2 Inadequate Supply Chain Security", "ko": "M2 부적절한 공급망 보안"},
+        scanner_categories=("dependencies",),
+        rule_ids=SUPPLY_CHAIN_RULE_IDS,
+    ),
+    StandardCategory(
+        "m3-insecure-authentication-authorization",
+        {"en": "M3 Insecure Authentication/Authorization", "ko": "M3 안전하지 않은 인증/인가"},
+    ),
+    StandardCategory(
+        "m4-insufficient-input-output-validation",
+        {"en": "M4 Insufficient Input/Output Validation", "ko": "M4 입출력 검증 부족"},
+    ),
+    StandardCategory(
+        "m5-insecure-communication",
+        {"en": "M5 Insecure Communication", "ko": "M5 안전하지 않은 통신"},
+        scanner_categories=("dependencies", "configuration"),
+        rule_ids=INSECURE_TRANSPORT_RULE_IDS,
+    ),
+    StandardCategory("m6-inadequate-privacy-controls", {"en": "M6 Inadequate Privacy Controls", "ko": "M6 부적절한 개인정보 보호 통제"}),
+    StandardCategory("m7-insufficient-binary-protections", {"en": "M7 Insufficient Binary Protections", "ko": "M7 바이너리 보호 부족"}),
+    StandardCategory(
+        "m8-security-misconfiguration",
+        {"en": "M8 Security Misconfiguration", "ko": "M8 보안 설정 오류"},
+        scanner_categories=("configuration",),
+        rule_ids=CONFIGURATION_RULE_IDS,
+    ),
+    StandardCategory(
+        "m9-insecure-data-storage",
+        {"en": "M9 Insecure Data Storage", "ko": "M9 안전하지 않은 데이터 저장"},
+        scanner_categories=("secrets", "configuration"),
+        rule_ids=SENSITIVE_DATA_RULE_IDS,
+    ),
+    StandardCategory(
+        "m10-insufficient-cryptography",
+        {"en": "M10 Insufficient Cryptography", "ko": "M10 암호화 부족"},
+        scanner_categories=("secrets", "configuration", "dependencies"),
+        rule_ids=SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS,
+    ),
+)
+
+OWASP_MOBILE_TOP_10_2024 = SecurityStandard(
+    "owasp-mobile-top-10-2024",
+    {"en": "OWASP Mobile Top 10:2024", "ko": "OWASP Mobile Top 10:2024"},
+    (
+        _all_category(
+            _OWASP_MOBILE_2024_CATEGORIES,
+            {"en": "All mapped Mobile Top 10 checks", "ko": "매핑된 Mobile Top 10 항목 전체"},
+        ),
+        *_OWASP_MOBILE_2024_CATEGORIES,
+    ),
+)
+
+
+SECURITY_STANDARDS = (
+    LOCAL_STANDARD,
+    OWASP_TOP_10_2025,
+    OWASP_TOP_10_2021,
+    OWASP_API_SECURITY_2023,
+    OWASP_MOBILE_TOP_10_2024,
+    SW_DEV_SECURITY_49,
+)
 SECURITY_STANDARD_IDS = tuple(standard.id for standard in SECURITY_STANDARDS)
 
 

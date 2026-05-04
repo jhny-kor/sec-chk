@@ -16,7 +16,7 @@ Korean guide: [한국어 안내](#한국어-안내)
 python3 -m security_scanner serve
 ```
 
-Open `http://127.0.0.1:8765/security-dashboard.html`, choose a folder to scan, select a security standard/category such as OWASP Top 10:2021 or Korea SW Development Security 49, and run the check from the dashboard.
+Open `http://127.0.0.1:8765/security-dashboard.html`, choose a folder to scan, select a security standard/category such as OWASP Top 10:2025, OWASP API Security Top 10:2023, OWASP Mobile Top 10:2024, or Korea SW Development Security 49, and run the check from the dashboard.
 
 To generate a static dashboard file instead:
 
@@ -88,7 +88,7 @@ The HTML dashboard follows common vulnerability-management patterns seen in GitL
 
 This tool is a local static checker, not a replacement for full SAST, dependency advisory databases, container scanners, SBOM analysis, CVSS scoring, or manual security review. It is intended to inventory obvious local risks consistently across project folders.
 
-Security-standard selections are mapping profiles over the local rules. Categories with no mapped local checks are shown as unsupported instead of pretending full standard coverage.
+Security-standard selections are mapping profiles over the local rules. Categories with no mapped local checks are shown as unsupported instead of pretending full standard coverage. NIST SSDF, OWASP ASVS, CWE Top 25, and ISMS-P are tracked as expansion candidates, but need more rule coverage or checklist-style workflows before they should be exposed as scan profiles.
 
 ## 한국어 안내
 
@@ -106,7 +106,7 @@ Security-standard selections are mapping profiles over the local rules. Categori
 python3 -m security_scanner serve
 ```
 
-브라우저에서 `http://127.0.0.1:8765/security-dashboard.html`을 열고, 대시보드 상단의 `폴더 선택`으로 검사할 폴더를 고른 뒤 OWASP Top 10:2021 또는 소프트웨어 개발보안 49 같은 보안 기준과 카테고리를 선택하고 `점검 실행`을 누르면 됩니다.
+브라우저에서 `http://127.0.0.1:8765/security-dashboard.html`을 열고, 대시보드 상단의 `폴더 선택`으로 검사할 폴더를 고른 뒤 OWASP Top 10:2025, OWASP API Security Top 10:2023, OWASP Mobile Top 10:2024, 소프트웨어 개발보안 49 같은 보안 기준과 카테고리를 선택하고 `점검 실행`을 누르면 됩니다.
 
 정적 HTML 대시보드를 파일로 생성하려면 다음 명령을 사용합니다.
 
@@ -172,4 +172,4 @@ SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scann
 
 이 도구는 로컬 정적 점검기입니다. 전문 SAST, 의존성 취약점 데이터베이스, 컨테이너 스캐너, SBOM 분석, CVSS 산정, 수동 보안 리뷰를 대체하지 않습니다. 여러 로컬 프로젝트 폴더에서 명확한 위험 신호를 일관되게 수집하는 용도입니다.
 
-보안 기준 선택은 현재 로컬 룰을 기준 카테고리에 매핑한 프로파일입니다. 매핑된 로컬 점검이 없는 카테고리는 전체 지원인 것처럼 표시하지 않고 미지원으로 표시합니다.
+보안 기준 선택은 현재 로컬 룰을 기준 카테고리에 매핑한 프로파일입니다. 매핑된 로컬 점검이 없는 카테고리는 전체 지원인 것처럼 표시하지 않고 미지원으로 표시합니다. NIST SSDF, OWASP ASVS, CWE Top 25, ISMS-P는 확장 후보로 기록했지만, 더 많은 룰이나 체크리스트형 워크플로가 필요해서 아직 점검 프로파일로 노출하지 않았습니다.

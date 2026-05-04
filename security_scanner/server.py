@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import platform
+import subprocess
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -192,15 +194,30 @@ def _handler(language: str):
 def select_directory(current_path: str = "") -> str | None:
     initial_dir = _initial_directory(current_path)
     try:
+        return _select_directory_tk(initial_dir)
+    except RuntimeError as tk_error:
+        if platform.system() == "Darwin":
+            try:
+                return _select_directory_macos(initial_dir)
+            except RuntimeError as mac_error:
+                raise RuntimeError(f"Folder picker is not available: {mac_error}") from mac_error
+        raise RuntimeError("Folder picker is not available in this Python environment") from tk_error
+
+
+def _select_directory_tk(initial_dir: Path) -> str | None:
+    try:
         import tkinter as tk
         from tkinter import filedialog
     except Exception as exc:  # pragma: no cover - depends on local Python build
-        raise RuntimeError("Folder picker is not available in this Python environment") from exc
+        raise RuntimeError("Tk folder picker is not available") from exc
 
-    root = tk.Tk()
-    root.withdraw()
-    root.update()
     try:
+        root = tk.Tk()
+    except Exception as exc:  # pragma: no cover - depends on local GUI/session state
+        raise RuntimeError("Tk folder picker could not start") from exc
+    try:
+        root.withdraw()
+        root.update()
         selected = filedialog.askdirectory(
             parent=root,
             initialdir=str(initial_dir),
@@ -210,6 +227,35 @@ def select_directory(current_path: str = "") -> str | None:
     finally:
         root.destroy()
 
+    return _normalize_selected_directory(selected)
+
+
+def _select_directory_macos(initial_dir: Path) -> str | None:
+    script_lines = (
+        f'set initialFolder to POSIX file "{_applescript_string(str(initial_dir))}" as alias',
+        'set selectedFolder to choose folder with prompt "Select folder to scan" default location initialFolder',
+        "POSIX path of selectedFolder",
+    )
+    command = ["osascript"]
+    for line in script_lines:
+        command.extend(("-e", line))
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:  # pragma: no cover - macOS normally provides osascript
+        raise RuntimeError("macOS folder picker command was not found") from exc
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "").strip()
+        if "User canceled" in message or "-128" in message:
+            return None
+        raise RuntimeError(message or "macOS folder picker failed")
+    return _normalize_selected_directory(result.stdout.strip())
+
+
+def _applescript_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _normalize_selected_directory(selected: str) -> str | None:
     if not selected:
         return None
     selected_path = Path(selected).expanduser().resolve()

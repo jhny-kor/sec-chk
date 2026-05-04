@@ -3,16 +3,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from security_scanner.config import expand_path
 from security_scanner.discovery import discover_projects
 from security_scanner.models import ScannerConfig, TargetConfig
 from security_scanner.reporting import render_html, render_json, render_sarif
 from security_scanner.scanner import SecurityScanner
-from security_scanner.server import scan_directory_payload
+from security_scanner.server import scan_directory_payload, select_directory
 
 
 class ScannerTests(unittest.TestCase):
@@ -255,6 +257,24 @@ class ScannerTests(unittest.TestCase):
                     standard_category="a03-injection",
                 )
 
+    def test_select_directory_falls_back_to_macos_picker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            selected = Path(tmp).resolve()
+            completed = subprocess.CompletedProcess(
+                args=["osascript"],
+                returncode=0,
+                stdout=f"{selected}\n",
+                stderr="",
+            )
+
+            with (
+                patch("security_scanner.server._select_directory_tk", side_effect=RuntimeError("tk missing")),
+                patch("security_scanner.server.platform.system", return_value="Darwin"),
+                patch("security_scanner.server.subprocess.run", return_value=completed) as run_picker,
+            ):
+                self.assertEqual(select_directory(), str(selected))
+                self.assertTrue(run_picker.called)
+
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")
 
@@ -268,7 +288,10 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("폴더 선택", html)
         self.assertIn("보안 기준", html)
         self.assertIn("기준 카테고리", html)
+        self.assertIn("OWASP Top 10:2025", html)
         self.assertIn("OWASP Top 10:2021", html)
+        self.assertIn("OWASP API Security Top 10:2023", html)
+        self.assertIn("OWASP Mobile Top 10:2024", html)
         self.assertIn("소프트웨어 개발보안 49", html)
         self.assertIn("점검 실행", html)
 
