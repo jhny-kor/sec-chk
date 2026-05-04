@@ -11,6 +11,14 @@ Read-only security scanner for local project folders. It scans configured paths,
 ## Quick Start
 
 ```bash
+python3 -m security_scanner serve
+```
+
+Open `http://127.0.0.1:8765/security-dashboard.html`, enter the directory to scan, and run the check from the dashboard.
+
+To generate a static dashboard file instead:
+
+```bash
 python3 -m security_scanner scan --config scanner_config.example.json
 ```
 
@@ -44,7 +52,7 @@ Copy `scanner_config.example.json` and edit the `targets` list:
     "format": "html",
     "output": "reports/security-dashboard.html",
     "min_severity": "low",
-    "language": "en"
+    "language": "ko"
   }
 }
 ```
@@ -53,6 +61,7 @@ Copy `scanner_config.example.json` and edit the `targets` list:
 
 ```bash
 python3 -m security_scanner list-categories
+python3 -m security_scanner serve
 python3 -m security_scanner discover --target /path/to/projects --depth 2
 python3 -m security_scanner scan --target /path/to/project --category secrets --format json
 python3 -m security_scanner scan --config scanner_config.example.json --fail-on high

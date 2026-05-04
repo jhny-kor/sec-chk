@@ -24,6 +24,6 @@
     "format": "html",
     "output": "reports/security-dashboard.html",
     "min_severity": "low",
-    "language": "en"
+    "language": "ko"
   }
 }

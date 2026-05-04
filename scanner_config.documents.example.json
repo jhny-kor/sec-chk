@@ -25,7 +25,7 @@
   ],
   "report": {
     "format": "html",
-    "output": "reports/local-security-dashboard.html",
+    "output": "reports/security-dashboard.html",
     "min_severity": "low",
     "language": "ko"
   }

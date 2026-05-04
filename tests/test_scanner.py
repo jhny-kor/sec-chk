@@ -12,6 +12,7 @@ from security_scanner.discovery import discover_projects
 from security_scanner.models import ScannerConfig, TargetConfig
 from security_scanner.reporting import render_html, render_json, render_sarif
 from security_scanner.scanner import SecurityScanner
+from security_scanner.server import scan_directory_payload
 
 
 class ScannerTests(unittest.TestCase):
@@ -211,6 +212,26 @@ class ScannerTests(unittest.TestCase):
             self.assertIn("ko", payload["findings_by_language"])
             self.assertRegex(payload["generated_display"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
             self.assertIsNone(re.search(r"\.\d+|[+-]\d{2}:\d{2}$", payload["generated_display"]))
+
+    def test_dashboard_payload_can_scan_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            payload = scan_directory_payload(str(root), language="ko", discover_projects=False)
+
+            self.assertEqual(payload["language"], "ko")
+            self.assertEqual(payload["scan"]["path"], str(root.resolve()))
+            self.assertEqual(payload["summary"]["target_paths"][root.name], str(root.resolve()))
+            self.assertEqual(payload["findings_by_language"]["ko"][0]["title"], "고정되지 않은 Python 의존성")
+
+    def test_html_report_contains_scan_controls(self) -> None:
+        html = render_html([], language="ko")
+
+        self.assertIn('id="scan-path"', html)
+        self.assertIn('id="scan-run"', html)
+        self.assertIn("점검 경로", html)
+        self.assertIn("점검 실행", html)
 
     def test_sarif_report_contains_rule_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

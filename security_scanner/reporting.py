@@ -35,6 +35,16 @@ TRANSLATIONS = {
         "targets": "Targets",
         "findings": "Findings",
         "filters": "Filters",
+        "scan_directory": "Scan Directory",
+        "scan_path_placeholder": "/path/to/project",
+        "scan_now": "Scan",
+        "discover_projects": "Discover projects",
+        "discovery_depth": "Depth",
+        "scan_status_idle": "Ready",
+        "scan_status_running": "Scanning...",
+        "scan_status_done": "Scan complete",
+        "scan_status_failed": "Scan failed",
+        "server_required": "Run python3 -m security_scanner serve and open the local dashboard.",
         "search_placeholder": "Search title, rule, path, evidence",
         "reset": "Reset",
         "project_risk": "Project Risk",
@@ -90,6 +100,16 @@ TRANSLATIONS = {
         "targets": "점검 대상",
         "findings": "발견 항목",
         "filters": "필터",
+        "scan_directory": "점검 경로",
+        "scan_path_placeholder": "/점검할/프로젝트/경로",
+        "scan_now": "점검 실행",
+        "discover_projects": "하위 프로젝트 탐색",
+        "discovery_depth": "깊이",
+        "scan_status_idle": "대기 중",
+        "scan_status_running": "점검 중...",
+        "scan_status_done": "점검 완료",
+        "scan_status_failed": "점검 실패",
+        "server_required": "python3 -m security_scanner serve로 로컬 대시보드를 열어주세요.",
         "search_placeholder": "제목, 규칙, 경로, 근거 검색",
         "reset": "초기화",
         "project_risk": "프로젝트 위험도",
@@ -414,27 +434,58 @@ def render_html(
     *,
     target_paths: dict[str, str] | None = None,
 ) -> str:
+    payload = build_dashboard_payload(findings, target_names, language, target_paths=target_paths)
+    labels = _labels(language)
+    json_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    replacements = _html_replacements(labels, json_payload)
+    content = HTML_TEMPLATE
+    for placeholder, value in replacements.items():
+        content = content.replace(placeholder, value)
+    return content
+
+
+def build_dashboard_payload(
+    findings: list[Finding],
+    target_names: tuple[str, ...] = (),
+    language: str = "en",
+    *,
+    target_paths: dict[str, str] | None = None,
+    warnings: tuple[str, ...] = (),
+    scan_path: str | None = None,
+) -> dict[str, object]:
     generated, generated_display = _generated_at()
     summary = _summary(findings, target_names, target_paths)
     labels = _labels(language)
-    payload = {
+    return {
         "generated_at": generated,
         "generated_display": generated_display,
         "language": labels["html_lang"],
         "labels_by_language": TRANSLATIONS,
         "scanner": {"name": "local-security-scanner", "version": __version__},
         "summary": summary,
+        "scan": {
+            "path": scan_path or "",
+            "warnings": list(warnings),
+        },
         "findings_by_language": {
             "en": [_finding_payload(finding) for finding in findings],
             "ko": [_localized_finding_payload(finding, "ko") for finding in findings],
         },
     }
-    json_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
-    replacements = {
+
+
+def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str, str]:
+    return {
         "__DATA__": json_payload,
         "__INITIAL_LANG__": html.escape(str(labels["html_lang"]), quote=True),
         "__INITIAL_TITLE__": html.escape(str(labels["title"]), quote=True),
         "__INITIAL_FILTERS__": html.escape(str(labels["filters"]), quote=True),
+        "__INITIAL_SCAN_DIRECTORY__": html.escape(str(labels["scan_directory"])),
+        "__INITIAL_SCAN_PATH_PLACEHOLDER__": html.escape(str(labels["scan_path_placeholder"]), quote=True),
+        "__INITIAL_SCAN_NOW__": html.escape(str(labels["scan_now"])),
+        "__INITIAL_DISCOVER_PROJECTS__": html.escape(str(labels["discover_projects"])),
+        "__INITIAL_DISCOVERY_DEPTH__": html.escape(str(labels["discovery_depth"])),
+        "__INITIAL_SCAN_STATUS_IDLE__": html.escape(str(labels["scan_status_idle"])),
         "__INITIAL_SEARCH_PLACEHOLDER__": html.escape(str(labels["search_placeholder"]), quote=True),
         "__INITIAL_RESET__": html.escape(str(labels["reset"])),
         "__INITIAL_PROJECT_RISK__": html.escape(str(labels["project_risk"])),
@@ -447,10 +498,6 @@ def render_html(
         "__INITIAL_ACTION__": html.escape(str(labels["action"])),
         "__INITIAL_EMPTY__": html.escape(str(labels["no_findings_display"])),
     }
-    content = HTML_TEMPLATE
-    for placeholder, value in replacements.items():
-        content = content.replace(placeholder, value)
-    return content
 
 
 def write_report(content: str, output: Path | None) -> None:
@@ -742,6 +789,67 @@ HTML_TEMPLATE = """<!doctype html>
       align-items: center;
     }
 
+    .scan-panel {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .scan-panel h2 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .scan-form {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto minmax(88px, 110px) auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .scan-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .scan-option input {
+      width: auto;
+      min-height: auto;
+      margin: 0;
+    }
+
+    .scan-depth {
+      display: grid;
+      grid-template-columns: auto minmax(54px, 1fr);
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .scan-status {
+      min-height: 20px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+
+    .scan-status.error {
+      color: var(--critical);
+      font-weight: 700;
+    }
+
+    .scan-status.ok {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
     input, select, button {
       width: 100%;
       min-height: 38px;
@@ -931,7 +1039,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     @media (max-width: 1000px) {
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .filters { grid-template-columns: 1fr 1fr; }
+      .filters, .scan-form { grid-template-columns: 1fr 1fr; }
       .grid { grid-template-columns: 1fr; }
       button { width: 100%; }
     }
@@ -942,7 +1050,7 @@ HTML_TEMPLATE = """<!doctype html>
       .header-side { width: 100%; padding-top: 32px; }
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
-      .metrics, .filters { grid-template-columns: 1fr; }
+      .metrics, .filters, .scan-form { grid-template-columns: 1fr; }
       .metric { min-height: 84px; }
       .metric-value { font-size: 26px; }
     }
@@ -968,6 +1076,23 @@ HTML_TEMPLATE = """<!doctype html>
   </header>
 
   <main class="shell">
+    <section class="panel scan-panel" id="scan-panel">
+      <h2 id="scan-directory-title">__INITIAL_SCAN_DIRECTORY__</h2>
+      <div class="scan-form">
+        <input id="scan-path" type="text" autocomplete="off" placeholder="__INITIAL_SCAN_PATH_PLACEHOLDER__">
+        <label class="scan-option">
+          <input id="scan-discover" type="checkbox" checked>
+          <span id="scan-discover-label">__INITIAL_DISCOVER_PROJECTS__</span>
+        </label>
+        <label class="scan-depth">
+          <span id="scan-depth-label">__INITIAL_DISCOVERY_DEPTH__</span>
+          <input id="scan-depth" type="number" min="0" max="6" value="2">
+        </label>
+        <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
+      </div>
+      <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
+    </section>
+
     <section class="metrics" id="metrics"></section>
 
     <section class="panel filters" id="filters-panel" aria-label="__INITIAL_FILTERS__">
@@ -1009,8 +1134,8 @@ HTML_TEMPLATE = """<!doctype html>
 
   <script id="findings-data" type="application/json">__DATA__</script>
   <script>
-    const payload = JSON.parse(document.getElementById("findings-data").textContent);
-    const summary = payload.summary;
+    let payload = JSON.parse(document.getElementById("findings-data").textContent);
+    let summary = payload.summary;
     const severityOrder = ["critical", "high", "medium", "low", "info"];
     const severityColors = { critical: "#7f1d1d", high: "#c2410c", medium: "#d69e2e", low: "#2563eb", info: "#64748b" };
 
@@ -1020,6 +1145,9 @@ HTML_TEMPLATE = """<!doctype html>
       category: "all",
       target: "all",
       language: payload.language || "en",
+      scanStatus: "",
+      scanStatusClass: "",
+      scanRunning: false,
     };
 
     function byId(id) {
@@ -1065,6 +1193,10 @@ HTML_TEMPLATE = """<!doctype html>
       byId(id).textContent = value;
     }
 
+    function apiEndpoint() {
+      return "/api/scan";
+    }
+
     function renderChrome() {
       const activeLabels = labels();
       document.documentElement.lang = activeLabels.html_lang;
@@ -1076,6 +1208,15 @@ HTML_TEMPLATE = """<!doctype html>
         `${activeLabels.risk_score} ${summary.risk_score} | ${activeLabels.targets} ${summary.target_count} | ${activeLabels.findings} ${findings().length}`
       );
       byId("filters-panel").setAttribute("aria-label", activeLabels.filters);
+      setText("scan-directory-title", activeLabels.scan_directory);
+      byId("scan-path").placeholder = activeLabels.scan_path_placeholder;
+      setText("scan-discover-label", activeLabels.discover_projects);
+      setText("scan-depth-label", activeLabels.discovery_depth);
+      setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
+      byId("scan-run").disabled = state.scanRunning;
+      const scanStatus = byId("scan-status");
+      scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
+      scanStatus.className = `scan-status ${state.scanStatusClass}`;
       byId("search").placeholder = activeLabels.search_placeholder;
       setText("reset", activeLabels.reset);
       setText("project-risk-title", activeLabels.project_risk);
@@ -1224,6 +1365,63 @@ HTML_TEMPLATE = """<!doctype html>
       renderTable(items);
     }
 
+    function applyPayload(nextPayload) {
+      payload = nextPayload;
+      summary = payload.summary;
+      state.search = "";
+      state.severity = "all";
+      state.category = "all";
+      state.target = "all";
+      byId("search").value = "";
+      render();
+    }
+
+    async function runDirectoryScan() {
+      const activeLabels = labels();
+      const path = byId("scan-path").value.trim();
+      if (!path) {
+        state.scanStatus = activeLabels.scan_path_placeholder;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+
+      state.scanRunning = true;
+      state.scanStatus = activeLabels.scan_status_running;
+      state.scanStatusClass = "";
+      render();
+
+      try {
+        const response = await fetch(apiEndpoint(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path,
+            language: state.language,
+            discover_projects: byId("scan-discover").checked,
+            discovery_depth: Number(byId("scan-depth").value || 0),
+            min_severity: "low",
+          }),
+        });
+        const nextPayload = await response.json();
+        if (!response.ok) {
+          throw new Error(nextPayload.error || activeLabels.scan_status_failed);
+        }
+        state.scanRunning = false;
+        state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || path}`;
+        state.scanStatusClass = "ok";
+        applyPayload(nextPayload);
+      } catch (error) {
+        state.scanRunning = false;
+        state.scanStatus = `${activeLabels.scan_status_failed}: ${error.message || activeLabels.server_required}`;
+        if (location.protocol === "file:") {
+          state.scanStatus = activeLabels.server_required;
+        }
+        state.scanStatusClass = "error";
+        render();
+      }
+    }
+
     byId("search").addEventListener("input", (event) => {
       state.search = event.target.value;
       render();
@@ -1250,6 +1448,14 @@ HTML_TEMPLATE = """<!doctype html>
       byId("category").value = "all";
       byId("target").value = "all";
       render();
+    });
+    byId("scan-run").addEventListener("click", () => {
+      runDirectoryScan();
+    });
+    byId("scan-path").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        runDirectoryScan();
+      }
     });
     byId("lang-ko").addEventListener("click", () => {
       state.language = "ko";
