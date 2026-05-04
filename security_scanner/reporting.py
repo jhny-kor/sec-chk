@@ -36,7 +36,8 @@ TRANSLATIONS = {
         "findings": "Findings",
         "filters": "Filters",
         "scan_directory": "Scan Directory",
-        "scan_path_placeholder": "/path/to/project",
+        "scan_path_placeholder": "No folder selected",
+        "choose_folder": "Choose Folder",
         "scan_now": "Scan",
         "discover_projects": "Discover projects",
         "discovery_depth": "Depth",
@@ -44,6 +45,9 @@ TRANSLATIONS = {
         "scan_status_running": "Scanning...",
         "scan_status_done": "Scan complete",
         "scan_status_failed": "Scan failed",
+        "folder_selection_cancelled": "Folder selection cancelled.",
+        "folder_selection_failed": "Folder selection failed",
+        "folder_selected": "Folder selected",
         "server_required": "Run python3 -m security_scanner serve and open the local dashboard.",
         "search_placeholder": "Search title, rule, path, evidence",
         "reset": "Reset",
@@ -101,7 +105,8 @@ TRANSLATIONS = {
         "findings": "발견 항목",
         "filters": "필터",
         "scan_directory": "점검 경로",
-        "scan_path_placeholder": "/점검할/프로젝트/경로",
+        "scan_path_placeholder": "선택된 폴더 없음",
+        "choose_folder": "폴더 선택",
         "scan_now": "점검 실행",
         "discover_projects": "하위 프로젝트 탐색",
         "discovery_depth": "깊이",
@@ -109,6 +114,9 @@ TRANSLATIONS = {
         "scan_status_running": "점검 중...",
         "scan_status_done": "점검 완료",
         "scan_status_failed": "점검 실패",
+        "folder_selection_cancelled": "폴더 선택이 취소되었습니다.",
+        "folder_selection_failed": "폴더 선택 실패",
+        "folder_selected": "폴더 선택됨",
         "server_required": "python3 -m security_scanner serve로 로컬 대시보드를 열어주세요.",
         "search_placeholder": "제목, 규칙, 경로, 근거 검색",
         "reset": "초기화",
@@ -482,6 +490,7 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_FILTERS__": html.escape(str(labels["filters"]), quote=True),
         "__INITIAL_SCAN_DIRECTORY__": html.escape(str(labels["scan_directory"])),
         "__INITIAL_SCAN_PATH_PLACEHOLDER__": html.escape(str(labels["scan_path_placeholder"]), quote=True),
+        "__INITIAL_CHOOSE_FOLDER__": html.escape(str(labels["choose_folder"])),
         "__INITIAL_SCAN_NOW__": html.escape(str(labels["scan_now"])),
         "__INITIAL_DISCOVER_PROJECTS__": html.escape(str(labels["discover_projects"])),
         "__INITIAL_DISCOVERY_DEPTH__": html.escape(str(labels["discovery_depth"])),
@@ -803,7 +812,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     .scan-form {
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) auto minmax(88px, 110px) auto;
+      grid-template-columns: minmax(280px, 1fr) auto auto minmax(88px, 110px) auto;
       gap: 10px;
       align-items: center;
     }
@@ -848,6 +857,11 @@ HTML_TEMPLATE = """<!doctype html>
     .scan-status.ok {
       color: var(--ok);
       font-weight: 700;
+    }
+
+    .path-display {
+      cursor: default;
+      background: #f8fafc;
     }
 
     input, select, button {
@@ -1079,7 +1093,8 @@ HTML_TEMPLATE = """<!doctype html>
     <section class="panel scan-panel" id="scan-panel">
       <h2 id="scan-directory-title">__INITIAL_SCAN_DIRECTORY__</h2>
       <div class="scan-form">
-        <input id="scan-path" type="text" autocomplete="off" placeholder="__INITIAL_SCAN_PATH_PLACEHOLDER__">
+        <input id="scan-path" class="path-display" type="text" autocomplete="off" readonly aria-readonly="true" placeholder="__INITIAL_SCAN_PATH_PLACEHOLDER__">
+        <button id="scan-choose" type="button">__INITIAL_CHOOSE_FOLDER__</button>
         <label class="scan-option">
           <input id="scan-discover" type="checkbox" checked>
           <span id="scan-discover-label">__INITIAL_DISCOVER_PROJECTS__</span>
@@ -1210,10 +1225,12 @@ HTML_TEMPLATE = """<!doctype html>
       byId("filters-panel").setAttribute("aria-label", activeLabels.filters);
       setText("scan-directory-title", activeLabels.scan_directory);
       byId("scan-path").placeholder = activeLabels.scan_path_placeholder;
+      setText("scan-choose", activeLabels.choose_folder);
       setText("scan-discover-label", activeLabels.discover_projects);
       setText("scan-depth-label", activeLabels.discovery_depth);
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
       byId("scan-run").disabled = state.scanRunning;
+      byId("scan-choose").disabled = state.scanRunning;
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
       scanStatus.className = `scan-status ${state.scanStatusClass}`;
@@ -1376,6 +1393,42 @@ HTML_TEMPLATE = """<!doctype html>
       render();
     }
 
+    async function chooseDirectory() {
+      const activeLabels = labels();
+      state.scanStatus = "";
+      state.scanStatusClass = "";
+      render();
+
+      try {
+        const response = await fetch("/api/select-directory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ current_path: byId("scan-path").value || "" }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || activeLabels.folder_selection_failed);
+        }
+        if (result.cancelled) {
+          state.scanStatus = activeLabels.folder_selection_cancelled;
+          state.scanStatusClass = "";
+          render();
+          return;
+        }
+        byId("scan-path").value = result.path || "";
+        state.scanStatus = `${activeLabels.folder_selected}: ${result.path || ""}`;
+        state.scanStatusClass = "ok";
+        render();
+      } catch (error) {
+        state.scanStatus = `${activeLabels.folder_selection_failed}: ${error.message || activeLabels.server_required}`;
+        if (location.protocol === "file:") {
+          state.scanStatus = activeLabels.server_required;
+        }
+        state.scanStatusClass = "error";
+        render();
+      }
+    }
+
     async function runDirectoryScan() {
       const activeLabels = labels();
       const path = byId("scan-path").value.trim();
@@ -1449,13 +1502,11 @@ HTML_TEMPLATE = """<!doctype html>
       byId("target").value = "all";
       render();
     });
+    byId("scan-choose").addEventListener("click", () => {
+      chooseDirectory();
+    });
     byId("scan-run").addEventListener("click", () => {
       runDirectoryScan();
-    });
-    byId("scan-path").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        runDirectoryScan();
-      }
     });
     byId("lang-ko").addEventListener("click", () => {
       state.language = "ko";

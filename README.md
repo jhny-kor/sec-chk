@@ -16,7 +16,7 @@ Korean guide: [한국어 안내](#한국어-안내)
 python3 -m security_scanner serve
 ```
 
-Open `http://127.0.0.1:8765/security-dashboard.html`, enter the directory to scan, and run the check from the dashboard.
+Open `http://127.0.0.1:8765/security-dashboard.html`, choose a folder to scan, and run the check from the dashboard.
 
 To generate a static dashboard file instead:
 
@@ -104,7 +104,7 @@ This tool is a local static checker, not a replacement for full SAST, dependency
 python3 -m security_scanner serve
 ```
 
-브라우저에서 `http://127.0.0.1:8765/security-dashboard.html`을 열고, 대시보드 상단의 `점검 경로`에 검사할 폴더를 입력한 뒤 `점검 실행`을 누르면 됩니다.
+브라우저에서 `http://127.0.0.1:8765/security-dashboard.html`을 열고, 대시보드 상단의 `폴더 선택`으로 검사할 폴더를 고른 뒤 `점검 실행`을 누르면 됩니다.
 
 정적 HTML 대시보드를 파일로 생성하려면 다음 명령을 사용합니다.
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -19,7 +19,7 @@ DEFAULT_PORT = 8765
 
 def serve_dashboard(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> int:
     handler = _handler(language)
-    server = ThreadingHTTPServer((host, port), handler)
+    server = HTTPServer((host, port), handler)
     url = f"http://{host}:{port}/security-dashboard.html"
     print(f"Serving local security dashboard: {url}")
     try:
@@ -98,6 +98,9 @@ def _handler(language: str):
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
+            if path == "/api/select-directory":
+                self._handle_select_directory()
+                return
             if path != "/api/scan":
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -119,13 +122,27 @@ def _handler(language: str):
 
             self._send_json(payload)
 
+        def _handle_select_directory(self) -> None:
+            try:
+                request = self._read_json(required=False)
+                selected = select_directory(str(request.get("current_path", "")))
+            except (json.JSONDecodeError, TypeError, ValueError, RuntimeError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            if selected is None:
+                self._send_json({"path": "", "cancelled": True})
+                return
+            self._send_json({"path": selected, "cancelled": False})
+
         def log_message(self, format: str, *args: object) -> None:
             print(f"{self.address_string()} - {format % args}")
 
-        def _read_json(self) -> dict[str, Any]:
+        def _read_json(self, *, required: bool = True) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0"))
             if content_length <= 0:
-                raise ValueError("Missing JSON body")
+                if required:
+                    raise ValueError("Missing JSON body")
+                return {}
             if content_length > 32768:
                 raise ValueError("JSON body is too large")
             data = json.loads(self.rfile.read(content_length).decode("utf-8"))
@@ -150,6 +167,45 @@ def _handler(language: str):
             self.wfile.write(body)
 
     return DashboardHandler
+
+
+def select_directory(current_path: str = "") -> str | None:
+    initial_dir = _initial_directory(current_path)
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:  # pragma: no cover - depends on local Python build
+        raise RuntimeError("Folder picker is not available in this Python environment") from exc
+
+    root = tk.Tk()
+    root.withdraw()
+    root.update()
+    try:
+        selected = filedialog.askdirectory(
+            parent=root,
+            initialdir=str(initial_dir),
+            mustexist=True,
+            title="Select folder to scan",
+        )
+    finally:
+        root.destroy()
+
+    if not selected:
+        return None
+    selected_path = Path(selected).expanduser().resolve()
+    if not selected_path.is_dir():
+        raise ValueError(f"Selected path is not a directory: {selected_path}")
+    return str(selected_path)
+
+
+def _initial_directory(current_path: str) -> Path:
+    if current_path:
+        candidate = Path(current_path).expanduser()
+        if candidate.is_dir():
+            return candidate.resolve()
+        if candidate.parent.is_dir():
+            return candidate.parent.resolve()
+    return Path.home().resolve()
 
 
 def _string_value(request: dict[str, Any], key: str) -> str:

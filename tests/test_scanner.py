@@ -229,8 +229,11 @@ class ScannerTests(unittest.TestCase):
         html = render_html([], language="ko")
 
         self.assertIn('id="scan-path"', html)
+        self.assertIn('readonly aria-readonly="true"', html)
+        self.assertIn('id="scan-choose"', html)
         self.assertIn('id="scan-run"', html)
         self.assertIn("점검 경로", html)
+        self.assertIn("폴더 선택", html)
         self.assertIn("점검 실행", html)
 
     def test_sarif_report_contains_rule_results(self) -> None:
