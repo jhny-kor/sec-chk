@@ -230,7 +230,8 @@ class ScannerTests(unittest.TestCase):
     def test_dashboard_payload_can_scan_standard_category(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / ".env").write_text("OPENAI_API_KEY=sk-1234567890abcdefghijklmnop\n", encoding="utf-8")
+            secret_value = "sk-" + "1234567890abcdefghijklmnop"
+            (root / ".env").write_text(f"OPENAI_API_KEY={secret_value}\n", encoding="utf-8")
             (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
 
             payload = scan_directory_payload(
@@ -246,6 +247,44 @@ class ScannerTests(unittest.TestCase):
             self.assertNotIn("secret.openai-key", rule_ids)
             self.assertEqual(payload["scan"]["standard"], "owasp-top-10-2021")
             self.assertEqual(payload["scan"]["standard_category"], "a06-vulnerable-outdated-components")
+
+    def test_cwe_top25_profile_maps_sensitive_information_exposure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secret_value = "sk-" + "1234567890abcdefghijklmnop"
+            (root / ".env").write_text(f"OPENAI_API_KEY={secret_value}\n", encoding="utf-8")
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="cwe-top-25-2025",
+                standard_category="cwe-200-sensitive-information-exposure",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertIn("secret.openai-key", rule_ids)
+            self.assertIn("config.env-file-present", rule_ids)
+            self.assertNotIn("dependency.python-unpinned-requirement", rule_ids)
+
+    def test_isms_p_development_security_profile_maps_test_data_security(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secret_value = "sk-" + "1234567890abcdefghijklmnop"
+            (root / ".env").write_text(f"OPENAI_API_KEY={secret_value}\n", encoding="utf-8")
+            (root / "settings.py").write_text("DEBUG=" + "true\n", encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="isms-p-development-security",
+                standard_category="2.8.4-test-data-security",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertIn("secret.openai-key", rule_ids)
+            self.assertIn("config.env-file-present", rule_ids)
+            self.assertNotIn("config.debug-enabled", rule_ids)
 
     def test_unsupported_standard_category_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -290,9 +329,11 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("기준 카테고리", html)
         self.assertIn("OWASP Top 10:2025", html)
         self.assertIn("OWASP Top 10:2021", html)
+        self.assertIn("CWE Top 25:2025", html)
         self.assertIn("OWASP API Security Top 10:2023", html)
         self.assertIn("OWASP Mobile Top 10:2024", html)
         self.assertIn("소프트웨어 개발보안 49", html)
+        self.assertIn("ISMS-P 2.8 개발보안", html)
         self.assertIn("점검 실행", html)
 
     def test_sarif_report_contains_rule_results(self) -> None:

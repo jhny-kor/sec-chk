@@ -449,13 +449,190 @@ OWASP_MOBILE_TOP_10_2024 = SecurityStandard(
 )
 
 
+_CWE_TOP_25_2025_CATEGORIES = (
+    StandardCategory(
+        "cwe-79-cross-site-scripting",
+        {"en": "CWE-79 Cross-site Scripting", "ko": "CWE-79 크로스사이트 스크립팅"},
+    ),
+    StandardCategory(
+        "cwe-89-sql-injection",
+        {"en": "CWE-89 SQL Injection", "ko": "CWE-89 SQL 삽입"},
+    ),
+    StandardCategory(
+        "cwe-352-cross-site-request-forgery",
+        {"en": "CWE-352 Cross-Site Request Forgery", "ko": "CWE-352 크로스사이트 요청 위조"},
+    ),
+    StandardCategory(
+        "cwe-862-missing-authorization",
+        {"en": "CWE-862 Missing Authorization", "ko": "CWE-862 인가 누락"},
+    ),
+    StandardCategory(
+        "cwe-787-out-of-bounds-write",
+        {"en": "CWE-787 Out-of-bounds Write", "ko": "CWE-787 범위 밖 쓰기"},
+    ),
+    StandardCategory(
+        "cwe-22-path-traversal",
+        {"en": "CWE-22 Path Traversal", "ko": "CWE-22 경로 조작"},
+    ),
+    StandardCategory(
+        "cwe-416-use-after-free",
+        {"en": "CWE-416 Use After Free", "ko": "CWE-416 해제 후 사용"},
+    ),
+    StandardCategory(
+        "cwe-125-out-of-bounds-read",
+        {"en": "CWE-125 Out-of-bounds Read", "ko": "CWE-125 범위 밖 읽기"},
+    ),
+    StandardCategory(
+        "cwe-78-os-command-injection",
+        {"en": "CWE-78 OS Command Injection", "ko": "CWE-78 운영체제 명령어 삽입"},
+    ),
+    StandardCategory(
+        "cwe-94-code-injection",
+        {"en": "CWE-94 Code Injection", "ko": "CWE-94 코드 삽입"},
+    ),
+    StandardCategory(
+        "cwe-120-classic-buffer-overflow",
+        {"en": "CWE-120 Classic Buffer Overflow", "ko": "CWE-120 크기 검증 없는 버퍼 복사"},
+    ),
+    StandardCategory(
+        "cwe-434-dangerous-file-upload",
+        {"en": "CWE-434 Unrestricted Upload of File with Dangerous Type", "ko": "CWE-434 위험한 형식의 파일 업로드 제한 미흡"},
+    ),
+    StandardCategory(
+        "cwe-476-null-pointer-dereference",
+        {"en": "CWE-476 NULL Pointer Dereference", "ko": "CWE-476 NULL 포인터 역참조"},
+    ),
+    StandardCategory(
+        "cwe-121-stack-buffer-overflow",
+        {"en": "CWE-121 Stack-based Buffer Overflow", "ko": "CWE-121 스택 기반 버퍼 오버플로우"},
+    ),
+    StandardCategory(
+        "cwe-502-unsafe-deserialization",
+        {"en": "CWE-502 Deserialization of Untrusted Data", "ko": "CWE-502 신뢰할 수 없는 데이터 역직렬화"},
+    ),
+    StandardCategory(
+        "cwe-122-heap-buffer-overflow",
+        {"en": "CWE-122 Heap-based Buffer Overflow", "ko": "CWE-122 힙 기반 버퍼 오버플로우"},
+    ),
+    StandardCategory(
+        "cwe-863-incorrect-authorization",
+        {"en": "CWE-863 Incorrect Authorization", "ko": "CWE-863 잘못된 인가"},
+    ),
+    StandardCategory(
+        "cwe-20-improper-input-validation",
+        {"en": "CWE-20 Improper Input Validation", "ko": "CWE-20 부적절한 입력값 검증"},
+    ),
+    StandardCategory(
+        "cwe-284-improper-access-control",
+        {"en": "CWE-284 Improper Access Control", "ko": "CWE-284 부적절한 접근통제"},
+    ),
+    StandardCategory(
+        "cwe-200-sensitive-information-exposure",
+        {"en": "CWE-200 Exposure of Sensitive Information to an Unauthorized Actor", "ko": "CWE-200 비인가자에 대한 민감정보 노출"},
+        scanner_categories=("secrets", "configuration"),
+        rule_ids=SENSITIVE_DATA_RULE_IDS,
+    ),
+    StandardCategory(
+        "cwe-306-missing-authentication-critical-function",
+        {"en": "CWE-306 Missing Authentication for Critical Function", "ko": "CWE-306 중요 기능 인증 누락"},
+    ),
+    StandardCategory(
+        "cwe-918-server-side-request-forgery",
+        {"en": "CWE-918 Server-Side Request Forgery", "ko": "CWE-918 서버사이드 요청 위조"},
+    ),
+    StandardCategory(
+        "cwe-77-command-injection",
+        {"en": "CWE-77 Command Injection", "ko": "CWE-77 명령어 삽입"},
+    ),
+    StandardCategory(
+        "cwe-639-authorization-bypass-user-controlled-key",
+        {"en": "CWE-639 Authorization Bypass Through User-Controlled Key", "ko": "CWE-639 사용자 제어 키를 통한 인가 우회"},
+    ),
+    StandardCategory(
+        "cwe-770-resource-allocation-without-limits",
+        {"en": "CWE-770 Allocation of Resources Without Limits or Throttling", "ko": "CWE-770 제한 또는 조절 없는 자원 할당"},
+    ),
+)
+
+CWE_TOP_25_2025 = SecurityStandard(
+    "cwe-top-25-2025",
+    {"en": "CWE Top 25:2025", "ko": "CWE Top 25:2025"},
+    (
+        _all_category(
+            _CWE_TOP_25_2025_CATEGORIES,
+            {"en": "All mapped CWE Top 25 checks", "ko": "매핑된 CWE Top 25 항목 전체"},
+        ),
+        *_CWE_TOP_25_2025_CATEGORIES,
+    ),
+)
+
+
+_ISMS_P_28_CATEGORIES = (
+    StandardCategory(
+        "2.8.1-security-requirements-definition",
+        {"en": "2.8.1 Security Requirements Definition", "ko": "2.8.1 보안 요구사항 정의"},
+        scanner_categories=CATEGORIES,
+        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS,
+    ),
+    StandardCategory(
+        "2.8.2-security-requirements-review-testing",
+        {"en": "2.8.2 Security Requirements Review and Testing", "ko": "2.8.2 보안 요구사항 검토 및 시험"},
+        scanner_categories=CATEGORIES,
+        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS,
+    ),
+    StandardCategory(
+        "2.8.3-test-production-separation",
+        {"en": "2.8.3 Test and Production Environment Separation", "ko": "2.8.3 시험과 운영 환경 분리"},
+        scanner_categories=("configuration",),
+        rule_ids=ERROR_HANDLING_RULE_IDS,
+    ),
+    StandardCategory(
+        "2.8.4-test-data-security",
+        {"en": "2.8.4 Test Data Security", "ko": "2.8.4 시험 데이터 보안"},
+        scanner_categories=("secrets", "configuration"),
+        rule_ids=SENSITIVE_DATA_RULE_IDS,
+    ),
+    StandardCategory(
+        "2.8.5-source-program-management",
+        {"en": "2.8.5 Source Program Management", "ko": "2.8.5 소스 프로그램 관리"},
+        scanner_categories=("secrets", "dependencies", "configuration"),
+        rule_ids=SECRET_RULE_IDS
+        + (
+            "config.env-file-present",
+            "config.private-key-like-file",
+            "dependency.node-missing-lockfile",
+        ),
+    ),
+    StandardCategory(
+        "2.8.6-production-migration",
+        {"en": "2.8.6 Production Migration", "ko": "2.8.6 운영환경 이관"},
+        scanner_categories=("configuration",),
+        rule_ids=CONFIGURATION_RULE_IDS,
+    ),
+)
+
+ISMS_P_DEVELOPMENT_SECURITY = SecurityStandard(
+    "isms-p-development-security",
+    {"en": "ISMS-P 2.8 Development Security", "ko": "ISMS-P 2.8 개발보안"},
+    (
+        _all_category(
+            _ISMS_P_28_CATEGORIES,
+            {"en": "All mapped ISMS-P 2.8 checks", "ko": "매핑된 ISMS-P 2.8 항목 전체"},
+        ),
+        *_ISMS_P_28_CATEGORIES,
+    ),
+)
+
+
 SECURITY_STANDARDS = (
     LOCAL_STANDARD,
     OWASP_TOP_10_2025,
     OWASP_TOP_10_2021,
+    CWE_TOP_25_2025,
     OWASP_API_SECURITY_2023,
     OWASP_MOBILE_TOP_10_2024,
     SW_DEV_SECURITY_49,
+    ISMS_P_DEVELOPMENT_SECURITY,
 )
 SECURITY_STANDARD_IDS = tuple(standard.id for standard in SECURITY_STANDARDS)
 

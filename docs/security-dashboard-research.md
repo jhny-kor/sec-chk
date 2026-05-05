@@ -26,7 +26,7 @@ The current implementation borrows information architecture from established vul
   - https://owasp.org/www-project-mobile-top-10/
 - OWASP ASVS 5.0.0: verification requirements for web application technical controls; tracked as a future checklist/profile candidate.
   - https://owasp.org/www-project-application-security-verification-standard/
-- CWE Top 25 2025: current MITRE/CISA weakness prioritization list; tracked as a future rule-taxonomy candidate because most items need language-aware SAST rules.
+- CWE Top 25 2025: current MITRE/CISA weakness prioritization list; added as a partial profile for currently mapped sensitive-information exposure checks.
   - https://cwe.mitre.org/top25/
 - NIST SSDF SP 800-218: secure software development practice framework; tracked as a future process/checklist candidate rather than a direct static-scan profile.
   - https://csrc.nist.gov/pubs/sp/800/218/final
@@ -34,7 +34,7 @@ The current implementation borrows information architecture from established vul
   - https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956
 - Korea Law Information Center software security weakness criteria: current official appendix reference for Article 52 category naming.
   - https://www.law.go.kr/
-- Korea ISMS-P: management-system certification criteria; tracked as a future checklist/control-evidence candidate, especially around system/service development security.
+- Korea ISMS-P: management-system certification criteria; added as a partial ISMS-P 2.8 development-security profile where local static checks can provide supporting evidence.
   - https://www.isms-p.or.kr/sysm/intro/selectSysmCertDetail.do
 
 ## Adopted Patterns
@@ -53,4 +53,6 @@ The current implementation borrows information architecture from established vul
 - Trend charts are not included yet because the scanner does not persist historical scan snapshots.
 - SBOM, CVE, EPSS, and advisory lookups are deferred because the first version remains offline and dependency-free.
 - Standard selections are mapping profiles over the implemented local rules, not a claim of full standard coverage.
-- ASVS, NIST SSDF, CWE Top 25, and ISMS-P are better served by additional rule engines or checklist/evidence workflows before they are exposed as first-class scan profiles.
+- CWE Top 25 is intentionally sparse because most of the 2025 Top 25 entries need language-aware SAST rules before they can be claimed as locally checked.
+- ISMS-P 2.8 is a supporting-evidence profile, not an ISMS-P audit result; full coverage needs checklist/evidence workflows outside static file scanning.
+- ASVS and NIST SSDF are better served by additional rule engines or checklist/evidence workflows before they are exposed as first-class scan profiles.
