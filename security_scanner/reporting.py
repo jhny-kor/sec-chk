@@ -1244,7 +1244,7 @@ HTML_TEMPLATE = """<!doctype html>
         </label>
         <label class="scan-depth">
           <span id="scan-depth-label">__INITIAL_DISCOVERY_DEPTH__</span>
-          <input id="scan-depth" type="number" min="0" max="6" value="2">
+          <input id="scan-depth" type="number" min="0" max="20" value="2">
         </label>
         <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
       </div>

@@ -516,6 +516,7 @@ class ScannerTests(unittest.TestCase):
         self.assertIn('id="scan-standard"', html)
         self.assertIn('id="scan-standard-category"', html)
         self.assertIn('id="scan-run"', html)
+        self.assertIn('id="scan-depth" type="number" min="0" max="20" value="2"', html)
         self.assertIn('apiEndpoint("/api/select-directory")', html)
         self.assertIn("http://127.0.0.1:8765", html)
         self.assertIn("아직 미지원", html)
