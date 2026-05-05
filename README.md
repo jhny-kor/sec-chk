@@ -12,6 +12,16 @@ Korean guide: [한국어 안내](#한국어-안내)
 
 ## Quick Start
 
+Run it like a local app:
+
+```bash
+python3 -m security_scanner app
+```
+
+This opens `security-dashboard.html` in the default browser and keeps a local server running until you press `Ctrl+C`. On macOS, you can also double-click `scripts/sec-chk.command` from Finder.
+
+Server-only mode is still available:
+
 ```bash
 python3 -m security_scanner serve
 ```
@@ -62,6 +72,7 @@ Copy `scanner_config.example.json` and edit the `targets` list:
 ## CLI
 
 ```bash
+python3 -m security_scanner app
 python3 -m security_scanner list-categories
 python3 -m security_scanner serve
 python3 -m security_scanner discover --target /path/to/projects --depth 2
@@ -101,6 +112,16 @@ Security-standard selections are mapping profiles over the local rules. Categori
 - `configuration`: 커밋된 환경 파일, 개인 키처럼 보이는 파일, 디버그 플래그, 위험한 Docker/Compose 설정
 
 ### 빠른 시작
+
+로컬 프로그램처럼 실행하려면:
+
+```bash
+python3 -m security_scanner app
+```
+
+기본 브라우저에 `security-dashboard.html`을 자동으로 열고, 터미널에서 `Ctrl+C`를 누를 때까지 로컬 서버를 유지합니다. macOS에서는 Finder에서 `scripts/sec-chk.command`를 더블클릭해도 됩니다.
+
+서버만 직접 띄우려면:
 
 ```bash
 python3 -m security_scanner serve
@@ -150,6 +171,7 @@ SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scann
 ### 주요 명령
 
 ```bash
+python3 -m security_scanner app
 python3 -m security_scanner list-categories
 python3 -m security_scanner serve
 python3 -m security_scanner discover --target /path/to/projects --depth 2

@@ -7,6 +7,7 @@ authors = [{ name = "Local" }]
 
 [project.scripts]
 local-security-scan = "security_scanner.cli:main"
+sec-chk = "security_scanner.cli:main"
 
 [tool.unittest]
 testpaths = ["tests"]

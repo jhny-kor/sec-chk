@@ -34,6 +34,15 @@ def main(argv: list[str] | None = None) -> int:
 
         return serve_dashboard(args.host, args.port, args.language)
 
+    if args.command == "app":
+        from .app import run_app
+
+        try:
+            return run_app(args.host, args.port, args.language, open_browser=not args.no_browser)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"App error: {exc}", file=sys.stderr)
+            return 2
+
     if args.command in {None, "scan"}:
         try:
             config = _build_scan_config(args)
@@ -105,6 +114,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1", help="host interface to bind")
     serve.add_argument("--port", type=int, default=8765, help="port to bind")
     serve.add_argument("--language", choices=("en", "ko"), default="ko", help="initial dashboard language")
+
+    app = subparsers.add_parser("app", help="run the dashboard like a local desktop app")
+    app.add_argument("--host", default="127.0.0.1", help="host interface to bind")
+    app.add_argument("--port", type=int, default=8765, help="first port to try")
+    app.add_argument("--language", choices=("en", "ko"), default="ko", help="initial dashboard language")
+    app.add_argument("--no-browser", action="store_true", help="do not open the default browser automatically")
 
     subparsers.add_parser("list-categories", help="show available check categories")
     return parser

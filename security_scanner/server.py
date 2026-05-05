@@ -26,10 +26,18 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
 
+def create_dashboard_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> HTTPServer:
+    return HTTPServer((host, port), _handler(language))
+
+
+def dashboard_url(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> str:
+    display_host = "127.0.0.1" if host in {"", "0.0.0.0"} else host
+    return f"http://{display_host}:{port}/security-dashboard.html"
+
+
 def serve_dashboard(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> int:
-    handler = _handler(language)
-    server = HTTPServer((host, port), handler)
-    url = f"http://{host}:{port}/security-dashboard.html"
+    server = create_dashboard_server(host, port, language)
+    url = dashboard_url(host, port)
     print(f"Serving local security dashboard: {url}")
     try:
         server.serve_forever()

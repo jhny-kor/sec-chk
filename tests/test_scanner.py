@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from security_scanner.app import _create_available_server
 from security_scanner.config import expand_path
 from security_scanner.discovery import discover_projects
 from security_scanner.models import ScannerConfig, TargetConfig
@@ -313,6 +314,20 @@ class ScannerTests(unittest.TestCase):
             ):
                 self.assertEqual(select_directory(), str(selected))
                 self.assertTrue(run_picker.called)
+
+    def test_app_server_uses_next_available_port(self) -> None:
+        fake_server = object()
+
+        def create_server(host: str, port: int, language: str) -> object:
+            if port == 8765:
+                raise OSError("address already in use")
+            return fake_server
+
+        with patch("security_scanner.app.create_dashboard_server", side_effect=create_server):
+            port, server = _create_available_server("127.0.0.1", 8765, "ko", 5)
+
+        self.assertEqual(port, 8766)
+        self.assertIs(server, fake_server)
 
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")
