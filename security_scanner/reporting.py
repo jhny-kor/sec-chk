@@ -52,7 +52,7 @@ TRANSLATIONS = {
         "folder_selection_cancelled": "Folder selection cancelled.",
         "folder_selection_failed": "Folder selection failed",
         "folder_selected": "Folder selected",
-        "server_required": "Run python3 -m security_scanner serve and open the local dashboard.",
+        "server_required": "Run python3 -m security_scanner app and open the local dashboard.",
         "search_placeholder": "Search title, rule, path, evidence",
         "reset": "Reset",
         "project_risk": "Project Risk",
@@ -124,7 +124,7 @@ TRANSLATIONS = {
         "folder_selection_cancelled": "폴더 선택이 취소되었습니다.",
         "folder_selection_failed": "폴더 선택 실패",
         "folder_selected": "폴더 선택됨",
-        "server_required": "python3 -m security_scanner serve로 로컬 대시보드를 열어주세요.",
+        "server_required": "python3 -m security_scanner app으로 로컬 대시보드를 열어주세요.",
         "search_placeholder": "제목, 규칙, 경로, 근거 검색",
         "reset": "초기화",
         "project_risk": "프로젝트 위험도",
@@ -1271,8 +1271,28 @@ HTML_TEMPLATE = """<!doctype html>
       byId(id).textContent = value;
     }
 
-    function apiEndpoint() {
-      return "/api/scan";
+    function apiEndpoint(path) {
+      const endpoint = path || "/api/scan";
+      if (location.protocol === "http:" || location.protocol === "https:") {
+        return endpoint;
+      }
+      return `http://127.0.0.1:8765${endpoint}`;
+    }
+
+    async function parseJsonResponse(response) {
+      try {
+        return await response.json();
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function userFacingApiError(error, fallback) {
+      const message = error && error.message ? error.message : "";
+      if (location.protocol === "file:" && (message.includes("expected pattern") || message.includes("Failed to fetch"))) {
+        return fallback;
+      }
+      return message || fallback;
     }
 
     function renderChrome() {
@@ -1503,12 +1523,12 @@ HTML_TEMPLATE = """<!doctype html>
       render();
 
       try {
-        const response = await fetch("/api/select-directory", {
+        const response = await fetch(apiEndpoint("/api/select-directory"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ current_path: byId("scan-path").value || "" }),
         });
-        const result = await response.json();
+        const result = await parseJsonResponse(response);
         if (!response.ok) {
           throw new Error(result.error || activeLabels.folder_selection_failed);
         }
@@ -1523,10 +1543,7 @@ HTML_TEMPLATE = """<!doctype html>
         state.scanStatusClass = "ok";
         render();
       } catch (error) {
-        state.scanStatus = `${activeLabels.folder_selection_failed}: ${error.message || activeLabels.server_required}`;
-        if (location.protocol === "file:") {
-          state.scanStatus = activeLabels.server_required;
-        }
+        state.scanStatus = `${activeLabels.folder_selection_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
         state.scanStatusClass = "error";
         render();
       }
@@ -1548,7 +1565,7 @@ HTML_TEMPLATE = """<!doctype html>
       render();
 
       try {
-        const response = await fetch(apiEndpoint(), {
+        const response = await fetch(apiEndpoint("/api/scan"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1561,7 +1578,7 @@ HTML_TEMPLATE = """<!doctype html>
             min_severity: "low",
           }),
         });
-        const nextPayload = await response.json();
+        const nextPayload = await parseJsonResponse(response);
         if (!response.ok) {
           throw new Error(nextPayload.error || activeLabels.scan_status_failed);
         }
@@ -1571,10 +1588,7 @@ HTML_TEMPLATE = """<!doctype html>
         applyPayload(nextPayload);
       } catch (error) {
         state.scanRunning = false;
-        state.scanStatus = `${activeLabels.scan_status_failed}: ${error.message || activeLabels.server_required}`;
-        if (location.protocol === "file:") {
-          state.scanStatus = activeLabels.server_required;
-        }
+        state.scanStatus = `${activeLabels.scan_status_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
         state.scanStatusClass = "error";
         render();
       }

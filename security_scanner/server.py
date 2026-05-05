@@ -24,6 +24,7 @@ from .standards import (
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+LOCAL_CORS_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def create_dashboard_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> HTTPServer:
@@ -119,6 +120,16 @@ def _handler(language: str):
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
 
+        def do_OPTIONS(self) -> None:
+            path = urlparse(self.path).path
+            if path in {"/api/health", "/api/scan", "/api/select-directory"}:
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self._send_cors_headers()
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_error(HTTPStatus.NOT_FOUND)
+
         def do_POST(self) -> None:
             path = urlparse(self.path).path
             if path == "/api/select-directory":
@@ -184,6 +195,7 @@ def _handler(language: str):
             body = content.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -192,9 +204,19 @@ def _handler(language: str):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_cors_headers(self) -> None:
+            origin = allowed_cors_origin(self.headers.get("Origin"))
+            if origin is None:
+                return
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Vary", "Origin")
 
     return DashboardHandler
 
@@ -239,24 +261,52 @@ def _select_directory_tk(initial_dir: Path) -> str | None:
 
 
 def _select_directory_macos(initial_dir: Path) -> str | None:
-    script_lines = (
-        f'set initialFolder to POSIX file "{_applescript_string(str(initial_dir))}" as alias',
-        'set selectedFolder to choose folder with prompt "Select folder to scan" default location initialFolder',
-        "POSIX path of selectedFolder",
-    )
-    command = ["osascript"]
-    for line in script_lines:
-        command.extend(("-e", line))
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-    except FileNotFoundError as exc:  # pragma: no cover - macOS normally provides osascript
-        raise RuntimeError("macOS folder picker command was not found") from exc
+    result = _run_macos_folder_picker(initial_dir)
+    if result.returncode != 0 and _should_retry_macos_picker_without_default(result):
+        result = _run_macos_folder_picker(None)
     if result.returncode != 0:
         message = (result.stderr or result.stdout or "").strip()
         if "User canceled" in message or "-128" in message:
             return None
         raise RuntimeError(message or "macOS folder picker failed")
     return _normalize_selected_directory(result.stdout.strip())
+
+
+def _run_macos_folder_picker(initial_dir: Path | None) -> subprocess.CompletedProcess[str]:
+    if initial_dir is None:
+        script_lines = (
+            'set selectedFolder to choose folder with prompt "Select folder to scan"',
+            "POSIX path of selectedFolder",
+        )
+    else:
+        script_lines = (
+            f'set initialFolder to POSIX file "{_applescript_string(str(initial_dir))}" as alias',
+            'set selectedFolder to choose folder with prompt "Select folder to scan" default location initialFolder',
+            "POSIX path of selectedFolder",
+        )
+    command = ["osascript"]
+    for line in script_lines:
+        command.extend(("-e", line))
+    try:
+        return subprocess.run(command, capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:  # pragma: no cover - macOS normally provides osascript
+        raise RuntimeError("macOS folder picker command was not found") from exc
+
+
+def _should_retry_macos_picker_without_default(result: subprocess.CompletedProcess[str]) -> bool:
+    message = (result.stderr or result.stdout or "").lower()
+    return "expected pattern" in message or "can't make" in message or "cannot make" in message
+
+
+def allowed_cors_origin(origin: str | None) -> str | None:
+    if origin is None:
+        return None
+    if origin == "null":
+        return origin
+    parsed = urlparse(origin)
+    if parsed.scheme in {"http", "https"} and parsed.hostname in LOCAL_CORS_HOSTS:
+        return origin
+    return None
 
 
 def _applescript_string(value: str) -> str:

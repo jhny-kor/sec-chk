@@ -15,7 +15,7 @@ from security_scanner.discovery import discover_projects
 from security_scanner.models import ScannerConfig, TargetConfig
 from security_scanner.reporting import render_html, render_json, render_sarif
 from security_scanner.scanner import SecurityScanner
-from security_scanner.server import scan_directory_payload, select_directory
+from security_scanner.server import _select_directory_macos, allowed_cors_origin, scan_directory_payload, select_directory
 
 
 class ScannerTests(unittest.TestCase):
@@ -315,6 +315,33 @@ class ScannerTests(unittest.TestCase):
                 self.assertEqual(select_directory(), str(selected))
                 self.assertTrue(run_picker.called)
 
+    def test_macos_picker_retries_without_default_location_pattern_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            selected = Path(tmp).resolve()
+            failed = subprocess.CompletedProcess(
+                args=["osascript"],
+                returncode=1,
+                stdout="",
+                stderr="The string did not match the expected pattern.",
+            )
+            completed = subprocess.CompletedProcess(
+                args=["osascript"],
+                returncode=0,
+                stdout=f"{selected}\n",
+                stderr="",
+            )
+
+            with patch("security_scanner.server.subprocess.run", side_effect=(failed, completed)) as run_picker:
+                self.assertEqual(_select_directory_macos(Path(tmp)), str(selected))
+                self.assertEqual(run_picker.call_count, 2)
+
+    def test_local_cors_allows_static_file_reports_only_for_local_server(self) -> None:
+        self.assertEqual(allowed_cors_origin("null"), "null")
+        self.assertEqual(allowed_cors_origin("http://127.0.0.1:8765"), "http://127.0.0.1:8765")
+        self.assertEqual(allowed_cors_origin("http://localhost:8765"), "http://localhost:8765")
+        self.assertIsNone(allowed_cors_origin("https://example.com"))
+        self.assertIsNone(allowed_cors_origin(None))
+
     def test_app_server_uses_next_available_port(self) -> None:
         fake_server = object()
 
@@ -347,6 +374,8 @@ class ScannerTests(unittest.TestCase):
         self.assertIn('id="scan-standard"', html)
         self.assertIn('id="scan-standard-category"', html)
         self.assertIn('id="scan-run"', html)
+        self.assertIn('apiEndpoint("/api/select-directory")', html)
+        self.assertIn("http://127.0.0.1:8765", html)
         self.assertIn("점검 경로", html)
         self.assertIn("폴더 선택", html)
         self.assertIn("보안 기준", html)
