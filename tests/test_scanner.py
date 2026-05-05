@@ -329,6 +329,15 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(port, 8766)
         self.assertIs(server, fake_server)
 
+    def test_platform_launchers_start_app_mode(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        mac_launcher = root / "scripts" / "sec-chk.command"
+        windows_launcher = root / "scripts" / "sec-chk.bat"
+
+        self.assertIn("-m security_scanner app", mac_launcher.read_text(encoding="utf-8"))
+        self.assertIn("-m security_scanner app", windows_launcher.read_text(encoding="utf-8"))
+        self.assertIn("py -3", windows_launcher.read_text(encoding="utf-8"))
+
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")
 

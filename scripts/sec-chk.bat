@@ -1,0 +1,36 @@
+@echo off
+setlocal
+
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
+
+cd /d "%REPO_DIR%" || (
+  echo Failed to enter repository folder: "%REPO_DIR%"
+  pause
+  exit /b 1
+)
+
+set "PYTHON_CMD="
+where py >nul 2>nul
+if not errorlevel 1 (
+  set "PYTHON_CMD=py -3"
+) else (
+  where python >nul 2>nul
+  if not errorlevel 1 set "PYTHON_CMD=python"
+)
+
+if not defined PYTHON_CMD (
+  echo Python 3.10 or newer was not found.
+  echo Install Python from https://www.python.org/downloads/windows/ and run this launcher again.
+  pause
+  exit /b 1
+)
+
+%PYTHON_CMD% -m security_scanner app
+set "EXIT_CODE=%ERRORLEVEL%"
+if not "%EXIT_CODE%"=="0" (
+  echo.
+  echo SecChk stopped with exit code %EXIT_CODE%.
+  pause
+)
+exit /b %EXIT_CODE%

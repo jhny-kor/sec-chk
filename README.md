@@ -18,7 +18,7 @@ Run it like a local app:
 python3 -m security_scanner app
 ```
 
-This opens `security-dashboard.html` in the default browser and keeps a local server running until you press `Ctrl+C`. On macOS, you can also double-click `scripts/sec-chk.command` from Finder.
+This opens `security-dashboard.html` in the default browser and keeps a local server running until you press `Ctrl+C`. On macOS, you can double-click `scripts/sec-chk.command` from Finder. On Windows, double-click `scripts/sec-chk.bat`.
 
 Server-only mode is still available:
 
@@ -119,7 +119,7 @@ Security-standard selections are mapping profiles over the local rules. Categori
 python3 -m security_scanner app
 ```
 
-기본 브라우저에 `security-dashboard.html`을 자동으로 열고, 터미널에서 `Ctrl+C`를 누를 때까지 로컬 서버를 유지합니다. macOS에서는 Finder에서 `scripts/sec-chk.command`를 더블클릭해도 됩니다.
+기본 브라우저에 `security-dashboard.html`을 자동으로 열고, 터미널에서 `Ctrl+C`를 누를 때까지 로컬 서버를 유지합니다. macOS에서는 Finder에서 `scripts/sec-chk.command`, Windows에서는 `scripts/sec-chk.bat`를 더블클릭하면 됩니다.
 
 서버만 직접 띄우려면:
 
