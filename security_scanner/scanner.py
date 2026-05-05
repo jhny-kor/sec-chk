@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
-from .checks import configuration, dependencies, secrets
+from .checks import code_patterns, configuration, dependencies, secrets
 from .checks.common import normalized_relpath
 from .discovery import discover_projects
 from .models import Finding, ScannerConfig, TargetConfig
@@ -53,6 +53,7 @@ CHECKS: dict[str, Callable[[Path, TargetConfig], list[Finding]]] = {
     "secrets": secrets.check_file,
     "dependencies": dependencies.check_file,
     "configuration": configuration.check_file,
+    "code": code_patterns.check_file,
 }
 
 

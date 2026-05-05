@@ -3,7 +3,7 @@
     {
       "name": "security-workspace",
       "path": ".",
-      "categories": ["secrets", "dependencies", "configuration"],
+      "categories": ["secrets", "dependencies", "configuration", "code"],
       "exclude_globs": [
         "**/.git/**",
         "**/node_modules/**",

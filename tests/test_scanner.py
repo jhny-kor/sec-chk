@@ -249,6 +249,53 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(payload["scan"]["standard"], "owasp-top-10-2021")
             self.assertEqual(payload["scan"]["standard_category"], "a06-vulnerable-outdated-components")
 
+    def test_injection_standard_profile_runs_code_pattern_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "views.js").write_text(
+                "document.body.innerHTML = location.hash\n",
+                encoding="utf-8",
+            )
+            query_line = (
+                "cursor."
+                'execute(f"'
+                "SELECT * FROM users WHERE id = {request.args['id']}"
+                '")\n'
+            )
+            (root / "users.py").write_text(query_line, encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="owasp-top-10-2021",
+                standard_category="a03-injection",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertIn("code.xss-dom-sink", rule_ids)
+            self.assertIn("code.sql-dynamic-query", rule_ids)
+            self.assertEqual(payload["scan"]["standard_category"], "a03-injection")
+
+    def test_cwe_path_traversal_profile_runs_code_pattern_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path_line = (
+                "return "
+                "send_file("
+                'request.args["path"])\n'
+            )
+            (root / "app.py").write_text(path_line, encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="cwe-top-25-2025",
+                standard_category="cwe-22-path-traversal",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertEqual(rule_ids, {"code.path-traversal"})
+
     def test_cwe_top25_profile_maps_sensitive_information_exposure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -294,7 +341,7 @@ class ScannerTests(unittest.TestCase):
                     tmp,
                     discover_projects=False,
                     standard="owasp-top-10-2021",
-                    standard_category="a03-injection",
+                    standard_category="a09-security-logging-monitoring-failures",
                 )
 
     def test_select_directory_falls_back_to_macos_picker(self) -> None:
@@ -376,6 +423,8 @@ class ScannerTests(unittest.TestCase):
         self.assertIn('id="scan-run"', html)
         self.assertIn('apiEndpoint("/api/select-directory")', html)
         self.assertIn("http://127.0.0.1:8765", html)
+        self.assertIn("아직 미지원", html)
+        self.assertIn("코드 패턴", html)
         self.assertIn("점검 경로", html)
         self.assertIn("폴더 선택", html)
         self.assertIn("보안 기준", html)

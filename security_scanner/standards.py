@@ -44,6 +44,56 @@ CONFIGURATION_RULE_IDS = (
     "config.compose-docker-sock",
 )
 
+CODE_PATTERN_RULE_IDS = (
+    "code.xss-dom-sink",
+    "code.sql-dynamic-query",
+    "code.command-injection",
+    "code.path-traversal",
+    "code.csrf-disabled",
+    "code.auth-disabled-endpoint",
+    "code.eval-user-input",
+    "code.unsafe-deserialization",
+    "code.ssrf-user-url",
+    "code.unrestricted-file-upload",
+    "code.dangerous-c-buffer-api",
+    "code.unbounded-request-body",
+)
+
+ACCESS_CONTROL_RULE_IDS = (
+    "code.auth-disabled-endpoint",
+)
+
+AUTHENTICATION_RULE_IDS = (
+    "code.auth-disabled-endpoint",
+)
+
+INJECTION_RULE_IDS = (
+    "code.xss-dom-sink",
+    "code.sql-dynamic-query",
+    "code.command-injection",
+    "code.eval-user-input",
+)
+
+INPUT_VALIDATION_RULE_IDS = (
+    "code.xss-dom-sink",
+    "code.sql-dynamic-query",
+    "code.command-injection",
+    "code.path-traversal",
+    "code.eval-user-input",
+    "code.ssrf-user-url",
+    "code.unrestricted-file-upload",
+)
+
+INSECURE_DESIGN_RULE_IDS = (
+    "code.csrf-disabled",
+    "code.auth-disabled-endpoint",
+    "code.unbounded-request-body",
+)
+
+MEMORY_SAFETY_RULE_IDS = (
+    "code.dangerous-c-buffer-api",
+)
+
 SENSITIVE_DATA_RULE_IDS = SECRET_RULE_IDS + (
     "config.env-file-present",
     "config.private-key-like-file",
@@ -147,12 +197,22 @@ LOCAL_STANDARD = SecurityStandard(
             {"en": "Configuration", "ko": "설정"},
             scanner_categories=("configuration",),
         ),
+        StandardCategory(
+            "code",
+            {"en": "Code Patterns", "ko": "코드 패턴"},
+            scanner_categories=("code",),
+        ),
     ),
 )
 
 
 _OWASP_TOP_10_CATEGORIES = (
-    StandardCategory("a01-broken-access-control", {"en": "A01 Broken Access Control", "ko": "A01 접근권한 취약"}),
+    StandardCategory(
+        "a01-broken-access-control",
+        {"en": "A01 Broken Access Control", "ko": "A01 접근권한 취약"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
+    ),
     StandardCategory(
         "a02-cryptographic-failures",
         {"en": "A02 Cryptographic Failures", "ko": "A02 암호화 오류"},
@@ -166,8 +226,18 @@ _OWASP_TOP_10_CATEGORIES = (
             "config.docker-add-http",
         ),
     ),
-    StandardCategory("a03-injection", {"en": "A03 Injection", "ko": "A03 인젝션"}),
-    StandardCategory("a04-insecure-design", {"en": "A04 Insecure Design", "ko": "A04 안전하지 않은 설계"}),
+    StandardCategory(
+        "a03-injection",
+        {"en": "A03 Injection", "ko": "A03 인젝션"},
+        scanner_categories=("code",),
+        rule_ids=INJECTION_RULE_IDS,
+    ),
+    StandardCategory(
+        "a04-insecure-design",
+        {"en": "A04 Insecure Design", "ko": "A04 안전하지 않은 설계"},
+        scanner_categories=("code",),
+        rule_ids=INSECURE_DESIGN_RULE_IDS,
+    ),
     StandardCategory(
         "a05-security-misconfiguration",
         {"en": "A05 Security Misconfiguration", "ko": "A05 보안 설정 오류"},
@@ -190,11 +260,13 @@ _OWASP_TOP_10_CATEGORIES = (
     StandardCategory(
         "a07-identification-authentication-failures",
         {"en": "A07 Identification and Authentication Failures", "ko": "A07 식별 및 인증 실패"},
+        scanner_categories=("code",),
+        rule_ids=AUTHENTICATION_RULE_IDS,
     ),
     StandardCategory(
         "a08-software-data-integrity-failures",
         {"en": "A08 Software and Data Integrity Failures", "ko": "A08 소프트웨어 및 데이터 무결성 실패"},
-        scanner_categories=("dependencies", "configuration"),
+        scanner_categories=("dependencies", "configuration", "code"),
         rule_ids=(
             "dependency.node-missing-lockfile",
             "dependency.node-insecure-url",
@@ -202,6 +274,7 @@ _OWASP_TOP_10_CATEGORIES = (
             "dependency.python-insecure-url",
             "dependency.docker-remote-shell",
             "config.docker-add-http",
+            "code.unsafe-deserialization",
         ),
     ),
     StandardCategory(
@@ -211,6 +284,8 @@ _OWASP_TOP_10_CATEGORIES = (
     StandardCategory(
         "a10-server-side-request-forgery",
         {"en": "A10 Server-Side Request Forgery", "ko": "A10 서버사이드 요청 위조"},
+        scanner_categories=("code",),
+        rule_ids=("code.ssrf-user-url",),
     ),
 )
 
@@ -231,6 +306,8 @@ _SW_DEV_SECURITY_CATEGORIES = (
     StandardCategory(
         "input-validation-expression",
         {"en": "Input Data Validation and Representation", "ko": "입력데이터 검증 및 표현"},
+        scanner_categories=("code",),
+        rule_ids=INPUT_VALIDATION_RULE_IDS,
     ),
     StandardCategory(
         "security-features",
@@ -252,16 +329,23 @@ _SW_DEV_SECURITY_CATEGORIES = (
         scanner_categories=("configuration",),
         rule_ids=("config.debug-enabled", "config.development-environment"),
     ),
-    StandardCategory("code-error", {"en": "Code Error", "ko": "코드오류"}),
+    StandardCategory(
+        "code-error",
+        {"en": "Code Error", "ko": "코드오류"},
+        scanner_categories=("code",),
+        rule_ids=MEMORY_SAFETY_RULE_IDS,
+    ),
     StandardCategory("encapsulation", {"en": "Encapsulation", "ko": "캡슐화"}),
     StandardCategory(
         "api-misuse",
         {"en": "API Misuse", "ko": "API 오용"},
-        scanner_categories=("dependencies", "configuration"),
+        scanner_categories=("dependencies", "configuration", "code"),
         rule_ids=(
             "dependency.remote-shell-script",
             "dependency.docker-remote-shell",
             "config.docker-add-http",
+            "code.unsafe-deserialization",
+            "code.eval-user-input",
         ),
     ),
 )
@@ -280,7 +364,12 @@ SW_DEV_SECURITY_49 = SecurityStandard(
 
 
 _OWASP_TOP_10_2025_CATEGORIES = (
-    StandardCategory("a01-broken-access-control", {"en": "A01 Broken Access Control", "ko": "A01 접근권한 취약"}),
+    StandardCategory(
+        "a01-broken-access-control",
+        {"en": "A01 Broken Access Control", "ko": "A01 접근권한 취약"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
+    ),
     StandardCategory(
         "a02-security-misconfiguration",
         {"en": "A02 Security Misconfiguration", "ko": "A02 보안 설정 오류"},
@@ -299,14 +388,29 @@ _OWASP_TOP_10_2025_CATEGORIES = (
         scanner_categories=("secrets", "configuration", "dependencies"),
         rule_ids=SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS,
     ),
-    StandardCategory("a05-injection", {"en": "A05 Injection", "ko": "A05 인젝션"}),
-    StandardCategory("a06-insecure-design", {"en": "A06 Insecure Design", "ko": "A06 안전하지 않은 설계"}),
-    StandardCategory("a07-authentication-failures", {"en": "A07 Authentication Failures", "ko": "A07 인증 실패"}),
+    StandardCategory(
+        "a05-injection",
+        {"en": "A05 Injection", "ko": "A05 인젝션"},
+        scanner_categories=("code",),
+        rule_ids=INJECTION_RULE_IDS,
+    ),
+    StandardCategory(
+        "a06-insecure-design",
+        {"en": "A06 Insecure Design", "ko": "A06 안전하지 않은 설계"},
+        scanner_categories=("code",),
+        rule_ids=INSECURE_DESIGN_RULE_IDS,
+    ),
+    StandardCategory(
+        "a07-authentication-failures",
+        {"en": "A07 Authentication Failures", "ko": "A07 인증 실패"},
+        scanner_categories=("code",),
+        rule_ids=AUTHENTICATION_RULE_IDS,
+    ),
     StandardCategory(
         "a08-software-data-integrity-failures",
         {"en": "A08 Software or Data Integrity Failures", "ko": "A08 소프트웨어 또는 데이터 무결성 실패"},
-        scanner_categories=("dependencies", "configuration"),
-        rule_ids=INTEGRITY_RULE_IDS,
+        scanner_categories=("dependencies", "configuration", "code"),
+        rule_ids=INTEGRITY_RULE_IDS + ("code.unsafe-deserialization",),
     ),
     StandardCategory(
         "a09-security-logging-alerting-failures",
@@ -337,25 +441,45 @@ _OWASP_API_2023_CATEGORIES = (
     StandardCategory(
         "api1-broken-object-level-authorization",
         {"en": "API1 Broken Object Level Authorization", "ko": "API1 객체 수준 권한 부여 취약"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
     ),
-    StandardCategory("api2-broken-authentication", {"en": "API2 Broken Authentication", "ko": "API2 인증 취약"}),
+    StandardCategory(
+        "api2-broken-authentication",
+        {"en": "API2 Broken Authentication", "ko": "API2 인증 취약"},
+        scanner_categories=("code",),
+        rule_ids=AUTHENTICATION_RULE_IDS,
+    ),
     StandardCategory(
         "api3-broken-object-property-level-authorization",
         {"en": "API3 Broken Object Property Level Authorization", "ko": "API3 객체 속성 수준 권한 부여 취약"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
     ),
     StandardCategory(
         "api4-unrestricted-resource-consumption",
         {"en": "API4 Unrestricted Resource Consumption", "ko": "API4 제한 없는 리소스 사용"},
+        scanner_categories=("code",),
+        rule_ids=("code.unbounded-request-body",),
     ),
     StandardCategory(
         "api5-broken-function-level-authorization",
         {"en": "API5 Broken Function Level Authorization", "ko": "API5 기능 수준 권한 부여 취약"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
     ),
     StandardCategory(
         "api6-unrestricted-access-sensitive-business-flows",
         {"en": "API6 Unrestricted Access to Sensitive Business Flows", "ko": "API6 민감 비즈니스 흐름 접근 제한 미흡"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS + ("code.unbounded-request-body",),
     ),
-    StandardCategory("api7-server-side-request-forgery", {"en": "API7 Server Side Request Forgery", "ko": "API7 서버사이드 요청 위조"}),
+    StandardCategory(
+        "api7-server-side-request-forgery",
+        {"en": "API7 Server Side Request Forgery", "ko": "API7 서버사이드 요청 위조"},
+        scanner_categories=("code",),
+        rule_ids=("code.ssrf-user-url",),
+    ),
     StandardCategory(
         "api8-security-misconfiguration",
         {"en": "API8 Security Misconfiguration", "ko": "API8 보안 설정 오류"},
@@ -369,8 +493,8 @@ _OWASP_API_2023_CATEGORIES = (
     StandardCategory(
         "api10-unsafe-consumption-of-apis",
         {"en": "API10 Unsafe Consumption of APIs", "ko": "API10 안전하지 않은 API 사용"},
-        scanner_categories=("dependencies", "configuration"),
-        rule_ids=INSECURE_TRANSPORT_RULE_IDS + REMOTE_EXECUTION_RULE_IDS,
+        scanner_categories=("dependencies", "configuration", "code"),
+        rule_ids=INSECURE_TRANSPORT_RULE_IDS + REMOTE_EXECUTION_RULE_IDS + ("code.ssrf-user-url",),
     ),
 )
 
@@ -403,10 +527,14 @@ _OWASP_MOBILE_2024_CATEGORIES = (
     StandardCategory(
         "m3-insecure-authentication-authorization",
         {"en": "M3 Insecure Authentication/Authorization", "ko": "M3 안전하지 않은 인증/인가"},
+        scanner_categories=("code",),
+        rule_ids=AUTHENTICATION_RULE_IDS,
     ),
     StandardCategory(
         "m4-insufficient-input-output-validation",
         {"en": "M4 Insufficient Input/Output Validation", "ko": "M4 입출력 검증 부족"},
+        scanner_categories=("code",),
+        rule_ids=INPUT_VALIDATION_RULE_IDS,
     ),
     StandardCategory(
         "m5-insecure-communication",
@@ -414,7 +542,12 @@ _OWASP_MOBILE_2024_CATEGORIES = (
         scanner_categories=("dependencies", "configuration"),
         rule_ids=INSECURE_TRANSPORT_RULE_IDS,
     ),
-    StandardCategory("m6-inadequate-privacy-controls", {"en": "M6 Inadequate Privacy Controls", "ko": "M6 부적절한 개인정보 보호 통제"}),
+    StandardCategory(
+        "m6-inadequate-privacy-controls",
+        {"en": "M6 Inadequate Privacy Controls", "ko": "M6 부적절한 개인정보 보호 통제"},
+        scanner_categories=("secrets", "configuration"),
+        rule_ids=SENSITIVE_DATA_RULE_IDS,
+    ),
     StandardCategory("m7-insufficient-binary-protections", {"en": "M7 Insufficient Binary Protections", "ko": "M7 바이너리 보호 부족"}),
     StandardCategory(
         "m8-security-misconfiguration",
@@ -453,26 +586,38 @@ _CWE_TOP_25_2025_CATEGORIES = (
     StandardCategory(
         "cwe-79-cross-site-scripting",
         {"en": "CWE-79 Cross-site Scripting", "ko": "CWE-79 크로스사이트 스크립팅"},
+        scanner_categories=("code",),
+        rule_ids=("code.xss-dom-sink",),
     ),
     StandardCategory(
         "cwe-89-sql-injection",
         {"en": "CWE-89 SQL Injection", "ko": "CWE-89 SQL 삽입"},
+        scanner_categories=("code",),
+        rule_ids=("code.sql-dynamic-query",),
     ),
     StandardCategory(
         "cwe-352-cross-site-request-forgery",
         {"en": "CWE-352 Cross-Site Request Forgery", "ko": "CWE-352 크로스사이트 요청 위조"},
+        scanner_categories=("code",),
+        rule_ids=("code.csrf-disabled",),
     ),
     StandardCategory(
         "cwe-862-missing-authorization",
         {"en": "CWE-862 Missing Authorization", "ko": "CWE-862 인가 누락"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
     ),
     StandardCategory(
         "cwe-787-out-of-bounds-write",
         {"en": "CWE-787 Out-of-bounds Write", "ko": "CWE-787 범위 밖 쓰기"},
+        scanner_categories=("code",),
+        rule_ids=MEMORY_SAFETY_RULE_IDS,
     ),
     StandardCategory(
         "cwe-22-path-traversal",
         {"en": "CWE-22 Path Traversal", "ko": "CWE-22 경로 조작"},
+        scanner_categories=("code",),
+        rule_ids=("code.path-traversal",),
     ),
     StandardCategory(
         "cwe-416-use-after-free",
@@ -481,22 +626,32 @@ _CWE_TOP_25_2025_CATEGORIES = (
     StandardCategory(
         "cwe-125-out-of-bounds-read",
         {"en": "CWE-125 Out-of-bounds Read", "ko": "CWE-125 범위 밖 읽기"},
+        scanner_categories=("code",),
+        rule_ids=MEMORY_SAFETY_RULE_IDS,
     ),
     StandardCategory(
         "cwe-78-os-command-injection",
         {"en": "CWE-78 OS Command Injection", "ko": "CWE-78 운영체제 명령어 삽입"},
+        scanner_categories=("code",),
+        rule_ids=("code.command-injection",),
     ),
     StandardCategory(
         "cwe-94-code-injection",
         {"en": "CWE-94 Code Injection", "ko": "CWE-94 코드 삽입"},
+        scanner_categories=("code",),
+        rule_ids=("code.eval-user-input",),
     ),
     StandardCategory(
         "cwe-120-classic-buffer-overflow",
         {"en": "CWE-120 Classic Buffer Overflow", "ko": "CWE-120 크기 검증 없는 버퍼 복사"},
+        scanner_categories=("code",),
+        rule_ids=MEMORY_SAFETY_RULE_IDS,
     ),
     StandardCategory(
         "cwe-434-dangerous-file-upload",
         {"en": "CWE-434 Unrestricted Upload of File with Dangerous Type", "ko": "CWE-434 위험한 형식의 파일 업로드 제한 미흡"},
+        scanner_categories=("code",),
+        rule_ids=("code.unrestricted-file-upload",),
     ),
     StandardCategory(
         "cwe-476-null-pointer-dereference",
@@ -505,26 +660,38 @@ _CWE_TOP_25_2025_CATEGORIES = (
     StandardCategory(
         "cwe-121-stack-buffer-overflow",
         {"en": "CWE-121 Stack-based Buffer Overflow", "ko": "CWE-121 스택 기반 버퍼 오버플로우"},
+        scanner_categories=("code",),
+        rule_ids=MEMORY_SAFETY_RULE_IDS,
     ),
     StandardCategory(
         "cwe-502-unsafe-deserialization",
         {"en": "CWE-502 Deserialization of Untrusted Data", "ko": "CWE-502 신뢰할 수 없는 데이터 역직렬화"},
+        scanner_categories=("code",),
+        rule_ids=("code.unsafe-deserialization",),
     ),
     StandardCategory(
         "cwe-122-heap-buffer-overflow",
         {"en": "CWE-122 Heap-based Buffer Overflow", "ko": "CWE-122 힙 기반 버퍼 오버플로우"},
+        scanner_categories=("code",),
+        rule_ids=MEMORY_SAFETY_RULE_IDS,
     ),
     StandardCategory(
         "cwe-863-incorrect-authorization",
         {"en": "CWE-863 Incorrect Authorization", "ko": "CWE-863 잘못된 인가"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
     ),
     StandardCategory(
         "cwe-20-improper-input-validation",
         {"en": "CWE-20 Improper Input Validation", "ko": "CWE-20 부적절한 입력값 검증"},
+        scanner_categories=("code",),
+        rule_ids=INPUT_VALIDATION_RULE_IDS,
     ),
     StandardCategory(
         "cwe-284-improper-access-control",
         {"en": "CWE-284 Improper Access Control", "ko": "CWE-284 부적절한 접근통제"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
     ),
     StandardCategory(
         "cwe-200-sensitive-information-exposure",
@@ -535,22 +702,32 @@ _CWE_TOP_25_2025_CATEGORIES = (
     StandardCategory(
         "cwe-306-missing-authentication-critical-function",
         {"en": "CWE-306 Missing Authentication for Critical Function", "ko": "CWE-306 중요 기능 인증 누락"},
+        scanner_categories=("code",),
+        rule_ids=AUTHENTICATION_RULE_IDS,
     ),
     StandardCategory(
         "cwe-918-server-side-request-forgery",
         {"en": "CWE-918 Server-Side Request Forgery", "ko": "CWE-918 서버사이드 요청 위조"},
+        scanner_categories=("code",),
+        rule_ids=("code.ssrf-user-url",),
     ),
     StandardCategory(
         "cwe-77-command-injection",
         {"en": "CWE-77 Command Injection", "ko": "CWE-77 명령어 삽입"},
+        scanner_categories=("code",),
+        rule_ids=("code.command-injection",),
     ),
     StandardCategory(
         "cwe-639-authorization-bypass-user-controlled-key",
         {"en": "CWE-639 Authorization Bypass Through User-Controlled Key", "ko": "CWE-639 사용자 제어 키를 통한 인가 우회"},
+        scanner_categories=("code",),
+        rule_ids=ACCESS_CONTROL_RULE_IDS,
     ),
     StandardCategory(
         "cwe-770-resource-allocation-without-limits",
         {"en": "CWE-770 Allocation of Resources Without Limits or Throttling", "ko": "CWE-770 제한 또는 조절 없는 자원 할당"},
+        scanner_categories=("code",),
+        rule_ids=("code.unbounded-request-body",),
     ),
 )
 
@@ -572,13 +749,13 @@ _ISMS_P_28_CATEGORIES = (
         "2.8.1-security-requirements-definition",
         {"en": "2.8.1 Security Requirements Definition", "ko": "2.8.1 보안 요구사항 정의"},
         scanner_categories=CATEGORIES,
-        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS,
+        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS,
     ),
     StandardCategory(
         "2.8.2-security-requirements-review-testing",
         {"en": "2.8.2 Security Requirements Review and Testing", "ko": "2.8.2 보안 요구사항 검토 및 시험"},
         scanner_categories=CATEGORIES,
-        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS,
+        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS,
     ),
     StandardCategory(
         "2.8.3-test-production-separation",
@@ -595,13 +772,14 @@ _ISMS_P_28_CATEGORIES = (
     StandardCategory(
         "2.8.5-source-program-management",
         {"en": "2.8.5 Source Program Management", "ko": "2.8.5 소스 프로그램 관리"},
-        scanner_categories=("secrets", "dependencies", "configuration"),
+        scanner_categories=("secrets", "dependencies", "configuration", "code"),
         rule_ids=SECRET_RULE_IDS
         + (
             "config.env-file-present",
             "config.private-key-like-file",
             "dependency.node-missing-lockfile",
-        ),
+        )
+        + CODE_PATTERN_RULE_IDS,
     ),
     StandardCategory(
         "2.8.6-production-migration",

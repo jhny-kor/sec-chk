@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-CATEGORIES = ("secrets", "dependencies", "configuration")
+CATEGORIES = ("secrets", "dependencies", "configuration", "code")
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 SEVERITY_RANK = {severity: index for index, severity in enumerate(SEVERITIES)}
 

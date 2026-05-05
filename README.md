@@ -9,6 +9,7 @@ Korean guide: [한국어 안내](#한국어-안내)
 - `secrets`: likely API keys, private keys, access tokens, and hard-coded secret assignments.
 - `dependencies`: risky dependency manifests, missing lockfiles, unpinned Python requirements, remote shell install scripts, and unsafe image tags.
 - `configuration`: committed environment files, private-key-like files, debug flags, and risky Docker/Compose settings.
+- `code`: heuristic code patterns for XSS, SQL injection, command injection, path traversal, SSRF, unsafe deserialization, disabled CSRF/auth checks, risky uploads, and C/C++ buffer APIs.
 
 ## Quick Start
 
@@ -55,7 +56,7 @@ Copy `scanner_config.example.json` and edit the `targets` list:
       "path": ".",
       "discover_projects": false,
       "discovery_depth": 2,
-      "categories": ["secrets", "dependencies", "configuration"],
+      "categories": ["secrets", "dependencies", "configuration", "code"],
       "exclude_globs": ["**/.git/**", "**/node_modules/**"],
       "max_file_size_bytes": 524288
     }
@@ -110,6 +111,7 @@ Security-standard selections are mapping profiles over the local rules. Categori
 - `secrets`: API 키, 개인 키, 액세스 토큰, 하드코딩된 비밀값 의심 대입
 - `dependencies`: 위험한 의존성 매니페스트, lockfile 누락, 고정되지 않은 Python requirements, 원격 셸 설치 스크립트, 안전하지 않은 이미지 태그
 - `configuration`: 커밋된 환경 파일, 개인 키처럼 보이는 파일, 디버그 플래그, 위험한 Docker/Compose 설정
+- `code`: XSS, SQL 삽입, 명령어 삽입, 경로 조작, SSRF, 위험한 역직렬화, CSRF/인증 우회 설정, 위험한 업로드, C/C++ 버퍼 API 휴리스틱 패턴
 
 ### 빠른 시작
 
@@ -154,7 +156,7 @@ SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scann
       "path": ".",
       "discover_projects": false,
       "discovery_depth": 2,
-      "categories": ["secrets", "dependencies", "configuration"],
+      "categories": ["secrets", "dependencies", "configuration", "code"],
       "exclude_globs": ["**/.git/**", "**/node_modules/**"],
       "max_file_size_bytes": 524288
     }

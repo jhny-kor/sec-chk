@@ -48,7 +48,7 @@ TRANSLATIONS = {
         "scan_status_running": "Scanning...",
         "scan_status_done": "Scan complete",
         "scan_status_failed": "Scan failed",
-        "scan_category_not_supported": "No local checks are mapped to this category yet.",
+        "scan_category_not_supported": "not yet supported",
         "folder_selection_cancelled": "Folder selection cancelled.",
         "folder_selection_failed": "Folder selection failed",
         "folder_selected": "Folder selected",
@@ -99,6 +99,12 @@ TRANSLATIONS = {
             "low": "Low",
             "info": "Info",
         },
+        "category_labels": {
+            "secrets": "Secrets",
+            "dependencies": "Dependencies",
+            "configuration": "Configuration",
+            "code": "Code Patterns",
+        },
     },
     "ko": {
         "html_lang": "ko",
@@ -120,7 +126,7 @@ TRANSLATIONS = {
         "scan_status_running": "점검 중...",
         "scan_status_done": "점검 완료",
         "scan_status_failed": "점검 실패",
-        "scan_category_not_supported": "이 카테고리에 매핑된 로컬 점검이 아직 없습니다.",
+        "scan_category_not_supported": "아직 미지원",
         "folder_selection_cancelled": "폴더 선택이 취소되었습니다.",
         "folder_selection_failed": "폴더 선택 실패",
         "folder_selected": "폴더 선택됨",
@@ -170,6 +176,12 @@ TRANSLATIONS = {
             "medium": "중간",
             "low": "낮음",
             "info": "정보",
+        },
+        "category_labels": {
+            "secrets": "비밀값",
+            "dependencies": "의존성",
+            "configuration": "설정",
+            "code": "코드 패턴",
         },
     },
 }
@@ -305,6 +317,66 @@ RULE_TRANSLATIONS_KO = {
         "description": "Docker 소켓 접근은 사실상 호스트 수준 제어 권한에 가깝습니다.",
         "recommendation": "Docker 소켓 마운트를 피하거나 목적별 프록시 뒤로 격리하세요.",
     },
+    "code.xss-dom-sink": {
+        "title": "XSS 의심 HTML 출력 지점",
+        "description": "사용자 입력으로 보이는 값이 HTML 렌더링 지점으로 전달되는 패턴입니다.",
+        "recommendation": "텍스트 렌더링, 컨텍스트별 출력 인코딩, 검증된 sanitizer를 사용하세요.",
+    },
+    "code.sql-dynamic-query": {
+        "title": "동적 SQL 쿼리로 인한 SQL 삽입 의심",
+        "description": "SQL 문자열이 실행 직전에 동적으로 조립되는 패턴입니다.",
+        "recommendation": "문자열 조합 대신 파라미터 바인딩이나 ORM의 안전한 쿼리 API를 사용하세요.",
+    },
+    "code.command-injection": {
+        "title": "명령어 삽입 의심",
+        "description": "셸 또는 프로세스 실행 API에 동적 입력이나 사용자 입력이 전달되는 패턴입니다.",
+        "recommendation": "사용자 입력을 셸에 넘기지 말고, 고정된 인자 배열과 allowlist 검증을 사용하세요.",
+    },
+    "code.path-traversal": {
+        "title": "경로 조작 의심",
+        "description": "파일 시스템 API가 사용자 제어 경로 데이터를 사용하는 패턴입니다.",
+        "recommendation": "허용된 기준 디렉터리 안에서 경로를 정규화하고, 상위 경로 이동을 차단하세요.",
+    },
+    "code.csrf-disabled": {
+        "title": "CSRF 보호 비활성화 의심",
+        "description": "라우트 또는 애플리케이션에서 CSRF 보호를 비활성화하는 패턴입니다.",
+        "recommendation": "브라우저 인증을 쓰는 상태 변경 요청에는 CSRF 보호를 유지하거나 보완 통제를 문서화하세요.",
+    },
+    "code.auth-disabled-endpoint": {
+        "title": "인증 또는 인가 우회 설정 의심",
+        "description": "엔드포인트나 핸들러에서 인증 또는 인가를 명시적으로 우회하는 패턴입니다.",
+        "recommendation": "정말 공개 엔드포인트인지 확인하고, 민감한 작업에는 인가 검사를 강제하세요.",
+    },
+    "code.eval-user-input": {
+        "title": "eval 계열 API를 통한 코드 삽입 의심",
+        "description": "사용자 입력이 동적 코드 실행 API로 전달되는 패턴입니다.",
+        "recommendation": "동적 코드 실행을 제거하고, 허용된 작업만 고정 dispatch table로 처리하세요.",
+    },
+    "code.unsafe-deserialization": {
+        "title": "위험한 역직렬화 API 사용",
+        "description": "신뢰할 수 없는 데이터에 위험할 수 있는 역직렬화 API가 사용된 패턴입니다.",
+        "recommendation": "안전한 파서를 사용하고, 역직렬화는 서명된 신뢰 입력으로 제한하세요.",
+    },
+    "code.ssrf-user-url": {
+        "title": "사용자 제어 URL 요청으로 인한 SSRF 의심",
+        "description": "서버 측 HTTP 클라이언트가 사용자 입력에서 온 URL을 요청하는 패턴입니다.",
+        "recommendation": "허용된 호스트만 요청하고 사설망 대역을 차단하며 임의 URL 전달을 피하세요.",
+    },
+    "code.unrestricted-file-upload": {
+        "title": "제한 없는 파일 업로드 의심",
+        "description": "업로드 파일을 클라이언트가 제어하는 이름이나 느슨한 저장 설정으로 저장하는 패턴입니다.",
+        "recommendation": "콘텐츠 타입과 확장자를 검증하고 서버 측 파일명을 생성하며 실행 경로 밖에 저장하세요.",
+    },
+    "code.dangerous-c-buffer-api": {
+        "title": "위험한 C/C++ 버퍼 API 사용",
+        "description": "버퍼 오버플로우와 자주 연결되는 오래된 C/C++ API가 사용된 패턴입니다.",
+        "recommendation": "경계가 있는 대체 API를 사용하고 대상 버퍼 크기를 검증하세요.",
+    },
+    "code.unbounded-request-body": {
+        "title": "요청 본문 크기 제한이 보이지 않음",
+        "description": "명시적 크기 제한 없이 요청 본문 파서가 활성화된 패턴입니다.",
+        "recommendation": "보수적인 요청 본문 크기 제한을 설정하고 과도한 요청은 초기에 거부하세요.",
+    },
 }
 
 
@@ -375,7 +447,7 @@ def render_markdown(
         if count:
             lines.append(f"- {labels['severity_labels'][severity]}: {count}")
     for category, count in sorted(summary["by_category"].items()):
-        lines.append(f"- {category}: {count}")
+        lines.append(f"- {_category_label(category, language)}: {count}")
     for target, count in sorted(summary["by_target"].items()):
         if target:
             lines.append(f"- {labels['target']} `{_target_display(target, summary)}`: {count}")
@@ -403,7 +475,7 @@ def render_markdown(
                     f"### {display['title']}",
                     "",
                     f"- {labels['rule']}: `{finding.rule_id}`",
-                    f"- {labels['category']}: `{finding.category}`",
+                    f"- {labels['category']}: `{_category_label(finding.category, language)}`",
                     f"- {labels['target']}: `{_target_display(finding.target, summary)}`",
                     f"- {labels['location']}: `{location}`",
                 ]
@@ -581,6 +653,13 @@ def _summary(
 
 def _labels(language: str) -> dict[str, object]:
     return TRANSLATIONS.get(language, TRANSLATIONS["en"])
+
+
+def _category_label(category: str, language: str) -> str:
+    category_labels = _labels(language).get("category_labels", {})
+    if isinstance(category_labels, dict):
+        return str(category_labels.get(category, category))
+    return category
 
 
 def _target_display(target: str, summary: dict[str, object]) -> str:
@@ -1241,6 +1320,14 @@ HTML_TEMPLATE = """<!doctype html>
       return labels().severity_labels;
     }
 
+    function categoryLabels() {
+      return labels().category_labels || {};
+    }
+
+    function categoryLabel(category) {
+      return categoryLabels()[category] || category;
+    }
+
     function labelFor(item) {
       return (item.labels && (item.labels[state.language] || item.labels.en)) || item.id || "";
     }
@@ -1392,7 +1479,7 @@ HTML_TEMPLATE = """<!doctype html>
       const categories = Array.from(new Set(items.map((item) => item.category))).sort();
       const targets = Object.keys(summary.by_target || {}).sort();
       fillSelect(byId("severity"), [["all", activeLabels.all_severities], ...severityOrder.map((sev) => [sev, activeSeverityLabels[sev]])], state.severity);
-      fillSelect(byId("category"), [["all", activeLabels.all_categories], ...categories.map((cat) => [cat, cat])], state.category);
+      fillSelect(byId("category"), [["all", activeLabels.all_categories], ...categories.map((cat) => [cat, categoryLabel(cat)])], state.category);
       fillSelect(byId("target"), [["all", activeLabels.all_targets], ...targets.map((target) => [target, targetDisplay(target)])], state.target);
     }
 
@@ -1416,7 +1503,7 @@ HTML_TEMPLATE = """<!doctype html>
         if (state.category !== "all" && finding.category !== state.category) return false;
         if (state.target !== "all" && finding.target !== state.target) return false;
         if (!query) return true;
-        return [finding.title, finding.rule_id, finding.path, targetDisplay(finding.target), finding.evidence, finding.recommendation]
+        return [finding.title, finding.rule_id, categoryLabel(finding.category), finding.path, targetDisplay(finding.target), finding.evidence, finding.recommendation]
           .join(" ")
           .toLowerCase()
           .includes(query);
@@ -1470,7 +1557,7 @@ HTML_TEMPLATE = """<!doctype html>
             <td><span class="severity-pill pill-${escapeText(finding.severity)}">${escapeText(activeSeverityLabels[finding.severity] || finding.severity)}</span></td>
             <td>
               <strong>${escapeText(finding.title)}</strong><br>
-              <span class="location">${escapeText(finding.rule_id)} | ${escapeText(finding.category)}</span>
+              <span class="location">${escapeText(finding.rule_id)} | ${escapeText(categoryLabel(finding.category))}</span>
             </td>
             <td>${escapeText(targetDisplay(finding.target))}</td>
             <td class="location">${escapeText(location)}</td>

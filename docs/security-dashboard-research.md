@@ -26,7 +26,7 @@ The current implementation borrows information architecture from established vul
   - https://owasp.org/www-project-mobile-top-10/
 - OWASP ASVS 5.0.0: verification requirements for web application technical controls; tracked as a future checklist/profile candidate.
   - https://owasp.org/www-project-application-security-verification-standard/
-- CWE Top 25 2025: current MITRE/CISA weakness prioritization list; added as a partial profile for currently mapped sensitive-information exposure checks.
+- CWE Top 25 2025: current MITRE/CISA weakness prioritization list; added as a partial profile for local sensitive-data checks and heuristic code-pattern checks.
   - https://cwe.mitre.org/top25/
 - NIST SSDF SP 800-218: secure software development practice framework; tracked as a future process/checklist candidate rather than a direct static-scan profile.
   - https://csrc.nist.gov/pubs/sp/800/218/final
@@ -46,6 +46,7 @@ The current implementation borrows information architecture from established vul
 - Standard selector: scan requests can narrow local checks by mapped security standards while unsupported standard categories remain visibly unavailable.
 - Finding table: remediation guidance stays attached to each finding.
 - Interchange output: SARIF is available for downstream static-analysis consumers.
+- Code-pattern heuristics: common risky sinks such as dynamic SQL, unsafe HTML rendering, shell execution, path use, SSRF fetches, disabled CSRF/auth checks, unsafe deserialization, file upload saves, request body parsing, and C/C++ buffer APIs can provide lightweight local evidence for standards categories.
 
 ## Deliberate Limits
 
@@ -53,6 +54,6 @@ The current implementation borrows information architecture from established vul
 - Trend charts are not included yet because the scanner does not persist historical scan snapshots.
 - SBOM, CVE, EPSS, and advisory lookups are deferred because the first version remains offline and dependency-free.
 - Standard selections are mapping profiles over the implemented local rules, not a claim of full standard coverage.
-- CWE Top 25 is intentionally sparse because most of the 2025 Top 25 entries need language-aware SAST rules before they can be claimed as locally checked.
+- CWE Top 25 coverage is still heuristic; use-after-free and null-pointer dereference remain unsupported because they need deeper language-aware analysis.
 - ISMS-P 2.8 is a supporting-evidence profile, not an ISMS-P audit result; full coverage needs checklist/evidence workflows outside static file scanning.
 - ASVS and NIST SSDF are better served by additional rule engines or checklist/evidence workflows before they are exposed as first-class scan profiles.

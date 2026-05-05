@@ -5,7 +5,7 @@
       "path": "${SEC_CHK_TARGET:-.}",
       "discover_projects": true,
       "discovery_depth": 2,
-      "categories": ["secrets", "dependencies", "configuration"],
+      "categories": ["secrets", "dependencies", "configuration", "code"],
       "exclude_globs": [
         "**/.git/**",
         "**/node_modules/**",
