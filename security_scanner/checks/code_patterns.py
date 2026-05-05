@@ -45,6 +45,11 @@ class CodePatternRule:
 
 
 UNTRUSTED_SOURCE = r"(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"
+LOGGING_API = (
+    r"(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|"
+    r"logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))"
+)
+SENSITIVE_NAME = r"(pass" r"(word)?|pwd|secret|token|api[_-]?key|authorization|credential|session|cookie)"
 
 CODE_PATTERN_RULES = (
     CodePatternRule(
@@ -192,6 +197,84 @@ CODE_PATTERN_RULES = (
         "Request body parsing appears to be enabled without an explicit size limit.",
         "Set conservative request body limits and reject oversized requests early.",
         frozenset({".js", ".jsx", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.logging-sensitive-data",
+        "Sensitive data may be written to logs",
+        "medium",
+        re.compile(rf"\b{LOGGING_API}\s*\([^#\n]*{SENSITIVE_NAME}", re.IGNORECASE),
+        "A logging or console output call appears to include credential, token, session, or cookie data.",
+        "Remove sensitive values from logs and record only redacted identifiers or security-safe event metadata.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.empty-exception-handler",
+        "Exception appears to be silently ignored",
+        "low",
+        re.compile(r"(\bexcept\b[^:\n]*:\s*pass\b|\bcatch\s*(\([^)]*\))?\s*\{\s*\})", re.IGNORECASE),
+        "An exception handler appears to swallow errors without logging, recovery, or a clear security decision.",
+        "Handle expected exceptions explicitly and log security-relevant failures with sanitized context.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.stack-trace-exposure",
+        "Stack trace output may expose internals",
+        "low",
+        re.compile(r"\b(printStackTrace|traceback\.print_exc|console\.trace|logger\.exception)\s*\(", re.IGNORECASE),
+        "A stack trace output API appears in application code and may expose internals if enabled in user-facing flows.",
+        "Route exceptions through centralized error handling and avoid returning or printing raw stack traces outside local debugging.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.unversioned-api-route",
+        "API route appears to be unversioned",
+        "low",
+        re.compile(
+            r"(?:@\w+\.route|(?:app|router|routes|server)\.(?:get|post|put|patch|delete|use)|Route|path)"
+            r"\s*\([^#\n]*[\"']/api/(?!v\d+(?:/|$))[^\"']+[\"']",
+            re.IGNORECASE,
+        ),
+        "A public-looking API route is declared without an obvious version segment.",
+        "Inventory public APIs and prefer explicit versioned routes such as /api/v1/... for lifecycle management.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.insecure-temp-file",
+        "Temporary file use may be predictable or race-prone",
+        "medium",
+        re.compile(
+            r"(\b(tempfile\.mktemp|mktemp|tmpnam)\s*\(|\b(open|writeFile|readFile|fopen)\s*\([^#\n]*[\"']/tmp/[^\"']+[\"'])",
+            re.IGNORECASE,
+        ),
+        "The code appears to use a predictable temporary filename or a direct /tmp path in a file operation.",
+        "Use secure temporary file APIs that create files atomically and avoid predictable shared paths.",
+        frozenset({".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.wildcard-cors",
+        "CORS appears to allow every origin",
+        "medium",
+        re.compile(
+            r"(Access-Control-Allow-Origin[\"']?\s*[:,]\s*[\"']\*|allow_origins\s*=\s*\[\s*[\"']\*|"
+            r"origins?\s*[:=]\s*[\"']\*|allowedOrigins\s*\(\s*[\"']\*)",
+            re.IGNORECASE,
+        ),
+        "CORS configuration appears to allow requests from any origin.",
+        "Restrict allowed origins to trusted application domains and avoid combining wildcard origins with credentials.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.public-bind-all-interfaces",
+        "Service appears to bind all network interfaces",
+        "low",
+        re.compile(
+            r"(\b(app\.run|uvicorn\.run|server\.listen|listen|http\.ListenAndServe)\s*\([^#\n]*[\"']0\.0\.0\.0[\"']|"
+            r"\b(host|bind_address|listen_address)\s*[:=]\s*[\"']0\.0\.0\.0[\"']|--host\s+0\.0\.0\.0)",
+            re.IGNORECASE,
+        ),
+        "A service binding appears to listen on all interfaces, which can expose local services more broadly than intended.",
+        "Bind development services to localhost by default and require explicit configuration for public exposure.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".swift", ".ts", ".tsx"}),
     ),
 )
 

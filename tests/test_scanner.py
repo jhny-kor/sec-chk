@@ -315,6 +315,101 @@ class ScannerTests(unittest.TestCase):
             self.assertIn("config.env-file-present", rule_ids)
             self.assertNotIn("dependency.python-unpinned-requirement", rule_ids)
 
+    def test_logging_monitoring_profile_runs_code_pattern_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_line = (
+                "logger."
+                "info("
+                '"pass'
+                'word=%s", request.args["pass'
+                'word"])\n'
+            )
+            handler_line = (
+                "try:\n"
+                "    run_job()\n"
+                "except Exception: "
+                "pass\n"
+            )
+            trace_line = (
+                "traceback."
+                "print_exc()\n"
+            )
+            (root / "audit.py").write_text(log_line, encoding="utf-8")
+            (root / "worker.py").write_text(handler_line + trace_line, encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="owasp-top-10-2021",
+                standard_category="a09-security-logging-monitoring-failures",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertIn("code.logging-sensitive-data", rule_ids)
+            self.assertIn("code.empty-exception-handler", rule_ids)
+            self.assertIn("code.stack-trace-exposure", rule_ids)
+
+    def test_api_inventory_profile_runs_unversioned_route_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            route_line = (
+                "app."
+                "get("
+                '"/api/users", handler)\n'
+            )
+            (root / "routes.js").write_text(route_line, encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="owasp-api-security-2023",
+                standard_category="api9-improper-inventory-management",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertEqual(rule_ids, {"code.unversioned-api-route"})
+
+    def test_sw_security_time_state_and_encapsulation_profiles_run_code_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            temp_line = (
+                "path = tempfile."
+                "mk"
+                "temp()\n"
+            )
+            cors_line = (
+                "CORS(app, "
+                "origins="
+                '"*")\n'
+            )
+            bind_line = (
+                "app."
+                "run(host="
+                '"0.0.0.0")\n'
+            )
+            (root / "files.py").write_text(temp_line, encoding="utf-8")
+            (root / "server.py").write_text(cors_line + bind_line, encoding="utf-8")
+
+            time_payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="sw-dev-security-49",
+                standard_category="time-state",
+            )
+            encapsulation_payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="sw-dev-security-49",
+                standard_category="encapsulation",
+            )
+
+            time_rule_ids = {finding["rule_id"] for finding in time_payload["findings_by_language"]["en"]}
+            encapsulation_rule_ids = {finding["rule_id"] for finding in encapsulation_payload["findings_by_language"]["en"]}
+            self.assertEqual(time_rule_ids, {"code.insecure-temp-file"})
+            self.assertIn("code.wildcard-cors", encapsulation_rule_ids)
+            self.assertIn("code.public-bind-all-interfaces", encapsulation_rule_ids)
+
     def test_isms_p_development_security_profile_maps_test_data_security(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -340,8 +435,8 @@ class ScannerTests(unittest.TestCase):
                 scan_directory_payload(
                     tmp,
                     discover_projects=False,
-                    standard="owasp-top-10-2021",
-                    standard_category="a09-security-logging-monitoring-failures",
+                    standard="cwe-top-25-2025",
+                    standard_category="cwe-416-use-after-free",
                 )
 
     def test_select_directory_falls_back_to_macos_picker(self) -> None:

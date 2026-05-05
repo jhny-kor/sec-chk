@@ -377,6 +377,41 @@ RULE_TRANSLATIONS_KO = {
         "description": "명시적 크기 제한 없이 요청 본문 파서가 활성화된 패턴입니다.",
         "recommendation": "보수적인 요청 본문 크기 제한을 설정하고 과도한 요청은 초기에 거부하세요.",
     },
+    "code.logging-sensitive-data": {
+        "title": "민감정보 로깅 의심",
+        "description": "로그 또는 콘솔 출력에 자격 증명, 토큰, 세션, 쿠키 정보가 포함될 수 있는 패턴입니다.",
+        "recommendation": "민감값은 로그에서 제거하고, 필요한 경우 마스킹된 식별자나 안전한 이벤트 메타데이터만 남기세요.",
+    },
+    "code.empty-exception-handler": {
+        "title": "빈 예외 처리 블록",
+        "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다.",
+        "recommendation": "예상 가능한 예외만 명시적으로 처리하고, 보안상 중요한 실패는 정제된 컨텍스트로 기록하세요.",
+    },
+    "code.stack-trace-exposure": {
+        "title": "스택 트레이스 노출 의심",
+        "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다.",
+        "recommendation": "중앙화된 오류 처리로 라우팅하고 로컬 디버깅 외에는 원시 스택 트레이스를 출력하지 마세요.",
+    },
+    "code.unversioned-api-route": {
+        "title": "버전 없는 API 라우트",
+        "description": "공개 API로 보이는 라우트에 명시적인 버전 경로가 없는 패턴입니다.",
+        "recommendation": "공개 API를 인벤토리화하고 /api/v1/... 같은 명시적 버전 경로를 사용하세요.",
+    },
+    "code.insecure-temp-file": {
+        "title": "안전하지 않은 임시 파일 사용",
+        "description": "예측 가능한 임시 파일명 또는 직접 지정한 /tmp 경로를 파일 작업에 사용하는 패턴입니다.",
+        "recommendation": "원자적으로 파일을 생성하는 안전한 임시 파일 API를 사용하고 예측 가능한 공유 경로를 피하세요.",
+    },
+    "code.wildcard-cors": {
+        "title": "와일드카드 CORS 허용",
+        "description": "모든 출처의 요청을 허용하는 CORS 설정 패턴입니다.",
+        "recommendation": "신뢰할 수 있는 애플리케이션 도메인만 허용하고, 자격 증명 허용과 와일드카드 출처를 함께 사용하지 마세요.",
+    },
+    "code.public-bind-all-interfaces": {
+        "title": "모든 인터페이스 바인딩",
+        "description": "서비스가 모든 네트워크 인터페이스에서 수신하도록 설정된 패턴입니다.",
+        "recommendation": "개발 서비스는 기본적으로 localhost에 바인딩하고, 외부 노출은 명시적 설정으로만 허용하세요.",
+    },
 }
 
 

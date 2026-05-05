@@ -57,6 +57,13 @@ CODE_PATTERN_RULE_IDS = (
     "code.unrestricted-file-upload",
     "code.dangerous-c-buffer-api",
     "code.unbounded-request-body",
+    "code.logging-sensitive-data",
+    "code.empty-exception-handler",
+    "code.stack-trace-exposure",
+    "code.unversioned-api-route",
+    "code.insecure-temp-file",
+    "code.wildcard-cors",
+    "code.public-bind-all-interfaces",
 )
 
 ACCESS_CONTROL_RULE_IDS = (
@@ -125,6 +132,32 @@ INTEGRITY_RULE_IDS = (
 ERROR_HANDLING_RULE_IDS = (
     "config.debug-enabled",
     "config.development-environment",
+    "code.empty-exception-handler",
+    "code.stack-trace-exposure",
+)
+
+LOGGING_MONITORING_RULE_IDS = (
+    "code.logging-sensitive-data",
+    "code.empty-exception-handler",
+    "code.stack-trace-exposure",
+)
+
+API_INVENTORY_RULE_IDS = (
+    "code.unversioned-api-route",
+)
+
+TIME_STATE_RULE_IDS = (
+    "code.insecure-temp-file",
+)
+
+ENCAPSULATION_RULE_IDS = (
+    "code.wildcard-cors",
+    "code.public-bind-all-interfaces",
+)
+
+MISCONFIGURATION_RULE_IDS = CONFIGURATION_RULE_IDS + (
+    "code.wildcard-cors",
+    "code.public-bind-all-interfaces",
 )
 
 
@@ -241,8 +274,8 @@ _OWASP_TOP_10_CATEGORIES = (
     StandardCategory(
         "a05-security-misconfiguration",
         {"en": "A05 Security Misconfiguration", "ko": "A05 보안 설정 오류"},
-        scanner_categories=("configuration",),
-        rule_ids=CONFIGURATION_RULE_IDS,
+        scanner_categories=("configuration", "code"),
+        rule_ids=MISCONFIGURATION_RULE_IDS,
     ),
     StandardCategory(
         "a06-vulnerable-outdated-components",
@@ -280,6 +313,8 @@ _OWASP_TOP_10_CATEGORIES = (
     StandardCategory(
         "a09-security-logging-monitoring-failures",
         {"en": "A09 Security Logging and Monitoring Failures", "ko": "A09 보안 로깅 및 모니터링 실패"},
+        scanner_categories=("code",),
+        rule_ids=LOGGING_MONITORING_RULE_IDS,
     ),
     StandardCategory(
         "a10-server-side-request-forgery",
@@ -322,12 +357,17 @@ _SW_DEV_SECURITY_CATEGORIES = (
             "config.docker-add-http",
         ),
     ),
-    StandardCategory("time-state", {"en": "Time and State", "ko": "시간 및 상태"}),
+    StandardCategory(
+        "time-state",
+        {"en": "Time and State", "ko": "시간 및 상태"},
+        scanner_categories=("code",),
+        rule_ids=TIME_STATE_RULE_IDS,
+    ),
     StandardCategory(
         "error-handling",
         {"en": "Error Handling", "ko": "에러처리"},
-        scanner_categories=("configuration",),
-        rule_ids=("config.debug-enabled", "config.development-environment"),
+        scanner_categories=("configuration", "code"),
+        rule_ids=ERROR_HANDLING_RULE_IDS,
     ),
     StandardCategory(
         "code-error",
@@ -335,7 +375,12 @@ _SW_DEV_SECURITY_CATEGORIES = (
         scanner_categories=("code",),
         rule_ids=MEMORY_SAFETY_RULE_IDS,
     ),
-    StandardCategory("encapsulation", {"en": "Encapsulation", "ko": "캡슐화"}),
+    StandardCategory(
+        "encapsulation",
+        {"en": "Encapsulation", "ko": "캡슐화"},
+        scanner_categories=("code",),
+        rule_ids=ENCAPSULATION_RULE_IDS,
+    ),
     StandardCategory(
         "api-misuse",
         {"en": "API Misuse", "ko": "API 오용"},
@@ -373,8 +418,8 @@ _OWASP_TOP_10_2025_CATEGORIES = (
     StandardCategory(
         "a02-security-misconfiguration",
         {"en": "A02 Security Misconfiguration", "ko": "A02 보안 설정 오류"},
-        scanner_categories=("configuration",),
-        rule_ids=CONFIGURATION_RULE_IDS,
+        scanner_categories=("configuration", "code"),
+        rule_ids=MISCONFIGURATION_RULE_IDS,
     ),
     StandardCategory(
         "a03-software-supply-chain-failures",
@@ -415,11 +460,13 @@ _OWASP_TOP_10_2025_CATEGORIES = (
     StandardCategory(
         "a09-security-logging-alerting-failures",
         {"en": "A09 Security Logging and Alerting Failures", "ko": "A09 보안 로깅 및 알림 실패"},
+        scanner_categories=("code",),
+        rule_ids=LOGGING_MONITORING_RULE_IDS,
     ),
     StandardCategory(
         "a10-mishandling-exceptional-conditions",
         {"en": "A10 Mishandling of Exceptional Conditions", "ko": "A10 예외 상황 처리 부적절"},
-        scanner_categories=("configuration",),
+        scanner_categories=("configuration", "code"),
         rule_ids=ERROR_HANDLING_RULE_IDS,
     ),
 )
@@ -483,12 +530,14 @@ _OWASP_API_2023_CATEGORIES = (
     StandardCategory(
         "api8-security-misconfiguration",
         {"en": "API8 Security Misconfiguration", "ko": "API8 보안 설정 오류"},
-        scanner_categories=("configuration",),
-        rule_ids=CONFIGURATION_RULE_IDS,
+        scanner_categories=("configuration", "code"),
+        rule_ids=MISCONFIGURATION_RULE_IDS,
     ),
     StandardCategory(
         "api9-improper-inventory-management",
         {"en": "API9 Improper Inventory Management", "ko": "API9 부적절한 인벤토리 관리"},
+        scanner_categories=("code",),
+        rule_ids=API_INVENTORY_RULE_IDS,
     ),
     StandardCategory(
         "api10-unsafe-consumption-of-apis",
@@ -552,8 +601,8 @@ _OWASP_MOBILE_2024_CATEGORIES = (
     StandardCategory(
         "m8-security-misconfiguration",
         {"en": "M8 Security Misconfiguration", "ko": "M8 보안 설정 오류"},
-        scanner_categories=("configuration",),
-        rule_ids=CONFIGURATION_RULE_IDS,
+        scanner_categories=("configuration", "code"),
+        rule_ids=MISCONFIGURATION_RULE_IDS,
     ),
     StandardCategory(
         "m9-insecure-data-storage",
