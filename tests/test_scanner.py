@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from security_scanner.app import _create_available_server
+from security_scanner.app import _create_available_server, run_app
 from security_scanner.config import expand_path
 from security_scanner.discovery import discover_projects
 from security_scanner.models import ScannerConfig, TargetConfig
@@ -497,6 +497,46 @@ class ScannerTests(unittest.TestCase):
 
         self.assertEqual(port, 8766)
         self.assertIs(server, fake_server)
+
+    def test_app_schedules_browser_without_blocking_server_loop(self) -> None:
+        events: list[str] = []
+
+        class FakeTimer:
+            cancelled = False
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+        class FakeServer:
+            def serve_forever(self) -> None:
+                events.append("serve")
+                raise KeyboardInterrupt()
+
+            def server_close(self) -> None:
+                events.append("close")
+
+        timer = FakeTimer()
+
+        def schedule_browser(url: str) -> FakeTimer:
+            events.append(f"schedule:{url}")
+            return timer
+
+        with (
+            patch("builtins.print"),
+            patch("security_scanner.app._create_available_server", return_value=(8765, FakeServer())),
+            patch("security_scanner.app._schedule_browser_open", side_effect=schedule_browser),
+        ):
+            self.assertEqual(run_app(open_browser=True), 0)
+
+        self.assertEqual(
+            events,
+            [
+                "schedule:http://127.0.0.1:8765/security-dashboard.html",
+                "serve",
+                "close",
+            ],
+        )
+        self.assertTrue(timer.cancelled)
 
     def test_platform_launchers_start_app_mode(self) -> None:
         root = Path(__file__).resolve().parents[1]

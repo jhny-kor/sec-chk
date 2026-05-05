@@ -4,7 +4,7 @@ import json
 import platform
 import subprocess
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -27,8 +27,10 @@ DEFAULT_PORT = 8765
 LOCAL_CORS_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
-def create_dashboard_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> HTTPServer:
-    return HTTPServer((host, port), _handler(language))
+def create_dashboard_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer((host, port), _handler(language))
+    server.daemon_threads = True
+    return server
 
 
 def dashboard_url(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> str:
@@ -107,13 +109,15 @@ def scan_directory_payload(
 
 
 def _handler(language: str):
+    initial_html = render_html([], language=language)
+
     class DashboardHandler(BaseHTTPRequestHandler):
         server_version = "SecChkDashboard/0.1"
 
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             if path in {"/", "/security-dashboard.html"}:
-                self._send_html(render_html([], language=language))
+                self._send_html(initial_html)
                 return
             if path == "/api/health":
                 self._send_json({"ok": True})

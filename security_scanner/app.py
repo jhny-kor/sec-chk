@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import webbrowser
 from http.server import HTTPServer
 
@@ -18,13 +19,16 @@ def run_app(
     url = dashboard_url(host, resolved_port)
     print(f"SecChk is running: {url}")
     print("Press Ctrl+C in this window to stop the local app.")
+    browser_timer: threading.Timer | None = None
     if open_browser:
-        webbrowser.open(url)
+        browser_timer = _schedule_browser_open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopping SecChk.")
     finally:
+        if browser_timer is not None:
+            browser_timer.cancel()
         server.server_close()
     return 0
 
@@ -47,3 +51,10 @@ def _create_available_server(
         except OSError as exc:
             last_error = exc
     raise RuntimeError(f"No available port from {start_port} to {start_port + attempts - 1}") from last_error
+
+
+def _schedule_browser_open(url: str) -> threading.Timer:
+    timer = threading.Timer(0.05, webbrowser.open, args=(url,))
+    timer.daemon = True
+    timer.start()
+    return timer
