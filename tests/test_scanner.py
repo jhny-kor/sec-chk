@@ -721,6 +721,7 @@ class ScannerTests(unittest.TestCase):
         windows_installer = root / "scripts" / "install-windows.ps1"
         windows_installer_bat = root / "scripts" / "install-windows.bat"
         windows_uninstaller = root / "scripts" / "uninstall-windows.ps1"
+        readme = (root / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("-m security_scanner app", mac_launcher.read_text(encoding="utf-8"))
         self.assertTrue(os.access(mac_installer, os.X_OK))
@@ -736,6 +737,10 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("SecChk.bat", windows_installer.read_text(encoding="utf-8"))
         self.assertIn("security_scanner", windows_installer.read_text(encoding="utf-8"))
         self.assertIn("Remove-Item -Path $InstallRoot", windows_uninstaller.read_text(encoding="utf-8"))
+        self.assertIn("Install quickly", readme)
+        self.assertIn("설치 방법 요약", readme)
+        self.assertIn("scripts/install-macos.command", readme)
+        self.assertIn("scripts/install-windows.bat", readme)
 
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")

@@ -4,6 +4,13 @@ Read-only security scanner for local project folders. It scans configured paths,
 
 Korean guide: [한국어 안내](#한국어-안내)
 
+Install quickly:
+
+| OS | Installer | Result |
+| --- | --- | --- |
+| macOS | Double-click `scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
+| Windows | Double-click `scripts/install-windows.bat` | Installs to `%LOCALAPPDATA%\SecChk` and creates a Start Menu shortcut |
+
 ## What It Checks
 
 - `secrets`: likely API keys, private keys, access tokens, and hard-coded secret assignments.
@@ -21,7 +28,7 @@ python3 -m security_scanner app
 
 This opens `security-dashboard.html` in the default browser and keeps a local server running until you press `Ctrl+C`. On macOS, you can double-click `scripts/sec-chk.command` from Finder. On Windows, double-click `scripts/sec-chk.bat`.
 
-## Desktop Installers
+## Installation
 
 macOS users can install SecChk without administrator privileges:
 
@@ -129,6 +136,13 @@ Security-standard selections are mapping profiles over the local rules. The dash
 ## 한국어 안내
 
 로컬 프로젝트 폴더를 읽기 전용으로 점검하는 보안 스캐너입니다. 추가 의존성 설치 없이 설정한 경로를 스캔하고, 하위 프로젝트 자동 탐색과 한국어/영어 토글 대시보드를 제공합니다. 기본 스캔은 오프라인이며, OSV/CVE 의존성 조회는 OSV.dev를 호출하므로 사용자가 켰을 때만 실행됩니다.
+
+### 설치 방법 요약
+
+| OS | 설치 파일 | 설치 결과 |
+| --- | --- | --- |
+| macOS | `scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
+| Windows | `scripts/install-windows.bat` 더블클릭 | `%LOCALAPPDATA%\SecChk`에 설치하고 시작 메뉴 `SecChk` 바로가기 생성 |
 
 ### 점검 항목
 
