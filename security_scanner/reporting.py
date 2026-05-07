@@ -36,6 +36,16 @@ TRANSLATIONS = {
         "targets": "Targets",
         "findings": "Findings",
         "filters": "Filters",
+        "help": "Help",
+        "dashboard": "Dashboard",
+        "help_title": "Security Standards Help",
+        "help_intro": "Review each selectable standard, what SecChk checks locally, and links to the official source.",
+        "coverage": "Coverage",
+        "official_links": "Official links",
+        "check_categories": "Check criteria",
+        "mapped_checks": "mapped checks",
+        "supported": "supported",
+        "not_supported": "not supported",
         "scan_directory": "Scan Directory",
         "scan_standard": "Security Standard",
         "scan_standard_category": "Standard Category",
@@ -114,6 +124,16 @@ TRANSLATIONS = {
         "targets": "점검 대상",
         "findings": "발견 항목",
         "filters": "필터",
+        "help": "도움말",
+        "dashboard": "대시보드",
+        "help_title": "보안 점검 기준 도움말",
+        "help_intro": "선택 가능한 보안 기준, 로컬 점검 범위, 공식 출처 링크를 확인합니다.",
+        "coverage": "점검 범위",
+        "official_links": "공식 링크",
+        "check_categories": "점검 기준",
+        "mapped_checks": "매핑된 점검",
+        "supported": "지원",
+        "not_supported": "미지원",
         "scan_directory": "점검 경로",
         "scan_standard": "보안 기준",
         "scan_standard_category": "기준 카테고리",
@@ -412,6 +432,36 @@ RULE_TRANSLATIONS_KO = {
         "description": "서비스가 모든 네트워크 인터페이스에서 수신하도록 설정된 패턴입니다.",
         "recommendation": "개발 서비스는 기본적으로 localhost에 바인딩하고, 외부 노출은 명시적 설정으로만 허용하세요.",
     },
+    "code.insecure-cookie-settings": {
+        "title": "안전하지 않은 쿠키 설정",
+        "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다.",
+        "recommendation": "세션 쿠키에 Secure, HttpOnly, 적절한 SameSite 속성을 설정하고 로컬 개발 외에는 약화하지 마세요.",
+    },
+    "code.directory-listing-enabled": {
+        "title": "디렉터리 리스팅 활성화 의심",
+        "description": "웹 서버 설정에서 디렉터리 목록 노출이 활성화된 것으로 보이는 패턴입니다.",
+        "recommendation": "디렉터리 리스팅을 비활성화하고 의도한 파일만 통제된 라우트나 정적 자산 설정으로 제공하세요.",
+    },
+    "code.webdav-enabled": {
+        "title": "WebDAV 활성화 의심",
+        "description": "WebDAV 또는 HTTP PUT 기반 게시 기능이 활성화된 것으로 보이는 패턴입니다.",
+        "recommendation": "명시적으로 필요하지 않다면 WebDAV를 비활성화하고, 필요한 경우 인증과 네트워크 통제로 제한하세요.",
+    },
+    "code.legacy-board-software": {
+        "title": "레거시 게시판 소프트웨어 흔적",
+        "description": "과거 반복적인 웹 침해와 연결되었던 레거시 게시판 소프트웨어 흔적이 포함된 패턴입니다.",
+        "recommendation": "실제 사용 여부를 확인하고, 업데이트 또는 제거하며 업로드/다운로드 기능은 보완 통제 뒤로 격리하세요.",
+    },
+    "code.weak-hash": {
+        "title": "약한 해시 알고리즘 사용 의심",
+        "description": "비밀번호, 서명, 무결성 확인에 부적절할 수 있는 MD5 또는 SHA-1 사용 패턴입니다.",
+        "recommendation": "자격 증명에는 전용 비밀번호 해시를 사용하고, 무결성에는 필요한 경우 SHA-256 이상 승인 알고리즘을 사용하세요.",
+    },
+    "code.xml-external-entity": {
+        "title": "XML 외부 엔티티 처리 위험",
+        "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다.",
+        "recommendation": "DTD와 외부 엔티티 해석을 비활성화하거나 신뢰할 수 없는 XML에는 강화된 파서 설정을 사용하세요.",
+    },
 }
 
 
@@ -606,6 +656,9 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__DATA__": json_payload,
         "__INITIAL_LANG__": html.escape(str(labels["html_lang"]), quote=True),
         "__INITIAL_TITLE__": html.escape(str(labels["title"]), quote=True),
+        "__INITIAL_HELP__": html.escape(str(labels["help"])),
+        "__INITIAL_HELP_TITLE__": html.escape(str(labels["help_title"])),
+        "__INITIAL_HELP_INTRO__": html.escape(str(labels["help_intro"])),
         "__INITIAL_FILTERS__": html.escape(str(labels["filters"]), quote=True),
         "__INITIAL_SCAN_DIRECTORY__": html.escape(str(labels["scan_directory"])),
         "__INITIAL_SCAN_STANDARD__": html.escape(str(labels["scan_standard"])),
@@ -837,6 +890,19 @@ HTML_TEMPLATE = """<!doctype html>
       display: flex;
       align-items: flex-start;
       gap: 14px;
+    }
+
+    .topbar-action {
+      min-width: 78px;
+      min-height: 30px;
+      padding: 5px 12px;
+      border: 1px solid rgba(203, 213, 225, 0.42);
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.7);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 800;
+      flex: 0 0 auto;
     }
 
     .language-toggle {
@@ -1194,20 +1260,141 @@ HTML_TEMPLATE = """<!doctype html>
       color: var(--muted);
     }
 
+    .help-view {
+      display: grid;
+      gap: 14px;
+    }
+
+    .help-view[hidden] {
+      display: none;
+    }
+
+    .help-heading {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+
+    .help-heading h2 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    .help-heading p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .standards-help {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .standard-card {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .standard-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .standard-card h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .standard-card p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .standard-count {
+      min-width: 78px;
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #eef2f7;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .help-meta {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+    }
+
+    .help-meta strong {
+      color: var(--ink);
+    }
+
+    .category-chips, .standard-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .category-chip {
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #eef6ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .category-chip.unsupported {
+      background: #f1f5f9;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .standard-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: #111827;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
     @media (max-width: 1000px) {
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr 1fr; }
+      .standards-help { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
       button { width: 100%; }
+      .topbar-action { width: auto; }
     }
 
     @media (max-width: 640px) {
       .shell { width: min(100% - 20px, 1440px); }
       .topbar { align-items: flex-start; flex-direction: column; padding: 16px 0; gap: 8px; }
-      .header-side { width: 100%; padding-top: 32px; }
+      .header-side { width: 100%; padding-top: 34px; flex-wrap: wrap; }
+      .topbar-action { position: absolute; top: 16px; right: 96px; }
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
       .metrics, .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr; }
+      .standard-head { grid-template-columns: 1fr; }
       .metric { min-height: 84px; }
       .metric-value { font-size: 26px; }
     }
@@ -1224,6 +1411,7 @@ HTML_TEMPLATE = """<!doctype html>
           <button id="lang-ko" type="button">KO</button>
           <button id="lang-en" type="button">EN</button>
         </div>
+        <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
         <div class="meta">
           <div id="generated-line"></div>
           <div id="summary-line"></div>
@@ -1233,7 +1421,8 @@ HTML_TEMPLATE = """<!doctype html>
   </header>
 
   <main class="shell">
-    <section class="panel scan-panel" id="scan-panel">
+    <div id="dashboard-view">
+      <section class="panel scan-panel" id="scan-panel">
       <h2 id="scan-directory-title">__INITIAL_SCAN_DIRECTORY__</h2>
       <div class="scan-form">
         <input id="scan-path" class="path-display" type="text" autocomplete="off" readonly aria-readonly="true" placeholder="__INITIAL_SCAN_PATH_PLACEHOLDER__">
@@ -1297,6 +1486,15 @@ HTML_TEMPLATE = """<!doctype html>
         <tbody id="findings"></tbody>
       </table>
       <div id="empty" class="empty" hidden>__INITIAL_EMPTY__</div>
+      </section>
+    </div>
+
+    <section id="help-view" class="help-view" hidden>
+      <div class="help-heading">
+        <h2 id="help-title">__INITIAL_HELP_TITLE__</h2>
+        <p id="help-intro">__INITIAL_HELP_INTRO__</p>
+      </div>
+      <div id="standards-help" class="standards-help"></div>
     </section>
   </main>
 
@@ -1318,6 +1516,7 @@ HTML_TEMPLATE = """<!doctype html>
       scanRunning: false,
       scanStandard: (payload.scan && payload.scan.standard) || "local",
       scanStandardCategory: (payload.scan && payload.scan.standard_category) || "all",
+      view: location.hash === "#help" ? "help" : "dashboard",
     };
 
     function byId(id) {
@@ -1365,6 +1564,10 @@ HTML_TEMPLATE = """<!doctype html>
 
     function labelFor(item) {
       return (item.labels && (item.labels[state.language] || item.labels.en)) || item.id || "";
+    }
+
+    function localizedText(map, fallback = "") {
+      return (map && (map[state.language] || map.en)) || fallback;
     }
 
     function standardDefinitions() {
@@ -1422,6 +1625,8 @@ HTML_TEMPLATE = """<!doctype html>
       document.documentElement.lang = activeLabels.html_lang;
       document.title = activeLabels.title;
       setText("dashboard-title", activeLabels.title);
+      setText("help-title", activeLabels.help_title);
+      setText("help-intro", activeLabels.help_intro);
       setText("generated-line", `${activeLabels.generated} ${payload.generated_display}`);
       setText(
         "summary-line",
@@ -1614,9 +1819,62 @@ HTML_TEMPLATE = """<!doctype html>
       empty.hidden = items.length > 0;
     }
 
+    function renderView() {
+      const isHelp = state.view === "help";
+      byId("dashboard-view").hidden = isHelp;
+      byId("help-view").hidden = !isHelp;
+      setText("help-toggle", isHelp ? labels().dashboard : labels().help);
+      byId("help-toggle").setAttribute("aria-pressed", isHelp ? "true" : "false");
+    }
+
+    function renderHelp() {
+      const activeLabels = labels();
+      const standards = standardDefinitions();
+      byId("standards-help").innerHTML = standards.map((standard) => {
+        const categories = standard.categories || [];
+        const supportedCount = categories.filter((category) => category.supported).length;
+        const references = standard.references || [];
+        const links = references.length
+          ? references.map((reference) => `
+              <a href="${escapeText(reference.url)}" target="_blank" rel="noopener noreferrer">${escapeText(labelFor(reference))}</a>
+            `).join("")
+          : `<span class="category-chip unsupported">${escapeText(activeLabels.not_supported)}</span>`;
+        const categoryChips = categories.map((category) => `
+          <span class="category-chip ${category.supported ? "" : "unsupported"}" title="${escapeText(category.supported ? activeLabels.supported : activeLabels.not_supported)}">
+            ${escapeText(labelFor(category))}
+          </span>
+        `).join("");
+        return `
+          <article class="standard-card">
+            <div class="standard-head">
+              <div>
+                <h3>${escapeText(labelFor(standard))}</h3>
+                <p>${escapeText(localizedText(standard.description, ""))}</p>
+              </div>
+              <div class="standard-count">${supportedCount}/${categories.length} ${escapeText(activeLabels.mapped_checks)}</div>
+            </div>
+            <div class="help-meta">
+              <strong>${escapeText(activeLabels.coverage)}</strong>
+              <span>${escapeText(localizedText(standard.coverage, ""))}</span>
+            </div>
+            <div class="help-meta">
+              <strong>${escapeText(activeLabels.check_categories)}</strong>
+              <div class="category-chips">${categoryChips}</div>
+            </div>
+            <div class="help-meta">
+              <strong>${escapeText(activeLabels.official_links)}</strong>
+              <div class="standard-links">${links}</div>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
     function render() {
       renderChrome();
       renderScanStandards();
+      renderHelp();
+      renderView();
       renderFilters();
       const items = filteredFindings();
       renderMetrics(items);
@@ -1760,12 +2018,25 @@ HTML_TEMPLATE = """<!doctype html>
     byId("scan-run").addEventListener("click", () => {
       runDirectoryScan();
     });
+    byId("help-toggle").addEventListener("click", () => {
+      state.view = state.view === "help" ? "dashboard" : "help";
+      if (state.view === "help") {
+        location.hash = "help";
+      } else if (location.hash === "#help") {
+        history.replaceState(null, document.title, location.href.split("#")[0]);
+      }
+      render();
+    });
     byId("lang-ko").addEventListener("click", () => {
       state.language = "ko";
       render();
     });
     byId("lang-en").addEventListener("click", () => {
       state.language = "en";
+      render();
+    });
+    window.addEventListener("hashchange", () => {
+      state.view = location.hash === "#help" ? "help" : "dashboard";
       render();
     });
 

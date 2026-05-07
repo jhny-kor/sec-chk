@@ -16,6 +16,7 @@ from security_scanner.models import ScannerConfig, TargetConfig
 from security_scanner.reporting import render_html, render_json, render_sarif
 from security_scanner.scanner import SecurityScanner
 from security_scanner.server import _select_directory_macos, allowed_cors_origin, scan_directory_payload, select_directory
+from security_scanner.standards import standards_payload
 
 
 class ScannerTests(unittest.TestCase):
@@ -204,6 +205,13 @@ class ScannerTests(unittest.TestCase):
             self.assertIn('<html lang="ko">', html)
             self.assertIn('id="lang-ko"', html)
             self.assertIn('id="lang-en"', html)
+            self.assertIn('id="help-toggle"', html)
+            self.assertIn("보안 점검 기준 도움말", html)
+            self.assertIn("국정원 웹 8대 보안취약점", html)
+            self.assertIn("전자금융감독규정 8대 취약점", html)
+            self.assertIn("OWASP ASVS 5.0", html)
+            self.assertIn("OWASP SAMM 2", html)
+            self.assertIn("NIST SSDF SP 800-218", html)
             self.assertIn("로컬 보안 대시보드", html)
             self.assertIn("모든 심각도", html)
             self.assertIn("고정되지 않은 Python 의존성", html)
@@ -215,6 +223,35 @@ class ScannerTests(unittest.TestCase):
             self.assertIn("ko", payload["findings_by_language"])
             self.assertRegex(payload["generated_display"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
             self.assertIsNone(re.search(r"\.\d+|[+-]\d{2}:\d{2}$", payload["generated_display"]))
+
+    def test_standards_payload_contains_help_metadata_and_new_profiles(self) -> None:
+        payload = standards_payload()
+        standards = {standard["id"]: standard for standard in payload}
+
+        for standard_id in (
+            "cwe-sans-top-25-2025",
+            "cwe",
+            "kisa-secure-coding-guide",
+            "sw-dev-security-7-types",
+            "ncsc-web-8",
+            "electronic-financial-supervision-8",
+            "owasp-asvs-5",
+            "owasp-wstg",
+            "nist-ssdf-sp800-218",
+            "owasp-samm-2",
+            "owasp-dependency-check-baseline",
+            "owasp-dependency-track-baseline",
+        ):
+            self.assertIn(standard_id, standards)
+            self.assertTrue(standards[standard_id]["description"]["ko"])
+            self.assertTrue(standards[standard_id]["coverage"]["ko"])
+            self.assertTrue(standards[standard_id]["references"])
+            self.assertTrue(any(category["supported"] for category in standards[standard_id]["categories"]))
+
+        self.assertEqual(
+            standards["ncsc-web-8"]["references"][0]["url"],
+            "https://www.ncsc.go.kr/",
+        )
 
     def test_dashboard_payload_can_scan_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -428,6 +465,73 @@ class ScannerTests(unittest.TestCase):
             self.assertIn("secret.openai-key", rule_ids)
             self.assertIn("config.env-file-present", rule_ids)
             self.assertNotIn("config.debug-enabled", rule_ids)
+
+    def test_ncsc_web_8_profile_runs_server_config_file_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".htaccess").write_text("Options Indexes\n", encoding="utf-8")
+            (root / "web.config").write_text("<add name=\"WebDAVModule\" />\n", encoding="utf-8")
+
+            listing_payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="ncsc-web-8",
+                standard_category="directory-listing",
+            )
+            webdav_payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="ncsc-web-8",
+                standard_category="webdav",
+            )
+
+            listing_rule_ids = {finding["rule_id"] for finding in listing_payload["findings_by_language"]["en"]}
+            webdav_rule_ids = {finding["rule_id"] for finding in webdav_payload["findings_by_language"]["en"]}
+            self.assertEqual(listing_rule_ids, {"code.directory-listing-enabled"})
+            self.assertEqual(webdav_rule_ids, {"code.webdav-enabled"})
+
+    def test_electronic_finance_cookie_session_profile_runs_cookie_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cookie_line = (
+                "session({ cookie: { "
+                "se"
+                "cure: fal"
+                "se, http"
+                "Only: fal"
+                "se } })\n"
+            )
+            (root / "server.js").write_text(cookie_line, encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="electronic-financial-supervision-8",
+                standard_category="cookie-session",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertIn("code.insecure-cookie-settings", rule_ids)
+
+    def test_asvs_data_protection_profile_runs_weak_hash_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hash_line = (
+                "digest = hashlib."
+                "md"
+                "5(data).hexdigest()\n"
+            )
+            (root / "hashing.py").write_text(hash_line, encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                standard="owasp-asvs-5",
+                standard_category="data-protection",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertEqual(rule_ids, {"code.weak-hash"})
 
     def test_unsupported_standard_category_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

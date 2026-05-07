@@ -12,6 +12,8 @@ CODE_EXTENSIONS = {
     ".c",
     ".cc",
     ".cpp",
+    ".conf",
+    ".config",
     ".cs",
     ".cxx",
     ".go",
@@ -23,6 +25,7 @@ CODE_EXTENSIONS = {
     ".jsx",
     ".kt",
     ".php",
+    ".properties",
     ".py",
     ".rb",
     ".rs",
@@ -30,6 +33,11 @@ CODE_EXTENSIONS = {
     ".ts",
     ".tsx",
     ".vue",
+    ".xml",
+}
+
+CODE_FILENAMES = {
+    ".htaccess",
 }
 
 
@@ -50,6 +58,9 @@ LOGGING_API = (
     r"logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))"
 )
 SENSITIVE_NAME = r"(pass" r"(word)?|pwd|secret|token|api[_-]?key|authorization|credential|session|cookie)"
+XML_PARSER_API = (
+    r"(Document" r"BuilderFactory|SAX" r"ParserFactory|Xml" r"ReaderSettings|Xml" r"Document)"
+)
 
 CODE_PATTERN_RULES = (
     CodePatternRule(
@@ -276,11 +287,76 @@ CODE_PATTERN_RULES = (
         "Bind development services to localhost by default and require explicit configuration for public exposure.",
         frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".swift", ".ts", ".tsx"}),
     ),
+    CodePatternRule(
+        "code.insecure-cookie-settings",
+        "Session cookie settings appear insecure",
+        "medium",
+        re.compile(
+            r"(SESSION_COOKIE_(SECURE|HTTPONLY)\s*=\s*False|"
+            r"(secure|httpOnly|httponly)\s*[:=]\s*false|"
+            r"sameSite\s*[:=]\s*[\"']none[\"'][^#\n]*(secure\s*[:=]\s*false)?)",
+            re.IGNORECASE,
+        ),
+        "Cookie or session settings appear to disable Secure or HttpOnly protections.",
+        "Set Secure, HttpOnly, and appropriate SameSite attributes for session cookies and avoid weakening them outside local-only development.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.directory-listing-enabled",
+        "Web directory listing appears enabled",
+        "medium",
+        re.compile(
+            r"(Options\s+(\+?Indexes|.*\bIndexes\b)|autoindex\s+on|DirectoryBrowse\s+On)",
+            re.IGNORECASE,
+        ),
+        "Web server configuration appears to expose directory listings.",
+        "Disable directory listing and serve only explicitly intended files through controlled routes or static asset configuration.",
+        frozenset({".conf", ".config", ".htaccess", ".properties", ".xml"}),
+    ),
+    CodePatternRule(
+        "code.webdav-enabled",
+        "WebDAV appears enabled",
+        "medium",
+        re.compile(r"(\bDAV\s+On\b|mod_dav|webdav|httpPutEnabled\s*=\s*[\"']?true)", re.IGNORECASE),
+        "WebDAV or HTTP PUT-style publishing support appears enabled.",
+        "Disable WebDAV unless explicitly required, and restrict authoring methods with authentication and network controls.",
+        frozenset({".conf", ".config", ".htaccess", ".properties", ".xml"}),
+    ),
+    CodePatternRule(
+        "code.legacy-board-software",
+        "Legacy bulletin board software marker",
+        "medium",
+        re.compile(r"\b(tech" r"note|zero" r"board)\b", re.IGNORECASE),
+        "The project contains markers of legacy bulletin board software historically associated with recurring web compromise.",
+        "Confirm the component is still used, update or remove it, and isolate legacy upload/download functionality behind compensating controls.",
+        frozenset({".html", ".inc", ".js", ".php"}),
+    ),
+    CodePatternRule(
+        "code.weak-hash",
+        "Weak hash algorithm appears in security-sensitive code",
+        "medium",
+        re.compile(r"\b(md" r"5|sha" r"1)\s*\(", re.IGNORECASE),
+        "The code appears to use MD5 or SHA-1, which are unsuitable for passwords, signatures, and collision-resistant integrity checks.",
+        "Use modern password hashing for credentials and SHA-256 or stronger approved algorithms for integrity where appropriate.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".swift", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.xml-external-entity",
+        "XML parser may allow external entity processing",
+        "high",
+        re.compile(
+            rf"(resolve_entities\s*=\s*True|load_dtd\s*=\s*True|{XML_PARSER_API}[^#\n]*(parse|load|newInstance|\())",
+            re.IGNORECASE,
+        ),
+        "XML parsing appears to use APIs that can be unsafe when external entity processing is not disabled.",
+        "Disable DTD and external entity resolution, or use hardened XML parser configurations for untrusted XML.",
+        frozenset({".cs", ".java", ".kt", ".py", ".xml"}),
+    ),
 )
 
 
 def check_file(path: Path, target: TargetConfig) -> list[Finding]:
-    if not is_text_candidate(path) or path.suffix.lower() not in CODE_EXTENSIONS:
+    if not is_text_candidate(path) or (path.suffix.lower() not in CODE_EXTENSIONS and path.name not in CODE_FILENAMES):
         return []
 
     lines = read_text_lines(path, target.max_file_size_bytes)
@@ -289,12 +365,14 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
 
     findings: list[Finding] = []
     per_rule_counts: dict[str, int] = {}
+    suffix = path.suffix.lower()
+    filename = path.name
     for line_number, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()
         if not line or _is_comment(line):
             continue
         for rule in CODE_PATTERN_RULES:
-            if path.suffix.lower() not in rule.extensions:
+            if suffix not in rule.extensions and filename not in rule.extensions:
                 continue
             if per_rule_counts.get(rule.rule_id, 0) >= 5:
                 continue

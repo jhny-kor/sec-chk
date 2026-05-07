@@ -53,6 +53,7 @@ TEXT_FILENAMES = {
     ".env.local",
     ".env.production",
     ".env.development",
+    ".htaccess",
     ".npmrc",
     "Dockerfile",
     "Makefile",
