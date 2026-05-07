@@ -33,7 +33,8 @@ def config_from_dict(raw: dict[str, Any], base_dir: Path | None = None) -> Scann
 
     targets = tuple(_target_from_dict(item, base) for item in targets_raw)
     report = _report_from_dict(raw.get("report", {}), base)
-    return ScannerConfig(targets=targets, report=report)
+    enable_osv = bool(raw.get("enable_osv", False))
+    return ScannerConfig(targets=targets, report=report, enable_osv=enable_osv)
 
 
 def _target_from_dict(raw: dict[str, Any], base_dir: Path) -> TargetConfig:
@@ -72,8 +73,8 @@ def _report_from_dict(raw: dict[str, Any], base_dir: Path) -> ReportConfig:
         raise ConfigError("'report' must be an object when present.")
 
     report_format = str(raw.get("format", "markdown")).lower()
-    if report_format not in {"markdown", "json", "html", "sarif"}:
-        raise ConfigError("report.format must be 'markdown', 'json', 'html', or 'sarif'.")
+    if report_format not in {"markdown", "json", "html", "sarif", "cyclonedx"}:
+        raise ConfigError("report.format must be 'markdown', 'json', 'html', 'sarif', or 'cyclonedx'.")
 
     min_severity = str(raw.get("min_severity", "low")).lower()
     if min_severity not in SEVERITIES:

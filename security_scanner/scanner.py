@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Callable
 
 from .checks import code_patterns, configuration, dependencies, secrets
-from .checks.common import normalized_relpath
+from .checks.common import clear_read_text_cache, normalized_relpath
+from .dependency_inventory import components_from_file, queryable_osv_components, unique_components
 from .discovery import discover_projects
-from .models import Finding, ScannerConfig, TargetConfig
+from .models import DependencyComponent, Finding, ScannerConfig, TargetConfig
+from .osv_vulnerabilities import query_osv_findings
 
 
 DEFAULT_EXCLUDE_DIRS = {
@@ -62,12 +64,18 @@ class SecurityScanner:
         self.config = config
         self.warnings: list[str] = []
         self.effective_targets: tuple[TargetConfig, ...] = ()
+        self.components: tuple[DependencyComponent, ...] = ()
 
     def scan(self) -> list[Finding]:
+        clear_read_text_cache()
         findings: list[Finding] = []
+        components: list[DependencyComponent] = []
         self.effective_targets = self._expand_targets()
         for target in self.effective_targets:
-            findings.extend(self._scan_target(target))
+            target_findings, target_components = self._scan_target(target)
+            components.extend(target_components)
+            findings.extend(target_findings)
+        self.components = unique_components(components)
         return sorted(findings, key=lambda finding: finding.sort_key())
 
     def _expand_targets(self) -> tuple[TargetConfig, ...]:
@@ -94,17 +102,24 @@ class SecurityScanner:
                 )
         return tuple(targets)
 
-    def _scan_target(self, target: TargetConfig) -> list[Finding]:
+    def _scan_target(self, target: TargetConfig) -> tuple[list[Finding], list[DependencyComponent]]:
         if not target.path.exists():
             self.warnings.append(f"Target does not exist: {target.path}")
-            return []
+            return [], []
         if target.path.is_file():
-            return self._scan_file(target.path, target)
+            components = self._components_from_file(target.path, target)
+            findings = self._scan_file(target.path, target)
+            findings.extend(self._osv_findings(components))
+            return findings, components
 
         findings: list[Finding] = []
+        components: list[DependencyComponent] = []
         for file_path in self._iter_files(target):
+            file_components = self._components_from_file(file_path, target)
+            components.extend(file_components)
             findings.extend(self._scan_file(file_path, target))
-        return findings
+        findings.extend(self._osv_findings(components))
+        return findings, components
 
     def _scan_file(self, path: Path, target: TargetConfig) -> list[Finding]:
         findings: list[Finding] = []
@@ -114,6 +129,21 @@ class SecurityScanner:
                 replace(finding, target=target.name) if not finding.target else finding
                 for finding in check(path, target)
             )
+        return findings
+
+    def _components_from_file(self, path: Path, target: TargetConfig) -> list[DependencyComponent]:
+        if "dependencies" not in target.categories:
+            return []
+        return components_from_file(path, target)
+
+    def _osv_findings(self, components: list[DependencyComponent]) -> list[Finding]:
+        if not self.config.enable_osv:
+            return []
+        queryable_components = queryable_osv_components(tuple(components))
+        if not queryable_components:
+            return []
+        findings, warnings = query_osv_findings(queryable_components)
+        self.warnings.extend(warnings)
         return findings
 
     def _iter_files(self, target: TargetConfig):

@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             target_names=target_names,
             target_paths=target_paths,
             language=config.report.language,
+            components=scanner.components,
         )
         write_report(content, config.report.output)
 
@@ -97,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=CATEGORIES,
         help="category to run; can be passed multiple times",
     )
-    scan.add_argument("--format", choices=("markdown", "json", "html", "sarif"), help="report format")
+    scan.add_argument("--format", choices=("markdown", "json", "html", "sarif", "cyclonedx"), help="report format")
     scan.add_argument("--output", type=Path, help="report output path")
     scan.add_argument("--language", choices=("en", "ko"), help="report display language")
     scan.add_argument("--min-severity", choices=SEVERITIES, help="minimum severity to include")
@@ -105,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-file-size", type=int, help="maximum file size to scan in bytes")
     scan.add_argument("--discover-projects", action="store_true", help="discover project roots under target folders")
     scan.add_argument("--discovery-depth", type=int, help="maximum discovery depth below each target")
+    scan.add_argument("--enable-osv", action="store_true", help="query OSV.dev for exact-version dependency vulnerabilities")
 
     discover = subparsers.add_parser("discover", help="list project roots under a folder")
     discover.add_argument("--target", default=".", help="folder to inspect")
@@ -161,7 +163,7 @@ def _config_from_cli(args: argparse.Namespace) -> ScannerConfig:
         min_severity=args.min_severity or "low",
         language=args.language or "en",
     )
-    return ScannerConfig(targets=targets, report=report)
+    return ScannerConfig(targets=targets, report=report, enable_osv=bool(args.enable_osv))
 
 
 def _apply_overrides(config: ScannerConfig, args: argparse.Namespace) -> ScannerConfig:
@@ -189,7 +191,7 @@ def _apply_overrides(config: ScannerConfig, args: argparse.Namespace) -> Scanner
         min_severity=args.min_severity or config.report.min_severity,
         language=args.language or config.report.language,
     )
-    return ScannerConfig(targets=targets, report=report)
+    return ScannerConfig(targets=targets, report=report, enable_osv=bool(args.enable_osv) or config.enable_osv)
 
 
 def _has_failure(findings, fail_on: str) -> bool:

@@ -63,6 +63,7 @@ def scan_directory_payload(
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
     max_file_size_bytes: int = 524288,
     base_dir: Path | None = None,
+    enable_osv: bool = False,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -89,7 +90,7 @@ def scan_directory_payload(
         discover_projects=discover_projects,
         discovery_depth=discovery_depth,
     )
-    config = ScannerConfig(targets=(target,))
+    config = ScannerConfig(targets=(target,), enable_osv=enable_osv)
     scanner = SecurityScanner(config)
     findings = filter_findings_by_standard(scanner.scan(), standard_selection)
     findings = filter_by_min_severity(findings, min_severity)
@@ -105,6 +106,8 @@ def scan_directory_payload(
         scan_path=str(target_path),
         standard=standard_selection.standard,
         standard_category=standard_selection.category,
+        components=scanner.components,
+        enable_osv=enable_osv,
     )
 
 
@@ -160,6 +163,7 @@ def _handler(language: str):
                     ),
                     standard_category=_string_value(request, "standard_category", default=DEFAULT_STANDARD_CATEGORY),
                     max_file_size_bytes=int(request.get("max_file_size_bytes", 524288)),
+                    enable_osv=bool(request.get("enable_osv", False)),
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)

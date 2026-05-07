@@ -29,6 +29,7 @@ DEPENDENCY_RULE_IDS = (
     "dependency.python-wildcard-version",
     "dependency.docker-unpinned-base",
     "dependency.docker-remote-shell",
+    "dependency.osv-known-vulnerability",
 )
 
 CONFIGURATION_RULE_IDS = (
@@ -216,6 +217,7 @@ class SecurityStandard:
     description: dict[str, str] = field(default_factory=dict)
     coverage: dict[str, str] = field(default_factory=dict)
     references: tuple[StandardReference, ...] = ()
+    coverage_level: str = "partial"
 
 
 @dataclass(frozen=True)
@@ -293,6 +295,7 @@ LOCAL_STANDARD = SecurityStandard(
     references=(
         _reference("SecChk GitHub", "SecChk GitHub", "https://github.com/jhny-kor/sec-chk"),
     ),
+    coverage_level="local",
 )
 
 
@@ -1495,6 +1498,7 @@ def standards_payload() -> list[dict[str, object]]:
             "labels": standard.labels,
             "description": standard.description,
             "coverage": standard.coverage,
+            "coverage_level": standard.coverage_level,
             "references": [
                 {
                     "labels": reference.labels,
@@ -1514,6 +1518,24 @@ def standards_payload() -> list[dict[str, object]]:
         }
         for standard in SECURITY_STANDARDS
     ]
+
+
+def rule_standard_mappings_payload() -> dict[str, list[dict[str, object]]]:
+    mappings: dict[str, list[dict[str, object]]] = {}
+    for standard in SECURITY_STANDARDS:
+        for category in standard.categories:
+            if category.id == DEFAULT_STANDARD_CATEGORY:
+                continue
+            for rule_id in category.rule_ids:
+                mappings.setdefault(rule_id, []).append(
+                    {
+                        "standard_id": standard.id,
+                        "standard_labels": standard.labels,
+                        "category_id": category.id,
+                        "category_labels": category.labels,
+                    }
+                )
+    return mappings
 
 
 def resolve_standard_selection(

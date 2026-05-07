@@ -11,9 +11,10 @@ from unittest.mock import patch
 
 from security_scanner.app import _create_available_server, run_app
 from security_scanner.config import expand_path
+from security_scanner.dependency_inventory import queryable_osv_components
 from security_scanner.discovery import discover_projects
-from security_scanner.models import ScannerConfig, TargetConfig
-from security_scanner.reporting import render_html, render_json, render_sarif
+from security_scanner.models import Finding, ScannerConfig, TargetConfig
+from security_scanner.reporting import render_html, render_json, render_report, render_sarif
 from security_scanner.scanner import SecurityScanner
 from security_scanner.server import _select_directory_macos, allowed_cors_origin, scan_directory_payload, select_directory
 from security_scanner.standards import standards_payload
@@ -252,6 +253,8 @@ class ScannerTests(unittest.TestCase):
             standards["ncsc-web-8"]["references"][0]["url"],
             "https://www.ncsc.go.kr/",
         )
+        self.assertEqual(standards["owasp-asvs-5"]["coverage_level"], "partial")
+        self.assertEqual(standards["owasp-wstg"]["coverage_level"], "partial")
 
     def test_dashboard_payload_can_scan_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -264,6 +267,73 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(payload["scan"]["path"], str(root.resolve()))
             self.assertEqual(payload["summary"]["target_paths"][root.name], str(root.resolve()))
             self.assertEqual(payload["findings_by_language"]["ko"][0]["title"], "고정되지 않은 Python 의존성")
+
+    def test_dashboard_payload_includes_dependency_components_and_sbom(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("jinja2==2.4.1\n", encoding="utf-8")
+
+            payload = scan_directory_payload(str(root), language="ko", discover_projects=False)
+
+            self.assertEqual(payload["components"][0]["name"], "jinja2")
+            self.assertEqual(payload["components"][0]["ecosystem"], "PyPI")
+            self.assertEqual(payload["sbom"]["bomFormat"], "CycloneDX")
+            self.assertEqual(payload["sbom"]["specVersion"], "1.6")
+            self.assertEqual(payload["sbom"]["components"][0]["purl"], "pkg:pypi/jinja2@2.4.1")
+
+    def test_cyclonedx_report_uses_collected_dependency_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package-lock.json").write_text(
+                json.dumps({"packages": {"node_modules/lodash": {"version": "4.17.21"}}}),
+                encoding="utf-8",
+            )
+            scanner = SecurityScanner(ScannerConfig(targets=(TargetConfig(name="tmp", path=root, categories=("dependencies",)),)))
+            scanner.scan()
+
+            payload = json.loads(render_report([], "cyclonedx", components=scanner.components))
+            component = payload["components"][0]
+
+            self.assertEqual(payload["bomFormat"], "CycloneDX")
+            self.assertEqual(component["name"], "lodash")
+            self.assertEqual(component["version"], "4.17.21")
+            self.assertEqual(component["purl"], "pkg:npm/lodash@4.17.21")
+
+    def test_osv_lookup_can_be_enabled_for_exact_dependency_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requirements = root / "requirements.txt"
+            requirements.write_text("jinja2==2.4.1\nrequests\n", encoding="utf-8")
+
+            def fake_query(components):
+                self.assertEqual([component.name for component in components], ["jinja2"])
+                return (
+                    [
+                        Finding(
+                            rule_id="dependency.osv-known-vulnerability",
+                            category="dependencies",
+                            severity="high",
+                            title="Known vulnerable dependency reported by OSV",
+                            path=requirements,
+                            target="tmp",
+                            line=1,
+                            evidence="PyPI jinja2@2.4.1: GHSA-test",
+                        )
+                    ],
+                    [],
+                )
+
+            config = ScannerConfig(
+                targets=(TargetConfig(name="tmp", path=root, categories=("dependencies",)),),
+                enable_osv=True,
+            )
+            with patch("security_scanner.scanner.query_osv_findings", side_effect=fake_query) as query:
+                scanner = SecurityScanner(config)
+                findings = scanner.scan()
+
+            self.assertTrue(query.called)
+            self.assertIn("dependency.osv-known-vulnerability", {finding.rule_id for finding in findings})
+            self.assertEqual([component.name for component in queryable_osv_components(scanner.components)], ["jinja2"])
 
     def test_dashboard_payload_can_scan_standard_category(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -660,6 +730,9 @@ class ScannerTests(unittest.TestCase):
         self.assertIn('id="scan-standard"', html)
         self.assertIn('id="scan-standard-category"', html)
         self.assertIn('id="scan-run"', html)
+        self.assertIn('id="scan-osv"', html)
+        self.assertIn('id="sbom-download"', html)
+        self.assertIn('id="coverage-matrix"', html)
         self.assertIn('id="scan-depth" type="number" min="0" max="20" value="2"', html)
         self.assertIn('apiEndpoint("/api/select-directory")', html)
         self.assertIn("http://127.0.0.1:8765", html)
@@ -669,6 +742,9 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("폴더 선택", html)
         self.assertIn("보안 기준", html)
         self.assertIn("기준 카테고리", html)
+        self.assertIn("OSV/CVE 조회", html)
+        self.assertIn("SBOM 다운로드", html)
+        self.assertIn("커버리지 매트릭스", html)
         self.assertIn("OWASP Top 10:2025", html)
         self.assertIn("OWASP Top 10:2021", html)
         self.assertIn("CWE Top 25:2025", html)

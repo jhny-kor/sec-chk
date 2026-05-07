@@ -33,6 +33,22 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class DependencyComponent:
+    name: str
+    ecosystem: str
+    version: str
+    path: Path
+    target: str = ""
+    line: int | None = None
+    scope: str = "required"
+    source: str = ""
+    purl: str = ""
+
+    def key(self) -> tuple[str, str, str, str]:
+        return (self.ecosystem.lower(), self.name.lower(), self.version, self.target)
+
+
+@dataclass(frozen=True)
 class TargetConfig:
     name: str
     path: Path
@@ -55,3 +71,4 @@ class ReportConfig:
 class ScannerConfig:
     targets: tuple[TargetConfig, ...]
     report: ReportConfig = ReportConfig()
+    enable_osv: bool = False

@@ -7,8 +7,10 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
-from .models import Finding, SEVERITIES, SEVERITY_RANK
-from .standards import DEFAULT_STANDARD, DEFAULT_STANDARD_CATEGORY, standards_payload
+from .dependency_inventory import component_payload
+from .models import DependencyComponent, Finding, SEVERITIES, SEVERITY_RANK
+from .sbom import cyclonedx_payload, render_cyclonedx
+from .standards import DEFAULT_STANDARD, DEFAULT_STANDARD_CATEGORY, rule_standard_mappings_payload, standards_payload
 
 
 SEVERITY_WEIGHTS = {
@@ -40,10 +42,22 @@ TRANSLATIONS = {
         "dashboard": "Dashboard",
         "help_title": "Security Standards Help",
         "help_intro": "Review each selectable standard, what SecChk checks locally, and links to the official source.",
+        "coverage_matrix": "Coverage Matrix",
         "coverage": "Coverage",
         "official_links": "Official links",
         "check_categories": "Check criteria",
         "mapped_checks": "mapped checks",
+        "auto_supported": "automatic",
+        "partial_automatic": "partial automatic",
+        "local_coverage": "local rules",
+        "rule_details": "Rule Details",
+        "related_standards": "Related standards",
+        "no_related_standards": "No standard mapping recorded.",
+        "dependency_components": "Components",
+        "download_sbom": "Download SBOM",
+        "sbom_unavailable": "No dependency components available for SBOM.",
+        "osv_toggle": "OSV/CVE lookup",
+        "osv_network_note": "Queries exact dependency versions through OSV.dev.",
         "supported": "supported",
         "not_supported": "not supported",
         "scan_directory": "Scan Directory",
@@ -128,10 +142,22 @@ TRANSLATIONS = {
         "dashboard": "대시보드",
         "help_title": "보안 점검 기준 도움말",
         "help_intro": "선택 가능한 보안 기준, 로컬 점검 범위, 공식 출처 링크를 확인합니다.",
+        "coverage_matrix": "커버리지 매트릭스",
         "coverage": "점검 범위",
         "official_links": "공식 링크",
         "check_categories": "점검 기준",
         "mapped_checks": "매핑된 점검",
+        "auto_supported": "자동",
+        "partial_automatic": "부분 자동 점검",
+        "local_coverage": "로컬 룰",
+        "rule_details": "룰 상세 도움말",
+        "related_standards": "관련 보안 기준",
+        "no_related_standards": "연결된 기준 매핑이 없습니다.",
+        "dependency_components": "컴포넌트",
+        "download_sbom": "SBOM 다운로드",
+        "sbom_unavailable": "SBOM으로 내보낼 의존성 컴포넌트가 없습니다.",
+        "osv_toggle": "OSV/CVE 조회",
+        "osv_network_note": "정확한 의존성 버전을 OSV.dev로 조회합니다.",
         "supported": "지원",
         "not_supported": "미지원",
         "scan_directory": "점검 경로",
@@ -462,6 +488,11 @@ RULE_TRANSLATIONS_KO = {
         "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다.",
         "recommendation": "DTD와 외부 엔티티 해석을 비활성화하거나 신뢰할 수 없는 XML에는 강화된 파서 설정을 사용하세요.",
     },
+    "dependency.osv-known-vulnerability": {
+        "title": "OSV에 보고된 알려진 취약 의존성",
+        "description": "OSV가 이 정확한 의존성 버전에 대해 알려진 취약점을 보고했습니다.",
+        "recommendation": "OSV 상세 페이지를 확인한 뒤 업그레이드, 패치, 대체, 또는 보완 통제를 문서화하세요.",
+    },
 }
 
 
@@ -477,13 +508,16 @@ def render_report(
     language: str = "en",
     *,
     target_paths: dict[str, str] | None = None,
+    components: tuple[DependencyComponent, ...] = (),
 ) -> str:
+    if report_format == "cyclonedx":
+        return render_cyclonedx(components)
     if report_format == "json":
-        return render_json(findings, target_names, language, target_paths=target_paths)
+        return render_json(findings, target_names, language, target_paths=target_paths, components=components)
     if report_format == "markdown":
         return render_markdown(findings, target_names, language, target_paths=target_paths)
     if report_format == "html":
-        return render_html(findings, target_names, language, target_paths=target_paths)
+        return render_html(findings, target_names, language, target_paths=target_paths, components=components)
     if report_format == "sarif":
         return render_sarif(findings)
     raise ValueError(f"Unsupported report format: {report_format}")
@@ -495,12 +529,14 @@ def render_json(
     language: str = "en",
     *,
     target_paths: dict[str, str] | None = None,
+    components: tuple[DependencyComponent, ...] = (),
 ) -> str:
     payload = {
         "generated_at": _generated_at()[0],
         "language": _labels(language)["html_lang"],
         "scanner": {"name": "local-security-scanner", "version": __version__},
         "summary": _summary(findings, target_names, target_paths),
+        "components": [component_payload(component) for component in components],
         "findings": [_finding_payload(finding) for finding in findings],
     }
     return json.dumps(payload, indent=2, ensure_ascii=False)
@@ -605,8 +641,9 @@ def render_html(
     language: str = "en",
     *,
     target_paths: dict[str, str] | None = None,
+    components: tuple[DependencyComponent, ...] = (),
 ) -> str:
-    payload = build_dashboard_payload(findings, target_names, language, target_paths=target_paths)
+    payload = build_dashboard_payload(findings, target_names, language, target_paths=target_paths, components=components)
     labels = _labels(language)
     json_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     replacements = _html_replacements(labels, json_payload)
@@ -626,6 +663,8 @@ def build_dashboard_payload(
     scan_path: str | None = None,
     standard: str = DEFAULT_STANDARD,
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
+    components: tuple[DependencyComponent, ...] = (),
+    enable_osv: bool = False,
 ) -> dict[str, object]:
     generated, generated_display = _generated_at()
     summary = _summary(findings, target_names, target_paths)
@@ -636,6 +675,9 @@ def build_dashboard_payload(
         "language": labels["html_lang"],
         "labels_by_language": TRANSLATIONS,
         "standards": standards_payload(),
+        "rule_mappings": _rule_mappings_for_findings(findings),
+        "components": [component_payload(component) for component in components],
+        "sbom": cyclonedx_payload(components),
         "scanner": {"name": "local-security-scanner", "version": __version__},
         "summary": summary,
         "scan": {
@@ -643,6 +685,7 @@ def build_dashboard_payload(
             "standard": standard,
             "standard_category": standard_category,
             "warnings": list(warnings),
+            "enable_osv": enable_osv,
         },
         "findings_by_language": {
             "en": [_finding_payload(finding) for finding in findings],
@@ -681,6 +724,14 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_ACTION__": html.escape(str(labels["action"])),
         "__INITIAL_EMPTY__": html.escape(str(labels["no_findings_display"])),
     }
+
+
+def _rule_mappings_for_findings(findings: list[Finding]) -> dict[str, list[dict[str, object]]]:
+    rule_ids = {finding.rule_id for finding in findings}
+    if not rule_ids:
+        return {}
+    all_mappings = rule_standard_mappings_payload()
+    return {rule_id: all_mappings.get(rule_id, []) for rule_id in sorted(rule_ids)}
 
 
 def write_report(content: str, output: Path | None) -> None:
@@ -1018,6 +1069,13 @@ HTML_TEMPLATE = """<!doctype html>
       align-items: end;
     }
 
+    .scan-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
     .scan-select {
       display: grid;
       gap: 6px;
@@ -1039,6 +1097,11 @@ HTML_TEMPLATE = """<!doctype html>
       width: auto;
       min-height: auto;
       margin: 0;
+    }
+
+    .scan-note {
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .scan-depth {
@@ -1286,6 +1349,45 @@ HTML_TEMPLATE = """<!doctype html>
       color: var(--muted);
     }
 
+    .coverage-table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .coverage-table th, .coverage-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .coverage-table-wrap {
+      overflow: auto;
+      border-radius: 8px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: #fff7ed;
+      color: #9a3412;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .status-badge.local {
+      background: #ecfdf5;
+      color: #047857;
+    }
+
     .standards-help {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1364,6 +1466,13 @@ HTML_TEMPLATE = """<!doctype html>
       font-weight: 700;
     }
 
+    .rule-related {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
     .standard-links a {
       display: inline-flex;
       align-items: center;
@@ -1380,6 +1489,7 @@ HTML_TEMPLATE = """<!doctype html>
     @media (max-width: 1000px) {
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr 1fr; }
+      .scan-actions { align-items: stretch; }
       .standards-help { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
       button { width: 100%; }
@@ -1394,6 +1504,7 @@ HTML_TEMPLATE = """<!doctype html>
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
       .metrics, .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr; }
+      .scan-actions { display: grid; grid-template-columns: 1fr; }
       .standard-head { grid-template-columns: 1fr; }
       .metric { min-height: 84px; }
       .metric-value { font-size: 26px; }
@@ -1447,6 +1558,14 @@ HTML_TEMPLATE = """<!doctype html>
           <select id="scan-standard-category"></select>
         </label>
       </div>
+      <div class="scan-actions">
+        <label class="scan-option" title="">
+          <input id="scan-osv" type="checkbox">
+          <span id="scan-osv-label"></span>
+        </label>
+        <button id="sbom-download" type="button"></button>
+        <span id="scan-osv-note" class="scan-note"></span>
+      </div>
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
 
@@ -1494,6 +1613,18 @@ HTML_TEMPLATE = """<!doctype html>
         <h2 id="help-title">__INITIAL_HELP_TITLE__</h2>
         <p id="help-intro">__INITIAL_HELP_INTRO__</p>
       </div>
+      <div class="coverage-table-wrap">
+        <table class="coverage-table">
+          <thead>
+            <tr>
+              <th id="coverage-standard-heading"></th>
+              <th id="coverage-auto-heading"></th>
+              <th id="coverage-status-heading"></th>
+            </tr>
+          </thead>
+          <tbody id="coverage-matrix"></tbody>
+        </table>
+      </div>
       <div id="standards-help" class="standards-help"></div>
     </section>
   </main>
@@ -1517,6 +1648,7 @@ HTML_TEMPLATE = """<!doctype html>
       scanStandard: (payload.scan && payload.scan.standard) || "local",
       scanStandardCategory: (payload.scan && payload.scan.standard_category) || "all",
       view: location.hash === "#help" ? "help" : "dashboard",
+      helpRenderedLanguage: "",
     };
 
     function byId(id) {
@@ -1572,6 +1704,14 @@ HTML_TEMPLATE = """<!doctype html>
 
     function standardDefinitions() {
       return payload.standards || [];
+    }
+
+    function ruleMappings() {
+      return payload.rule_mappings || {};
+    }
+
+    function components() {
+      return payload.components || [];
     }
 
     function currentStandard() {
@@ -1640,11 +1780,16 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-standard-category-label", activeLabels.scan_standard_category);
       setText("scan-discover-label", activeLabels.discover_projects);
       setText("scan-depth-label", activeLabels.discovery_depth);
+      setText("scan-osv-label", activeLabels.osv_toggle);
+      setText("scan-osv-note", activeLabels.osv_network_note);
+      setText("sbom-download", activeLabels.download_sbom);
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
       byId("scan-run").disabled = state.scanRunning;
       byId("scan-choose").disabled = state.scanRunning;
       byId("scan-standard").disabled = state.scanRunning;
       byId("scan-standard-category").disabled = state.scanRunning;
+      byId("scan-osv").disabled = state.scanRunning;
+      byId("sbom-download").disabled = components().length === 0;
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
       scanStatus.className = `scan-status ${state.scanStatusClass}`;
@@ -1658,6 +1803,9 @@ HTML_TEMPLATE = """<!doctype html>
       setText("th-location", activeLabels.location);
       setText("th-evidence", activeLabels.evidence);
       setText("th-action", activeLabels.action);
+      setText("coverage-standard-heading", activeLabels.scan_standard);
+      setText("coverage-auto-heading", activeLabels.auto_supported);
+      setText("coverage-status-heading", activeLabels.coverage);
       byId("lang-ko").classList.toggle("active", state.language === "ko");
       byId("lang-en").classList.toggle("active", state.language === "en");
     }
@@ -1785,6 +1933,17 @@ HTML_TEMPLATE = """<!doctype html>
         : `<div class="empty">${escapeText(activeLabels.no_targets_recorded)}</div>`;
     }
 
+    function relatedStandardsHtml(ruleId) {
+      const activeLabels = labels();
+      const mappings = ruleMappings()[ruleId] || [];
+      if (!mappings.length) {
+        return `<span>${escapeText(activeLabels.no_related_standards)}</span>`;
+      }
+      return `<div class="rule-related">${mappings.slice(0, 12).map((mapping) => `
+        <span class="category-chip">${escapeText(labelFor({ labels: mapping.standard_labels }))} · ${escapeText(labelFor({ labels: mapping.category_labels }))}</span>
+      `).join("")}</div>`;
+    }
+
     function renderTable(items) {
       const activeLabels = labels();
       const activeSeverityLabels = severityLabels();
@@ -1806,9 +1965,14 @@ HTML_TEMPLATE = """<!doctype html>
               <details>
                 <summary>${escapeText(activeLabels.remediate)}</summary>
                 <div class="detail-body">
+                  <strong>${escapeText(activeLabels.rule_details)}</strong>
+                  <br>
                   ${escapeText(finding.description || "")}
                   <br><br>
                   ${escapeText(finding.recommendation || activeLabels.review_this_finding)}
+                  <br><br>
+                  <strong>${escapeText(activeLabels.related_standards)}</strong>
+                  ${relatedStandardsHtml(finding.rule_id)}
                 </div>
               </details>
             </td>
@@ -1828,11 +1992,29 @@ HTML_TEMPLATE = """<!doctype html>
     }
 
     function renderHelp() {
+      if (state.helpRenderedLanguage === state.language) {
+        return;
+      }
       const activeLabels = labels();
       const standards = standardDefinitions();
+      byId("coverage-matrix").innerHTML = standards.map((standard) => {
+        const leafCategories = (standard.categories || []).filter((category) => category.id !== "all");
+        const supportedCount = leafCategories.filter((category) => category.supported).length;
+        const total = Math.max(leafCategories.length, 1);
+        const statusLabel = standard.coverage_level === "local" ? activeLabels.local_coverage : activeLabels.partial_automatic;
+        return `
+          <tr>
+            <td>${escapeText(labelFor(standard))}</td>
+            <td>${supportedCount}/${total}</td>
+            <td><span class="status-badge ${standard.coverage_level === "local" ? "local" : ""}">${escapeText(statusLabel)}</span></td>
+          </tr>
+        `;
+      }).join("");
       byId("standards-help").innerHTML = standards.map((standard) => {
         const categories = standard.categories || [];
-        const supportedCount = categories.filter((category) => category.supported).length;
+        const leafCategories = categories.filter((category) => category.id !== "all");
+        const supportedCount = leafCategories.filter((category) => category.supported).length;
+        const statusLabel = standard.coverage_level === "local" ? activeLabels.local_coverage : activeLabels.partial_automatic;
         const references = standard.references || [];
         const links = references.length
           ? references.map((reference) => `
@@ -1851,8 +2033,9 @@ HTML_TEMPLATE = """<!doctype html>
                 <h3>${escapeText(labelFor(standard))}</h3>
                 <p>${escapeText(localizedText(standard.description, ""))}</p>
               </div>
-              <div class="standard-count">${supportedCount}/${categories.length} ${escapeText(activeLabels.mapped_checks)}</div>
+              <div class="standard-count">${supportedCount}/${Math.max(leafCategories.length, 1)} ${escapeText(activeLabels.mapped_checks)}</div>
             </div>
+            <div><span class="status-badge ${standard.coverage_level === "local" ? "local" : ""}">${escapeText(statusLabel)}</span></div>
             <div class="help-meta">
               <strong>${escapeText(activeLabels.coverage)}</strong>
               <span>${escapeText(localizedText(standard.coverage, ""))}</span>
@@ -1868,13 +2051,16 @@ HTML_TEMPLATE = """<!doctype html>
           </article>
         `;
       }).join("");
+      state.helpRenderedLanguage = state.language;
     }
 
     function render() {
       renderChrome();
       renderScanStandards();
-      renderHelp();
       renderView();
+      if (state.view === "help") {
+        renderHelp();
+      }
       renderFilters();
       const items = filteredFindings();
       renderMetrics(items);
@@ -1956,6 +2142,7 @@ HTML_TEMPLATE = """<!doctype html>
             standard: state.scanStandard,
             standard_category: state.scanStandardCategory,
             min_severity: "low",
+            enable_osv: byId("scan-osv").checked,
           }),
         });
         const nextPayload = await parseJsonResponse(response);
@@ -1972,6 +2159,24 @@ HTML_TEMPLATE = """<!doctype html>
         state.scanStatusClass = "error";
         render();
       }
+    }
+
+    function downloadSbom() {
+      const activeLabels = labels();
+      if (!components().length || !payload.sbom) {
+        state.scanStatus = activeLabels.sbom_unavailable;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+      const blob = new Blob([JSON.stringify(payload.sbom, null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "sec-chk-cyclonedx-sbom.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
     }
 
     byId("search").addEventListener("input", (event) => {
@@ -2017,6 +2222,9 @@ HTML_TEMPLATE = """<!doctype html>
     });
     byId("scan-run").addEventListener("click", () => {
       runDirectoryScan();
+    });
+    byId("sbom-download").addEventListener("click", () => {
+      downloadSbom();
     });
     byId("help-toggle").addEventListener("click", () => {
       state.view = state.view === "help" ? "dashboard" : "help";

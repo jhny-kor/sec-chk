@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -71,9 +72,25 @@ def is_text_candidate(path: Path) -> bool:
 
 def read_text_lines(path: Path, max_size: int) -> list[str] | None:
     try:
-        if path.stat().st_size > max_size:
+        stat = path.stat()
+    except OSError:
+        return None
+    if stat.st_size > max_size:
+        return None
+    return _read_text_lines_cached(str(path), max_size, stat.st_mtime_ns, stat.st_size)
+
+
+def clear_read_text_cache() -> None:
+    _read_text_lines_cached.cache_clear()
+
+
+@lru_cache(maxsize=4096)
+def _read_text_lines_cached(path_value: str, max_size: int, mtime_ns: int, size: int) -> list[str] | None:
+    del mtime_ns
+    try:
+        if size > max_size:
             return None
-        with path.open("rb") as handle:
+        with Path(path_value).open("rb") as handle:
             data = handle.read()
     except OSError:
         return None
