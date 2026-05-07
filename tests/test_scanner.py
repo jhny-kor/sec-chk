@@ -745,6 +745,8 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("OSV/CVE 조회", html)
         self.assertIn("SBOM 다운로드", html)
         self.assertIn("커버리지 매트릭스", html)
+        self.assertIn("치명 100점", html)
+        self.assertIn('id="risk-score-note"', html)
         self.assertIn("OWASP Top 10:2025", html)
         self.assertIn("OWASP Top 10:2021", html)
         self.assertIn("CWE Top 25:2025", html)

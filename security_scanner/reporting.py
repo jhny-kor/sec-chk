@@ -95,6 +95,7 @@ TRANSLATIONS = {
         "all_targets": "All targets",
         "risk_score_metric": "Risk Score",
         "risk_score_sub": "weighted local score",
+        "risk_score_formula": "Calculation: critical 100, high 40, medium 10, low 3, info 1 per finding.",
         "critical_sub": "immediate review",
         "high_sub": "near-term fix",
         "medium_sub": "planned remediation",
@@ -195,6 +196,7 @@ TRANSLATIONS = {
         "all_targets": "모든 대상",
         "risk_score_metric": "위험 점수",
         "risk_score_sub": "가중 로컬 점수",
+        "risk_score_formula": "계산: 발견 항목마다 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점씩 합산합니다.",
         "critical_sub": "즉시 검토",
         "high_sub": "빠른 수정 필요",
         "medium_sub": "계획된 조치",
@@ -1027,6 +1029,13 @@ HTML_TEMPLATE = """<!doctype html>
       font-size: 12px;
     }
 
+    .risk-score-note {
+      margin: -6px 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     .critical { color: var(--critical); }
     .high { color: var(--high); }
     .medium { color: var(--medium); }
@@ -1570,6 +1579,7 @@ HTML_TEMPLATE = """<!doctype html>
     </section>
 
     <section class="metrics" id="metrics"></section>
+    <p id="risk-score-note" class="risk-score-note"></p>
 
     <section class="panel filters" id="filters-panel" aria-label="__INITIAL_FILTERS__">
       <input id="search" type="search" placeholder="__INITIAL_SEARCH_PLACEHOLDER__">
@@ -1793,6 +1803,7 @@ HTML_TEMPLATE = """<!doctype html>
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
       scanStatus.className = `scan-status ${state.scanStatusClass}`;
+      setText("risk-score-note", activeLabels.risk_score_formula);
       byId("search").placeholder = activeLabels.search_placeholder;
       setText("reset", activeLabels.reset);
       setText("project-risk-title", activeLabels.project_risk);
