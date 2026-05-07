@@ -715,11 +715,27 @@ class ScannerTests(unittest.TestCase):
     def test_platform_launchers_start_app_mode(self) -> None:
         root = Path(__file__).resolve().parents[1]
         mac_launcher = root / "scripts" / "sec-chk.command"
+        mac_installer = root / "scripts" / "install-macos.command"
+        mac_uninstaller = root / "scripts" / "uninstall-macos.command"
         windows_launcher = root / "scripts" / "sec-chk.bat"
+        windows_installer = root / "scripts" / "install-windows.ps1"
+        windows_installer_bat = root / "scripts" / "install-windows.bat"
+        windows_uninstaller = root / "scripts" / "uninstall-windows.ps1"
 
         self.assertIn("-m security_scanner app", mac_launcher.read_text(encoding="utf-8"))
+        self.assertTrue(os.access(mac_installer, os.X_OK))
+        self.assertTrue(os.access(mac_uninstaller, os.X_OK))
+        self.assertIn("Library/Application Support/SecChk", mac_installer.read_text(encoding="utf-8"))
+        self.assertIn("SecChk.command", mac_installer.read_text(encoding="utf-8"))
+        self.assertIn("-m security_scanner app", mac_installer.read_text(encoding="utf-8"))
+        self.assertIn("rm -rf", mac_uninstaller.read_text(encoding="utf-8"))
         self.assertIn("-m security_scanner app", windows_launcher.read_text(encoding="utf-8"))
         self.assertIn("py -3", windows_launcher.read_text(encoding="utf-8"))
+        self.assertIn("install-windows.ps1", windows_installer_bat.read_text(encoding="utf-8"))
+        self.assertIn("LOCALAPPDATA", windows_installer.read_text(encoding="utf-8"))
+        self.assertIn("SecChk.bat", windows_installer.read_text(encoding="utf-8"))
+        self.assertIn("security_scanner", windows_installer.read_text(encoding="utf-8"))
+        self.assertIn("Remove-Item -Path $InstallRoot", windows_uninstaller.read_text(encoding="utf-8"))
 
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")

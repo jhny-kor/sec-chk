@@ -21,6 +21,24 @@ python3 -m security_scanner app
 
 This opens `security-dashboard.html` in the default browser and keeps a local server running until you press `Ctrl+C`. On macOS, you can double-click `scripts/sec-chk.command` from Finder. On Windows, double-click `scripts/sec-chk.bat`.
 
+## Desktop Installers
+
+macOS users can install SecChk without administrator privileges:
+
+1. Install Python 3.10 or newer.
+2. Download or clone this repository.
+3. Double-click `scripts/install-macos.command`.
+
+The macOS installer copies the app to `~/Library/Application Support/SecChk`, creates a private Python virtual environment, and creates `~/Applications/SecChk.command`. To remove it, run `~/Library/Application Support/SecChk/Uninstall-SecChk.command` or double-click `scripts/uninstall-macos.command` from the downloaded repository.
+
+Windows users can install SecChk without administrator privileges:
+
+1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/).
+2. Download or clone this repository.
+3. Double-click `scripts/install-windows.bat`.
+
+The installer copies the app to `%LOCALAPPDATA%\SecChk`, creates a private Python virtual environment, and adds a Start Menu shortcut named `SecChk`. It does not install third-party dependencies. To remove it, run `%LOCALAPPDATA%\SecChk\Uninstall-SecChk.ps1` or double-click `scripts/uninstall-windows.bat` from the downloaded repository.
+
 Server-only mode is still available:
 
 ```bash
@@ -128,6 +146,24 @@ python3 -m security_scanner app
 ```
 
 기본 브라우저에 `security-dashboard.html`을 자동으로 열고, 터미널에서 `Ctrl+C`를 누를 때까지 로컬 서버를 유지합니다. macOS에서는 Finder에서 `scripts/sec-chk.command`, Windows에서는 `scripts/sec-chk.bat`를 더블클릭하면 됩니다.
+
+### 데스크톱 설치 파일
+
+macOS에서는 관리자 권한 없이 설치할 수 있습니다.
+
+1. Python 3.10 이상을 설치합니다.
+2. 이 저장소를 다운로드하거나 clone합니다.
+3. `scripts/install-macos.command`를 더블클릭합니다.
+
+macOS 설치 스크립트는 앱을 `~/Library/Application Support/SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 `~/Applications/SecChk.command` 바로가기를 생성합니다. 삭제하려면 `~/Library/Application Support/SecChk/Uninstall-SecChk.command`를 실행하거나, 다운로드한 저장소의 `scripts/uninstall-macos.command`를 더블클릭하면 됩니다.
+
+Windows에서는 관리자 권한 없이 설치할 수 있습니다.
+
+1. [python.org](https://www.python.org/downloads/windows/)에서 Python 3.10 이상을 설치합니다.
+2. 이 저장소를 다운로드하거나 clone합니다.
+3. `scripts/install-windows.bat`를 더블클릭합니다.
+
+설치 스크립트는 앱을 `%LOCALAPPDATA%\SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 시작 메뉴에 `SecChk` 바로가기를 추가합니다. 추가 서드파티 의존성은 설치하지 않습니다. 삭제하려면 `%LOCALAPPDATA%\SecChk\Uninstall-SecChk.ps1`을 실행하거나, 다운로드한 저장소의 `scripts/uninstall-windows.bat`를 더블클릭하면 됩니다.
 
 서버만 직접 띄우려면:
 
