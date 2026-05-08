@@ -40,3 +40,21 @@ If Inno Setup is installed in a custom path:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows-installer.ps1 -InnoCompilerPath "C:\Path\To\ISCC.exe"
 ```
+
+## Microsoft Store path
+
+The current `SecChkSetup.exe` is an Inno Setup desktop installer for direct download. Microsoft Store distribution should use an MSIX package or `.msixupload` file through Partner Center, not the Inno installer.
+
+Recommended Store lane:
+
+1. Reserve the app name in Partner Center.
+2. Convert or package the desktop app as MSIX.
+3. Generate a Store upload package (`.msixupload`) with Visual Studio or MSIX tooling.
+4. Validate the package locally where possible.
+5. Submit the upload package, screenshots, privacy details, age rating, and notes in Partner Center.
+
+Useful Microsoft references:
+
+- [MSIX documentation](https://learn.microsoft.com/en-us/windows/msix/)
+- [Package a desktop or UWP app in Visual Studio](https://learn.microsoft.com/en-us/windows/msix/package/packaging-uwp-apps)
+- [Create an app submission for your MSIX app](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/create-app-submission?pivots=store-installer-msix)

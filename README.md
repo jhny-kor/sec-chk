@@ -38,7 +38,7 @@ macOS users can install SecChk without administrator privileges:
 
 The macOS installer copies the app to `~/Library/Application Support/SecChk`, creates a private Python virtual environment, and creates `~/Applications/SecChk.command`. To remove it, run `~/Library/Application Support/SecChk/Uninstall-SecChk.command` or double-click `scripts/uninstall-macos.command` from the downloaded repository.
 
-Mac App Store packaging for the native macOS app name `KODA` lives in `packaging/macos`. It includes the KODA icon, sandbox entitlements, and a build script for `KODA.app` and a signed package when Apple signing identities are available.
+Mac App Store packaging for the native macOS app name `KODA` lives in `packaging/macos`, with the Xcode project at `platforms/macos/KODA/KODA.xcodeproj`. It includes the KODA icon, sandbox entitlements, and build notes for App Store Connect submission. See `docs/store-release.md` for the store checklist.
 
 Windows users can install SecChk without administrator privileges. If you downloaded a release build, run `dist/Windows/SecChkSetup.exe`. If you cloned the repository, you can use the script installer:
 
@@ -47,6 +47,8 @@ Windows users can install SecChk without administrator privileges. If you downlo
 3. Double-click `scripts/install-windows.bat`.
 
 The installer copies the app to `%LOCALAPPDATA%\SecChk`, creates a private Python virtual environment, and adds a Start Menu shortcut named `SecChk`. It does not install third-party dependencies. To remove it, run `%LOCALAPPDATA%\SecChk\Uninstall-SecChk.ps1` or double-click `scripts/uninstall-windows.bat` from the downloaded repository.
+
+For Microsoft Store distribution, the current Inno Setup installer is not the final upload format. The Store lane should package the Windows app as MSIX and submit a `.msixupload` package through Partner Center. See `packaging/windows/README.md` and `docs/store-release.md`.
 
 Server-only mode is still available:
 
@@ -173,7 +175,7 @@ macOS에서는 관리자 권한 없이 설치할 수 있습니다.
 
 macOS 설치 스크립트는 앱을 `~/Library/Application Support/SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 `~/Applications/SecChk.command` 바로가기를 생성합니다. 삭제하려면 `~/Library/Application Support/SecChk/Uninstall-SecChk.command`를 실행하거나, 다운로드한 저장소의 `scripts/uninstall-macos.command`를 더블클릭하면 됩니다.
 
-Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `packaging/macos`에 KODA 아이콘, 샌드박스 entitlements, `KODA.app` 및 서명 패키지 빌드 스크립트를 추가했습니다.
+Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `packaging/macos`에 KODA 아이콘과 샌드박스 entitlements를 추가했고 `platforms/macos/KODA/KODA.xcodeproj`에 Xcode 프로젝트를 추가했습니다. 스토어 출시 체크리스트는 `docs/store-release.md`에서 확인할 수 있습니다.
 
 Windows에서는 관리자 권한 없이 설치할 수 있습니다. 릴리스 빌드를 받은 경우 `dist/Windows/SecChkSetup.exe`를 실행하고, 저장소를 clone한 경우 스크립트 설치 파일을 사용할 수 있습니다.
 
@@ -182,6 +184,8 @@ Windows에서는 관리자 권한 없이 설치할 수 있습니다. 릴리스 �
 3. `scripts/install-windows.bat`를 더블클릭합니다.
 
 설치 스크립트는 앱을 `%LOCALAPPDATA%\SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 시작 메뉴에 `SecChk` 바로가기를 추가합니다. 추가 서드파티 의존성은 설치하지 않습니다. 삭제하려면 `%LOCALAPPDATA%\SecChk\Uninstall-SecChk.ps1`을 실행하거나, 다운로드한 저장소의 `scripts/uninstall-windows.bat`를 더블클릭하면 됩니다.
+
+Microsoft Store에 출시하려면 현재의 Inno Setup 설치 파일이 아니라 MSIX 패키지와 `.msixupload` 제출 파일을 준비해야 합니다. 자세한 절차는 `packaging/windows/README.md`와 `docs/store-release.md`에 정리했습니다.
 
 서버만 직접 띄우려면:
 

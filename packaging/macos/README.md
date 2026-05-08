@@ -7,6 +7,7 @@ This folder contains the first App Store packaging lane for the macOS app named 
 - `assets/KODA.icns`: app icon generated from the supplied KODA image.
 - `assets/KODA-AppStore-1024.png`: 1024 px App Store marketing icon source.
 - `KODA.entitlements`: App Sandbox entitlements required for Mac App Store distribution.
+- `../../platforms/macos/KODA/KODA.xcodeproj`: native SwiftUI macOS project for the App Store lane.
 - `build-koda-app.command`: PyInstaller-based macOS app and package build script.
 
 ## Requirements
@@ -18,6 +19,30 @@ This folder contains the first App Store packaging lane for the macOS app named 
 - Mac App Distribution and Mac Installer Distribution signing certificates.
 
 ## Local build
+
+### Xcode project
+
+Open the native project:
+
+```zsh
+open platforms/macos/KODA/KODA.xcodeproj
+```
+
+For local command-line verification without signing:
+
+```zsh
+xcodebuild \
+  -project platforms/macos/KODA/KODA.xcodeproj \
+  -scheme KODA \
+  -configuration Debug \
+  -derivedDataPath /tmp/koda-derived \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+The Xcode scheme sets `KODA_SCANNER_ROOT` to the repository root for development runs. For a final App Store build, package `security_scanner` as an app resource or replace the bridge with a native scanner implementation so the app is self-contained.
+
+### PyInstaller package lane
 
 ```zsh
 packaging/macos/build-koda-app.command
@@ -51,4 +76,10 @@ Upload the signed package through Transporter or App Store Connect after creatin
 
 ## Current limitation
 
-The packaging lane bundles the existing Python dashboard app. Before final App Review submission, run a full sandbox QA pass on a clean Mac and verify folder selection, local server behavior, OSV opt-in networking, and scanner access to user-selected folders.
+The Xcode app is now the preferred App Store lane, but its first bridge still calls the existing Python scanner during development. Before final App Review submission, make the scanner runtime self-contained, run a full sandbox QA pass on a clean Mac, and verify folder selection, OSV opt-in networking, and scanner access to user-selected folders.
+
+Apple references:
+
+- [Upload builds to App Store Connect](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/)
+- [App Sandbox](https://developer.apple.com/documentation/security/app_sandbox)
+- [Configuring the macOS App Sandbox](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox)

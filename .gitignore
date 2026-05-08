@@ -10,3 +10,5 @@ reports/*.html
 reports/*.sarif
 .playwright-cli/
 output/
+.build/
+dist/macos/
