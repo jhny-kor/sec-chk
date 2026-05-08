@@ -1,7 +1,17 @@
 @echo off
 setlocal
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall-windows.ps1" %*
+set "SCRIPT_DIR=%~dp0"
+set "UNINSTALL_PS1=%SCRIPT_DIR%uninstall-windows.ps1"
+
+if not exist "%UNINSTALL_PS1%" (
+  echo uninstall-windows.ps1 was not found.
+  echo Run %%LOCALAPPDATA%%\SecChk\Uninstall-SecChk.ps1 if SecChk is already installed.
+  pause
+  exit /b 1
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%UNINSTALL_PS1%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 if "%EXIT_CODE%"=="0" (
