@@ -721,6 +721,12 @@ class ScannerTests(unittest.TestCase):
         windows_installer = root / "scripts" / "install-windows.ps1"
         windows_installer_bat = root / "scripts" / "install-windows.bat"
         windows_uninstaller = root / "scripts" / "uninstall-windows.ps1"
+        windows_builder = root / "scripts" / "build-windows-installer.ps1"
+        windows_inno = root / "packaging" / "windows" / "SecChk.iss"
+        mac_app_builder = root / "packaging" / "macos" / "build-koda-app.command"
+        mac_entitlements = root / "packaging" / "macos" / "KODA.entitlements"
+        mac_icon = root / "packaging" / "macos" / "assets" / "KODA.icns"
+        mac_packaging_readme = root / "packaging" / "macos" / "README.md"
         readme = (root / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("-m security_scanner app", mac_launcher.read_text(encoding="utf-8"))
@@ -737,10 +743,18 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("SecChk.bat", windows_installer.read_text(encoding="utf-8"))
         self.assertIn("security_scanner", windows_installer.read_text(encoding="utf-8"))
         self.assertIn("Remove-Item -Path $InstallRoot", windows_uninstaller.read_text(encoding="utf-8"))
+        self.assertIn('InstallerOutDir = Join-Path $DistDir "Windows"', windows_builder.read_text(encoding="utf-8"))
+        self.assertIn("OutputDir=..\\..\\dist\\Windows", windows_inno.read_text(encoding="utf-8"))
+        self.assertTrue(os.access(mac_app_builder, os.X_OK))
+        self.assertIn("APP_NAME=\"${APP_NAME:-KODA}\"", mac_app_builder.read_text(encoding="utf-8"))
+        self.assertIn("com.apple.security.app-sandbox", mac_entitlements.read_text(encoding="utf-8"))
+        self.assertEqual(mac_icon.read_bytes()[:4], b"icns")
+        self.assertIn("KODA macOS App Store Packaging", mac_packaging_readme.read_text(encoding="utf-8"))
         self.assertIn("Install quickly", readme)
         self.assertIn("설치 방법 요약", readme)
         self.assertIn("scripts/install-macos.command", readme)
         self.assertIn("scripts/install-windows.bat", readme)
+        self.assertIn("KODA", readme)
 
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")

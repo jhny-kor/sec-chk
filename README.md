@@ -9,7 +9,7 @@ Install quickly:
 | OS | Installer | Result |
 | --- | --- | --- |
 | macOS | Double-click `scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
-| Windows | Double-click `scripts/install-windows.bat` | Installs to `%LOCALAPPDATA%\SecChk` and creates a Start Menu shortcut |
+| Windows | Run `dist/Windows/SecChkSetup.exe` or double-click `scripts/install-windows.bat` | Installs to `%LOCALAPPDATA%\SecChk` and creates a Start Menu shortcut |
 
 ## What It Checks
 
@@ -38,7 +38,9 @@ macOS users can install SecChk without administrator privileges:
 
 The macOS installer copies the app to `~/Library/Application Support/SecChk`, creates a private Python virtual environment, and creates `~/Applications/SecChk.command`. To remove it, run `~/Library/Application Support/SecChk/Uninstall-SecChk.command` or double-click `scripts/uninstall-macos.command` from the downloaded repository.
 
-Windows users can install SecChk without administrator privileges:
+Mac App Store packaging for the native macOS app name `KODA` lives in `packaging/macos`. It includes the KODA icon, sandbox entitlements, and a build script for `KODA.app` and a signed package when Apple signing identities are available.
+
+Windows users can install SecChk without administrator privileges. If you downloaded a release build, run `dist/Windows/SecChkSetup.exe`. If you cloned the repository, you can use the script installer:
 
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/).
 2. Download or clone this repository.
@@ -142,7 +144,7 @@ Security-standard selections are mapping profiles over the local rules. The dash
 | OS | 설치 파일 | 설치 결과 |
 | --- | --- | --- |
 | macOS | `scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
-| Windows | `scripts/install-windows.bat` 더블클릭 | `%LOCALAPPDATA%\SecChk`에 설치하고 시작 메뉴 `SecChk` 바로가기 생성 |
+| Windows | `dist/Windows/SecChkSetup.exe` 실행 또는 `scripts/install-windows.bat` 더블클릭 | `%LOCALAPPDATA%\SecChk`에 설치하고 시작 메뉴 `SecChk` 바로가기 생성 |
 
 ### 점검 항목
 
@@ -171,7 +173,9 @@ macOS에서는 관리자 권한 없이 설치할 수 있습니다.
 
 macOS 설치 스크립트는 앱을 `~/Library/Application Support/SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 `~/Applications/SecChk.command` 바로가기를 생성합니다. 삭제하려면 `~/Library/Application Support/SecChk/Uninstall-SecChk.command`를 실행하거나, 다운로드한 저장소의 `scripts/uninstall-macos.command`를 더블클릭하면 됩니다.
 
-Windows에서는 관리자 권한 없이 설치할 수 있습니다.
+Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `packaging/macos`에 KODA 아이콘, 샌드박스 entitlements, `KODA.app` 및 서명 패키지 빌드 스크립트를 추가했습니다.
+
+Windows에서는 관리자 권한 없이 설치할 수 있습니다. 릴리스 빌드를 받은 경우 `dist/Windows/SecChkSetup.exe`를 실행하고, 저장소를 clone한 경우 스크립트 설치 파일을 사용할 수 있습니다.
 
 1. [python.org](https://www.python.org/downloads/windows/)에서 Python 3.10 이상을 설치합니다.
 2. 이 저장소를 다운로드하거나 clone합니다.
