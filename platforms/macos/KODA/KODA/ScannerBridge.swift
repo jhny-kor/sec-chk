@@ -49,6 +49,19 @@ final class ScannerBridge: ObservableObject {
         statusColor = .secondary
     }
 
+    func removeTarget(_ url: URL) {
+        selectedTargets.removeAll { $0.path == url.path }
+        reportURL = nil
+        detailMessage = ""
+
+        if selectedTargets.isEmpty {
+            statusMessage = "점검할 폴더나 파일을 선택하세요."
+        } else {
+            statusMessage = "\(selectedTargets.count)개 항목 선택됨"
+        }
+        statusColor = .secondary
+    }
+
     func runScan() {
         let targets = selectedTargets
         guard !targets.isEmpty else {

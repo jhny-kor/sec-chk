@@ -3,21 +3,44 @@ import WebKit
 
 struct ContentView: View {
     @StateObject private var scanner = ScannerBridge()
+    @State private var activeStandard: AppSecurityStandard?
+    @State private var homePane: HomePane = .standards
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 18) {
+        GeometryReader { proxy in
+            if let activeStandard {
+                SecurityStandardDetailScreen(standard: activeStandard) {
+                    self.activeStandard = nil
+                }
+            } else {
+                homeView(size: proxy.size)
+            }
+        }
+        .frame(minWidth: 860, minHeight: 640)
+        .onChange(of: scanner.reportURL) { reportURL in
+            if reportURL != nil {
+                homePane = .report
+            } else if homePane == .report {
+                homePane = .standards
+            }
+        }
+    }
+
+    private func homeView(size: CGSize) -> some View {
+        let metrics = layoutMetrics(for: size)
+
+        return VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: metrics.verticalSpacing) {
                 header
-                targetPicker
+                targetPicker(maxHeight: metrics.targetListHeight)
                 statusBar
             }
-            .padding(24)
+            .padding(metrics.outerPadding)
 
             Divider()
 
-            reportPane
+            lowerPane(size: size, minimumCardWidth: metrics.minimumCardWidth)
         }
-        .frame(minWidth: 980, minHeight: 720)
     }
 
     private var header: some View {
@@ -44,7 +67,7 @@ struct ContentView: View {
         }
     }
 
-    private var targetPicker: some View {
+    private func targetPicker(maxHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("점검 대상")
@@ -89,6 +112,18 @@ struct ContentView: View {
                                 Text(target.path)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+
+                                Spacer(minLength: 8)
+
+                                Button {
+                                    scanner.removeTarget(target)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("점검 대상 삭제")
+                                .disabled(scanner.isRunning)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 12)
@@ -97,7 +132,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .frame(maxHeight: 118)
+            .frame(maxHeight: maxHeight)
             .background(Color(nsColor: .textBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
@@ -128,26 +163,62 @@ struct ContentView: View {
         .font(.callout)
     }
 
-    private var reportPane: some View {
-        Group {
-            if let reportURL = scanner.reportURL {
+    private func lowerPane(size: CGSize, minimumCardWidth: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text(homePane == .report ? "점검 결과" : "보안 점검 기준")
+                    .font(.title3.weight(.bold))
+
+                Spacer()
+
+                if scanner.reportURL != nil {
+                    Picker("하단 화면", selection: $homePane) {
+                        Text("보안 기준").tag(HomePane.standards)
+                        Text("점검 결과").tag(HomePane.report)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: min(240, max(190, size.width * 0.24)))
+                }
+            }
+            .padding(.horizontal, min(28, max(18, size.width * 0.025)))
+            .padding(.vertical, 14)
+
+            Divider()
+
+            if homePane == .report, let reportURL = scanner.reportURL {
                 ReportWebView(url: reportURL)
                     .id(reportURL)
             } else {
-                VStack(spacing: 14) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 46, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text("점검을 실행하면 이 영역에 웹 대시보드 형식의 결과가 표시됩니다.")
-                        .font(.title3)
-                    Text("폴더나 파일을 선택한 뒤 보안 점검 실행을 누르세요.")
-                        .foregroundStyle(.secondary)
+                SecurityStandardsGridView(
+                    standards: SecurityStandardCatalog.all,
+                    minimumCardWidth: minimumCardWidth
+                ) { standard in
+                    activeStandard = standard
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
             }
         }
     }
+
+    private func layoutMetrics(for size: CGSize) -> DashboardLayoutMetrics {
+        DashboardLayoutMetrics(
+            outerPadding: min(28, max(16, size.width * 0.025)),
+            verticalSpacing: min(18, max(12, size.height * 0.02)),
+            targetListHeight: min(150, max(82, size.height * 0.17)),
+            minimumCardWidth: min(340, max(250, size.width * 0.28))
+        )
+    }
+}
+
+private enum HomePane: String {
+    case standards
+    case report
+}
+
+private struct DashboardLayoutMetrics {
+    let outerPadding: CGFloat
+    let verticalSpacing: CGFloat
+    let targetListHeight: CGFloat
+    let minimumCardWidth: CGFloat
 }
 
 private struct ReportWebView: NSViewRepresentable {

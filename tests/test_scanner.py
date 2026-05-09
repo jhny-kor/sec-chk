@@ -778,6 +778,7 @@ class ScannerTests(unittest.TestCase):
             / "KODA.xcscheme"
         )
         koda_content_view = root / "platforms" / "macos" / "KODA" / "KODA" / "ContentView.swift"
+        koda_standards_view = root / "platforms" / "macos" / "KODA" / "KODA" / "SecurityStandardsView.swift"
         koda_bridge = root / "platforms" / "macos" / "KODA" / "KODA" / "ScannerBridge.swift"
         koda_app = root / "platforms" / "macos" / "KODA" / "KODA" / "KODAApp.swift"
         koda_native_scanner = root / "platforms" / "macos" / "KODA" / "KODA" / "NativeSecurityScanner.swift"
@@ -812,6 +813,7 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = com.jhnykor.koda", koda_project.read_text(encoding="utf-8"))
         self.assertIn("CODE_SIGN_ENTITLEMENTS = ../../../packaging/macos/KODA.entitlements", koda_project.read_text(encoding="utf-8"))
         self.assertIn("NativeSecurityScanner.swift in Sources", koda_project.read_text(encoding="utf-8"))
+        self.assertIn("SecurityStandardsView.swift in Sources", koda_project.read_text(encoding="utf-8"))
         self.assertNotIn("security_scanner in Resources", koda_project.read_text(encoding="utf-8"))
         self.assertNotIn("KODA_SCANNER_ROOT", koda_scheme.read_text(encoding="utf-8"))
         self.assertIn("NSOpenPanel", koda_bridge.read_text(encoding="utf-8"))
@@ -821,11 +823,22 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("zip, jar, war, tar, tar.gz, tgz, gz", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("NativeSecurityScanner", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("startAccessingSecurityScopedResource", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("func removeTarget", koda_bridge.read_text(encoding="utf-8"))
         self.assertNotIn("python3", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("WKWebView", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("ReportWebView", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("loadFileURL", koda_content_view.read_text(encoding="utf-8"))
-        self.assertIn("if let reportURL", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("let reportURL = scanner.reportURL", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("GeometryReader", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("removeTarget(target)", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("SecurityStandardsGridView", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("SecurityStandardDetailScreen", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("SecurityStandardCatalog.all", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("OWASP Top 10:2025", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("국정원 웹 8대 보안취약점", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("전자금융감독규정 8대 취약점", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("OWASP ASVS 5.0", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("NIST SSDF SP 800-218", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_TARGETS", koda_app.read_text(encoding="utf-8"))
         self.assertIn("extractZip", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("gunzip", koda_native_scanner.read_text(encoding="utf-8"))
