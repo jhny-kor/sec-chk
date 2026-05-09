@@ -59,6 +59,104 @@ enum AppLanguage: String, Hashable {
         case .en: return "Official Sites"
         }
     }
+
+    var riskFormulaTitle: String {
+        switch self {
+        case .ko: return "위험점수 계산"
+        case .en: return "Risk Score Formula"
+        }
+    }
+
+    var riskFormulaDescription: String {
+        switch self {
+        case .ko: return "위험 점수는 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점을 발견 항목별로 더한 값입니다."
+        case .en: return "Risk score is the sum of each finding: critical 100, high 40, medium 10, low 3, and info 1."
+        }
+    }
+
+    var severityDistributionTitle: String {
+        switch self {
+        case .ko: return "위험군별 분포"
+        case .en: return "Severity Distribution"
+        }
+    }
+
+    var checkedItemsTitle: String {
+        switch self {
+        case .ko: return "이 기준에서 확인하는 항목"
+        case .en: return "Checks Covered By This Standard"
+        }
+    }
+
+    var noCheckedItemsTitle: String {
+        switch self {
+        case .ko: return "표시할 점검 항목이 없습니다."
+        case .en: return "No check items to display."
+        }
+    }
+
+    var localCheckBadge: String {
+        switch self {
+        case .ko: return "로컬 점검"
+        case .en: return "Local"
+        }
+    }
+
+    var partialCheckBadge: String {
+        switch self {
+        case .ko: return "부분 자동"
+        case .en: return "Partial"
+        }
+    }
+
+    func severityLabel(_ severity: String) -> String {
+        switch (self, severity) {
+        case (.ko, "critical"): return "치명"
+        case (.ko, "high"): return "높음"
+        case (.ko, "medium"): return "중간"
+        case (.ko, "low"): return "낮음"
+        case (.ko, _): return "정보"
+        case (.en, "critical"): return "Critical"
+        case (.en, "high"): return "High"
+        case (.en, "medium"): return "Medium"
+        case (.en, "low"): return "Low"
+        case (.en, _): return "Info"
+        }
+    }
+}
+
+struct LanguageToggle: View {
+    @Binding var language: AppLanguage
+
+    var body: some View {
+        HStack(spacing: 0) {
+            languageButton(.ko)
+            languageButton(.en)
+        }
+        .padding(3)
+        .background(Color.white.opacity(0.14))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+        }
+        .accessibilityLabel("Language")
+    }
+
+    private func languageButton(_ value: AppLanguage) -> some View {
+        Button {
+            language = value
+        } label: {
+            Text(value.rawValue.uppercased())
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 26)
+                .background(language == value ? Color.white.opacity(0.26) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .help(value == .ko ? "한국어" : "English")
+    }
 }
 
 struct AppSecurityStandard: Identifiable, Hashable {
@@ -450,12 +548,7 @@ struct SecurityStandardDetailScreen: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.white)
 
-                Picker("Language", selection: $language) {
-                    Text("KO").tag(AppLanguage.ko)
-                    Text("EN").tag(AppLanguage.en)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 104)
+                LanguageToggle(language: $language)
             }
 
             HStack(alignment: .top, spacing: 16) {
@@ -604,6 +697,25 @@ struct DetailHelpPanel: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(language.checkedItemsTitle)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+
+                if checkedCategories.isEmpty {
+                    Text(language.noCheckedItemsTitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10)], spacing: 10) {
+                        ForEach(checkedCategories) { category in
+                            HelpCriteriaCard(category: category, language: language)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 4)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -636,6 +748,48 @@ struct DetailHelpPanel: View {
             return "\(standardName) 화면입니다. 위험 점수는 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점을 더해 계산합니다. 기준별 결과는 로컬 정적 점검으로 매핑 가능한 항목만 포함하며, 런타임 점검이나 조직 증적이 필요한 항목은 별도 확인이 필요합니다."
         case .en:
             return "This is the \(standardName) view. Risk score is calculated as critical 100, high 40, medium 10, low 3, and info 1. Standard-specific results include locally mappable static checks only; runtime validation and organizational evidence still require separate review."
+        }
+    }
+
+    private var checkedCategories: [AppStandardCategory] {
+        if let standard {
+            return standard.categories
+        }
+        return SecurityStandardCatalog.all.first { $0.id == "local" }?.categories ?? []
+    }
+}
+
+private struct HelpCriteriaCard: View {
+    let category: AppStandardCategory
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(category.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 8)
+
+                Text(category.isMapped ? language.localCheckBadge : language.partialCheckBadge)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(category.isMapped ? .green : .orange)
+            }
+
+            Text(category.coverage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
         }
     }
 }

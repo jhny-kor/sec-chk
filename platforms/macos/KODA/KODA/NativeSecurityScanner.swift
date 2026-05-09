@@ -675,6 +675,7 @@ private extension NativeSecurityScanner {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let generated = formatter.string(from: result.generatedAt)
         let severityCounts = Dictionary(grouping: result.findings, by: \.severity).mapValues(\.count)
+        let severityBars = renderSeverityBars(severityCounts)
         let rows = result.findings.map { finding in
             """
             <tr>
@@ -705,6 +706,14 @@ private extension NativeSecurityScanner {
             .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:18px; }
             .label { color:var(--muted); font-weight:700; }
             .value { font-size:34px; font-weight:800; margin-top:8px; }
+            .risk-panel { display:grid; grid-template-columns:1fr 1.2fr; gap:14px; margin:0 0 22px; }
+            .risk-copy { color:var(--muted); line-height:1.55; margin:8px 0 0; }
+            .bars { display:grid; gap:10px; }
+            .bar-row { display:grid; grid-template-columns:72px 1fr 42px; align-items:center; gap:10px; }
+            .bar-label { color:var(--muted); font-weight:700; }
+            .bar-track { height:11px; border-radius:999px; background:#e9eef5; overflow:hidden; }
+            .bar-fill { height:100%; border-radius:999px; min-width:0; }
+            .bar-count { text-align:right; font-variant-numeric:tabular-nums; font-weight:800; }
             table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
             th,td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:13px 14px; }
             th { color:var(--muted); background:#f8fafc; font-size:13px; }
@@ -716,7 +725,7 @@ private extension NativeSecurityScanner {
             .low { background:#2563eb; color:white; }
             .info { background:#475467; color:white; }
             .warnings { margin:18px 0; color:#92400e; }
-            @media (max-width: 900px) { .grid { grid-template-columns:1fr 1fr; } table { font-size:14px; } }
+            @media (max-width: 900px) { .grid,.risk-panel { grid-template-columns:1fr; } table { font-size:14px; } }
           </style>
         </head>
         <body>
@@ -730,6 +739,16 @@ private extension NativeSecurityScanner {
               <div class="card"><div class="label">치명/높음</div><div class="value">\((severityCounts["critical"] ?? 0) + (severityCounts["high"] ?? 0))</div></div>
               <div class="card"><div class="label">중간</div><div class="value">\(severityCounts["medium"] ?? 0)</div></div>
               <div class="card"><div class="label">낮음/정보</div><div class="value">\((severityCounts["low"] ?? 0) + (severityCounts["info"] ?? 0))</div></div>
+            </section>
+            <section class="risk-panel">
+              <div class="card">
+                <div class="label">위험점수 계산</div>
+                <p class="risk-copy">위험 점수는 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점을 발견 항목별로 더한 값입니다.</p>
+              </div>
+              <div class="card">
+                <div class="label">위험군별 분포</div>
+                <div class="bars">\(severityBars)</div>
+              </div>
             </section>
             \(warnings.isEmpty ? "" : "<section class=\"warnings\"><strong>경고</strong><ul>\(warnings)</ul></section>")
             <table>
@@ -750,6 +769,28 @@ private extension NativeSecurityScanner {
         case "low": return "낮음"
         default: return "정보"
         }
+    }
+
+    func renderSeverityBars(_ counts: [String: Int]) -> String {
+        let entries = [
+            ("critical", "치명", "#7f1d1d"),
+            ("high", "높음", "#b42318"),
+            ("medium", "중간", "#b7791f"),
+            ("low", "낮음", "#2563eb"),
+            ("info", "정보", "#475467"),
+        ]
+        let maximum = max(entries.map { counts[$0.0] ?? 0 }.max() ?? 0, 1)
+        return entries.map { severity, label, color in
+            let count = counts[severity] ?? 0
+            let width = count == 0 ? 0 : max(3, Int((Double(count) / Double(maximum)) * 100))
+            return """
+            <div class="bar-row">
+              <div class="bar-label">\(label)</div>
+              <div class="bar-track"><div class="bar-fill" style="width:\(width)%; background:\(color);"></div></div>
+              <div class="bar-count">\(count)</div>
+            </div>
+            """
+        }.joined(separator: "\n")
     }
 }
 

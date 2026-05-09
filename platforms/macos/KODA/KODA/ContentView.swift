@@ -228,6 +228,8 @@ private struct ScanReportDetailScreen: View {
                 DetailHelpPanel(language: language, standard: report.standard)
             }
 
+            RiskScoreOverviewPanel(report: report, language: language)
+
             ReportWebView(url: report.reportURL)
                 .id(report.reportURL)
         }
@@ -264,16 +266,147 @@ private struct ScanReportDetailScreen: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.white)
 
-            Picker("Language", selection: $language) {
-                Text("KO").tag(AppLanguage.ko)
-                Text("EN").tag(AppLanguage.en)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 104)
+            LanguageToggle(language: $language)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
         .background(Color(red: 0.04, green: 0.07, blue: 0.13))
+    }
+}
+
+private struct RiskScoreOverviewPanel: View {
+    let report: ScanReportItem
+    let language: AppLanguage
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 8) {
+                    Image(systemName: "function")
+                        .foregroundStyle(report.accent.color)
+                    Text(language.riskFormulaTitle)
+                        .font(.headline)
+                }
+
+                Text(language.riskFormulaDescription)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("\(language.riskScoreTitle): \(report.riskScore)")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(report.accent.color)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+            }
+
+            SeverityDistributionChart(
+                distribution: report.severityDistribution,
+                language: language
+            )
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct SeverityDistributionChart: View {
+    let distribution: SeverityDistribution
+    let language: AppLanguage
+
+    private var buckets: [SeverityBucket] {
+        SeverityBucket.all(language: language, distribution: distribution)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.xaxis")
+                    .foregroundStyle(.blue)
+                Text(language.severityDistributionTitle)
+                    .font(.headline)
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
+                ForEach(buckets) { bucket in
+                    SeverityBarRow(bucket: bucket, maximum: distribution.maximum)
+                }
+            }
+        }
+    }
+}
+
+private struct SeverityBucket: Identifiable {
+    let id: String
+    let label: String
+    let count: Int
+    let color: Color
+
+    static func all(language: AppLanguage, distribution: SeverityDistribution) -> [SeverityBucket] {
+        [
+            SeverityBucket(id: "critical", label: language.severityLabel("critical"), count: distribution.critical, color: Color(red: 0.50, green: 0.11, blue: 0.11)),
+            SeverityBucket(id: "high", label: language.severityLabel("high"), count: distribution.high, color: Color(red: 0.70, green: 0.13, blue: 0.09)),
+            SeverityBucket(id: "medium", label: language.severityLabel("medium"), count: distribution.medium, color: Color(red: 0.72, green: 0.48, blue: 0.12)),
+            SeverityBucket(id: "low", label: language.severityLabel("low"), count: distribution.low, color: .blue),
+            SeverityBucket(id: "info", label: language.severityLabel("info"), count: distribution.info, color: .secondary)
+        ]
+    }
+}
+
+private struct SeverityBarRow: View {
+    let bucket: SeverityBucket
+    let maximum: Int
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(bucket.label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 58, alignment: .leading)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(nsColor: .controlBackgroundColor))
+
+                    Capsule()
+                        .fill(bucket.color)
+                        .frame(width: barWidth(in: proxy.size.width))
+                }
+            }
+            .frame(height: 9)
+
+            Text("\(bucket.count)")
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .frame(width: 32, alignment: .trailing)
+        }
+    }
+
+    private func barWidth(in width: CGFloat) -> CGFloat {
+        guard bucket.count > 0 else {
+            return 0
+        }
+        return max(6, width * CGFloat(bucket.count) / CGFloat(maximum))
     }
 }
 

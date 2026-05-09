@@ -161,6 +161,7 @@ final class ScannerBridge: ObservableObject {
                 reportURL: overallURL,
                 findingCount: result.findings.count,
                 riskScore: result.riskScore,
+                severityDistribution: SeverityDistribution(findings: result.findings),
                 standard: nil
             )
         ]
@@ -188,6 +189,7 @@ final class ScannerBridge: ObservableObject {
                     reportURL: output,
                     findingCount: findings.count,
                     riskScore: standardResult.riskScore,
+                    severityDistribution: SeverityDistribution(findings: findings),
                     standard: standard
                 )
             )
@@ -234,10 +236,42 @@ struct ScanReportItem: Identifiable, Hashable {
     let reportURL: URL
     let findingCount: Int
     let riskScore: Int
+    let severityDistribution: SeverityDistribution
     let standard: AppSecurityStandard?
 
     var isOverall: Bool {
         standard == nil
+    }
+}
+
+struct SeverityDistribution: Hashable {
+    let critical: Int
+    let high: Int
+    let medium: Int
+    let low: Int
+    let info: Int
+
+    init(critical: Int = 0, high: Int = 0, medium: Int = 0, low: Int = 0, info: Int = 0) {
+        self.critical = critical
+        self.high = high
+        self.medium = medium
+        self.low = low
+        self.info = info
+    }
+
+    init(findings: [NativeFinding]) {
+        let counts = Dictionary(grouping: findings, by: \.severity).mapValues(\.count)
+        self.init(
+            critical: counts["critical"] ?? 0,
+            high: counts["high"] ?? 0,
+            medium: counts["medium"] ?? 0,
+            low: counts["low"] ?? 0,
+            info: counts["info"] ?? 0
+        )
+    }
+
+    var maximum: Int {
+        max(critical, high, medium, low, info, 1)
     }
 }
 
