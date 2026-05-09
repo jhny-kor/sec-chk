@@ -7,13 +7,13 @@ This folder contains the first App Store packaging lane for the macOS app named 
 - `assets/KODA.icns`: app icon generated from the supplied KODA image.
 - `assets/KODA-AppStore-1024.png`: 1024 px App Store marketing icon source.
 - `KODA.entitlements`: App Sandbox entitlements required for Mac App Store distribution.
-- `../../platforms/macos/KODA/KODA.xcodeproj`: native SwiftUI macOS project for the App Store lane. The app supports folder selection, multiple file selection, and common archive inputs through the bundled scanner resources.
-- `build-koda-app.command`: PyInstaller-based macOS app and package build script.
+- `../../platforms/macos/KODA/KODA.xcodeproj`: native SwiftUI macOS project for the App Store lane. The app supports folder selection, multiple file selection, and common archive inputs with a built-in Swift scanner.
+- `build-koda-xcode-app.command`: builds the native Xcode app to `dist/macos/KODA.app`.
+- `build-koda-app.command`: legacy PyInstaller-based macOS app and package build script for non-store experiments.
 
 ## Requirements
 
 - macOS with Xcode Command Line Tools.
-- Python 3.10 or newer.
 - Apple Developer Program membership.
 - A Mac App Store bundle identifier, for example `com.yourcompany.koda`.
 - Mac App Distribution and Mac Installer Distribution signing certificates.
@@ -31,16 +31,14 @@ open platforms/macos/KODA/KODA.xcodeproj
 For local command-line verification without signing:
 
 ```zsh
-xcodebuild \
-  -project platforms/macos/KODA/KODA.xcodeproj \
-  -scheme KODA \
-  -configuration Debug \
-  -derivedDataPath /tmp/koda-derived \
-  CODE_SIGNING_ALLOWED=NO \
-  build
+packaging/macos/build-koda-xcode-app.command
 ```
 
-The Xcode app copies the `security_scanner` package into `Contents/Resources`, so the built app can find the scanner without being launched from the repository root. The first bridge still starts `python3`; for final App Store review, bundle a Python runtime or replace the bridge with a native scanner implementation so the app is fully self-contained on a clean Mac.
+The Xcode app uses the native Swift scanner in the app target. It does not require `python3` to launch or scan from the `.app` bundle. The local build output is:
+
+```text
+dist/macos/KODA.app
+```
 
 ### PyInstaller package lane
 
@@ -76,7 +74,7 @@ Upload the signed package through Transporter or App Store Connect after creatin
 
 ## Current limitation
 
-The Xcode app is now the preferred App Store lane, and it can run scans from selected folders, selected files, and supported archives (`zip`, `jar`, `war`, `tar`, `tar.gz`, `tgz`, `gz`). Before final App Review submission, make the Python runtime self-contained, run a full sandbox QA pass on a clean Mac, and verify folder selection, multi-file scanning, archive extraction, OSV opt-in networking, and scanner access to user-selected folders.
+The Xcode app is now the preferred App Store lane, and it can run scans from selected folders, selected files, and supported archives (`zip`, `jar`, `war`, `tar`, `tar.gz`, `tgz`, `gz`) without an external Python runtime. Before final App Review submission, run a full sandbox QA pass on a clean Mac and verify folder selection, multi-file scanning, archive extraction, and scanner access to user-selected folders.
 
 Apple references:
 

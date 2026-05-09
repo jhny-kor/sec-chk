@@ -762,6 +762,7 @@ class ScannerTests(unittest.TestCase):
         windows_builder = root / "scripts" / "build-windows-installer.ps1"
         windows_inno = root / "packaging" / "windows" / "SecChk.iss"
         mac_app_builder = root / "packaging" / "macos" / "build-koda-app.command"
+        mac_xcode_builder = root / "packaging" / "macos" / "build-koda-xcode-app.command"
         mac_entitlements = root / "packaging" / "macos" / "KODA.entitlements"
         mac_icon = root / "packaging" / "macos" / "assets" / "KODA.icns"
         mac_packaging_readme = root / "packaging" / "macos" / "README.md"
@@ -777,6 +778,8 @@ class ScannerTests(unittest.TestCase):
             / "KODA.xcscheme"
         )
         koda_bridge = root / "platforms" / "macos" / "KODA" / "KODA" / "ScannerBridge.swift"
+        koda_app = root / "platforms" / "macos" / "KODA" / "KODA" / "KODAApp.swift"
+        koda_native_scanner = root / "platforms" / "macos" / "KODA" / "KODA" / "NativeSecurityScanner.swift"
         store_release_notes = root / "docs" / "store-release.md"
         readme = (root / "README.md").read_text(encoding="utf-8")
 
@@ -798,23 +801,32 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("OutputDir=..\\..\\dist\\Windows", windows_inno.read_text(encoding="utf-8"))
         self.assertTrue(os.access(mac_app_builder, os.X_OK))
         self.assertIn("APP_NAME=\"${APP_NAME:-KODA}\"", mac_app_builder.read_text(encoding="utf-8"))
+        self.assertTrue(os.access(mac_xcode_builder, os.X_OK))
+        self.assertIn("platforms/macos/KODA/KODA.xcodeproj", mac_xcode_builder.read_text(encoding="utf-8"))
+        self.assertIn("dist/macos", mac_xcode_builder.read_text(encoding="utf-8"))
         self.assertIn("com.apple.security.app-sandbox", mac_entitlements.read_text(encoding="utf-8"))
         self.assertEqual(mac_icon.read_bytes()[:4], b"icns")
         self.assertIn("KODA macOS App Store Packaging", mac_packaging_readme.read_text(encoding="utf-8"))
         self.assertIn("productType = \"com.apple.product-type.application\"", koda_project.read_text(encoding="utf-8"))
         self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = com.jhnykor.koda", koda_project.read_text(encoding="utf-8"))
         self.assertIn("CODE_SIGN_ENTITLEMENTS = ../../../packaging/macos/KODA.entitlements", koda_project.read_text(encoding="utf-8"))
-        self.assertIn("security_scanner in Resources", koda_project.read_text(encoding="utf-8"))
-        self.assertIn("KODA_SCANNER_ROOT", koda_scheme.read_text(encoding="utf-8"))
+        self.assertIn("NativeSecurityScanner.swift in Sources", koda_project.read_text(encoding="utf-8"))
+        self.assertNotIn("security_scanner in Resources", koda_project.read_text(encoding="utf-8"))
+        self.assertNotIn("KODA_SCANNER_ROOT", koda_scheme.read_text(encoding="utf-8"))
         self.assertIn("NSOpenPanel", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("allowsMultipleSelection = true", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("canChooseDirectories = true", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("canChooseFiles = true", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("zip, jar, war, tar, tar.gz, tgz, gz", koda_bridge.read_text(encoding="utf-8"))
-        self.assertIn("security_scanner", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("NativeSecurityScanner", koda_bridge.read_text(encoding="utf-8"))
+        self.assertNotIn("python3", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("KODA_SCAN_TARGETS", koda_app.read_text(encoding="utf-8"))
+        self.assertIn("extractZip", koda_native_scanner.read_text(encoding="utf-8"))
+        self.assertIn("gunzip", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn(".msixupload", (root / "packaging" / "windows" / "README.md").read_text(encoding="utf-8"))
         self.assertIn("Microsoft Store", store_release_notes.read_text(encoding="utf-8"))
         self.assertIn("App Store Connect", store_release_notes.read_text(encoding="utf-8"))
+        self.assertIn("native Swift scanner", store_release_notes.read_text(encoding="utf-8"))
         self.assertIn("Install quickly", readme)
         self.assertIn("설치 방법 요약", readme)
         self.assertIn("scripts/install-macos.command", readme)

@@ -96,99 +96,28 @@ final class ScannerBridge: ObservableObject {
     }
 
     private nonisolated static func runScanCommand(targets: [URL]) -> ScanResult {
+        let scanner = NativeSecurityScanner()
         let fileManager = FileManager.default
-        guard let scannerRoot = locateScannerRoot(fileManager: fileManager) else {
-            return ScanResult(
-                exitCode: 2,
-                reportURL: nil,
-                message: "스캐너 리소스를 찾지 못했습니다.",
-                detail: "앱 번들 리소스 또는 KODA_SCANNER_ROOT에서 security_scanner 패키지를 찾지 못했습니다."
-            )
-        }
-
         let output = fileManager.temporaryDirectory.appendingPathComponent("KODA-security-dashboard-\(UUID().uuidString).html")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        var arguments = [
-            "python3",
-            "-m",
-            "security_scanner",
-            "scan",
-            "--format",
-            "html",
-            "--language",
-            "ko",
-            "--output",
-            output.path,
-            "--discover-projects",
-            "--discovery-depth",
-            "20",
-        ]
-        for target in targets {
-            arguments.append(contentsOf: ["--target", target.path])
-        }
-        process.arguments = arguments
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["PYTHONPATH"] = scannerRoot.path
-        process.environment = environment
-        process.currentDirectoryURL = scannerRoot
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
 
         do {
-            try process.run()
-            process.waitUntilExit()
+            let result = try scanner.scan(targets: targets)
+            try scanner.writeHTMLReport(result, to: output)
+            let warningText = result.warnings.isEmpty ? "" : "\n경고:\n" + result.warnings.joined(separator: "\n")
+            return ScanResult(
+                exitCode: 0,
+                reportURL: output,
+                message: "점검 완료",
+                detail: "스캔 파일 \(result.scannedFileCount)개, 발견 항목 \(result.findings.count)건\(warningText)"
+            )
         } catch {
             return ScanResult(
                 exitCode: 2,
                 reportURL: nil,
                 message: "스캐너 실행에 실패했습니다.",
-                detail: "\(error.localizedDescription)\npython3 런타임을 실행할 수 있는지 확인하세요."
+                detail: error.localizedDescription
             )
         }
-
-        let stdout = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let detail = [stdout, stderr].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: "\n")
-
-        return ScanResult(
-            exitCode: process.terminationStatus,
-            reportURL: process.terminationStatus == 0 ? output : nil,
-            message: process.terminationStatus == 0 ? "점검 완료" : "점검 실패",
-            detail: detail
-        )
-    }
-
-    private nonisolated static func locateScannerRoot(fileManager: FileManager) -> URL? {
-        if let configuredRoot = ProcessInfo.processInfo.environment["KODA_SCANNER_ROOT"], !configuredRoot.isEmpty {
-            let url = URL(fileURLWithPath: configuredRoot)
-            if hasScannerPackage(at: url, fileManager: fileManager) {
-                return url
-            }
-        }
-
-        if let resourceURL = Bundle.main.resourceURL, hasScannerPackage(at: resourceURL, fileManager: fileManager) {
-            return resourceURL
-        }
-
-        var current = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-        for _ in 0..<10 {
-            if hasScannerPackage(at: current, fileManager: fileManager) {
-                return current
-            }
-            current.deleteLastPathComponent()
-        }
-
-        return nil
-    }
-
-    private nonisolated static func hasScannerPackage(at root: URL, fileManager: FileManager) -> Bool {
-        let marker = root.appendingPathComponent("security_scanner/__main__.py").path
-        return fileManager.fileExists(atPath: marker)
     }
 }
 

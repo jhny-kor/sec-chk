@@ -13,26 +13,20 @@ Primary lane:
 - App Sandbox entitlements: `packaging/macos/KODA.entitlements`
 - Icon: `packaging/macos/assets/KODA.icns`
 - App Store 1024 px icon source: `packaging/macos/assets/KODA-AppStore-1024.png`
-- Scanner resources: `security_scanner` is copied into the app bundle resources.
+- Scanner runtime: native Swift scanner in the KODA app target; no external Python runtime required for `.app` scanning.
 - Inputs: folder selection, multiple file selection, and supported archives (`zip`, `jar`, `war`, `tar`, `tar.gz`, `tgz`, `gz`).
 
 Local build check:
 
 ```zsh
-xcodebuild \
-  -project platforms/macos/KODA/KODA.xcodeproj \
-  -scheme KODA \
-  -configuration Debug \
-  -derivedDataPath /tmp/koda-derived \
-  CODE_SIGNING_ALLOWED=NO \
-  build
+packaging/macos/build-koda-xcode-app.command
 ```
 
 Before submission:
 
 - Set the final Apple Developer Team and Bundle ID in Xcode.
 - Use App Sandbox and keep folder access behind user selection.
-- Make the Python runtime self-contained for the signed app, or replace the scanner bridge with a native scanner implementation.
+- Run a clean-Mac sandbox QA pass against the signed archive, including selected folder access and archive extraction.
 - Archive in Xcode and upload to App Store Connect, or export and upload with Transporter.
 
 Apple references:

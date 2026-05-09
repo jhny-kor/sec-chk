@@ -38,7 +38,7 @@ macOS users can install SecChk without administrator privileges:
 
 The macOS installer copies the app to `~/Library/Application Support/SecChk`, creates a private Python virtual environment, and creates `~/Applications/SecChk.command`. To remove it, run `~/Library/Application Support/SecChk/Uninstall-SecChk.command` or double-click `scripts/uninstall-macos.command` from the downloaded repository.
 
-Mac App Store packaging for the native macOS app name `KODA` lives in `packaging/macos`, with the Xcode project at `platforms/macos/KODA/KODA.xcodeproj`. The app supports folder selection, multiple file selection, and common archive inputs through bundled scanner resources. See `docs/store-release.md` for the store checklist.
+Mac App Store packaging for the native macOS app name `KODA` lives in `packaging/macos`, with the Xcode project at `platforms/macos/KODA/KODA.xcodeproj`. The app supports folder selection, multiple file selection, and common archive inputs with a built-in Swift scanner, so `.app` scanning does not require Python. See `docs/store-release.md` for the store checklist.
 
 Windows users can install SecChk without administrator privileges. If you downloaded a release build, run `dist/Windows/SecChkSetup.exe`. If you cloned the repository, you can use the script installer:
 
@@ -175,7 +175,7 @@ macOS에서는 관리자 권한 없이 설치할 수 있습니다.
 
 macOS 설치 스크립트는 앱을 `~/Library/Application Support/SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 `~/Applications/SecChk.command` 바로가기를 생성합니다. 삭제하려면 `~/Library/Application Support/SecChk/Uninstall-SecChk.command`를 실행하거나, 다운로드한 저장소의 `scripts/uninstall-macos.command`를 더블클릭하면 됩니다.
 
-Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `packaging/macos`에 KODA 아이콘과 샌드박스 entitlements를 추가했고 `platforms/macos/KODA/KODA.xcodeproj`에 Xcode 프로젝트를 추가했습니다. 앱에서는 폴더 선택, 여러 파일 선택, 일반 압축파일 입력을 지원합니다. 스토어 출시 체크리스트는 `docs/store-release.md`에서 확인할 수 있습니다.
+Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `packaging/macos`에 KODA 아이콘과 샌드박스 entitlements를 추가했고 `platforms/macos/KODA/KODA.xcodeproj`에 Xcode 프로젝트를 추가했습니다. 앱에서는 Python 없이 내장 Swift 스캐너로 폴더 선택, 여러 파일 선택, 일반 압축파일 입력을 지원합니다. 스토어 출시 체크리스트는 `docs/store-release.md`에서 확인할 수 있습니다.
 
 Windows에서는 관리자 권한 없이 설치할 수 있습니다. 릴리스 빌드를 받은 경우 `dist/Windows/SecChkSetup.exe`를 실행하고, 저장소를 clone한 경우 스크립트 설치 파일을 사용할 수 있습니다.
 
