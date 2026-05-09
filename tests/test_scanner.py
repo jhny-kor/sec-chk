@@ -777,6 +777,7 @@ class ScannerTests(unittest.TestCase):
             / "xcschemes"
             / "KODA.xcscheme"
         )
+        koda_content_view = root / "platforms" / "macos" / "KODA" / "KODA" / "ContentView.swift"
         koda_bridge = root / "platforms" / "macos" / "KODA" / "KODA" / "ScannerBridge.swift"
         koda_app = root / "platforms" / "macos" / "KODA" / "KODA" / "KODAApp.swift"
         koda_native_scanner = root / "platforms" / "macos" / "KODA" / "KODA" / "NativeSecurityScanner.swift"
@@ -819,7 +820,12 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("canChooseFiles = true", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("zip, jar, war, tar, tar.gz, tgz, gz", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("NativeSecurityScanner", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("startAccessingSecurityScopedResource", koda_bridge.read_text(encoding="utf-8"))
         self.assertNotIn("python3", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("WKWebView", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("ReportWebView", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("loadFileURL", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("if let reportURL", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_TARGETS", koda_app.read_text(encoding="utf-8"))
         self.assertIn("extractZip", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("gunzip", koda_native_scanner.read_text(encoding="utf-8"))

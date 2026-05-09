@@ -99,6 +99,10 @@ final class ScannerBridge: ObservableObject {
         let scanner = NativeSecurityScanner()
         let fileManager = FileManager.default
         let output = fileManager.temporaryDirectory.appendingPathComponent("KODA-security-dashboard-\(UUID().uuidString).html")
+        let accessedTargets = targets.filter { $0.startAccessingSecurityScopedResource() }
+        defer {
+            accessedTargets.forEach { $0.stopAccessingSecurityScopedResource() }
+        }
 
         do {
             let result = try scanner.scan(targets: targets)
