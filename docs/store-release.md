@@ -13,6 +13,8 @@ Primary lane:
 - App Sandbox entitlements: `packaging/macos/KODA.entitlements`
 - Icon: `packaging/macos/assets/KODA.icns`
 - App Store 1024 px icon source: `packaging/macos/assets/KODA-AppStore-1024.png`
+- Scanner resources: `security_scanner` is copied into the app bundle resources.
+- Inputs: folder selection, multiple file selection, and supported archives (`zip`, `jar`, `war`, `tar`, `tar.gz`, `tgz`, `gz`).
 
 Local build check:
 
@@ -30,7 +32,7 @@ Before submission:
 
 - Set the final Apple Developer Team and Bundle ID in Xcode.
 - Use App Sandbox and keep folder access behind user selection.
-- Make the scanner runtime self-contained for the signed app.
+- Make the Python runtime self-contained for the signed app, or replace the scanner bridge with a native scanner implementation.
 - Archive in Xcode and upload to App Store Connect, or export and upload with Transporter.
 
 Apple references:

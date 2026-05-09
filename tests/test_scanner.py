@@ -6,10 +6,12 @@ import re
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 from security_scanner.app import _create_available_server, run_app
+from security_scanner.cli import main as cli_main
 from security_scanner.config import expand_path
 from security_scanner.dependency_inventory import queryable_osv_components
 from security_scanner.discovery import discover_projects
@@ -298,6 +300,42 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(component["name"], "lodash")
             self.assertEqual(component["version"], "4.17.21")
             self.assertEqual(component["purl"], "pkg:npm/lodash@4.17.21")
+
+    def test_scan_command_accepts_multiple_files_and_zip_archives(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env_file = root / ".env"
+            requirements = root / "requirements.txt"
+            archive_path = root / "upload.zip"
+            output = root / "report.json"
+            secret_value = "sk-" + "1234567890abcdefghijklmnop"
+            env_file.write_text(f"OPENAI_API_KEY={secret_value}\n", encoding="utf-8")
+            requirements.write_text("requests\n", encoding="utf-8")
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("web/views.js", "document.body.innerHTML = location.hash\n")
+
+            exit_code = cli_main(
+                [
+                    "scan",
+                    "--target",
+                    str(env_file),
+                    "--target",
+                    str(requirements),
+                    "--target",
+                    str(archive_path),
+                    "--format",
+                    "json",
+                    "--output",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            rule_ids = {finding["rule_id"] for finding in payload["findings"]}
+            self.assertIn("secret.openai-key", rule_ids)
+            self.assertIn("dependency.python-unpinned-requirement", rule_ids)
+            self.assertIn("code.xss-dom-sink", rule_ids)
 
     def test_osv_lookup_can_be_enabled_for_exact_dependency_versions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -766,8 +804,13 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("productType = \"com.apple.product-type.application\"", koda_project.read_text(encoding="utf-8"))
         self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = com.jhnykor.koda", koda_project.read_text(encoding="utf-8"))
         self.assertIn("CODE_SIGN_ENTITLEMENTS = ../../../packaging/macos/KODA.entitlements", koda_project.read_text(encoding="utf-8"))
+        self.assertIn("security_scanner in Resources", koda_project.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCANNER_ROOT", koda_scheme.read_text(encoding="utf-8"))
         self.assertIn("NSOpenPanel", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("allowsMultipleSelection = true", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("canChooseDirectories = true", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("canChooseFiles = true", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("zip, jar, war, tar, tar.gz, tgz, gz", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("security_scanner", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn(".msixupload", (root / "packaging" / "windows" / "README.md").read_text(encoding="utf-8"))
         self.assertIn("Microsoft Store", store_release_notes.read_text(encoding="utf-8"))

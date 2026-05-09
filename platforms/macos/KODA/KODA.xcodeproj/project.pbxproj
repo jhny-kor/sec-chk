@@ -11,6 +11,7 @@
 		0A1B2C3D4E5F600000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A1B2C3D4E5F600000000012 /* ContentView.swift */; };
 		0A1B2C3D4E5F600000000003 /* ScannerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A1B2C3D4E5F600000000013 /* ScannerBridge.swift */; };
 		0A1B2C3D4E5F600000000004 /* KODA.icns in Resources */ = {isa = PBXBuildFile; fileRef = 0A1B2C3D4E5F600000000015 /* KODA.icns */; };
+		0A1B2C3D4E5F600000000005 /* security_scanner in Resources */ = {isa = PBXBuildFile; fileRef = 0A1B2C3D4E5F600000000016 /* security_scanner */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +21,7 @@
 		0A1B2C3D4E5F600000000013 /* ScannerBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerBridge.swift; sourceTree = "<group>"; };
 		0A1B2C3D4E5F600000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0A1B2C3D4E5F600000000015 /* KODA.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = KODA.icns; path = ../../../packaging/macos/assets/KODA.icns; sourceTree = SOURCE_ROOT; };
+		0A1B2C3D4E5F600000000016 /* security_scanner */ = {isa = PBXFileReference; lastKnownFileType = folder; name = security_scanner; path = ../../../security_scanner; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,6 +59,7 @@
 			isa = PBXGroup;
 			children = (
 				0A1B2C3D4E5F600000000015 /* KODA.icns */,
+				0A1B2C3D4E5F600000000016 /* security_scanner */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -128,6 +131,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A1B2C3D4E5F600000000004 /* KODA.icns in Resources */,
+				0A1B2C3D4E5F600000000005 /* security_scanner in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -7,7 +7,7 @@ This folder contains the first App Store packaging lane for the macOS app named 
 - `assets/KODA.icns`: app icon generated from the supplied KODA image.
 - `assets/KODA-AppStore-1024.png`: 1024 px App Store marketing icon source.
 - `KODA.entitlements`: App Sandbox entitlements required for Mac App Store distribution.
-- `../../platforms/macos/KODA/KODA.xcodeproj`: native SwiftUI macOS project for the App Store lane.
+- `../../platforms/macos/KODA/KODA.xcodeproj`: native SwiftUI macOS project for the App Store lane. The app supports folder selection, multiple file selection, and common archive inputs through the bundled scanner resources.
 - `build-koda-app.command`: PyInstaller-based macOS app and package build script.
 
 ## Requirements
@@ -40,7 +40,7 @@ xcodebuild \
   build
 ```
 
-The Xcode scheme sets `KODA_SCANNER_ROOT` to the repository root for development runs. For a final App Store build, package `security_scanner` as an app resource or replace the bridge with a native scanner implementation so the app is self-contained.
+The Xcode app copies the `security_scanner` package into `Contents/Resources`, so the built app can find the scanner without being launched from the repository root. The first bridge still starts `python3`; for final App Store review, bundle a Python runtime or replace the bridge with a native scanner implementation so the app is fully self-contained on a clean Mac.
 
 ### PyInstaller package lane
 
@@ -76,7 +76,7 @@ Upload the signed package through Transporter or App Store Connect after creatin
 
 ## Current limitation
 
-The Xcode app is now the preferred App Store lane, but its first bridge still calls the existing Python scanner during development. Before final App Review submission, make the scanner runtime self-contained, run a full sandbox QA pass on a clean Mac, and verify folder selection, OSV opt-in networking, and scanner access to user-selected folders.
+The Xcode app is now the preferred App Store lane, and it can run scans from selected folders, selected files, and supported archives (`zip`, `jar`, `war`, `tar`, `tar.gz`, `tgz`, `gz`). Before final App Review submission, make the Python runtime self-contained, run a full sandbox QA pass on a clean Mac, and verify folder selection, multi-file scanning, archive extraction, OSV opt-in networking, and scanner access to user-selected folders.
 
 Apple references:
 

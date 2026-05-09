@@ -12,3 +12,5 @@ reports/*.sarif
 output/
 .build/
 dist/macos/
+xcuserdata/
+*.xcuserstate
