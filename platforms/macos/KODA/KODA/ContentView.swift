@@ -4,12 +4,26 @@ import WebKit
 struct ContentView: View {
     @StateObject private var scanner = ScannerBridge()
     @State private var activeStandard: AppSecurityStandard?
-    @State private var homePane: HomePane = .standards
+    @State private var activeReport: ScanReportItem?
+    @State private var language: AppLanguage = .ko
+    @State private var isHelpVisible = false
 
     var body: some View {
         GeometryReader { proxy in
-            if let activeStandard {
-                SecurityStandardDetailScreen(standard: activeStandard) {
+            if let activeReport {
+                ScanReportDetailScreen(
+                    report: activeReport,
+                    language: $language,
+                    isHelpVisible: $isHelpVisible
+                ) {
+                    self.activeReport = nil
+                }
+            } else if let activeStandard {
+                SecurityStandardDetailScreen(
+                    standard: activeStandard,
+                    language: $language,
+                    isHelpVisible: $isHelpVisible
+                ) {
                     self.activeStandard = nil
                 }
             } else {
@@ -17,13 +31,6 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 860, minHeight: 640)
-        .onChange(of: scanner.reportURL) { reportURL in
-            if reportURL != nil {
-                homePane = .report
-            } else if homePane == .report {
-                homePane = .standards
-            }
-        }
     }
 
     private func homeView(size: CGSize) -> some View {
@@ -39,7 +46,7 @@ struct ContentView: View {
 
             Divider()
 
-            lowerPane(size: size, minimumCardWidth: metrics.minimumCardWidth)
+            lowerPane(minimumCardWidth: metrics.minimumCardWidth)
         }
     }
 
@@ -163,38 +170,29 @@ struct ContentView: View {
         .font(.callout)
     }
 
-    private func lowerPane(size: CGSize, minimumCardWidth: CGFloat) -> some View {
+    private func lowerPane(minimumCardWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Text(homePane == .report ? "점검 결과" : "보안 점검 기준")
+                Text("점검 결과 조회")
                     .font(.title3.weight(.bold))
 
                 Spacer()
-
-                if scanner.reportURL != nil {
-                    Picker("하단 화면", selection: $homePane) {
-                        Text("보안 기준").tag(HomePane.standards)
-                        Text("점검 결과").tag(HomePane.report)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: min(240, max(190, size.width * 0.24)))
-                }
             }
-            .padding(.horizontal, min(28, max(18, size.width * 0.025)))
+            .padding(.horizontal, 22)
             .padding(.vertical, 14)
 
             Divider()
 
-            if homePane == .report, let reportURL = scanner.reportURL {
-                ReportWebView(url: reportURL)
-                    .id(reportURL)
-            } else {
-                SecurityStandardsGridView(
-                    standards: SecurityStandardCatalog.all,
-                    minimumCardWidth: minimumCardWidth
-                ) { standard in
-                    activeStandard = standard
-                }
+            ScanResultsGroupedView(
+                reports: scanner.reportItems,
+                standards: SecurityStandardCatalog.all,
+                minimumCardWidth: minimumCardWidth
+            ) { report in
+                activeReport = report
+                isHelpVisible = false
+            } onSelectStandard: { standard in
+                activeStandard = standard
+                isHelpVisible = false
             }
         }
     }
@@ -209,11 +207,6 @@ struct ContentView: View {
     }
 }
 
-private enum HomePane: String {
-    case standards
-    case report
-}
-
 private struct DashboardLayoutMetrics {
     let outerPadding: CGFloat
     let verticalSpacing: CGFloat
@@ -221,7 +214,70 @@ private struct DashboardLayoutMetrics {
     let minimumCardWidth: CGFloat
 }
 
-private struct ReportWebView: NSViewRepresentable {
+private struct ScanReportDetailScreen: View {
+    let report: ScanReportItem
+    @Binding var language: AppLanguage
+    @Binding var isHelpVisible: Bool
+    let onBack: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            detailTopBar
+
+            if isHelpVisible {
+                DetailHelpPanel(language: language, standard: report.standard)
+            }
+
+            ReportWebView(url: report.reportURL)
+                .id(report.reportURL)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var detailTopBar: some View {
+        HStack(spacing: 14) {
+            Button {
+                onBack()
+            } label: {
+                Label(language.backTitle, systemImage: "chevron.left")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.white)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(report.title)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text("\(language.findingsTitle): \(report.findingCount) | \(language.riskScoreTitle): \(report.riskScore)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+
+            Spacer()
+
+            Button {
+                isHelpVisible.toggle()
+            } label: {
+                Label(language.helpTitle, systemImage: "questionmark.circle")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.white)
+
+            Picker("Language", selection: $language) {
+                Text("KO").tag(AppLanguage.ko)
+                Text("EN").tag(AppLanguage.en)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 104)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .background(Color(red: 0.04, green: 0.07, blue: 0.13))
+    }
+}
+
+struct ReportWebView: NSViewRepresentable {
     let url: URL
 
     func makeCoordinator() -> Coordinator {

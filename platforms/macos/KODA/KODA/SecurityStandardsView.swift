@@ -1,5 +1,66 @@
 import SwiftUI
 
+enum AppLanguage: String, Hashable {
+    case ko
+    case en
+
+    var backTitle: String {
+        switch self {
+        case .ko: return "목록"
+        case .en: return "Back"
+        }
+    }
+
+    var helpTitle: String {
+        switch self {
+        case .ko: return "도움말"
+        case .en: return "Help"
+        }
+    }
+
+    var findingsTitle: String {
+        switch self {
+        case .ko: return "발견 항목"
+        case .en: return "Findings"
+        }
+    }
+
+    var riskScoreTitle: String {
+        switch self {
+        case .ko: return "위험 점수"
+        case .en: return "Risk Score"
+        }
+    }
+
+    var scopeTitle: String {
+        switch self {
+        case .ko: return "점검 범위"
+        case .en: return "Scope"
+        }
+    }
+
+    var automationTitle: String {
+        switch self {
+        case .ko: return "자동화 수준"
+        case .en: return "Automation"
+        }
+    }
+
+    var criteriaTitle: String {
+        switch self {
+        case .ko: return "점검 기준"
+        case .en: return "Criteria"
+        }
+    }
+
+    var referenceTitle: String {
+        switch self {
+        case .ko: return "공식 웹사이트"
+        case .en: return "Official Sites"
+        }
+    }
+}
+
 struct AppSecurityStandard: Identifiable, Hashable {
     let id: String
     let title: String
@@ -82,6 +143,213 @@ struct SecurityStandardsGridView: View {
     }
 }
 
+struct ScanResultsGroupedView: View {
+    let reports: [ScanReportItem]
+    let standards: [AppSecurityStandard]
+    let minimumCardWidth: CGFloat
+    let onSelectReport: (ScanReportItem) -> Void
+    let onSelectStandard: (AppSecurityStandard) -> Void
+
+    private var overallReport: ScanReportItem? {
+        reports.first(where: \.isOverall)
+    }
+
+    private var standardReports: [ScanReportItem] {
+        reports.filter { !$0.isOverall }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                if reports.isEmpty {
+                    emptyState
+                }
+
+                groupedSection(title: "전체 조회", subtitle: "스캔 결과 전체를 한 화면에서 확인합니다.") {
+                    if let overallReport {
+                        Button {
+                            onSelectReport(overallReport)
+                        } label: {
+                            ScanReportNavigationCard(report: overallReport)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        DisabledResultCard(
+                            title: "전체 조회",
+                            subtitle: "점검 실행 후 전체 결과 화면으로 이동할 수 있습니다.",
+                            icon: "rectangle.stack"
+                        )
+                    }
+                }
+
+                groupedSection(title: "보안기준별 점검결과", subtitle: "전체 화면에서 기준별 설명, 도움말, KO/EN 토글과 함께 결과를 확인합니다.") {
+                    if standardReports.isEmpty {
+                        LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
+                            ForEach(standards) { standard in
+                                Button {
+                                    onSelectStandard(standard)
+                                } label: {
+                                    SecurityStandardCard(standard: standard)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    } else {
+                        LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
+                            ForEach(standardReports) { report in
+                                Button {
+                                    onSelectReport(report)
+                                } label: {
+                                    ScanReportNavigationCard(report: report)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(22)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var gridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: minimumCardWidth, maximum: 420), spacing: 14)]
+    }
+
+    private var emptyState: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "play.circle")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("점검을 실행하면 결과 조회 카드가 활성화됩니다.")
+                    .font(.headline)
+                Text("점검 전에는 보안기준 카드를 눌러 기준 설명 화면을 먼저 볼 수 있습니다.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+
+    private func groupedSection<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            content()
+        }
+    }
+}
+
+private struct ScanReportNavigationCard: View {
+    let report: ScanReportItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: report.icon)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(report.accent.color)
+                    .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(report.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(report.badge)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(report.accent.color)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.up.right.square")
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(report.subtitle)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 12) {
+                Label("\(report.findingCount)건", systemImage: "list.bullet.rectangle")
+                Label("\(report.riskScore)점", systemImage: "gauge.with.dots.needle.50percent")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 156, alignment: .topLeading)
+        .background(Color(nsColor: .textBackgroundColor))
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(report.accent.color)
+                .frame(width: 4)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+}
+
+private struct DisabledResultCard: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.65))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+}
+
 private struct SecurityStandardCard: View {
     let standard: AppSecurityStandard
 
@@ -142,6 +410,8 @@ private struct SecurityStandardCard: View {
 
 struct SecurityStandardDetailScreen: View {
     let standard: AppSecurityStandard
+    @Binding var language: AppLanguage
+    @Binding var isHelpVisible: Bool
     let onBack: () -> Void
 
     var body: some View {
@@ -149,6 +419,9 @@ struct SecurityStandardDetailScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header(width: proxy.size.width)
+                    if isHelpVisible {
+                        DetailHelpPanel(language: language, standard: standard)
+                    }
                     content(width: proxy.size.width)
                 }
             }
@@ -158,13 +431,32 @@ struct SecurityStandardDetailScreen: View {
 
     private func header(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            Button {
-                onBack()
-            } label: {
-                Label("기준 목록", systemImage: "chevron.left")
+            HStack(spacing: 14) {
+                Button {
+                    onBack()
+                } label: {
+                    Label(language.backTitle, systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.white)
+
+                Spacer()
+
+                Button {
+                    isHelpVisible.toggle()
+                } label: {
+                    Label(language.helpTitle, systemImage: "questionmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.white)
+
+                Picker("Language", selection: $language) {
+                    Text("KO").tag(AppLanguage.ko)
+                    Text("EN").tag(AppLanguage.en)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 104)
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.white)
 
             HStack(alignment: .top, spacing: 16) {
                 Image(systemName: standard.icon)
@@ -201,11 +493,11 @@ struct SecurityStandardDetailScreen: View {
     private func content(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             LazyVGrid(columns: detailColumns(width), spacing: 14) {
-                DetailSummaryTile(title: "점검 범위", value: standard.scope)
-                DetailSummaryTile(title: "자동화 수준", value: standard.coverage)
+                DetailSummaryTile(title: language.scopeTitle, value: standard.scope)
+                DetailSummaryTile(title: language.automationTitle, value: standard.coverage)
             }
 
-            section(title: "점검 기준") {
+            section(title: language.criteriaTitle) {
                 LazyVGrid(columns: detailColumns(width), spacing: 12) {
                     ForEach(standard.categories) { category in
                         StandardCategoryRow(category: category)
@@ -213,7 +505,7 @@ struct SecurityStandardDetailScreen: View {
                 }
             }
 
-            section(title: "공식 웹사이트") {
+            section(title: language.referenceTitle) {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(standard.references) { reference in
                         Link(destination: URL(string: reference.url)!) {
@@ -291,6 +583,59 @@ private struct DetailSummaryTile: View {
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+}
+
+struct DetailHelpPanel: View {
+    let language: AppLanguage
+    let standard: AppSecurityStandard?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "questionmark.circle")
+                    .foregroundStyle(.blue)
+                Text(title)
+                    .font(.headline)
+            }
+
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
+        }
+    }
+
+    private var title: String {
+        switch language {
+        case .ko: return "도움말"
+        case .en: return "Help"
+        }
+    }
+
+    private var message: String {
+        let standardName = standard?.title ?? {
+            switch language {
+            case .ko: return "전체 조회"
+            case .en: return "Overall Results"
+            }
+        }()
+
+        switch language {
+        case .ko:
+            return "\(standardName) 화면입니다. 위험 점수는 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점을 더해 계산합니다. 기준별 결과는 로컬 정적 점검으로 매핑 가능한 항목만 포함하며, 런타임 점검이나 조직 증적이 필요한 항목은 별도 확인이 필요합니다."
+        case .en:
+            return "This is the \(standardName) view. Risk score is calculated as critical 100, high 40, medium 10, low 3, and info 1. Standard-specific results include locally mappable static checks only; runtime validation and organizational evidence still require separate review."
         }
     }
 }
