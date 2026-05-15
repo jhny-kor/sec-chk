@@ -88,6 +88,27 @@ enum AppLanguage: String, Hashable {
         }
     }
 
+    var checkMethodTitle: String {
+        switch self {
+        case .ko: return "점검 방식"
+        case .en: return "Check Method"
+        }
+    }
+
+    var detailedChecksTitle: String {
+        switch self {
+        case .ko: return "세부 확인 항목"
+        case .en: return "Detailed Checks"
+        }
+    }
+
+    var evidenceSourceTitle: String {
+        switch self {
+        case .ko: return "확인 근거"
+        case .en: return "Evidence Used"
+        }
+    }
+
     var noCheckedItemsTitle: String {
         switch self {
         case .ko: return "표시할 점검 항목이 없습니다."
@@ -123,6 +144,205 @@ enum AppLanguage: String, Hashable {
         case (.en, _): return "Info"
         }
     }
+
+    var helpGuideTitle: String {
+        switch self {
+        case .ko: return "점검 가이드"
+        case .en: return "Check Guide"
+        }
+    }
+
+    var guideSummaryTitle: String {
+        switch self {
+        case .ko: return "가이드 요약"
+        case .en: return "Guide Summary"
+        }
+    }
+
+    var guideUsageTitle: String {
+        switch self {
+        case .ko: return "결과 해석"
+        case .en: return "How To Read Results"
+        }
+    }
+
+    var guideUsageDescription: String {
+        switch self {
+        case .ko: return "로컬 정적 점검으로 확인 가능한 항목은 자동으로 표시됩니다. 런타임 테스트, 조직 정책, 운영 증적이 필요한 항목은 부분 자동 항목으로 분류되며 별도 검토가 필요합니다."
+        case .en: return "Locally mappable static checks are shown automatically. Runtime tests, organizational policy checks, and operational evidence are marked as partial and require separate review."
+        }
+    }
+
+    var appSubtitle: String {
+        switch self {
+        case .ko: return "로컬 프로젝트 보안 점검"
+        case .en: return "Local Project Security Scan"
+        }
+    }
+
+    var openInBrowserTitle: String {
+        switch self {
+        case .ko: return "외부 브라우저로 열기"
+        case .en: return "Open in Browser"
+        }
+    }
+
+    var targetsTitle: String {
+        switch self {
+        case .ko: return "점검 대상"
+        case .en: return "Scan Targets"
+        }
+    }
+
+    var chooseFolderTitle: String {
+        switch self {
+        case .ko: return "폴더 선택"
+        case .en: return "Choose Folder"
+        }
+    }
+
+    var uploadFilesTitle: String {
+        switch self {
+        case .ko: return "파일 업로드"
+        case .en: return "Upload Files"
+        }
+    }
+
+    var clearSelectionTitle: String {
+        switch self {
+        case .ko: return "선택 초기화"
+        case .en: return "Clear Selection"
+        }
+    }
+
+    var runScanTitle: String {
+        switch self {
+        case .ko: return "보안 점검 실행"
+        case .en: return "Run Security Scan"
+        }
+    }
+
+    var runningTitle: String {
+        switch self {
+        case .ko: return "점검 중"
+        case .en: return "Scanning"
+        }
+    }
+
+    var noTargetsTitle: String {
+        switch self {
+        case .ko: return "선택된 항목 없음"
+        case .en: return "No targets selected"
+        }
+    }
+
+    var removeTargetHelp: String {
+        switch self {
+        case .ko: return "점검 대상 삭제"
+        case .en: return "Remove scan target"
+        }
+    }
+
+    var resultsTitle: String {
+        switch self {
+        case .ko: return "점검 결과 조회"
+        case .en: return "Scan Results"
+        }
+    }
+
+    var overallResultsTitle: String {
+        switch self {
+        case .ko: return "전체 조회"
+        case .en: return "Overall Results"
+        }
+    }
+
+    var overallResultsSubtitle: String {
+        switch self {
+        case .ko: return "스캔 결과 전체를 한 화면에서 확인합니다."
+        case .en: return "View all scan results in one screen."
+        }
+    }
+
+    var standardsResultsTitle: String {
+        switch self {
+        case .ko: return "보안기준별 점검결과"
+        case .en: return "Results by Security Standard"
+        }
+    }
+
+    var standardsResultsSubtitle: String {
+        switch self {
+        case .ko: return "전체 화면에서 기준별 설명, 도움말, KO/EN 토글과 함께 결과를 확인합니다."
+        case .en: return "Open a full-screen view with standard details, help, and the KO/EN toggle."
+        }
+    }
+
+    var resultCardsEnabledTitle: String {
+        switch self {
+        case .ko: return "점검을 실행하면 결과 조회 카드가 활성화됩니다."
+        case .en: return "Run a scan to activate result cards."
+        }
+    }
+
+    var resultCardsEnabledSubtitle: String {
+        switch self {
+        case .ko: return "점검 전에는 보안기준 카드를 눌러 기준 설명 화면을 먼저 볼 수 있습니다."
+        case .en: return "Before scanning, open a security-standard card to review its criteria."
+        }
+    }
+
+    var exportTitle: String {
+        switch self {
+        case .ko: return "다운로드"
+        case .en: return "Download"
+        }
+    }
+
+    func findingCountText(_ count: Int) -> String {
+        switch self {
+        case .ko: return "\(count)건"
+        case .en: return "\(count) finding\(count == 1 ? "" : "s")"
+        }
+    }
+
+    func riskScoreText(_ score: Int) -> String {
+        switch self {
+        case .ko: return "\(score)점"
+        case .en: return "\(score) pts"
+        }
+    }
+
+    func mappedItemsText(mapped: Int, total: Int) -> String {
+        switch self {
+        case .ko: return "매핑 항목 \(mapped)/\(total)"
+        case .en: return "Mapped checks \(mapped)/\(total)"
+        }
+    }
+}
+
+struct HelpGuideRoute: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let standard: AppSecurityStandard?
+
+    private init(id: String, title: String, standard: AppSecurityStandard?) {
+        self.id = id
+        self.title = title
+        self.standard = standard
+    }
+
+    init(report: ScanReportItem) {
+        if let standard = report.standard {
+            self.init(standard: standard)
+        } else {
+            self.init(id: "overall", title: "전체 조회", standard: nil)
+        }
+    }
+
+    init(standard: AppSecurityStandard) {
+        self.init(id: standard.id, title: standard.title, standard: standard)
+    }
 }
 
 struct LanguageToggle: View {
@@ -134,7 +354,7 @@ struct LanguageToggle: View {
             languageButton(.en)
         }
         .padding(3)
-        .background(Color.white.opacity(0.14))
+        .background(Color(red: 0.04, green: 0.07, blue: 0.13))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -174,6 +394,31 @@ struct AppSecurityStandard: Identifiable, Hashable {
     var supportedCategoryCount: Int {
         categories.filter(\.isMapped).count
     }
+
+    func title(language: AppLanguage) -> String {
+        guard language == .en else { return title }
+        return SecurityStandardLocalization.standardText[id]?.title ?? title
+    }
+
+    func subtitle(language: AppLanguage) -> String {
+        guard language == .en else { return subtitle }
+        return SecurityStandardLocalization.standardText[id]?.subtitle ?? subtitle
+    }
+
+    func scope(language: AppLanguage) -> String {
+        guard language == .en else { return scope }
+        return SecurityStandardLocalization.standardText[id]?.scope ?? scope
+    }
+
+    func coverage(language: AppLanguage) -> String {
+        guard language == .en else { return coverage }
+        return SecurityStandardLocalization.standardText[id]?.coverage ?? coverage
+    }
+
+    func badge(language: AppLanguage) -> String {
+        guard language == .en else { return badge }
+        return SecurityStandardLocalization.badgeText[badge] ?? badge
+    }
 }
 
 struct AppStandardCategory: Identifiable, Hashable {
@@ -181,6 +426,136 @@ struct AppStandardCategory: Identifiable, Hashable {
     let title: String
     let coverage: String
     let isMapped: Bool
+
+    func title(language: AppLanguage) -> String {
+        guard language == .en else { return title }
+        return SecurityStandardLocalization.categoryTitleText[title] ?? title
+    }
+
+    func coverage(language: AppLanguage) -> String {
+        guard language == .en else { return coverage }
+        if !isMapped {
+            return "Partially supported. This area needs manual review, runtime testing, or external evidence."
+        }
+        return SecurityStandardLocalization.categoryCoverageText[coverage]
+            ?? "Checks this area using locally available source, configuration, secret, and dependency evidence."
+    }
+
+    func detailItems(language: AppLanguage) -> [String] {
+        let key = "\(id) \(title) \(coverage)".lowercased()
+        let koItems: [String]
+        let enItems: [String]
+
+        if key.contains("xss") || key.contains("script") || key.contains("스크립") {
+            koItems = [
+                "HTML 출력, 템플릿 렌더링, DOM sink에 사용자 입력이 직접 연결되는지 확인합니다.",
+                "innerHTML, dangerouslySetInnerHTML, document.write 등 브라우저 실행 경로를 찾습니다.",
+                "이스케이프, 인코딩, 콘텐츠 보안 정책으로 보완이 필요한 지점을 표시합니다.",
+            ]
+            enItems = [
+                "Checks whether user input reaches HTML output, template rendering, or DOM sinks.",
+                "Finds browser execution paths such as innerHTML, dangerouslySetInnerHTML, and document.write.",
+                "Highlights places that need escaping, encoding, or Content Security Policy controls.",
+            ]
+        } else if key.contains("sql") || key.contains("injection") || key.contains("인젝션") || key.contains("입력") {
+            koItems = [
+                "SQL 문자열 조합, 명령 실행, 템플릿 인젝션처럼 입력값이 실행 구문에 섞이는 패턴을 확인합니다.",
+                "exec, system, subprocess, child_process, eval 계열 호출과 사용자 입력 흐름을 찾습니다.",
+                "쿼리 파라미터화, 허용목록 검증, 명령 인자 분리로 고쳐야 할 지점을 표시합니다.",
+            ]
+            enItems = [
+                "Checks patterns where input is mixed into SQL strings, command execution, or template execution.",
+                "Finds exec, system, subprocess, child_process, eval, and similar calls tied to input flow.",
+                "Highlights places that should use parameterized queries, allowlists, or separated command arguments.",
+            ]
+        } else if key.contains("path") || key.contains("file") || key.contains("download") || key.contains("upload") || key.contains("파일") || key.contains("다운로드") {
+            koItems = [
+                "다운로드/업로드 핸들러, 경로 조합, ../ 사용처럼 파일 접근 범위가 넓어지는 패턴을 확인합니다.",
+                "정적 파일 공개, 임시 파일, 오래된 업로드/게시판 디렉터리 흔적을 찾습니다.",
+                "기준 디렉터리 제한, 확장자 허용목록, 파일명 정규화가 필요한 위치를 표시합니다.",
+            ]
+            enItems = [
+                "Checks download/upload handlers, path joins, and ../ patterns that can widen file access.",
+                "Finds static file exposure, temporary-file use, and legacy upload or board-directory traces.",
+                "Highlights where base-directory constraints, extension allowlists, and filename normalization are needed.",
+            ]
+        } else if key.contains("directory") || key.contains("listing") || key.contains("webdav") || key.contains("cors") || key.contains("debug") || key.contains("설정") || key.contains("배포") || key.contains("server") {
+            koItems = [
+                "debug 플래그, CORS 전체 허용, directory listing, WebDAV 활성화 설정을 확인합니다.",
+                "nginx, Apache, IIS, Docker, compose, framework 설정 파일에서 운영 노출 위험을 찾습니다.",
+                "운영 배포 전 끄거나 제한해야 할 서버 옵션과 오류 노출 설정을 표시합니다.",
+            ]
+            enItems = [
+                "Checks debug flags, overly permissive CORS, directory listing, and enabled WebDAV settings.",
+                "Finds exposure risks in nginx, Apache, IIS, Docker, compose, and framework configuration files.",
+                "Highlights server options and error-disclosure settings that should be disabled or restricted before release.",
+            ]
+        } else if key.contains("session") || key.contains("cookie") || key.contains("auth") || key.contains("인증") || key.contains("인가") || key.contains("세션") || key.contains("접근") {
+            koItems = [
+                "쿠키 Secure, HttpOnly, SameSite 누락과 세션 설정 약화를 확인합니다.",
+                "인가 우회, 라우트 보호 누락, 파일/관리자 경로 접근 패턴을 찾습니다.",
+                "인증 우회 조건, 기본 계정, 테스트용 권한 설정이 남은 위치를 표시합니다.",
+            ]
+            enItems = [
+                "Checks missing cookie Secure, HttpOnly, SameSite flags and weak session settings.",
+                "Finds authorization bypass patterns, unprotected routes, and file or admin path access risks.",
+                "Highlights leftover auth bypass conditions, default accounts, and test-only authorization settings.",
+            ]
+        } else if key.contains("secret") || key.contains("credential") || key.contains("crypto") || key.contains("hash") || key.contains("암호") || key.contains("비밀") || key.contains("중요정보") {
+            koItems = [
+                "API 키, 토큰, 개인키, DB 비밀번호처럼 저장소에 남은 비밀값을 확인합니다.",
+                "MD5, SHA1, DES, ECB 등 약한 해시/암호와 평문 전송 흔적을 찾습니다.",
+                "환경변수 분리, 키 순환, 강한 KDF/암호화 알고리즘으로 바꿔야 할 위치를 표시합니다.",
+            ]
+            enItems = [
+                "Checks repository remnants such as API keys, tokens, private keys, and database passwords.",
+                "Finds weak hashes or crypto such as MD5, SHA1, DES, ECB, plus cleartext transport traces.",
+                "Highlights where to move secrets to environment storage, rotate keys, or use stronger KDF and crypto algorithms.",
+            ]
+        } else if key.contains("dependency") || key.contains("sbom") || key.contains("manifest") || key.contains("version") || key.contains("supply") || key.contains("의존") || key.contains("공급망") || key.contains("매니페스트") {
+            koItems = [
+                "package.json, requirements, Gemfile, lockfile 등 의존성 매니페스트와 잠금 파일 상태를 확인합니다.",
+                "고정되지 않은 버전, wildcard, latest, HTTP 소스, 원격 스크립트 즉시 실행 패턴을 찾습니다.",
+                "SBOM 생성 준비성, 무결성 검증, OSV/Dependency-Check 연동 대상 파일을 표시합니다.",
+            ]
+            enItems = [
+                "Checks dependency manifests and lockfiles such as package.json, requirements, Gemfile, and lock files.",
+                "Finds unpinned versions, wildcards, latest, HTTP sources, and remote script execution patterns.",
+                "Highlights SBOM readiness, integrity checks, and files suitable for OSV or Dependency-Check integration.",
+            ]
+        } else {
+            koItems = [
+                "소스코드, 설정 파일, 의존성 파일에서 이 기준과 연결되는 정적 근거를 수집합니다.",
+                "런타임 호출 없이 확인 가능한 위험 패턴과 운영 전 제거해야 할 흔적을 찾습니다.",
+                "조직 정책이나 운영 증적이 필요한 항목은 부분 자동 점검으로 구분해 표시합니다.",
+            ]
+            enItems = [
+                "Collects static evidence from source code, configuration, and dependency files mapped to this standard.",
+                "Finds risky patterns and release-time leftovers that can be checked without runtime execution.",
+                "Marks items that need organizational policy or operational evidence as partial automation.",
+            ]
+        }
+
+        return language == .ko ? koItems : enItems
+    }
+
+    func evidenceSummary(language: AppLanguage) -> String {
+        if isMapped {
+            switch language {
+            case .ko:
+                return "선택한 폴더/파일의 소스 라인, 설정 파일, 의존성 매니페스트, 압축 해제 파일에서 발견된 로컬 증거를 사용합니다."
+            case .en:
+                return "Uses local evidence from source lines, configuration files, dependency manifests, and extracted archives in the selected targets."
+            }
+        }
+
+        switch language {
+        case .ko:
+            return "로컬 파일로 일부 단서만 확인하며, 실제 취약 여부는 런타임 테스트, 운영 설정, 정책 증적으로 추가 검토해야 합니다."
+        case .en:
+            return "Uses local files for partial signals only; runtime testing, deployed configuration, and policy evidence are still needed for final validation."
+        }
+    }
 }
 
 struct AppStandardReference: Identifiable, Hashable {
@@ -214,9 +589,297 @@ enum StandardAccent: String, Hashable {
     }
 }
 
+enum KODATheme {
+    static var cardBackground: Color {
+        Color(nsColor: .controlBackgroundColor)
+    }
+
+    static var insetBackground: Color {
+        Color(nsColor: .windowBackgroundColor)
+    }
+}
+
+private enum SecurityStandardLocalization {
+    struct StandardText {
+        let title: String
+        let subtitle: String
+        let scope: String
+        let coverage: String
+    }
+
+    static let badgeText: [String: String] = [
+        "기본": "Default",
+        "국제 기준": "International",
+        "국내 기준": "Korean Standard",
+        "국내 인증": "Korean Certification",
+        "국제 검증표준": "International Verification",
+        "국제 테스트가이드": "International Testing Guide",
+        "국제 프레임워크": "International Framework",
+        "국제 성숙도모델": "International Maturity Model",
+        "공급망": "Supply Chain",
+    ]
+
+    static let standardText: [String: StandardText] = [
+        "local": StandardText(
+            title: "Local Security Scan",
+            subtitle: "Default profile for quickly checking secrets, dependencies, configuration, and risky code patterns.",
+            scope: "File-based static checks",
+            coverage: "Fully automated local checks"
+        ),
+        "owasp-top-10-2025": StandardText(
+            title: "OWASP Top 10:2025",
+            subtitle: "Maps major web application risk categories to local rules.",
+            scope: "Web application code and configuration",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-top-10-2021": StandardText(
+            title: "OWASP Top 10:2021",
+            subtitle: "Checks widely used OWASP Top 10 categories with local evidence.",
+            scope: "Web application code and configuration",
+            coverage: "Partially automated checks"
+        ),
+        "cwe-sans-top-25-2025": StandardText(
+            title: "CWE/SANS Top 25:2025",
+            subtitle: "Risk profile that groups MITRE CWE Top 25 data from the SANS software-error perspective.",
+            scope: "Code weaknesses and security hygiene",
+            coverage: "Partially automated checks"
+        ),
+        "cwe-top-25-2025": StandardText(
+            title: "CWE Top 25:2025",
+            subtitle: "Checks the most dangerous CWE weaknesses with file-based static analysis.",
+            scope: "Code weaknesses and dependency hygiene",
+            coverage: "Partially automated checks"
+        ),
+        "cwe-general": StandardText(
+            title: "General CWE Weaknesses",
+            subtitle: "Classifies common code and configuration weaknesses beyond the Top 25 from the CWE perspective.",
+            scope: "Code, configuration, and dependencies",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-api-security-2023": StandardText(
+            title: "OWASP API Security Top 10:2023",
+            subtitle: "Checks API route, authorization, resource, SSRF, and configuration risks.",
+            scope: "API code and configuration",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-mobile-top-10-2024": StandardText(
+            title: "OWASP Mobile Top 10:2024",
+            subtitle: "Checks security risks visible in mobile app source and configuration.",
+            scope: "Mobile source and configuration files",
+            coverage: "Partially automated checks"
+        ),
+        "sw-dev-security-49": StandardText(
+            title: "Korean Software Development Security 49",
+            subtitle: "Maps the 49 Korean software-development-security guide criteria to local rules.",
+            scope: "Korean secure-coding criteria",
+            coverage: "Partially automated checks"
+        ),
+        "sw-dev-security-7-types": StandardText(
+            title: "Korean Software Development Security 7 Types",
+            subtitle: "Groups development-security weaknesses into seven broad Korean guide types.",
+            scope: "Korean secure-coding types",
+            coverage: "Partially automated checks"
+        ),
+        "kisa-secure-coding": StandardText(
+            title: "KISA Secure Coding Guide",
+            subtitle: "Checks Korean secure-coding recommendations using local code evidence.",
+            scope: "Source code and configuration",
+            coverage: "Partially automated checks"
+        ),
+        "ncsc-web-8": StandardText(
+            title: "NCSC Web 8 Security Vulnerabilities",
+            subtitle: "Checks eight common public web-service vulnerability families used in Korean security reviews.",
+            scope: "Web code and server configuration",
+            coverage: "Partially automated checks"
+        ),
+        "electronic-financial-8": StandardText(
+            title: "Electronic Financial Supervision 8 Vulnerabilities",
+            subtitle: "Maps Korean electronic-finance public web-server review items to local rules.",
+            scope: "Financial web-service code and configuration",
+            coverage: "Partially automated checks"
+        ),
+        "isms-p-28": StandardText(
+            title: "ISMS-P 2.8 Development Security",
+            subtitle: "Maps development-security controls to items that can be checked with local evidence.",
+            scope: "Development, testing, and production handoff security",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-asvs-5": StandardText(
+            title: "OWASP ASVS 5.0",
+            subtitle: "Groups static-checkable areas from application security verification requirements.",
+            scope: "Application security verification",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-wstg": StandardText(
+            title: "OWASP WSTG",
+            subtitle: "Shows web security testing guide areas where file-based evidence is available.",
+            scope: "Web security testing methodology",
+            coverage: "Partially automated checks"
+        ),
+        "nist-ssdf": StandardText(
+            title: "NIST SSDF SP 800-218",
+            subtitle: "Checks secure software development practices with local evidence.",
+            scope: "Secure development process",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-samm-2": StandardText(
+            title: "OWASP SAMM 2",
+            subtitle: "Checks design, implementation, verification, and operations practices in the software assurance maturity model.",
+            scope: "Software assurance maturity",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-dependency-check": StandardText(
+            title: "OWASP Dependency-Check Baseline",
+            subtitle: "Dependency hygiene baseline for identifying known vulnerable components.",
+            scope: "Dependency manifests and lockfiles",
+            coverage: "Partially automated checks"
+        ),
+        "owasp-dependency-track": StandardText(
+            title: "OWASP Dependency-Track / SBOM Baseline",
+            subtitle: "Checks local evidence for SBOM readiness and dependency tracking.",
+            scope: "SBOM and supply-chain management",
+            coverage: "Partially automated checks"
+        ),
+    ]
+
+    static let categoryTitleText: [String: String] = [
+        "비밀값": "Secrets",
+        "의존성": "Dependencies",
+        "설정": "Configuration",
+        "코드 패턴": "Code Patterns",
+        "인가 취약점": "Authorization Weaknesses",
+        "리소스 제한": "Resource Limits",
+        "API 설정": "API Configuration",
+        "자격증명 저장": "Credential Storage",
+        "통신 보안": "Communication Security",
+        "앱 설정": "App Configuration",
+        "모바일 의존성": "Mobile Dependencies",
+        "입력 데이터 검증 및 표현": "Input Validation and Representation",
+        "보안 기능": "Security Functions",
+        "시간 및 상태": "Time and State",
+        "에러 처리 및 코드 품질": "Error Handling and Code Quality",
+        "캡슐화 및 API 오용": "Encapsulation and API Misuse",
+        "에러 처리": "Error Handling",
+        "코드 오류": "Code Errors",
+        "인젝션": "Injection",
+        "크로스사이트 스크립팅": "Cross-Site Scripting",
+        "파일 처리": "File Handling",
+        "중요정보 보호": "Sensitive Information Protection",
+        "파일 다운로드": "File Download",
+        "디렉터리 리스팅": "Directory Listing",
+        "레거시 게시판": "Legacy Bulletin Board",
+        "서버 설정": "Server Configuration",
+        "세션 관리": "Session Management",
+        "보안 요구사항": "Security Requirements",
+        "시큐어코딩": "Secure Coding",
+        "시험 데이터 보호": "Test Data Protection",
+        "소스 프로그램 관리": "Source Program Management",
+        "운영 이관": "Production Handoff",
+        "입력 검증": "Input Validation",
+        "인증 및 세션": "Authentication and Session",
+        "접근통제": "Access Control",
+        "데이터 보호 및 암호": "Data Protection and Cryptography",
+        "공급망": "Supply Chain",
+        "설정 및 배포": "Configuration and Deployment",
+        "인증": "Authentication",
+        "인가": "Authorization",
+        "입력값 검증": "Input Validation",
+        "약한 암호": "Weak Cryptography",
+        "Protect the Software": "Protect the Software",
+        "Produce Well-Secured Software": "Produce Well-Secured Software",
+        "Verify Security": "Verify Security",
+        "Respond to Vulnerabilities": "Respond to Vulnerabilities",
+        "Design": "Design",
+        "Implementation": "Implementation",
+        "Verification": "Verification",
+        "Operations": "Operations",
+        "매니페스트 위생": "Manifest Hygiene",
+        "버전 고정": "Version Pinning",
+        "의존성 소스": "Dependency Sources",
+        "SBOM 준비성": "SBOM Readiness",
+        "버전 위생": "Version Hygiene",
+        "CWE-79 XSS": "CWE-79 XSS",
+        "CWE-89 SQL Injection": "CWE-89 SQL Injection",
+        "CWE-78 OS Command Injection": "CWE-78 OS Command Injection",
+        "CWE-22 Path Traversal": "CWE-22 Path Traversal",
+        "CWE-352 CSRF": "CWE-352 CSRF",
+        "CWE-798 Hard-coded Credentials": "CWE-798 Hard-coded Credentials",
+        "인증 및 접근통제": "Authentication and Access Control",
+        "암호 및 비밀정보": "Cryptography and Secrets",
+        "보안 설정": "Security Configuration",
+    ]
+
+    static let categoryCoverageText: [String: String] = [
+        "API 키, 토큰, 개인키로 보이는 값을 탐지합니다.": "Detects possible API keys, tokens, and private keys.",
+        "고정되지 않은 버전, 락파일 누락, 안전하지 않은 소스를 확인합니다.": "Checks unpinned versions, missing lockfiles, and unsafe dependency sources.",
+        ".env, debug, 권한 상승 컨테이너 설정을 확인합니다.": "Checks .env files, debug flags, and privileged container settings.",
+        "XSS, SQL injection, command injection, path traversal 등을 확인합니다.": "Checks XSS, SQL injection, command injection, path traversal, and related patterns.",
+        "인가 우회, 파일 다운로드, 경로 접근 패턴을 확인합니다.": "Checks authorization bypass, file download, and path access patterns.",
+        "비밀값, 약한 해시, 평문 전송 흔적을 확인합니다.": "Checks secrets, weak hashes, and cleartext transport traces.",
+        "SQL, command, template, path traversal 입력 흐름을 확인합니다.": "Checks SQL, command, template, and path traversal input flows.",
+        "debug, CORS, directory listing, WebDAV 설정을 확인합니다.": "Checks debug, CORS, directory listing, and WebDAV settings.",
+        "의존성 위생과 OSV 확장 대상 매니페스트를 확인합니다.": "Checks dependency hygiene and manifests suitable for OSV extension.",
+        "동적 SQL 조합과 입력 흐름을 확인합니다.": "Checks dynamic SQL construction and input flow.",
+        "shell 명령 조합과 실행 패턴을 확인합니다.": "Checks shell command construction and execution patterns.",
+        "경로 조작 및 파일 다운로드 위험을 확인합니다.": "Checks path manipulation and file download risks.",
+        "하드코딩된 비밀값과 토큰을 확인합니다.": "Checks hard-coded secrets and tokens.",
+        "키, 토큰, 비밀값 노출을 확인합니다.": "Checks exposed keys, tokens, and secrets.",
+        "SQL, XSS, command, path traversal 패턴을 확인합니다.": "Checks SQL, XSS, command, and path traversal patterns.",
+        "인증, 세션, 암호, 권한 흐름을 확인합니다.": "Checks authentication, session, cryptography, and authorization flows.",
+        "임시 파일, 경쟁 상태 가능 패턴을 확인합니다.": "Checks temporary-file and possible race-condition patterns.",
+        "오류 노출, 위험 API 사용 흔적을 확인합니다.": "Checks error disclosure and risky API usage traces.",
+        "파일·명령·직렬화 API 오용을 확인합니다.": "Checks file, command, and serialization API misuse.",
+        "입력값 기반 공격 패턴을 확인합니다.": "Checks attack patterns driven by user input.",
+        "인증, 세션, 암호 사용 위험을 확인합니다.": "Checks authentication, session, and cryptography risks.",
+        "임시 파일 및 상태 처리 위험을 확인합니다.": "Checks temporary-file and state-handling risks.",
+        "디버그와 오류 노출 설정을 확인합니다.": "Checks debug and error-disclosure settings.",
+        "위험 API와 오용 패턴을 확인합니다.": "Checks risky APIs and misuse patterns.",
+        "SQL, command, template injection 패턴을 확인합니다.": "Checks SQL, command, and template injection patterns.",
+        "DOM sink와 HTML 렌더링 위험을 확인합니다.": "Checks DOM sinks and HTML rendering risks.",
+        "다운로드, 경로 조작, directory listing 위험을 확인합니다.": "Checks download, path manipulation, and directory listing risks.",
+        "비밀값과 약한 암호 사용을 확인합니다.": "Checks secrets and weak cryptography use.",
+        "동적 SQL 조합과 쿼리 입력 흐름을 확인합니다.": "Checks dynamic SQL construction and query input flow.",
+        "DOM XSS와 HTML 출력 위험을 확인합니다.": "Checks DOM XSS and HTML output risks.",
+        "경로 조작과 다운로드 핸들러 위험을 확인합니다.": "Checks path manipulation and download-handler risks.",
+        "index 옵션과 listing 설정을 확인합니다.": "Checks index options and listing settings.",
+        "WebDAV 활성화 설정을 확인합니다.": "Checks WebDAV enablement settings.",
+        "오래된 게시판·업로드 흔적을 확인합니다.": "Checks traces of legacy bulletin-board and upload components.",
+        "SQL과 명령 실행 위험을 확인합니다.": "Checks SQL and command-execution risks.",
+        "브라우저 실행 스크립트 주입 위험을 확인합니다.": "Checks browser-side script injection risks.",
+        "다운로드, 업로드, 경로 조작 위험을 확인합니다.": "Checks download, upload, and path manipulation risks.",
+        "디렉터리 리스팅, WebDAV, debug 설정을 확인합니다.": "Checks directory listing, WebDAV, and debug settings.",
+        "쿠키와 세션 설정 위험을 확인합니다.": "Checks cookie and session setting risks.",
+        "비밀값, 설정, 의존성 관리 근거를 확인합니다.": "Checks evidence for secrets, configuration, and dependency management.",
+        "코드 약점과 위험 API 사용을 확인합니다.": "Checks code weaknesses and risky API usage.",
+        ".env, 샘플 비밀값, 테스트 credential을 확인합니다.": "Checks .env files, sample secrets, and test credentials.",
+        "락파일, 의존성, 설정 위생을 확인합니다.": "Checks lockfile, dependency, and configuration hygiene.",
+        "debug와 위험 설정 잔존 여부를 확인합니다.": "Checks whether debug and risky settings remain.",
+        "입력값 검증과 인코딩 위험을 확인합니다.": "Checks input validation and encoding risks.",
+        "쿠키, 세션, 인증 처리 위험을 확인합니다.": "Checks cookie, session, and authentication handling risks.",
+        "파일·라우트 접근통제 위험을 확인합니다.": "Checks file and route access-control risks.",
+        "의존성 및 무결성 설정을 확인합니다.": "Checks dependency and integrity settings.",
+        "CORS, debug, directory listing, WebDAV를 확인합니다.": "Checks CORS, debug, directory listing, and WebDAV.",
+        "인증·세션 관련 코드 패턴을 확인합니다.": "Checks authentication and session code patterns.",
+        "파일 접근과 라우트 접근 위험을 확인합니다.": "Checks file and route access risks.",
+        "XSS, SQL, command, traversal 패턴을 확인합니다.": "Checks XSS, SQL, command, and traversal patterns.",
+        "약한 해시와 비밀값 노출을 확인합니다.": "Checks weak hashes and exposed secrets.",
+        "보안 요구와 위험 설정 흔적을 확인합니다.": "Checks traces of security requirements and risky settings.",
+        "시큐어코딩과 의존성 위생을 확인합니다.": "Checks secure-coding and dependency hygiene.",
+        "정적 점검 근거를 수집합니다.": "Collects local static-check evidence.",
+        "운영 이관 전 debug와 비밀값 잔존을 확인합니다.": "Checks debug and secret remnants before production handoff.",
+        "package.json, requirements, lockfile 상태를 확인합니다.": "Checks package.json, requirements, and lockfile status.",
+        "고정되지 않은 버전과 wildcard를 확인합니다.": "Checks unpinned versions and wildcards.",
+        "평문 또는 원격 실행 의존성 소스를 확인합니다.": "Checks cleartext or remote-execution dependency sources.",
+        "매니페스트와 락파일 상태를 확인합니다.": "Checks manifests and lockfile status.",
+        "고정되지 않은 의존성과 wildcard를 확인합니다.": "Checks unpinned dependencies and wildcards.",
+        "안전하지 않은 다운로드와 원격 실행 패턴을 확인합니다.": "Checks unsafe download and remote-execution patterns.",
+    ]
+}
+
 struct SecurityStandardsGridView: View {
     let standards: [AppSecurityStandard]
     let minimumCardWidth: CGFloat
+    let language: AppLanguage
     let onSelect: (AppSecurityStandard) -> Void
 
     var body: some View {
@@ -230,7 +893,7 @@ struct SecurityStandardsGridView: View {
                     Button {
                         onSelect(standard)
                     } label: {
-                        SecurityStandardCard(standard: standard)
+                        SecurityStandardCard(standard: standard, language: language)
                     }
                     .buttonStyle(.plain)
                 }
@@ -245,6 +908,7 @@ struct ScanResultsGroupedView: View {
     let reports: [ScanReportItem]
     let standards: [AppSecurityStandard]
     let minimumCardWidth: CGFloat
+    let language: AppLanguage
     let onSelectReport: (ScanReportItem) -> Void
     let onSelectStandard: (AppSecurityStandard) -> Void
 
@@ -263,31 +927,33 @@ struct ScanResultsGroupedView: View {
                     emptyState
                 }
 
-                groupedSection(title: "전체 조회", subtitle: "스캔 결과 전체를 한 화면에서 확인합니다.") {
+                groupedSection(title: language.overallResultsTitle, subtitle: language.overallResultsSubtitle) {
                     if let overallReport {
                         Button {
                             onSelectReport(overallReport)
                         } label: {
-                            ScanReportNavigationCard(report: overallReport)
+                            ScanReportNavigationCard(report: overallReport, language: language)
                         }
                         .buttonStyle(.plain)
                     } else {
                         DisabledResultCard(
-                            title: "전체 조회",
-                            subtitle: "점검 실행 후 전체 결과 화면으로 이동할 수 있습니다.",
+                            title: language.overallResultsTitle,
+                            subtitle: language == .ko
+                                ? "점검 실행 후 전체 결과 화면으로 이동할 수 있습니다."
+                                : "Run a scan to open the overall results screen.",
                             icon: "rectangle.stack"
                         )
                     }
                 }
 
-                groupedSection(title: "보안기준별 점검결과", subtitle: "전체 화면에서 기준별 설명, 도움말, KO/EN 토글과 함께 결과를 확인합니다.") {
+                groupedSection(title: language.standardsResultsTitle, subtitle: language.standardsResultsSubtitle) {
                     if standardReports.isEmpty {
                         LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
                             ForEach(standards) { standard in
                                 Button {
                                     onSelectStandard(standard)
                                 } label: {
-                                    SecurityStandardCard(standard: standard)
+                                    SecurityStandardCard(standard: standard, language: language)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -298,7 +964,7 @@ struct ScanResultsGroupedView: View {
                                 Button {
                                     onSelectReport(report)
                                 } label: {
-                                    ScanReportNavigationCard(report: report)
+                                    ScanReportNavigationCard(report: report, language: language)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -322,16 +988,16 @@ struct ScanResultsGroupedView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("점검을 실행하면 결과 조회 카드가 활성화됩니다.")
+                Text(language.resultCardsEnabledTitle)
                     .font(.headline)
-                Text("점검 전에는 보안기준 카드를 눌러 기준 설명 화면을 먼저 볼 수 있습니다.")
+                Text(language.resultCardsEnabledSubtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(KODATheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -359,6 +1025,7 @@ struct ScanResultsGroupedView: View {
 
 private struct ScanReportNavigationCard: View {
     let report: ScanReportItem
+    let language: AppLanguage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -369,13 +1036,13 @@ private struct ScanReportNavigationCard: View {
                     .frame(width: 34, height: 34)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(report.title)
+                    Text(report.title(language: language))
                         .font(.headline)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(report.badge)
+                    Text(report.badge(language: language))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(report.accent.color)
                 }
@@ -386,22 +1053,22 @@ private struct ScanReportNavigationCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(report.subtitle)
+            Text(report.subtitle(language: language))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 12) {
-                Label("\(report.findingCount)건", systemImage: "list.bullet.rectangle")
-                Label("\(report.riskScore)점", systemImage: "gauge.with.dots.needle.50percent")
+                Label(language.findingCountText(report.findingCount), systemImage: "list.bullet.rectangle")
+                Label(language.riskScoreText(report.riskScore), systemImage: "gauge.with.dots.needle.50percent")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 156, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(KODATheme.cardBackground)
         .overlay(alignment: .leading) {
             Rectangle()
                 .fill(report.accent.color)
@@ -439,7 +1106,7 @@ private struct DisabledResultCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.65))
+        .background(KODATheme.cardBackground.opacity(0.65))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -450,6 +1117,7 @@ private struct DisabledResultCard: View {
 
 private struct SecurityStandardCard: View {
     let standard: AppSecurityStandard
+    let language: AppLanguage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -460,13 +1128,13 @@ private struct SecurityStandardCard: View {
                     .frame(width: 34, height: 34)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(standard.title)
+                    Text(standard.title(language: language))
                         .font(.headline)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(standard.badge)
+                    Text(standard.badge(language: language))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(standard.accent.color)
                 }
@@ -477,7 +1145,7 @@ private struct SecurityStandardCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(standard.subtitle)
+            Text(standard.subtitle(language: language))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
@@ -485,14 +1153,14 @@ private struct SecurityStandardCard: View {
 
             HStack(spacing: 8) {
                 Label("\(standard.supportedCategoryCount)/\(standard.categories.count)", systemImage: "checklist")
-                Text(standard.coverage)
+                Text(standard.coverage(language: language))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 168, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(KODATheme.cardBackground)
         .overlay(alignment: .leading) {
             Rectangle()
                 .fill(standard.accent.color)
@@ -509,17 +1177,14 @@ private struct SecurityStandardCard: View {
 struct SecurityStandardDetailScreen: View {
     let standard: AppSecurityStandard
     @Binding var language: AppLanguage
-    @Binding var isHelpVisible: Bool
     let onBack: () -> Void
+    let onHelp: () -> Void
 
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header(width: proxy.size.width)
-                    if isHelpVisible {
-                        DetailHelpPanel(language: language, standard: standard)
-                    }
                     content(width: proxy.size.width)
                 }
             }
@@ -528,7 +1193,7 @@ struct SecurityStandardDetailScreen: View {
     }
 
     private func header(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 14) {
                 Button {
                     onBack()
@@ -541,7 +1206,7 @@ struct SecurityStandardDetailScreen: View {
                 Spacer()
 
                 Button {
-                    isHelpVisible.toggle()
+                    onHelp()
                 } label: {
                     Label(language.helpTitle, systemImage: "questionmark.circle")
                 }
@@ -558,13 +1223,13 @@ struct SecurityStandardDetailScreen: View {
                     .frame(width: scaledIconSize(width) + 12, height: scaledIconSize(width) + 12)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(standard.title)
+                    Text(standard.title(language: language))
                         .font(.system(size: scaledTitleSize(width), weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(standard.subtitle)
+                    Text(standard.subtitle(language: language))
                         .font(.title3)
                         .foregroundStyle(.white.opacity(0.75))
                         .fixedSize(horizontal: false, vertical: true)
@@ -573,7 +1238,7 @@ struct SecurityStandardDetailScreen: View {
                 Spacer()
             }
 
-            Text("\(standard.badge) | 매핑 항목 \(standard.supportedCategoryCount)/\(standard.categories.count)")
+            Text("\(standard.badge(language: language)) | \(language.mappedItemsText(mapped: standard.supportedCategoryCount, total: standard.categories.count))")
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.8))
         }
@@ -586,14 +1251,14 @@ struct SecurityStandardDetailScreen: View {
     private func content(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             LazyVGrid(columns: detailColumns(width), spacing: 14) {
-                DetailSummaryTile(title: language.scopeTitle, value: standard.scope)
-                DetailSummaryTile(title: language.automationTitle, value: standard.coverage)
+                DetailSummaryTile(title: language.scopeTitle, value: standard.scope(language: language))
+                DetailSummaryTile(title: language.automationTitle, value: standard.coverage(language: language))
             }
 
             section(title: language.criteriaTitle) {
                 LazyVGrid(columns: detailColumns(width), spacing: 12) {
                     ForEach(standard.categories) { category in
-                        StandardCategoryRow(category: category)
+                        StandardCategoryRow(category: category, language: language)
                     }
                 }
             }
@@ -613,7 +1278,7 @@ struct SecurityStandardDetailScreen: View {
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 11)
-                            .background(Color(nsColor: .textBackgroundColor))
+                            .background(KODATheme.cardBackground)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 8)
@@ -671,7 +1336,7 @@ private struct DetailSummaryTile: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(KODATheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -680,82 +1345,208 @@ private struct DetailSummaryTile: View {
     }
 }
 
-struct DetailHelpPanel: View {
-    let language: AppLanguage
-    let standard: AppSecurityStandard?
+struct HelpGuideScreen: View {
+    let route: HelpGuideRoute
+    @Binding var language: AppLanguage
+    let onBack: () -> Void
+
+    private var guideStandard: AppSecurityStandard? {
+        route.standard ?? SecurityStandardCatalog.all.first { $0.id == "local" }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: "questionmark.circle")
-                    .foregroundStyle(.blue)
-                Text(title)
-                    .font(.headline)
-            }
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                header(width: proxy.size.width)
 
-            Text(message)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        LazyVGrid(columns: detailColumns(proxy.size.width), spacing: 14) {
+                            DetailSummaryTile(title: language.scopeTitle, value: route.standard?.scope(language: language) ?? overallScope)
+                            DetailSummaryTile(title: language.automationTitle, value: route.standard?.coverage(language: language) ?? overallCoverage)
+                            DetailSummaryTile(title: language.riskFormulaTitle, value: language.riskFormulaDescription)
+                        }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(language.checkedItemsTitle)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.primary)
+                        section(title: language.guideSummaryTitle) {
+                            Text(message)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(KODATheme.cardBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                                }
+                        }
 
-                if checkedCategories.isEmpty {
-                    Text(language.noCheckedItemsTitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10)], spacing: 10) {
-                        ForEach(checkedCategories) { category in
-                            HelpCriteriaCard(category: category, language: language)
+                        section(title: language.checkedItemsTitle) {
+                            if checkedCategories.isEmpty {
+                                Text(language.noCheckedItemsTitle)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                LazyVGrid(columns: detailColumns(proxy.size.width), spacing: 12) {
+                                    ForEach(checkedCategories) { category in
+                                        HelpCriteriaCard(category: category, language: language)
+                                    }
+                                }
+                            }
+                        }
+
+                        section(title: language.guideUsageTitle) {
+                            Text(language.guideUsageDescription)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(KODATheme.cardBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                                }
+                        }
+
+                        if let standard = guideStandard {
+                            section(title: language.referenceTitle) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(standard.references) { reference in
+                                        Link(destination: URL(string: reference.url)!) {
+                                            HStack {
+                                                Image(systemName: "link")
+                                                Text(reference.title)
+                                                Spacer()
+                                                Text(reference.url)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                                    .truncationMode(.middle)
+                                            }
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 11)
+                                            .background(KODATheme.cardBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
                         }
                     }
+                    .padding(.horizontal, horizontalPadding(proxy.size.width))
+                    .padding(.vertical, 24)
                 }
             }
-            .padding(.top, 4)
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .textBackgroundColor))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(height: 1)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
     }
 
-    private var title: String {
-        switch language {
-        case .ko: return "도움말"
-        case .en: return "Help"
+    private func header(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 14) {
+                Button {
+                    onBack()
+                } label: {
+                    Label(language.backTitle, systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.white)
+
+                Spacer()
+
+                LanguageToggle(language: $language)
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
+
+            HStack(alignment: .top, spacing: 16) {
+                Image(systemName: guideStandard?.icon ?? "questionmark.circle")
+                    .font(.system(size: min(48, max(34, width * 0.04)), weight: .bold))
+                    .foregroundStyle(guideStandard?.accent.color ?? .blue)
+                    .frame(width: 60, height: 60)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(language.helpGuideTitle)
+                        .font(.system(size: min(42, max(28, width * 0.038)), weight: .bold))
+                        .foregroundStyle(.white)
+
+                    Text(displayTitle)
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.78))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, horizontalPadding(width))
+            .padding(.top, 12)
+            .padding(.bottom, max(28, width * 0.035))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.04, green: 0.07, blue: 0.13))
     }
 
     private var message: String {
-        let standardName = standard?.title ?? {
-            switch language {
-            case .ko: return "전체 조회"
-            case .en: return "Overall Results"
-            }
-        }()
+        let standardName = displayTitle
 
         switch language {
         case .ko:
-            return "\(standardName) 화면입니다. 위험 점수는 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점을 더해 계산합니다. 기준별 결과는 로컬 정적 점검으로 매핑 가능한 항목만 포함하며, 런타임 점검이나 조직 증적이 필요한 항목은 별도 확인이 필요합니다."
+            return "\(standardName) 기준의 점검 가이드입니다. 아래 항목은 KODA가 로컬 파일과 설정에서 확인하는 범위이며, 자동 탐지 가능한 항목과 별도 검토가 필요한 부분을 함께 보여줍니다."
         case .en:
-            return "This is the \(standardName) view. Risk score is calculated as critical 100, high 40, medium 10, low 3, and info 1. Standard-specific results include locally mappable static checks only; runtime validation and organizational evidence still require separate review."
+            return "This guide explains what KODA checks for \(standardName). The items below show what can be inspected from local files and configuration, including locally automated and separately reviewed areas."
         }
     }
 
     private var checkedCategories: [AppStandardCategory] {
-        if let standard {
-            return standard.categories
+        guideStandard?.categories ?? []
+    }
+
+    private var displayTitle: String {
+        if let standard = route.standard {
+            return standard.title(language: language)
         }
-        return SecurityStandardCatalog.all.first { $0.id == "local" }?.categories ?? []
+        switch language {
+        case .ko: return "전체 조회"
+        case .en: return "Overall Results"
+        }
+    }
+
+    private var overallScope: String {
+        switch language {
+        case .ko: return "전체 로컬 보안 점검 결과"
+        case .en: return "All local security scan results"
+        }
+    }
+
+    private var overallCoverage: String {
+        switch language {
+        case .ko: return "기준 제한 없이 전체 자동 점검"
+        case .en: return "All automated checks without standard filtering"
+        }
+    }
+
+    private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.title2.weight(.bold))
+            content()
+        }
+    }
+
+    private func detailColumns(_ width: CGFloat) -> [GridItem] {
+        let minimum = width > 1120 ? CGFloat(330) : CGFloat(280)
+        return [GridItem(.adaptive(minimum: minimum), spacing: 12)]
+    }
+
+    private func horizontalPadding(_ width: CGFloat) -> CGFloat {
+        min(46, max(20, width * 0.04))
     }
 }
 
@@ -764,9 +1555,9 @@ private struct HelpCriteriaCard: View {
     let language: AppLanguage
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(category.title)
+                Text(category.title(language: language))
                     .font(.callout.weight(.semibold))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -778,14 +1569,32 @@ private struct HelpCriteriaCard: View {
                     .foregroundStyle(category.isMapped ? .green : .orange)
             }
 
-            Text(category.coverage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HelpInfoBlock(title: language.checkMethodTitle, text: category.coverage(language: language))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(language.detailedChecksTitle)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(category.detailItems(language: language), id: \.self) { item in
+                    HStack(alignment: .top, spacing: 7) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(category.isMapped ? .green : .orange)
+                            .padding(.top, 2)
+                        Text(item)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            HelpInfoBlock(title: language.evidenceSourceTitle, text: category.evidenceSummary(language: language))
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+        .background(KODATheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -794,32 +1603,50 @@ private struct HelpCriteriaCard: View {
     }
 }
 
+private struct HelpInfoBlock: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 private struct StandardCategoryRow: View {
     let category: AppStandardCategory
+    let language: AppLanguage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(category.title)
+                Text(category.title(language: language))
                     .font(.headline)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Spacer()
 
-                Text(category.isMapped ? "로컬 점검" : "부분 지원")
+                Text(category.isMapped ? language.localCheckBadge : language.partialCheckBadge)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(category.isMapped ? .green : .orange)
             }
 
-            Text(category.coverage)
+            Text(category.coverage(language: language))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(KODATheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)

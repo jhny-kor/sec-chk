@@ -1,6 +1,43 @@
 import AppKit
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
+
+enum ReportExportFormat: String, CaseIterable, Hashable {
+    case html
+    case markdown
+    case pdf
+
+    var fileExtension: String {
+        switch self {
+        case .html: return "html"
+        case .markdown: return "md"
+        case .pdf: return "pdf"
+        }
+    }
+
+    var contentType: UTType {
+        switch self {
+        case .html:
+            return .html
+        case .markdown:
+            return UTType(filenameExtension: "md") ?? .plainText
+        case .pdf:
+            return .pdf
+        }
+    }
+
+    func title(language: AppLanguage) -> String {
+        switch (language, self) {
+        case (.ko, .html): return "HTML 다운로드"
+        case (.ko, .markdown): return "MD 다운로드"
+        case (.ko, .pdf): return "PDF 다운로드"
+        case (.en, .html): return "Download HTML"
+        case (.en, .markdown): return "Download MD"
+        case (.en, .pdf): return "Download PDF"
+        }
+    }
+}
 
 @MainActor
 final class ScannerBridge: ObservableObject {
@@ -8,34 +45,56 @@ final class ScannerBridge: ObservableObject {
     @Published var reportURL: URL?
     @Published var reportItems: [ScanReportItem] = []
     @Published var isRunning = false
-    @Published var statusMessage = "점검할 폴더나 파일을 선택하세요."
-    @Published var detailMessage = ""
+    @Published private var statusMessageKO = "점검할 폴더나 파일을 선택하세요."
+    @Published private var statusMessageEN = "Choose folders or files to scan."
+    @Published private var detailMessageKO = ""
+    @Published private var detailMessageEN = ""
     @Published var statusColor: Color = .secondary
 
     var hasSelection: Bool {
         !selectedTargets.isEmpty
     }
 
-    func chooseFolder() {
+    var statusMessage: String {
+        statusMessageKO
+    }
+
+    var detailMessage: String {
+        detailMessageKO
+    }
+
+    func statusMessage(language: AppLanguage) -> String {
+        language == .ko ? statusMessageKO : statusMessageEN
+    }
+
+    func detailMessage(language: AppLanguage) -> String {
+        language == .ko ? detailMessageKO : detailMessageEN
+    }
+
+    func chooseFolder(language: AppLanguage = .ko) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.prompt = "선택"
-        panel.message = "보안취약점을 점검할 폴더를 선택하세요."
+        panel.prompt = language == .ko ? "선택" : "Choose"
+        panel.message = language == .ko
+            ? "보안취약점을 점검할 폴더를 선택하세요."
+            : "Choose folders to scan for security issues."
 
         if panel.runModal() == .OK {
             appendTargets(panel.urls)
         }
     }
 
-    func chooseFiles() {
+    func chooseFiles(language: AppLanguage = .ko) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.prompt = "업로드"
-        panel.message = "점검할 파일을 선택하세요. zip, jar, war, tar, tar.gz, tgz, gz 압축파일도 선택할 수 있습니다."
+        panel.prompt = language == .ko ? "업로드" : "Upload"
+        panel.message = language == .ko
+            ? "점검할 파일을 선택하세요. zip, jar, war, tar, tar.gz, tgz, gz 압축파일도 선택할 수 있습니다."
+            : "Choose files to scan. zip, jar, war, tar, tar.gz, tgz, and gz archives are supported."
 
         if panel.runModal() == .OK {
             appendTargets(panel.urls)
@@ -46,8 +105,8 @@ final class ScannerBridge: ObservableObject {
         selectedTargets = []
         reportURL = nil
         reportItems = []
-        detailMessage = ""
-        statusMessage = "점검할 폴더나 파일을 선택하세요."
+        setDetail(ko: "", en: "")
+        setStatus(ko: "점검할 폴더나 파일을 선택하세요.", en: "Choose folders or files to scan.")
         statusColor = .secondary
     }
 
@@ -55,12 +114,12 @@ final class ScannerBridge: ObservableObject {
         selectedTargets.removeAll { $0.path == url.path }
         reportURL = nil
         reportItems = []
-        detailMessage = ""
+        setDetail(ko: "", en: "")
 
         if selectedTargets.isEmpty {
-            statusMessage = "점검할 폴더나 파일을 선택하세요."
+            setStatus(ko: "점검할 폴더나 파일을 선택하세요.", en: "Choose folders or files to scan.")
         } else {
-            statusMessage = "\(selectedTargets.count)개 항목 선택됨"
+            setStatus(ko: "\(selectedTargets.count)개 항목 선택됨", en: "\(selectedTargets.count) item(s) selected")
         }
         statusColor = .secondary
     }
@@ -68,7 +127,7 @@ final class ScannerBridge: ObservableObject {
     func runScan() {
         let targets = selectedTargets
         guard !targets.isEmpty else {
-            statusMessage = "먼저 점검할 폴더나 파일을 선택하세요."
+            setStatus(ko: "먼저 점검할 폴더나 파일을 선택하세요.", en: "Choose folders or files before scanning.")
             statusColor = .red
             return
         }
@@ -76,8 +135,8 @@ final class ScannerBridge: ObservableObject {
         isRunning = true
         reportURL = nil
         reportItems = []
-        detailMessage = ""
-        statusMessage = "보안 점검을 실행하고 있습니다."
+        setDetail(ko: "", en: "")
+        setStatus(ko: "보안 점검을 실행하고 있습니다.", en: "Running security scan.")
         statusColor = .secondary
 
         Task {
@@ -85,22 +144,59 @@ final class ScannerBridge: ObservableObject {
                 Self.runScanCommand(targets: targets)
             }.value
             isRunning = false
-            detailMessage = result.detail
+            setDetail(ko: result.detailKO, en: result.detailEN)
             if result.exitCode == 0, let output = result.reportURL {
                 reportURL = output
                 reportItems = result.reportItems
-                statusMessage = "점검 완료: \(output.path)"
+                setStatus(ko: "점검 완료: \(output.path)", en: "Scan complete: \(output.path)")
                 statusColor = .green
             } else {
-                statusMessage = result.message
+                setStatus(ko: result.messageKO, en: result.messageEN)
                 statusColor = .red
             }
         }
     }
 
-    func openReport() {
+    func openReport(language: AppLanguage = .ko) {
         guard let reportURL else { return }
-        NSWorkspace.shared.open(reportURL)
+        if let report = reportItems.first(where: \.isOverall) {
+            NSWorkspace.shared.open(report.htmlURL(language: language))
+        } else {
+            NSWorkspace.shared.open(reportURL)
+        }
+    }
+
+    func export(_ report: ScanReportItem, as format: ReportExportFormat, language: AppLanguage) {
+        let source = report.url(format: format, language: language)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [format.contentType]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = report.exportFileName(format: format, language: language)
+        panel.message = language == .ko
+            ? "점검결과를 저장할 위치를 선택하세요."
+            : "Choose where to save the scan result."
+
+        guard panel.runModal() == .OK, let destination = panel.url else {
+            return
+        }
+
+        do {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+            setStatus(
+                ko: "\(format.fileExtension.uppercased()) 저장 완료: \(destination.path)",
+                en: "\(format.fileExtension.uppercased()) saved: \(destination.path)"
+            )
+            statusColor = .green
+        } catch {
+            setStatus(
+                ko: "다운로드 실패: \(error.localizedDescription)",
+                en: "Download failed: \(error.localizedDescription)"
+            )
+            statusColor = .red
+        }
     }
 
     private func appendTargets(_ urls: [URL]) {
@@ -108,15 +204,23 @@ final class ScannerBridge: ObservableObject {
         let additions = urls.filter { seen.insert($0.path).inserted }
         selectedTargets.append(contentsOf: additions)
         reportURL = nil
-        detailMessage = ""
-        statusMessage = "\(selectedTargets.count)개 항목 선택됨"
+        setDetail(ko: "", en: "")
+        setStatus(ko: "\(selectedTargets.count)개 항목 선택됨", en: "\(selectedTargets.count) item(s) selected")
         statusColor = .secondary
+    }
+
+    private func setStatus(ko: String, en: String) {
+        statusMessageKO = ko
+        statusMessageEN = en
+    }
+
+    private func setDetail(ko: String, en: String) {
+        detailMessageKO = ko
+        detailMessageEN = en
     }
 
     private nonisolated static func runScanCommand(targets: [URL]) -> ScanResult {
         let scanner = NativeSecurityScanner()
-        let fileManager = FileManager.default
-        let output = fileManager.temporaryDirectory.appendingPathComponent("KODA-security-dashboard-\(UUID().uuidString).html")
         let accessedTargets = targets.filter { $0.startAccessingSecurityScopedResource() }
         defer {
             accessedTargets.forEach { $0.stopAccessingSecurityScopedResource() }
@@ -124,44 +228,76 @@ final class ScannerBridge: ObservableObject {
 
         do {
             let result = try scanner.scan(targets: targets)
-            try scanner.writeHTMLReport(result, to: output)
-            let reportItems = try buildReportItems(result: result, scanner: scanner, overallURL: output)
-            let warningText = result.warnings.isEmpty ? "" : "\n경고:\n" + result.warnings.joined(separator: "\n")
+            let overallFiles = try writeReportFiles(result: result, scanner: scanner, prefix: "KODA-security-dashboard")
+            let reportItems = try buildReportItems(result: result, scanner: scanner, overallFiles: overallFiles)
+            let warningTextKO = result.warnings.isEmpty ? "" : "\n경고:\n" + result.warnings.joined(separator: "\n")
+            let warningTextEN = result.warnings.isEmpty ? "" : "\nWarnings:\n" + result.warnings.joined(separator: "\n")
             return ScanResult(
                 exitCode: 0,
-                reportURL: output,
-                message: "점검 완료",
-                detail: "스캔 파일 \(result.scannedFileCount)개, 발견 항목 \(result.findings.count)건\(warningText)",
+                reportURL: overallFiles.koHTMLURL,
+                messageKO: "점검 완료",
+                messageEN: "Scan complete",
+                detailKO: "스캔 파일 \(result.scannedFileCount)개, 발견 항목 \(result.findings.count)건\(warningTextKO)",
+                detailEN: "Scanned files \(result.scannedFileCount), findings \(result.findings.count)\(warningTextEN)",
                 reportItems: reportItems
             )
         } catch {
             return ScanResult(
                 exitCode: 2,
                 reportURL: nil,
-                message: "스캐너 실행에 실패했습니다.",
-                detail: error.localizedDescription,
+                messageKO: "스캐너 실행에 실패했습니다.",
+                messageEN: "Scanner failed.",
+                detailKO: error.localizedDescription,
+                detailEN: error.localizedDescription,
                 reportItems: []
             )
         }
     }
 
+    private nonisolated static func writeReportFiles(
+        result: NativeScanResult,
+        scanner: NativeSecurityScanner,
+        prefix: String
+    ) throws -> GeneratedReportFiles {
+        let token = UUID().uuidString
+        let directory = FileManager.default.temporaryDirectory
+        let koHTML = directory.appendingPathComponent("\(prefix)-ko-\(token).html")
+        let enHTML = directory.appendingPathComponent("\(prefix)-en-\(token).html")
+        let koMarkdown = directory.appendingPathComponent("\(prefix)-ko-\(token).md")
+        let enMarkdown = directory.appendingPathComponent("\(prefix)-en-\(token).md")
+        let koPDF = directory.appendingPathComponent("\(prefix)-ko-\(token).pdf")
+        let enPDF = directory.appendingPathComponent("\(prefix)-en-\(token).pdf")
+
+        try scanner.writeHTMLReport(result, to: koHTML, language: .ko)
+        try scanner.writeHTMLReport(result, to: enHTML, language: .en)
+        try scanner.writeMarkdownReport(result, to: koMarkdown, language: .ko)
+        try scanner.writeMarkdownReport(result, to: enMarkdown, language: .en)
+        try scanner.writePDFReport(result, to: koPDF, language: .ko)
+        try scanner.writePDFReport(result, to: enPDF, language: .en)
+
+        return GeneratedReportFiles(
+            koHTMLURL: koHTML,
+            enHTMLURL: enHTML,
+            koMarkdownURL: koMarkdown,
+            enMarkdownURL: enMarkdown,
+            koPDFURL: koPDF,
+            enPDFURL: enPDF
+        )
+    }
+
     private nonisolated static func buildReportItems(
         result: NativeScanResult,
         scanner: NativeSecurityScanner,
-        overallURL: URL
+        overallFiles: GeneratedReportFiles
     ) throws -> [ScanReportItem] {
         var items = [
             ScanReportItem(
                 id: "overall",
-                title: "전체 조회",
-                subtitle: "모든 로컬 점검 결과를 기준 제한 없이 확인합니다.",
-                badge: "전체",
                 icon: "rectangle.stack",
                 accent: .blue,
-                reportURL: overallURL,
+                files: overallFiles,
                 findingCount: result.findings.count,
                 riskScore: result.riskScore,
-                severityDistribution: SeverityDistribution(findings: result.findings),
                 standard: nil
             )
         ]
@@ -175,21 +311,19 @@ final class ScannerBridge: ObservableObject {
                 scannedFileCount: result.scannedFileCount,
                 generatedAt: result.generatedAt
             )
-            let fileName = "KODA-\(standard.id)-security-dashboard-\(UUID().uuidString).html"
-            let output = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-            try scanner.writeHTMLReport(standardResult, to: output)
+            let files = try writeReportFiles(
+                result: standardResult,
+                scanner: scanner,
+                prefix: "KODA-\(standard.id)-security-dashboard"
+            )
             items.append(
                 ScanReportItem(
                     id: standard.id,
-                    title: standard.title,
-                    subtitle: standard.scope,
-                    badge: standard.badge,
                     icon: standard.icon,
                     accent: standard.accent,
-                    reportURL: output,
+                    files: files,
                     findingCount: findings.count,
                     riskScore: standardResult.riskScore,
-                    severityDistribution: SeverityDistribution(findings: findings),
                     standard: standard
                 )
             )
@@ -228,57 +362,87 @@ final class ScannerBridge: ObservableObject {
 
 struct ScanReportItem: Identifiable, Hashable {
     let id: String
-    let title: String
-    let subtitle: String
-    let badge: String
     let icon: String
     let accent: StandardAccent
-    let reportURL: URL
+    let files: GeneratedReportFiles
     let findingCount: Int
     let riskScore: Int
-    let severityDistribution: SeverityDistribution
     let standard: AppSecurityStandard?
 
     var isOverall: Bool {
         standard == nil
     }
+
+    var reportURL: URL {
+        files.koHTMLURL
+    }
+
+    func htmlURL(language: AppLanguage) -> URL {
+        language == .ko ? files.koHTMLURL : files.enHTMLURL
+    }
+
+    func url(format: ReportExportFormat, language: AppLanguage) -> URL {
+        switch (language, format) {
+        case (.ko, .html): return files.koHTMLURL
+        case (.ko, .markdown): return files.koMarkdownURL
+        case (.ko, .pdf): return files.koPDFURL
+        case (.en, .html): return files.enHTMLURL
+        case (.en, .markdown): return files.enMarkdownURL
+        case (.en, .pdf): return files.enPDFURL
+        }
+    }
+
+    func title(language: AppLanguage) -> String {
+        if let standard {
+            return standard.title(language: language)
+        }
+        switch language {
+        case .ko: return "전체 조회"
+        case .en: return "Overall Results"
+        }
+    }
+
+    func subtitle(language: AppLanguage) -> String {
+        if let standard {
+            return standard.scope(language: language)
+        }
+        switch language {
+        case .ko: return "모든 로컬 점검 결과를 기준 제한 없이 확인합니다."
+        case .en: return "Review all local scan results without limiting by standard."
+        }
+    }
+
+    func badge(language: AppLanguage) -> String {
+        if let standard {
+            return standard.badge(language: language)
+        }
+        switch language {
+        case .ko: return "전체"
+        case .en: return "All"
+        }
+    }
+
+    func exportFileName(format: ReportExportFormat, language: AppLanguage) -> String {
+        let slug = id.replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "-", options: .regularExpression)
+        return "KODA-\(slug)-\(language.rawValue).\(format.fileExtension)"
+    }
 }
 
-struct SeverityDistribution: Hashable {
-    let critical: Int
-    let high: Int
-    let medium: Int
-    let low: Int
-    let info: Int
-
-    init(critical: Int = 0, high: Int = 0, medium: Int = 0, low: Int = 0, info: Int = 0) {
-        self.critical = critical
-        self.high = high
-        self.medium = medium
-        self.low = low
-        self.info = info
-    }
-
-    init(findings: [NativeFinding]) {
-        let counts = Dictionary(grouping: findings, by: \.severity).mapValues(\.count)
-        self.init(
-            critical: counts["critical"] ?? 0,
-            high: counts["high"] ?? 0,
-            medium: counts["medium"] ?? 0,
-            low: counts["low"] ?? 0,
-            info: counts["info"] ?? 0
-        )
-    }
-
-    var maximum: Int {
-        max(critical, high, medium, low, info, 1)
-    }
+struct GeneratedReportFiles: Hashable {
+    let koHTMLURL: URL
+    let enHTMLURL: URL
+    let koMarkdownURL: URL
+    let enMarkdownURL: URL
+    let koPDFURL: URL
+    let enPDFURL: URL
 }
 
 private struct ScanResult {
     let exitCode: Int32
     let reportURL: URL?
-    let message: String
-    let detail: String
+    let messageKO: String
+    let messageEN: String
+    let detailKO: String
+    let detailEN: String
     let reportItems: [ScanReportItem]
 }

@@ -38,7 +38,14 @@ struct KODAApp: App {
         do {
             let scanner = NativeSecurityScanner()
             let result = try scanner.scan(targets: targets)
-            try scanner.writeHTMLReport(result, to: output)
+            let language: AppLanguage = environment["KODA_SCAN_LANGUAGE"] == "en" ? .en : .ko
+            try scanner.writeHTMLReport(result, to: output, language: language)
+            if let markdownOutput = environment["KODA_SCAN_OUTPUT_MARKDOWN"], !markdownOutput.isEmpty {
+                try scanner.writeMarkdownReport(result, to: URL(fileURLWithPath: markdownOutput), language: language)
+            }
+            if let pdfOutput = environment["KODA_SCAN_OUTPUT_PDF"], !pdfOutput.isEmpty {
+                try scanner.writePDFReport(result, to: URL(fileURLWithPath: pdfOutput), language: language)
+            }
             print(output.path)
             exit(0)
         } catch {
