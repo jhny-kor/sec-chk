@@ -53,6 +53,7 @@ final class ScannerBridge: ObservableObject {
     @Published var statusColor: Color = .secondary
     @Published var scoreHistory: [SecurityScoreSnapshot] = []
     @Published var projectProfiles: [ProjectProfile] = []
+    @Published var maskReportExports = true
 
     init() {
         scoreHistory = SecurityScoreStore.load()
@@ -179,6 +180,7 @@ final class ScannerBridge: ObservableObject {
 
     func export(_ report: ScanReportItem, as format: ReportExportFormat, language: AppLanguage) {
         let source = report.url(format: format, language: language)
+        let masked = maskReportExports
         let panel = NSSavePanel()
         panel.allowedContentTypes = [format.contentType]
         panel.canCreateDirectories = true
@@ -195,10 +197,14 @@ final class ScannerBridge: ObservableObject {
             if FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.removeItem(at: destination)
             }
-            try FileManager.default.copyItem(at: source, to: destination)
+            if masked {
+                try Self.writeSanitizedReport(report, as: format, language: language, to: destination)
+            } else {
+                try FileManager.default.copyItem(at: source, to: destination)
+            }
             setStatus(
-                ko: "\(format.fileExtension.uppercased()) 저장 완료: \(destination.path)",
-                en: "\(format.fileExtension.uppercased()) saved: \(destination.path)"
+                ko: "\(masked ? "마스킹된 " : "")\(format.fileExtension.uppercased()) 저장 완료: \(destination.path)",
+                en: "\(masked ? "Masked " : "")\(format.fileExtension.uppercased()) saved: \(destination.path)"
             )
             statusColor = .green
         } catch {
@@ -672,6 +678,163 @@ final class ScannerBridge: ObservableObject {
         statusColor = .secondary
     }
 
+    func installPreCommitHook(language: AppLanguage) {
+        let targets = selectedTargets.filter { Self.isDirectoryURL($0) }
+        guard !targets.isEmpty else {
+            setStatus(ko: "pre-commit 훅을 설치할 Git 프로젝트 폴더를 선택하세요.", en: "Choose Git project folders before installing pre-commit hooks.")
+            statusColor = .red
+            return
+        }
+
+        isRunning = true
+        setDetail(ko: "", en: "")
+        setStatus(ko: "KODA pre-commit 훅을 설치하고 있습니다.", en: "Installing KODA pre-commit hooks.")
+        statusColor = .secondary
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.installPreCommitHookCommand(targets: targets)
+            }.value
+
+            isRunning = false
+            setStatus(ko: result.messageKO, en: result.messageEN)
+            setDetail(ko: result.detailKO, en: result.detailEN)
+            statusColor = result.failures.isEmpty ? .green : (result.writtenCount > 0 || result.skippedCount > 0 ? .orange : .red)
+        }
+    }
+
+    func exportRepositorySecurityChecklist(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-github-repository-security.md",
+            panelMessageKO: "GitHub 저장소 보안 설정 체크리스트를 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the GitHub repository security checklist.",
+            successKO: "저장소 보안 체크리스트 저장 완료",
+            successEN: "Repository security checklist saved",
+            content: Self.repositorySecurityChecklist(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportReleaseSigningPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-release-signing-plan.md",
+            panelMessageKO: "SLSA/Sigstore 릴리스 서명 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the SLSA/Sigstore release signing plan.",
+            successKO: "릴리스 서명 계획 저장 완료",
+            successEN: "Release signing plan saved",
+            content: Self.releaseSigningPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportSSDFWorkflowPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-nist-ssdf-workflow.md",
+            panelMessageKO: "NIST SSDF 워크플로 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the NIST SSDF workflow plan.",
+            successKO: "NIST SSDF 계획 저장 완료",
+            successEN: "NIST SSDF plan saved",
+            content: Self.ssdfWorkflowPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportSecureByDesignPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-secure-by-design-plan.md",
+            panelMessageKO: "Secure by Design 예방 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the Secure by Design prevention plan.",
+            successKO: "Secure by Design 계획 저장 완료",
+            successEN: "Secure by Design plan saved",
+            content: Self.secureByDesignPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportSecretResponseChecklist(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-secret-rotation-runbook.md",
+            panelMessageKO: "비밀값 회전 절차를 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the secret rotation runbook.",
+            successKO: "비밀값 회전 절차 저장 완료",
+            successEN: "Secret rotation runbook saved",
+            content: Self.secretRotationRunbook(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportThreatModelTemplate(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-threat-model.md",
+            panelMessageKO: "위협 모델 템플릿을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the threat model template.",
+            successKO: "위협 모델 템플릿 저장 완료",
+            successEN: "Threat model template saved",
+            content: Self.threatModelTemplate(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportThreatModelTemplate(markdown: String, language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-threat-model.md",
+            panelMessageKO: "위협 모델 템플릿을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the threat model template.",
+            successKO: "위협 모델 템플릿 저장 완료",
+            successEN: "Threat model template saved",
+            content: markdown,
+            language: language
+        )
+    }
+
+    func exportAILLMSecurityPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-ai-llm-security-plan.md",
+            panelMessageKO: "AI/LLM 보안 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the AI/LLM security plan.",
+            successKO: "AI/LLM 보안 계획 저장 완료",
+            successEN: "AI/LLM security plan saved",
+            content: Self.aiLLMSecurityPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportMobileSecurityPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-mobile-security-plan.md",
+            panelMessageKO: "모바일 보안 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the mobile security plan.",
+            successKO: "모바일 보안 계획 저장 완료",
+            successEN: "Mobile security plan saved",
+            content: Self.mobileSecurityPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportNISTCSFProfile(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-nist-csf-2-profile.md",
+            panelMessageKO: "NIST CSF 2.0 프로파일을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the NIST CSF 2.0 profile.",
+            successKO: "NIST CSF 2.0 프로파일 저장 완료",
+            successEN: "NIST CSF 2.0 profile saved",
+            content: Self.nistCSFProfile(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
+    func exportCISAAttestationChecklist(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-cisa-secure-software-attestation.md",
+            panelMessageKO: "CISA 보안 소프트웨어 개발 확인서 체크리스트를 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the CISA secure software attestation checklist.",
+            successKO: "CISA 확인서 체크리스트 저장 완료",
+            successEN: "CISA attestation checklist saved",
+            content: Self.cisaAttestationChecklist(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project", language: language),
+            language: language
+        )
+    }
+
     func applySecurityToolkit(language: AppLanguage) {
         var targets = selectedTargets.filter { Self.isDirectoryURL($0) }
 
@@ -720,6 +883,35 @@ final class ScannerBridge: ObservableObject {
                 en: result.detail(language: .en)
             )
             statusColor = result.failures.isEmpty ? .green : (result.writtenCount + result.skippedCount > 0 ? .orange : .red)
+        }
+    }
+
+    private func exportGeneratedMarkdown(
+        defaultFileName: String,
+        panelMessageKO: String,
+        panelMessageEN: String,
+        successKO: String,
+        successEN: String,
+        content: String,
+        language: AppLanguage
+    ) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = defaultFileName
+        panel.message = language == .ko ? panelMessageKO : panelMessageEN
+
+        guard panel.runModal() == .OK, let destination = panel.url else {
+            return
+        }
+
+        do {
+            try content.write(to: destination, atomically: true, encoding: .utf8)
+            setStatus(ko: "\(successKO): \(destination.path)", en: "\(successEN): \(destination.path)")
+            statusColor = .green
+        } catch {
+            setStatus(ko: "저장 실패: \(error.localizedDescription)", en: "Save failed: \(error.localizedDescription)")
+            statusColor = .red
         }
     }
 
@@ -794,6 +986,52 @@ final class ScannerBridge: ObservableObject {
     private static func deduplicatedURLs(_ urls: [URL]) -> [URL] {
         var seen = Set<String>()
         return urls.filter { seen.insert($0.path).inserted }
+    }
+
+    private nonisolated static func installPreCommitHookCommand(targets: [URL]) -> OperationResult {
+        var written = 0
+        var skipped = 0
+        var failures: [String] = []
+
+        for target in targets {
+            let accessed = target.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { target.stopAccessingSecurityScopedResource() }
+            }
+
+            do {
+                let gitDir = target.appendingPathComponent(".git", isDirectory: true)
+                guard FileManager.default.fileExists(atPath: gitDir.path) else {
+                    failures.append("\(target.path): Git 저장소가 아닙니다.")
+                    continue
+                }
+                let hook = gitDir.appendingPathComponent("hooks/pre-commit")
+                try FileManager.default.createDirectory(at: hook.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: hook.path) {
+                    let existing = (try? String(contentsOf: hook, encoding: .utf8)) ?? ""
+                    if existing.contains("KODA pre-commit security gate") {
+                        skipped += 1
+                        continue
+                    }
+                }
+                try preCommitHook(kodaExecutable: Bundle.main.executableURL?.path).write(to: hook, atomically: true, encoding: .utf8)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+                written += 1
+            } catch {
+                failures.append("\(target.path): \(error.localizedDescription)")
+            }
+        }
+
+        return OperationResult(
+            exitCode: failures.isEmpty ? 0 : 2,
+            messageKO: "pre-commit 훅 설치 완료: 설치 \(written)개, 기존 유지 \(skipped)개",
+            messageEN: "Pre-commit hook setup complete: installed \(written), kept existing \(skipped)",
+            detailKO: failures.prefix(3).joined(separator: "\n"),
+            detailEN: failures.prefix(3).joined(separator: "\n"),
+            writtenCount: written,
+            skippedCount: skipped,
+            failures: failures
+        )
     }
 
     private nonisolated static func runScanCommand(targets: [URL]) -> ScanResult {
@@ -1029,6 +1267,296 @@ final class ScannerBridge: ObservableObject {
             lines.append("")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private nonisolated static func preCommitHook(kodaExecutable: String?) -> String {
+        let executableAssignment = kodaExecutable.map { "KODA_EXECUTABLE=${KODA_EXECUTABLE:-\(shellQuote($0))}" } ?? "KODA_EXECUTABLE=${KODA_EXECUTABLE:-KODA}"
+        return """
+        #!/bin/sh
+        # KODA pre-commit security gate.
+        set -eu
+
+        \(executableAssignment)
+        FAIL_ON="${KODA_PRE_COMMIT_FAIL_ON:-high}"
+        TARGET="${KODA_PRE_COMMIT_TARGET:-.}"
+        REPORT="${TMPDIR:-/tmp}/koda-pre-commit-report.md"
+        HTML_REPORT="${TMPDIR:-/tmp}/koda-pre-commit-dashboard.html"
+
+        if [ ! -x "$KODA_EXECUTABLE" ]; then
+          echo "KODA executable not found: $KODA_EXECUTABLE" >&2
+          echo "Set KODA_EXECUTABLE to the KODA app executable path." >&2
+          exit 2
+        fi
+
+        KODA_SCAN_TARGETS="$TARGET" \\
+        KODA_SCAN_OUTPUT="$HTML_REPORT" \\
+        KODA_SCAN_OUTPUT_MARKDOWN="$REPORT" \\
+        KODA_SCAN_FAIL_ON="$FAIL_ON" \\
+        "$KODA_EXECUTABLE" >/dev/null
+
+        echo "KODA pre-commit scan passed. Report: $REPORT"
+        """
+    }
+
+    private nonisolated static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private nonisolated static func repositorySecurityChecklist(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # GitHub 저장소 보안 설정 체크리스트
+
+            프로젝트: \(projectName)
+
+            ## 브랜치 및 리뷰 보호
+
+            - [ ] 기본 브랜치 보호를 켭니다.
+            - [ ] 병합 전 pull request를 요구합니다.
+            - [ ] 최소 1명 이상의 승인 리뷰를 요구합니다.
+            - [ ] KODA/SAST 상태 점검 통과를 병합 조건으로 둡니다.
+            - [ ] 보안 민감 경로는 CODEOWNERS 리뷰를 요구합니다.
+
+            ## 비밀값 및 의존성 보호
+
+            - [ ] secret scanning과 push protection을 켭니다.
+            - [ ] Dependabot alerts와 security updates를 켭니다.
+            - [ ] KODA, CodeQL, Semgrep 등 SARIF 결과를 업로드합니다.
+            - [ ] GitHub Actions token 권한은 기본 읽기 전용으로 둡니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.repositorySecurityChecklist(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func releaseSigningPlan(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # SLSA / Sigstore 릴리스 서명 계획
+
+            프로젝트: \(projectName)
+
+            ## 목표
+
+            릴리스 산출물을 CI에서 빌드하고, provenance를 생성하며, Sigstore/cosign 또는 조직 서명 체계로 산출물을 서명한 뒤 체크섬과 함께 게시합니다.
+
+            ## 로컬 dry run 명령
+
+            ```bash
+            sha256sum "dist/app.tar.gz" > "dist/app.tar.gz.sha256"
+            cosign sign-blob "dist/app.tar.gz" --bundle "dist/app.tar.gz.sigstore.json" --yes
+            cosign verify-blob "dist/app.tar.gz" --bundle "dist/app.tar.gz.sigstore.json" --certificate-identity-regexp ".*" --certificate-oidc-issuer-regexp ".*"
+            ```
+
+            ## CI 요구사항
+
+            - [ ] 릴리스 태그에서 CI가 산출물을 빌드합니다.
+            - [ ] SLSA provenance 또는 동등한 attestation을 생성합니다.
+            - [ ] 산출물 또는 컨테이너 digest에 서명합니다.
+            - [ ] checksum, signature bundle, provenance를 릴리스에 첨부합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.releaseSigningPlan(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func ssdfWorkflowPlan(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # NIST SSDF 워크플로
+
+            프로젝트: \(projectName)
+
+            ## Prepare The Organization
+
+            - [ ] 보안 개발 역할과 책임자를 지정합니다.
+            - [ ] SECURITY.md, CODEOWNERS, 예외 정책을 최신으로 유지합니다.
+            - [ ] 비밀값, 의존성 위생, 안전한 기본값을 contributor에게 안내합니다.
+
+            ## Protect The Software
+
+            - [ ] 소스 접근 권한은 최소 권한으로 둡니다.
+            - [ ] 커밋 전 비밀값과 고위험 항목을 차단합니다.
+            - [ ] 릴리스 빌드마다 SBOM을 생성합니다.
+            - [ ] 릴리스 산출물을 서명하고 provenance를 보관합니다.
+
+            ## Produce Well-Secured Software
+
+            - [ ] Pull request에서 KODA, SAST, 의존성 점검을 실행합니다.
+            - [ ] 설정, 쿠키, CORS, 컨테이너, CI token은 안전한 기본값을 사용합니다.
+            - [ ] 의존성 업데이트 자동화를 유지합니다.
+
+            ## Respond To Vulnerabilities
+
+            - [ ] OSV/CVE 발견 항목을 KEV/EPSS 맥락으로 우선순위화합니다.
+            - [ ] 검토된 의존성 취약점은 VEX로 기록합니다.
+            - [ ] 조치 후 KODA를 다시 실행하고 점수 추이를 비교합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.ssdfWorkflowPlan(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func secureByDesignPlan(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # CISA Secure by Design 예방 계획
+
+            프로젝트: \(projectName)
+
+            ## 고객 보안 결과 책임
+
+            - [ ] 비밀값 노출, 안전하지 않은 기본값, 실제 악용 취약점을 고객 영향 결함으로 취급합니다.
+            - [ ] 인증, 세션, 로깅, CORS, 배포 설정에 안전한 기본값을 제공합니다.
+            - [ ] 보안 연락처와 취약점 처리 절차를 공개합니다.
+
+            ## 투명성 및 책임성
+
+            - [ ] 보안 정책, 지원 버전, 조치 기대사항을 게시합니다.
+            - [ ] 릴리스마다 SBOM과 VEX 산출물을 유지합니다.
+            - [ ] 알려진 제한, 수용 위험, 예외 만료일을 기록합니다.
+            - [ ] 릴리스마다 점수 추적과 위험군 변화를 확인합니다.
+
+            ## 경영진 주도
+
+            - [ ] 제품 보안 결과 책임자를 지정합니다.
+            - [ ] 고위험 항목, 조치 시간, 차단된 비밀값, 취약 의존성 지표를 주기적으로 검토합니다.
+            - [ ] 병합과 릴리스 전 보안 게이트를 요구합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.secureByDesignPlan(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func threatModelTemplate(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # 위협 모델
+
+            프로젝트: \(projectName)
+
+            ## 범위
+
+            - [ ] 제품/서비스 경계:
+            - [ ] 포함되는 앱, API, worker, 관리자 도구:
+            - [ ] 제외 범위:
+
+            ## 주요 자산과 신뢰 경계
+
+            - [ ] 고객 데이터, 비밀값, 빌드 산출물, 관리자 권한의 소유자와 저장 위치를 기록합니다.
+            - [ ] 클라이언트-API, API-DB, CI-레지스트리, 운영자-프로덕션, AI/LLM 제공자 경계를 기록합니다.
+            - [ ] 인증 우회, 비밀값 노출, 공급망 변조, 파일 처리, 프롬프트 인젝션 악용 시나리오를 검토합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.threatModelTemplate(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func secretRotationRunbook(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # 비밀값 회전 절차
+
+            프로젝트: \(projectName)
+
+            ## 즉시 조치
+
+            - [ ] 비밀값 소유자와 영향을 받는 서비스를 식별합니다.
+            - [ ] 노출된 값을 폐기하거나 비활성화합니다.
+            - [ ] 승인된 비밀 관리 도구에서 대체 값을 발급합니다.
+            - [ ] 새 값을 배포하고 KODA와 provider secret scanning을 다시 실행합니다.
+
+            ## 감사
+
+            - [ ] provider 로그, CI 로그, 이슈 첨부, 릴리스 산출물, 채팅 복사본을 확인합니다.
+            - [ ] 접근, 권한 상승, 데이터 조회 여부를 기록하고 incident ticket에 최종 판단을 남깁니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.secretRotationRunbook(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func aiLLMSecurityPlan(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # AI / LLM 보안 계획
+
+            프로젝트: \(projectName)
+
+            - [ ] 모델/제공자, 전달 데이터, 사용 도구, 소유자를 목록화합니다.
+            - [ ] 사용자 입력과 검색 콘텐츠를 system/developer instruction과 분리합니다.
+            - [ ] 프롬프트와 로그에서 credential, token, PII, 고객 비밀값을 제거합니다.
+            - [ ] 도구 호출은 allowlist, 인자 검증, 부작용 확인, 감사 로그를 적용합니다.
+            - [ ] 프롬프트 인젝션, 민감정보 누출, 과도한 tool 실행 테스트 케이스를 유지합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.aiLLMSecurityPlan(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func mobileSecurityPlan(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # 모바일 보안 계획
+
+            프로젝트: \(projectName)
+
+            - [ ] MASVS-STORAGE: 로컬 저장소, backup, keychain/keystore, cache 파일을 검토합니다.
+            - [ ] MASVS-NETWORK: ATS/network security config와 cleartext traffic 예외를 검토합니다.
+            - [ ] MASVS-PLATFORM: Android exported component와 iOS 파일 공유 설정을 검토합니다.
+            - [ ] MASVS-CODE: debug flag, logging, injection, 파일 처리, 의존성 위생을 확인합니다.
+            - [ ] 릴리스 서명, device/runtime 테스트, 개인정보 처리 항목을 릴리스 기준에 포함합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.mobileSecurityPlan(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func nistCSFProfile(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # NIST CSF 2.0 프로파일
+
+            프로젝트: \(projectName)
+
+            - [ ] Govern: 보안 위험 소유자, 정책, 예외 처리, 검토 주기를 기록합니다.
+            - [ ] Identify: 저장소, 서비스, SBOM, 데이터 저장소, 중요 자산을 목록화합니다.
+            - [ ] Protect: 비밀값, 인증, 세션, 컨테이너, 모바일, AI, CI 설정의 안전한 기본값을 확인합니다.
+            - [ ] Detect: KODA/SAST/의존성 점검이 pull request 또는 릴리스 브랜치에서 실행됩니다.
+            - [ ] Respond: 취약점 신고, OSV/CVE, 비밀값 노출, DAST 발견 항목의 담당자와 기한을 기록합니다.
+            - [ ] Recover: checksum, SBOM, VEX, 점검 리포트, 서명/provenance 증적을 릴리스 패키지에 포함합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.nistCSFProfile(projectName: projectName)
+        }
+    }
+
+    private nonisolated static func cisaAttestationChecklist(projectName: String, language: AppLanguage) -> String {
+        switch language {
+        case .ko:
+            return """
+            # CISA 보안 소프트웨어 개발 확인서 체크리스트
+
+            프로젝트: \(projectName)
+
+            - [ ] 개발 환경: 소스 접근 최소 권한, 브랜치 보호, 리뷰, CODEOWNERS, CI 게이트를 확인합니다.
+            - [ ] 개발 실천: 위협 모델, 시큐어코딩 점검, 예외 owner/reason/until 기록을 확인합니다.
+            - [ ] 제3자 구성요소: SBOM, 버전 고정, 알려진 취약점 triage, VEX 결정을 확인합니다.
+            - [ ] 검증 및 대응: SAST, 의존성, 비밀값, 설정 점검과 취약점 보고/조치 프로세스를 확인합니다.
+            - [ ] 확인서 제출 전 실제 조직 실천 여부와 증적 위치를 책임자가 승인합니다.
+            """
+        case .en:
+            return SecurityPreventionToolkit.cisaAttestationChecklist(projectName: projectName)
+        }
     }
 
     private nonisolated static func scoreDiffMarkdown(current: SecurityScoreSnapshot, baseline: SecurityScoreSnapshot, language: AppLanguage) -> String {
@@ -1288,6 +1816,24 @@ final class ScannerBridge: ObservableObject {
         )
     }
 
+    private nonisolated static func writeSanitizedReport(
+        _ report: ScanReportItem,
+        as format: ReportExportFormat,
+        language: AppLanguage,
+        to destination: URL
+    ) throws {
+        let scanner = NativeSecurityScanner()
+        let sanitized = NativeReportSanitizer.sanitizedResult(for: report)
+        switch format {
+        case .html:
+            try scanner.writeHTMLReport(sanitized, to: destination, language: language)
+        case .markdown:
+            try scanner.writeMarkdownReport(sanitized, to: destination, language: language)
+        case .pdf:
+            try scanner.writePDFReport(sanitized, to: destination, language: language)
+        }
+    }
+
     private nonisolated static func buildReportItems(
         result: NativeScanResult,
         scanner: NativeSecurityScanner,
@@ -1302,6 +1848,10 @@ final class ScannerBridge: ObservableObject {
                 findingCount: result.findings.count,
                 riskScore: result.riskScore,
                 findings: result.findings,
+                warnings: result.warnings,
+                targetCount: result.targetCount,
+                scannedFileCount: result.scannedFileCount,
+                generatedAt: result.generatedAt,
                 standard: nil
             )
         ]
@@ -1329,6 +1879,10 @@ final class ScannerBridge: ObservableObject {
                     findingCount: findings.count,
                     riskScore: standardResult.riskScore,
                     findings: findings,
+                    warnings: standardResult.warnings,
+                    targetCount: standardResult.targetCount,
+                    scannedFileCount: standardResult.scannedFileCount,
+                    generatedAt: standardResult.generatedAt,
                     standard: standard
                 )
             )
@@ -1373,6 +1927,34 @@ final class ScannerBridge: ObservableObject {
             return finding.category == "secrets"
                 || finding.category == "configuration"
                 || finding.category == "dependencies"
+        case "owasp-masvs":
+            return finding.ruleID.contains("android")
+                || finding.ruleID.contains("ios")
+                || finding.category == "secrets"
+                || finding.category == "dependencies"
+                || finding.ruleID == "prevention.mobile-security-plan-missing"
+                || finding.ruleID == "prevention.slsa-sigstore-missing"
+                || finding.ruleID == "prevention.release-provenance-automation-missing"
+        case "owasp-llm-top-10-2025":
+            return finding.ruleID.contains("llm")
+                || finding.ruleID == "code.logging-sensitive-data"
+                || finding.ruleID == "code.unbounded-request-body"
+                || finding.ruleID == "code.eval-user-input"
+                || finding.ruleID == "code.command-injection"
+                || finding.ruleID == "code.unsafe-deserialization"
+                || finding.category == "secrets"
+                || finding.ruleID == "prevention.ai-llm-security-plan-missing"
+                || finding.ruleID == "prevention.threat-model-missing"
+                || finding.ruleID == "prevention.sbom-missing"
+                || finding.ruleID == "prevention.vex-missing"
+        case "nist-csf-2", "cisa-secure-software-attestation":
+            return finding.category == "prevention"
+                || finding.category == "dependencies"
+                || finding.category == "secrets"
+                || finding.category == "configuration"
+                || finding.ruleID == "code.logging-sensitive-data"
+                || finding.ruleID == "code.insecure-cookie-settings"
+                || finding.ruleID == "code.csrf-disabled"
         case "ncsc-web-8", "electronic-financial-8":
             return finding.category == "code" || finding.category == "configuration"
         case "sw-dev-security-49", "sw-dev-security-7-types", "kisa-secure-coding":
@@ -1385,6 +1967,80 @@ final class ScannerBridge: ObservableObject {
     }
 }
 
+private enum NativeReportSanitizer {
+    static func sanitizedResult(for report: ScanReportItem) -> NativeScanResult {
+        NativeScanResult(
+            findings: report.findings.map(sanitizedFinding),
+            warnings: report.warnings.map(maskText),
+            targetCount: report.targetCount,
+            scannedFileCount: report.scannedFileCount,
+            generatedAt: report.generatedAt
+        )
+    }
+
+    private static func sanitizedFinding(_ finding: NativeFinding) -> NativeFinding {
+        NativeFinding(
+            ruleID: finding.ruleID,
+            severity: finding.severity,
+            category: finding.category,
+            title: maskText(finding.title),
+            path: maskPath(finding.path),
+            line: finding.line,
+            evidence: maskText(finding.evidence),
+            recommendation: maskText(finding.recommendation)
+        )
+    }
+
+    private static func maskPath(_ value: String) -> String {
+        let absoluteMasked = maskAbsolutePaths(value)
+        guard absoluteMasked != "." else {
+            return absoluteMasked
+        }
+        if absoluteMasked.contains("[local-path]") {
+            return absoluteMasked
+        }
+        let parts = absoluteMasked.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        if parts.isEmpty {
+            return "[target]"
+        }
+        if parts.count == 1 {
+            return "[target]/\(parts[0])"
+        }
+        return "[target]/" + parts.dropFirst().joined(separator: "/")
+    }
+
+    private static func maskText(_ value: String) -> String {
+        var output = maskAbsolutePaths(value)
+        let replacements: [(String, String)] = [
+            (#"AKIA[0-9A-Z]{16}"#, "[redacted-aws-key]"),
+            (#"gh[pousr]_[A-Za-z0-9_]{20,}"#, "[redacted-github-token]"),
+            (#"sk-[A-Za-z0-9_-]{20,}"#, "[redacted-api-key]"),
+            (#"xox[baprs]-[A-Za-z0-9-]{20,}"#, "[redacted-slack-token]"),
+            (#"(?i)\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)(\s*[:=]\s*['"]?)[^'"\s#;,]{6,}"#, "$1$2[redacted]"),
+        ]
+        for (pattern, replacement) in replacements {
+            output = regexReplace(output, pattern: pattern, replacement: replacement)
+        }
+        return output
+    }
+
+    private static func maskAbsolutePaths(_ value: String) -> String {
+        regexReplace(
+            value,
+            pattern: #"(/Users/[^"' <>\n\r]+|/private/var/[^"' <>\n\r]+|[A-Za-z]:\\[^"' <>\n\r]+)"#,
+            replacement: "[local-path]"
+        )
+    }
+
+    private static func regexReplace(_ value: String, pattern: String, replacement: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return value
+        }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        return regex.stringByReplacingMatches(in: value, range: range, withTemplate: replacement)
+    }
+}
+
 struct ScanReportItem: Identifiable, Hashable {
     let id: String
     let icon: String
@@ -1393,6 +2049,10 @@ struct ScanReportItem: Identifiable, Hashable {
     let findingCount: Int
     let riskScore: Int
     let findings: [NativeFinding]
+    let warnings: [String]
+    let targetCount: Int
+    let scannedFileCount: Int
+    let generatedAt: Date
     let standard: AppSecurityStandard?
 
     var isOverall: Bool {
@@ -1842,12 +2502,26 @@ private struct NativeDependencyComponent: Hashable {
         switch ecosystem {
         case "npm": return "pkg:npm/\(encodedName)@\(encodedVersion)"
         case "PyPI": return "pkg:pypi/\(encodedName.lowercased())@\(encodedVersion)"
+        case "Maven":
+            let parts = name.split(separator: ":", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                let group = parts[0].addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? parts[0]
+                let artifact = parts[1].addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? parts[1]
+                return "pkg:maven/\(group)/\(artifact)@\(encodedVersion)"
+            }
+            return "pkg:maven/\(encodedName)@\(encodedVersion)"
+        case "Go": return "pkg:golang/\(encodedName)@\(encodedVersion)"
+        case "crates.io": return "pkg:cargo/\(encodedName)@\(encodedVersion)"
+        case "RubyGems": return "pkg:gem/\(encodedName)@\(encodedVersion)"
+        case "Packagist": return "pkg:composer/\(encodedName)@\(encodedVersion)"
+        case "NuGet": return "pkg:nuget/\(encodedName)@\(encodedVersion)"
         default: return "pkg:generic/\(encodedName)@\(encodedVersion)"
         }
     }
 }
 
 private enum NativeDependencyInventory {
+    private static let supportedOSVEcosystems: Set<String> = ["npm", "PyPI", "Maven", "Go", "crates.io", "RubyGems", "Packagist", "NuGet"]
     private static let excludedDirectoryNames: Set<String> = [
         ".git", ".hg", ".svn", ".cache", ".next", ".venv", "venv", "node_modules", "dist", "build", "coverage", "reports", "target"
     ]
@@ -1866,7 +2540,7 @@ private enum NativeDependencyInventory {
 
     static func queryableOSVComponents(from targets: [URL]) throws -> [NativeDependencyComponent] {
         try components(from: targets).filter { component in
-            ["npm", "PyPI"].contains(component.ecosystem) && isExactVersion(component.version)
+            supportedOSVEcosystems.contains(component.ecosystem) && isExactVersion(component.version)
         }
     }
 
@@ -1945,7 +2619,22 @@ private enum NativeDependencyInventory {
             return poetryLockComponents(file, root: root, targetName: targetName)
         case "Pipfile.lock":
             return pipfileLockComponents(file, root: root, targetName: targetName)
+        case "go.mod", "go.sum":
+            return goModuleComponents(file, root: root, targetName: targetName)
+        case "Cargo.lock":
+            return cargoLockComponents(file, root: root, targetName: targetName)
+        case "Gemfile.lock":
+            return gemfileLockComponents(file, root: root, targetName: targetName)
+        case "composer.lock":
+            return composerLockComponents(file, root: root, targetName: targetName)
+        case "pom.xml":
+            return pomComponents(file, root: root, targetName: targetName)
+        case "packages.config":
+            return nugetComponents(file, root: root, targetName: targetName)
         default:
+            if ["csproj", "fsproj", "vbproj"].contains(file.pathExtension.lowercased()) {
+                return nugetComponents(file, root: root, targetName: targetName)
+            }
             return []
         }
     }
@@ -2230,6 +2919,243 @@ private enum NativeDependencyInventory {
         return components
     }
 
+    private static func goModuleComponents(_ file: URL, root: URL, targetName: String) -> [NativeDependencyComponent] {
+        guard let lines = try? String(contentsOf: file, encoding: .utf8).components(separatedBy: .newlines) else {
+            return []
+        }
+
+        var inRequireBlock = false
+        var components: [NativeDependencyComponent] = []
+        for (index, rawLine) in lines.enumerated() {
+            var line = rawLine
+                .split(separator: "//", maxSplits: 1, omittingEmptySubsequences: false)
+                .first
+                .map(String.init)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !line.isEmpty else { continue }
+            if file.lastPathComponent == "go.mod" {
+                if line == "require (" {
+                    inRequireBlock = true
+                    continue
+                }
+                if inRequireBlock && line == ")" {
+                    inRequireBlock = false
+                    continue
+                }
+                if line.hasPrefix("require ") {
+                    line = String(line.dropFirst("require ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if !inRequireBlock {
+                    continue
+                }
+            }
+            let pattern = file.lastPathComponent == "go.sum"
+                ? #"^\s*([A-Za-z0-9_.\-~/]+(?:/[A-Za-z0-9_.\-~]+)+)\s+(v?[0-9][^\s/]+)(?:/go\.mod)?\s+"#
+                : #"^\s*([A-Za-z0-9_.\-~/]+(?:/[A-Za-z0-9_.\-~]+)+)\s+(v?[0-9][^\s]+)"#
+            guard let groups = firstRegexGroups(pattern, in: line), groups.count >= 2 else {
+                continue
+            }
+            components.append(
+                NativeDependencyComponent(
+                    name: groups[0],
+                    ecosystem: "Go",
+                    version: groups[1],
+                    path: displayPath(file, root: root, targetName: targetName),
+                    target: targetName,
+                    line: index + 1,
+                    scope: "required"
+                )
+            )
+        }
+        return components
+    }
+
+    private static func cargoLockComponents(_ file: URL, root: URL, targetName: String) -> [NativeDependencyComponent] {
+        guard let lines = try? String(contentsOf: file, encoding: .utf8).components(separatedBy: .newlines) else {
+            return []
+        }
+
+        var current: [String: String] = [:]
+        var currentLine: Int?
+        var components: [NativeDependencyComponent] = []
+
+        func flushPackage() {
+            guard let name = current["name"], let version = current["version"], !name.isEmpty, !version.isEmpty else {
+                return
+            }
+            components.append(
+                NativeDependencyComponent(
+                    name: name,
+                    ecosystem: "crates.io",
+                    version: version,
+                    path: displayPath(file, root: root, targetName: targetName),
+                    target: targetName,
+                    line: currentLine,
+                    scope: "required"
+                )
+            )
+        }
+
+        for (index, rawLine) in lines.enumerated() {
+            let stripped = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if stripped == "[[package]]" {
+                flushPackage()
+                current = [:]
+                currentLine = index + 1
+                continue
+            }
+            guard currentLine != nil, let pair = keyValue(stripped), ["name", "version"].contains(pair.key) else {
+                continue
+            }
+            current[pair.key] = tomlValue(pair.value)
+        }
+        flushPackage()
+        return components
+    }
+
+    private static func gemfileLockComponents(_ file: URL, root: URL, targetName: String) -> [NativeDependencyComponent] {
+        guard let lines = try? String(contentsOf: file, encoding: .utf8).components(separatedBy: .newlines) else {
+            return []
+        }
+
+        var inSpecs = false
+        var components: [NativeDependencyComponent] = []
+        for (index, rawLine) in lines.enumerated() {
+            let stripped = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if stripped == "GEM" {
+                inSpecs = false
+                continue
+            }
+            if stripped == "specs:" {
+                inSpecs = true
+                continue
+            }
+            if inSpecs && !rawLine.isEmpty && !rawLine.hasPrefix(" ") && !rawLine.hasPrefix("\t") {
+                inSpecs = false
+            }
+            guard inSpecs,
+                  let groups = firstRegexGroups(#"^\s{4}([A-Za-z0-9_.\-]+)\s+\(([^()\s]+)\)"#, in: rawLine),
+                  groups.count >= 2 else {
+                continue
+            }
+            components.append(
+                NativeDependencyComponent(
+                    name: groups[0],
+                    ecosystem: "RubyGems",
+                    version: groups[1],
+                    path: displayPath(file, root: root, targetName: targetName),
+                    target: targetName,
+                    line: index + 1,
+                    scope: "required"
+                )
+            )
+        }
+        return components
+    }
+
+    private static func composerLockComponents(_ file: URL, root: URL, targetName: String) -> [NativeDependencyComponent] {
+        guard let data = try? Data(contentsOf: file),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+
+        var components: [NativeDependencyComponent] = []
+        for (section, scope) in [("packages", "required"), ("packages-dev", "excluded")] {
+            guard let packages = object[section] as? [[String: Any]] else { continue }
+            for package in packages {
+                guard let name = package["name"] as? String,
+                      let rawVersion = package["version"] as? String else {
+                    continue
+                }
+                components.append(
+                    NativeDependencyComponent(
+                        name: name,
+                        ecosystem: "Packagist",
+                        version: rawVersion.hasPrefix("v") ? String(rawVersion.dropFirst()) : rawVersion,
+                        path: displayPath(file, root: root, targetName: targetName),
+                        target: targetName,
+                        line: nil,
+                        scope: scope
+                    )
+                )
+            }
+        }
+        return components
+    }
+
+    private static func pomComponents(_ file: URL, root: URL, targetName: String) -> [NativeDependencyComponent] {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else {
+            return []
+        }
+
+        var components: [NativeDependencyComponent] = []
+        for block in regexMatches(#"<dependency\b[^>]*>(.*?)</dependency>"#, in: text) {
+            let groupID = firstXMLTagValue("groupId", in: block)
+            let artifactID = firstXMLTagValue("artifactId", in: block)
+            let version = firstXMLTagValue("version", in: block)
+            guard !groupID.isEmpty, !artifactID.isEmpty, !version.isEmpty, !version.hasPrefix("${") else {
+                continue
+            }
+            let scope = firstXMLTagValue("scope", in: block).lowercased() == "test" ? "excluded" : "required"
+            components.append(
+                NativeDependencyComponent(
+                    name: "\(groupID):\(artifactID)",
+                    ecosystem: "Maven",
+                    version: version,
+                    path: displayPath(file, root: root, targetName: targetName),
+                    target: targetName,
+                    line: lineNumber(of: "<artifactId>\(artifactID)</artifactId>", in: text),
+                    scope: scope
+                )
+            )
+        }
+        return components
+    }
+
+    private static func nugetComponents(_ file: URL, root: URL, targetName: String) -> [NativeDependencyComponent] {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else {
+            return []
+        }
+
+        var components: [NativeDependencyComponent] = []
+        if file.lastPathComponent == "packages.config" {
+            for match in regexMatches(#"<package\b[^>]*\bid=["']([^"']+)["'][^>]*\bversion=["']([^"']+)["'][^>]*/?>"#, in: text, includeFullMatch: false) {
+                let parts = match.components(separatedBy: "\u{1f}")
+                guard parts.count == 2 else { continue }
+                components.append(
+                    NativeDependencyComponent(
+                        name: parts[0],
+                        ecosystem: "NuGet",
+                        version: parts[1],
+                        path: displayPath(file, root: root, targetName: targetName),
+                        target: targetName,
+                        line: lineNumber(of: parts[0], in: text),
+                        scope: "required"
+                    )
+                )
+            }
+            return components
+        }
+
+        for block in regexMatches(#"<PackageReference\b([^>]*)>(.*?)</PackageReference>|<PackageReference\b([^>]*)/?>"#, in: text) {
+            let attributes = xmlAttributes(block)
+            let name = attributes["Include"] ?? attributes["Update"] ?? ""
+            let version = attributes["Version"] ?? firstXMLTagValue("Version", in: block)
+            guard !name.isEmpty, !version.isEmpty else { continue }
+            components.append(
+                NativeDependencyComponent(
+                    name: name,
+                    ecosystem: "NuGet",
+                    version: version,
+                    path: displayPath(file, root: root, targetName: targetName),
+                    target: targetName,
+                    line: lineNumber(of: name, in: text),
+                    scope: "required"
+                )
+            )
+        }
+        return components
+    }
+
     private static func unique(_ components: [NativeDependencyComponent]) -> [NativeDependencyComponent] {
         var seen: Set<String> = []
         var output: [NativeDependencyComponent] = []
@@ -2243,9 +3169,12 @@ private enum NativeDependencyInventory {
     }
 
     private static func isExactVersion(_ version: String) -> Bool {
-        let trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("v"), trimmed.dropFirst().first?.isNumber == true {
+            trimmed = String(trimmed.dropFirst())
+        }
         guard !trimmed.isEmpty else { return false }
-        if trimmed.range(of: #"[<>=~^*xX]"#, options: .regularExpression) != nil {
+        if trimmed.range(of: #"[<>=~^*xX\[\]]|\$\{"#, options: .regularExpression) != nil {
             return false
         }
         return trimmed.first?.isNumber == true
@@ -2373,6 +3302,73 @@ private enum NativeDependencyInventory {
             return nil
         }
         return (name, version)
+    }
+
+    private static func firstRegexGroups(_ pattern: String, in value: String) -> [String]? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        guard let match = regex.firstMatch(in: value, range: range) else {
+            return nil
+        }
+        var groups: [String] = []
+        for index in 1..<match.numberOfRanges {
+            let capture = match.range(at: index)
+            if capture.location != NSNotFound, let swiftRange = Range(capture, in: value) {
+                groups.append(String(value[swiftRange]))
+            }
+        }
+        return groups
+    }
+
+    private static func regexMatches(_ pattern: String, in value: String, includeFullMatch: Bool = true) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) else {
+            return []
+        }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        return regex.matches(in: value, range: range).compactMap { match in
+            if includeFullMatch, let swiftRange = Range(match.range, in: value) {
+                return String(value[swiftRange])
+            }
+            var captures: [String] = []
+            for index in 1..<match.numberOfRanges {
+                let capture = match.range(at: index)
+                if capture.location != NSNotFound, let swiftRange = Range(capture, in: value) {
+                    captures.append(String(value[swiftRange]))
+                }
+            }
+            return captures.isEmpty ? nil : captures.joined(separator: "\u{1f}")
+        }
+    }
+
+    private static func firstXMLTagValue(_ tag: String, in value: String) -> String {
+        let escaped = NSRegularExpression.escapedPattern(for: tag)
+        let pattern = #"<(?:[A-Za-z0-9_.-]+:)?"# + escaped + #">\s*([^<\s][^<]*)\s*</(?:[A-Za-z0-9_.-]+:)?"# + escaped + #">"#
+        return firstRegexGroups(pattern, in: value)?.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static func xmlAttributes(_ value: String) -> [String: String] {
+        guard let regex = try? NSRegularExpression(pattern: #"([A-Za-z_:][A-Za-z0-9_.:-]*)=["']([^"']+)["']"#) else {
+            return [:]
+        }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        var attributes: [String: String] = [:]
+        for match in regex.matches(in: value, range: range) {
+            guard let keyRange = Range(match.range(at: 1), in: value),
+                  let valueRange = Range(match.range(at: 2), in: value) else {
+                continue
+            }
+            attributes[String(value[keyRange])] = String(value[valueRange])
+        }
+        return attributes
+    }
+
+    private static func lineNumber(of needle: String, in value: String) -> Int? {
+        guard let range = value.range(of: needle) else {
+            return nil
+        }
+        return value[..<range.lowerBound].filter { $0 == "\n" }.count + 1
     }
 
     private static func keyValue(_ value: String) -> (key: String, value: String)? {
@@ -2900,12 +3896,24 @@ private enum SecurityPreventionToolkit {
             ("SECURITY.md", securityPolicy(projectName: projectName)),
             (".github/dependabot.yml", dependabotConfig()),
             (".github/workflows/koda-security.yml", githubSecurityWorkflow()),
+            (".github/workflows/koda-release-provenance.yml", releaseProvenanceWorkflow()),
+            (".github/CODEOWNERS", codeowners()),
             (".dockerignore", dockerignore()),
             (".env.example", envExample()),
+            ("docs/security/PRE_COMMIT.md", preCommitGuide()),
+            ("docs/security/GITHUB_REPOSITORY_SECURITY.md", repositorySecurityChecklist(projectName: projectName)),
             ("docs/security/ZAP_BASELINE.md", zapBaselineGuide()),
             ("docs/security/DEPENDENCY_TRACK.md", dependencyTrackGuide(projectName: projectName)),
             ("docs/security/VEX.md", vexGuide()),
             ("docs/security/SLSA_SIGSTORE.md", slsaSigstoreGuide()),
+            ("docs/security/NIST_SSDF_WORKFLOW.md", ssdfWorkflowPlan(projectName: projectName)),
+            ("docs/security/SECURE_BY_DESIGN.md", secureByDesignPlan(projectName: projectName)),
+            ("docs/security/THREAT_MODEL.md", threatModelTemplate(projectName: projectName)),
+            ("docs/security/SECRET_ROTATION.md", secretRotationRunbook(projectName: projectName)),
+            ("docs/security/AI_LLM_SECURITY.md", aiLLMSecurityPlan(projectName: projectName)),
+            ("docs/security/MOBILE_SECURITY.md", mobileSecurityPlan(projectName: projectName)),
+            ("docs/security/NIST_CSF_2_PROFILE.md", nistCSFProfile(projectName: projectName)),
+            ("docs/security/CISA_SECURE_SOFTWARE_ATTESTATION.md", cisaAttestationChecklist(projectName: projectName)),
         ]
     }
 
@@ -3017,6 +4025,52 @@ private enum SecurityPreventionToolkit {
         """
     }
 
+    private static func releaseProvenanceWorkflow() -> String {
+        """
+        name: KODA Release Provenance
+
+        on:
+          workflow_dispatch:
+          release:
+            types: [published]
+
+        permissions:
+          contents: read
+          id-token: write
+
+        jobs:
+          release-provenance:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v4
+              - name: Build release artifacts
+                run: |
+                  mkdir -p dist
+                  tar --exclude .git --exclude dist -czf dist/source-release.tar.gz .
+              - name: Generate checksums
+                run: sha256sum dist/* > dist/checksums.txt
+              - name: Install cosign
+                uses: sigstore/cosign-installer@v3
+              - name: Sign artifacts with Sigstore
+                run: |
+                  for artifact in dist/*; do
+                    [ -f "$artifact" ] || continue
+                    cosign sign-blob "$artifact" --bundle "$artifact.sigstore.json" --yes
+                  done
+        """
+    }
+
+    private static func codeowners() -> String {
+        """
+        # Adjust owners before committing.
+        * @security-team
+        /.github/ @security-team
+        /security_scanner/ @security-team
+        /docs/security/ @security-team
+        /SECURITY.md @security-team
+        """
+    }
+
     private static func dockerignore() -> String {
         """
         .git
@@ -3041,6 +4095,46 @@ private enum SecurityPreventionToolkit {
         # Copy to .env locally and fill real values outside the repository.
         APP_ENV=development
         LOG_LEVEL=info
+        """
+    }
+
+    private static func preCommitGuide() -> String {
+        """
+        # KODA Pre-Commit Security Gate
+
+        Install the KODA pre-commit hook from the app or CLI to stop high-risk findings before they enter Git history.
+
+        ```bash
+        python -m security_scanner install-hook --target . --fail-on high
+        ```
+
+        Environment variables:
+
+        - KODA_PRE_COMMIT_FAIL_ON: critical, high, medium, low, or info
+        - KODA_PRE_COMMIT_TARGET: target path, default `.`
+        """
+    }
+
+    fileprivate static func repositorySecurityChecklist(projectName: String) -> String {
+        """
+        # GitHub Repository Security Checklist
+
+        Project: \(projectName)
+
+        ## Branch And Review Protection
+
+        - [ ] Protect the default branch.
+        - [ ] Require pull requests before merge.
+        - [ ] Require at least one approving review.
+        - [ ] Require KODA/SAST status checks before merge.
+        - [ ] Require CODEOWNERS review for security-sensitive paths.
+
+        ## Secret And Dependency Protection
+
+        - [ ] Enable secret scanning and push protection.
+        - [ ] Enable Dependabot alerts and security updates.
+        - [ ] Upload SARIF from KODA, CodeQL, Semgrep, or equivalent tools.
+        - [ ] Keep Actions token permissions read-only by default.
         """
     }
 
@@ -3100,6 +4194,249 @@ private enum SecurityPreventionToolkit {
         3. Sign artifacts with Sigstore/cosign or your signing system.
         4. Publish checksums, signatures, and provenance next to the release.
         5. Keep GitHub Actions permissions read-only by default.
+        """
+    }
+
+    fileprivate static func releaseSigningPlan(projectName: String) -> String {
+        """
+        # SLSA / Sigstore Release Signing Plan
+
+        Project: \(projectName)
+
+        ## Goal
+
+        Build release artifacts in CI, generate provenance, sign artifacts with Sigstore/cosign or your signing system, and publish verification material next to the release.
+
+        ## Local Commands For Dry Run
+
+        ```bash
+        sha256sum "dist/app.tar.gz" > "dist/app.tar.gz.sha256"
+        cosign sign-blob "dist/app.tar.gz" --bundle "dist/app.tar.gz.sigstore.json" --yes
+        cosign verify-blob "dist/app.tar.gz" --bundle "dist/app.tar.gz.sigstore.json" --certificate-identity-regexp ".*" --certificate-oidc-issuer-regexp ".*"
+        ```
+
+        ## CI Requirements
+
+        - [ ] Build artifacts in CI from the release tag.
+        - [ ] Generate SLSA provenance or an equivalent attestation.
+        - [ ] Sign the artifact or container digest.
+        - [ ] Publish checksum, signature bundle, and provenance.
+        - [ ] Verify the published artifact from a clean environment before release announcement.
+        """
+    }
+
+    fileprivate static func ssdfWorkflowPlan(projectName: String) -> String {
+        """
+        # NIST SSDF Workflow
+
+        Project: \(projectName)
+
+        ## Prepare The Organization
+
+        - [ ] Define secure-development roles and owners.
+        - [ ] Keep SECURITY.md, CODEOWNERS, and exception policy current.
+        - [ ] Train contributors on secrets, dependency hygiene, and secure defaults.
+
+        ## Protect The Software
+
+        - [ ] Keep source access least-privilege.
+        - [ ] Block secrets and high-risk findings before commit.
+        - [ ] Generate SBOMs for release builds.
+        - [ ] Sign release artifacts and preserve provenance.
+
+        ## Produce Well-Secured Software
+
+        - [ ] Run KODA, SAST, and dependency checks on pull requests.
+        - [ ] Use secure defaults for configuration, cookies, CORS, containers, and CI tokens.
+        - [ ] Keep dependency update automation enabled.
+
+        ## Respond To Vulnerabilities
+
+        - [ ] Triage OSV/CVE findings with KEV/EPSS context.
+        - [ ] Record reviewed dependency findings in VEX.
+        - [ ] Re-run KODA and compare score history after remediation.
+        """
+    }
+
+    fileprivate static func secureByDesignPlan(projectName: String) -> String {
+        """
+        # CISA Secure by Design Plan
+
+        Project: \(projectName)
+
+        ## Take Ownership Of Customer Security Outcomes
+
+        - [ ] Treat exposed secrets, unsafe defaults, and known exploited vulnerabilities as customer-impacting defects.
+        - [ ] Provide secure defaults for auth, sessions, logging, CORS, and deployment configuration.
+        - [ ] Keep a security contact and vulnerability handling process visible.
+
+        ## Embrace Radical Transparency And Accountability
+
+        - [ ] Publish security policy, supported versions, and remediation expectations.
+        - [ ] Keep SBOM and VEX artifacts for releases.
+        - [ ] Record known limitations, accepted risks, and exception expiry dates.
+        - [ ] Track score history and severity deltas after each release.
+
+        ## Lead From The Top
+
+        - [ ] Assign owners for product security outcomes.
+        - [ ] Review Secure by Design metrics regularly.
+        - [ ] Require security gates before merge and release.
+        """
+    }
+
+    fileprivate static func threatModelTemplate(projectName: String) -> String {
+        """
+        # Threat Model
+
+        Project: \(projectName)
+
+        ## Scope
+
+        - [ ] Product or service boundary:
+        - [ ] In-scope repositories, apps, APIs, workers, and admin tools:
+        - [ ] Out-of-scope systems:
+
+        ## Assets
+
+        | Asset | Sensitivity | Owner | Storage/Transit |
+        | --- | --- | --- | --- |
+        | Customer data | high | TBD | TBD |
+        | Secrets and tokens | critical | TBD | secret manager / environment |
+        | Build and release artifacts | high | TBD | CI/release storage |
+
+        ## Trust Boundaries
+
+        - [ ] Browser/mobile client to backend API
+        - [ ] Backend to database/cache/object storage
+        - [ ] CI runner to package registries and release storage
+        - [ ] Admin/operator access to production systems
+        - [ ] AI/LLM provider, tool, or retrieval boundary when used
+
+        ## Abuse Cases
+
+        - [ ] Unauthorized access to user/admin function
+        - [ ] Secret leak through repository, logs, prompt, or artifact
+        - [ ] Dependency or CI supply-chain compromise
+        - [ ] File upload/download path manipulation
+        - [ ] Prompt injection or over-privileged agent action when AI is used
+        """
+    }
+
+    fileprivate static func secretRotationRunbook(projectName: String) -> String {
+        """
+        # Secret Rotation Runbook
+
+        Project: \(projectName)
+
+        ## Immediate Response
+
+        - [ ] Identify the secret owner and affected service.
+        - [ ] Revoke or disable the exposed value.
+        - [ ] Issue a replacement secret through the approved secret manager.
+        - [ ] Deploy the replacement without writing it to source control.
+        - [ ] Re-run KODA and provider-side secret scanning.
+
+        ## Audit
+
+        - [ ] Review provider logs from the first possible exposure time.
+        - [ ] Check CI logs, issue attachments, release artifacts, and chat copies.
+        - [ ] Record owner, incident ticket, timeline, and final disposition.
+        """
+    }
+
+    fileprivate static func aiLLMSecurityPlan(projectName: String) -> String {
+        """
+        # AI / LLM Security Plan
+
+        Project: \(projectName)
+
+        ## Inventory
+
+        | Use case | Model/provider | Data sent | Tools/actions | Owner |
+        | --- | --- | --- | --- | --- |
+        | TBD | TBD | TBD | TBD | TBD |
+
+        ## OWASP LLM Top 10 Controls
+
+        - [ ] LLM01 Prompt Injection: user and retrieved content are separated from system/developer instructions.
+        - [ ] LLM02 Sensitive Information Disclosure: prompts and logs redact credentials, tokens, PII, and customer secrets.
+        - [ ] LLM03 Supply Chain: model, SDK, plugin, and retrieval dependencies are inventoried and reviewed.
+        - [ ] LLM05 Improper Output Handling: model output is validated before HTML, shell, SQL, file, or API use.
+        - [ ] LLM06 Excessive Agency: tools are allowlisted, scoped, logged, and require confirmation for side effects.
+        - [ ] LLM08 Vector and Embedding Weaknesses: retrieval sources are trusted, access-controlled, and poison-resistant.
+
+        ## Tests
+
+        - [ ] Prompt injection fixtures cover direct and indirect input.
+        - [ ] Tool calls reject path traversal, network abuse, and unauthorized destructive actions.
+        - [ ] Sensitive data canary values are not returned by the model or stored in logs.
+        """
+    }
+
+    fileprivate static func mobileSecurityPlan(projectName: String) -> String {
+        """
+        # Mobile Security Plan
+
+        Project: \(projectName)
+
+        ## OWASP MASVS Coverage
+
+        - [ ] MASVS-STORAGE: local storage, backups, keychain/keystore, and cached files reviewed.
+        - [ ] MASVS-CRYPTO: approved crypto and key handling used.
+        - [ ] MASVS-AUTH: authentication, session, biometric, and authorization flows tested.
+        - [ ] MASVS-NETWORK: TLS/ATS/network security config reviewed; cleartext traffic disabled.
+        - [ ] MASVS-PLATFORM: exported Android components and iOS document sharing reviewed.
+        - [ ] MASVS-CODE: debug flags, logging, injection, file handling, and dependency hygiene checked.
+        - [ ] MASVS-RESILIENCE: release signing, debug builds, and tamper expectations documented.
+        - [ ] MASVS-PRIVACY: personal data collection, retention, prompts, analytics, and logs reviewed.
+        """
+    }
+
+    fileprivate static func nistCSFProfile(projectName: String) -> String {
+        """
+        # NIST CSF 2.0 Profile
+
+        Project: \(projectName)
+
+        - [ ] Govern: risk owners, policy, exception handling, and review cadence are documented.
+        - [ ] Identify: repositories, services, dependency manifests, SBOM, data stores, and critical assets are inventoried.
+        - [ ] Protect: secrets, authentication, session, container, mobile, AI, and CI settings have secure defaults.
+        - [ ] Detect: KODA/SAST/dependency scans run on pull requests or release branches.
+        - [ ] Respond: vulnerability reports, OSV/CVE findings, secret leaks, and DAST findings have owners and due dates.
+        - [ ] Recover: release packages include checksums, SBOM, VEX, scan reports, and signing/provenance evidence.
+        """
+    }
+
+    fileprivate static func cisaAttestationChecklist(projectName: String) -> String {
+        """
+        # CISA Secure Software Development Attestation Checklist
+
+        Project: \(projectName)
+
+        ## Secure Development Environment
+
+        - [ ] Source access is least-privilege and reviewed.
+        - [ ] Branch protection, required review, CODEOWNERS, and CI gates are configured.
+        - [ ] Secrets are not stored in source and have rotation procedures.
+
+        ## Secure Development Practices
+
+        - [ ] Threat modeling is performed for significant features.
+        - [ ] Secure coding checks run locally or in CI.
+        - [ ] Security-relevant exceptions have owner, reason, and expiry.
+
+        ## Third-Party Components
+
+        - [ ] Dependencies are inventoried with SBOM.
+        - [ ] Versions are pinned where practical.
+        - [ ] Known vulnerabilities are triaged and VEX decisions are recorded.
+
+        ## Verification And Response
+
+        - [ ] SAST, dependency, secret, and configuration checks are run before release.
+        - [ ] DAST or penetration testing is scheduled when runtime behavior matters.
+        - [ ] Vulnerability reporting, remediation, and release-note/advisory processes are documented.
         """
     }
 

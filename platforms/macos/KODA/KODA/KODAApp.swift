@@ -47,10 +47,33 @@ struct KODAApp: App {
                 try scanner.writePDFReport(result, to: URL(fileURLWithPath: pdfOutput), language: language)
             }
             print(output.path)
+            if shouldFail(result, failOn: environment["KODA_SCAN_FAIL_ON"]) {
+                exit(1)
+            }
             exit(0)
         } catch {
             fputs("\(error.localizedDescription)\n", stderr)
             exit(2)
+        }
+    }
+
+    private func shouldFail(_ result: NativeScanResult, failOn: String?) -> Bool {
+        guard let failOn, let threshold = severityRank(failOn) else {
+            return false
+        }
+        return result.findings.contains { finding in
+            (severityRank(finding.severity) ?? 0) >= threshold
+        }
+    }
+
+    private func severityRank(_ severity: String) -> Int? {
+        switch severity.lowercased() {
+        case "critical": return 5
+        case "high": return 4
+        case "medium": return 3
+        case "low": return 2
+        case "info": return 1
+        default: return nil
         }
     }
 }

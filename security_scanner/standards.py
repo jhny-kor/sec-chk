@@ -43,15 +43,29 @@ CONFIGURATION_RULE_IDS = (
     "config.compose-privileged",
     "config.compose-host-network",
     "config.compose-docker-sock",
+    "config.compose-dangerous-capability",
+    "config.compose-host-pid",
     "config.k8s-privileged-container",
     "config.k8s-allow-privilege-escalation",
     "config.k8s-host-network",
     "config.k8s-hostpath-volume",
+    "config.k8s-run-as-root",
+    "config.k8s-service-account-token",
+    "config.k8s-unpinned-image",
     "config.terraform-public-storage",
     "config.terraform-public-access-block-disabled",
     "config.terraform-open-admin-port",
+    "config.terraform-wildcard-iam-action",
+    "config.terraform-wildcard-principal",
     "config.github-pull-request-target",
     "config.github-untrusted-event-in-run",
+    "config.android-debuggable",
+    "config.android-allow-backup",
+    "config.android-cleartext-traffic",
+    "config.android-exported-component",
+    "config.ios-ats-arbitrary-loads",
+    "config.ios-file-sharing-enabled",
+    "config.ios-open-documents-in-place",
 )
 
 CODE_PATTERN_RULE_IDS = (
@@ -80,12 +94,21 @@ CODE_PATTERN_RULE_IDS = (
     "code.legacy-board-software",
     "code.weak-hash",
     "code.xml-external-entity",
+    "code.llm-prompt-user-concat",
+    "code.llm-tool-unrestricted",
+    "code.llm-sensitive-data-in-prompt",
 )
 
 PREVENTION_RULE_IDS = (
     "prevention.security-policy-missing",
     "prevention.dependency-update-automation-missing",
     "prevention.ci-security-scan-missing",
+    "prevention.pre-commit-hook-missing",
+    "prevention.codeowners-missing",
+    "prevention.repository-security-settings-missing",
+    "prevention.release-provenance-automation-missing",
+    "prevention.ssdf-workflow-missing",
+    "prevention.secure-by-design-program-missing",
     "prevention.env-not-gitignored",
     "prevention.env-example-missing",
     "prevention.dockerignore-missing",
@@ -99,6 +122,12 @@ PREVENTION_RULE_IDS = (
     "prevention.dependency-track-integration-missing",
     "prevention.vex-missing",
     "prevention.binary-artifact-committed",
+    "prevention.threat-model-missing",
+    "prevention.secret-rotation-runbook-missing",
+    "prevention.ai-llm-security-plan-missing",
+    "prevention.mobile-security-plan-missing",
+    "prevention.nist-csf-profile-missing",
+    "prevention.cisa-attestation-missing",
 )
 
 ACCESS_CONTROL_RULE_IDS = (
@@ -211,6 +240,34 @@ CRYPTOGRAPHY_RULE_IDS = SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS + 
 WEB_FILE_HANDLING_RULE_IDS = (
     "code.path-traversal",
     "code.unrestricted-file-upload",
+)
+
+MOBILE_CONFIGURATION_RULE_IDS = (
+    "config.android-debuggable",
+    "config.android-allow-backup",
+    "config.android-cleartext-traffic",
+    "config.android-exported-component",
+    "config.ios-ats-arbitrary-loads",
+    "config.ios-file-sharing-enabled",
+    "config.ios-open-documents-in-place",
+)
+
+MOBILE_SECURITY_RULE_IDS = SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS + MOBILE_CONFIGURATION_RULE_IDS + (
+    "prevention.mobile-security-plan-missing",
+)
+
+LLM_SECURITY_RULE_IDS = (
+    "code.llm-prompt-user-concat",
+    "code.llm-tool-unrestricted",
+    "code.llm-sensitive-data-in-prompt",
+    "code.logging-sensitive-data",
+    "code.unbounded-request-body",
+    "code.eval-user-input",
+    "dependency.osv-known-vulnerability",
+    "prevention.ai-llm-security-plan-missing",
+    "prevention.threat-model-missing",
+    "prevention.sbom-missing",
+    "prevention.vex-missing",
 )
 
 LEGACY_WEB_RULE_IDS = (
@@ -1503,6 +1560,7 @@ OWASP_DEPENDENCY_TRACK_BASELINE = SecurityStandard(
 
 _OPENSSF_SCORECARD_CATEGORIES = (
     StandardCategory("security-policy", {"en": "Security Policy", "ko": "보안 정책"}, scanner_categories=("prevention",), rule_ids=("prevention.security-policy-missing",)),
+    StandardCategory("maintained-owners", {"en": "Maintained Owners", "ko": "관리 책임자"}, scanner_categories=("prevention",), rule_ids=("prevention.codeowners-missing", "prevention.repository-security-settings-missing")),
     StandardCategory("dependency-update-tool", {"en": "Dependency Update Tool", "ko": "의존성 업데이트 자동화"}, scanner_categories=("prevention",), rule_ids=("prevention.dependency-update-automation-missing",)),
     StandardCategory("sast", {"en": "SAST", "ko": "정적 분석"}, scanner_categories=("prevention",), rule_ids=("prevention.sast-workflow-missing", "prevention.ci-security-scan-missing")),
     StandardCategory("token-permissions", {"en": "Token Permissions", "ko": "토큰 권한"}, scanner_categories=("prevention",), rule_ids=("prevention.github-token-permissions-not-readonly",)),
@@ -1564,8 +1622,8 @@ CISA_KEV_EPSS_PRIORITY = SecurityStandard(
 
 
 _SLSA_SIGSTORE_CATEGORIES = (
-    StandardCategory("provenance", {"en": "Build Provenance", "ko": "빌드 출처 증명"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing",)),
-    StandardCategory("signed-artifacts", {"en": "Signed Artifacts", "ko": "서명된 산출물"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing", "prevention.binary-artifact-committed")),
+    StandardCategory("provenance", {"en": "Build Provenance", "ko": "빌드 출처 증명"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing", "prevention.release-provenance-automation-missing")),
+    StandardCategory("signed-artifacts", {"en": "Signed Artifacts", "ko": "서명된 산출물"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing", "prevention.release-provenance-automation-missing", "prevention.binary-artifact-committed")),
     StandardCategory("pinned-actions", {"en": "Pinned Actions", "ko": "고정된 액션"}, scanner_categories=("prevention",), rule_ids=("prevention.github-actions-unpinned", "prevention.github-token-permissions-not-readonly")),
 )
 
@@ -1591,6 +1649,165 @@ SLSA_SIGSTORE_BASELINE = SecurityStandard(
 )
 
 
+_CISA_SECURE_BY_DESIGN_CATEGORIES = (
+    StandardCategory("ownership", {"en": "Own Customer Security Outcomes", "ko": "고객 보안 결과 책임"}, scanner_categories=("prevention", "dependencies", "configuration", "code"), rule_ids=("prevention.secure-by-design-program-missing", "prevention.security-policy-missing", "prevention.ssdf-workflow-missing") + DEPENDENCY_RULE_IDS + MISCONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS),
+    StandardCategory("secure-defaults", {"en": "Secure Defaults", "ko": "안전한 기본값"}, scanner_categories=("configuration", "code", "prevention"), rule_ids=MISCONFIGURATION_RULE_IDS + SESSION_MANAGEMENT_RULE_IDS + ("prevention.pre-commit-hook-missing", "prevention.ci-security-scan-missing")),
+    StandardCategory("transparency", {"en": "Transparency and Accountability", "ko": "투명성 및 책임성"}, scanner_categories=("prevention", "dependencies"), rule_ids=("prevention.security-policy-missing", "prevention.vex-missing", "prevention.sbom-missing", "prevention.repository-security-settings-missing", "prevention.dependency-update-automation-missing") + DEPENDENCY_RULE_IDS),
+    StandardCategory("leadership", {"en": "Lead From the Top", "ko": "경영진 주도"}, scanner_categories=("prevention",), rule_ids=("prevention.secure-by-design-program-missing", "prevention.ssdf-workflow-missing", "prevention.codeowners-missing")),
+)
+
+CISA_SECURE_BY_DESIGN = SecurityStandard(
+    "cisa-secure-by-design",
+    {"en": "CISA Secure by Design", "ko": "CISA Secure by Design"},
+    (
+        _all_category(_CISA_SECURE_BY_DESIGN_CATEGORIES, {"en": "All mapped Secure by Design checks", "ko": "매핑된 Secure by Design 항목 전체"}),
+        *_CISA_SECURE_BY_DESIGN_CATEGORIES,
+    ),
+    description=_text(
+        "Maps CISA Secure by Design principles to local prevention evidence, secure defaults, transparency artifacts, and ownership signals.",
+        "CISA Secure by Design 원칙을 로컬 예방 증거, 안전한 기본값, 투명성 산출물, 책임 주체 신호에 매핑한 프로파일입니다.",
+    ),
+    coverage=_text(
+        "Evidence review required. Product security outcomes, executive ownership, and customer-impact metrics need organizational evidence beyond source files.",
+        "증적 확인이 필요합니다. 제품 보안 결과, 경영진 책임, 고객 영향 지표는 소스 파일 외 조직 증적이 필요합니다.",
+    ),
+    references=(
+        _reference("CISA Secure by Design", "CISA Secure by Design", "https://www.cisa.gov/resources-tools/resources/secure-by-design"),
+        _reference("CISA Secure by Design Pledge", "CISA Secure by Design Pledge", "https://www.cisa.gov/securebydesign"),
+    ),
+)
+
+
+_OWASP_MASVS_CATEGORIES = (
+    StandardCategory("masvs-storage", {"en": "MASVS-STORAGE Secure Storage", "ko": "MASVS-STORAGE 안전한 저장"}, scanner_categories=("secrets", "configuration"), rule_ids=SENSITIVE_DATA_RULE_IDS + ("config.android-allow-backup", "config.ios-file-sharing-enabled", "config.ios-open-documents-in-place")),
+    StandardCategory("masvs-crypto", {"en": "MASVS-CRYPTO Cryptography", "ko": "MASVS-CRYPTO 암호화"}, scanner_categories=("secrets", "code", "configuration"), rule_ids=CRYPTOGRAPHY_RULE_IDS + MOBILE_CONFIGURATION_RULE_IDS),
+    StandardCategory("masvs-auth", {"en": "MASVS-AUTH Authentication and Authorization", "ko": "MASVS-AUTH 인증 및 인가"}, scanner_categories=("code",), rule_ids=AUTHENTICATION_RULE_IDS + SESSION_MANAGEMENT_RULE_IDS),
+    StandardCategory("masvs-network", {"en": "MASVS-NETWORK Network Communication", "ko": "MASVS-NETWORK 네트워크 통신"}, scanner_categories=("dependencies", "configuration"), rule_ids=INSECURE_TRANSPORT_RULE_IDS + ("config.android-cleartext-traffic", "config.ios-ats-arbitrary-loads")),
+    StandardCategory("masvs-platform", {"en": "MASVS-PLATFORM Platform Interaction", "ko": "MASVS-PLATFORM 플랫폼 상호작용"}, scanner_categories=("configuration", "code"), rule_ids=("config.android-exported-component", "code.path-traversal", "code.unrestricted-file-upload")),
+    StandardCategory("masvs-code", {"en": "MASVS-CODE Code Quality", "ko": "MASVS-CODE 코드 품질"}, scanner_categories=("code", "dependencies"), rule_ids=CODE_PATTERN_RULE_IDS + DEPENDENCY_RULE_IDS),
+    StandardCategory("masvs-resilience", {"en": "MASVS-RESILIENCE Reverse Engineering Resilience", "ko": "MASVS-RESILIENCE 변조 대응"}, scanner_categories=("configuration", "prevention"), rule_ids=("config.android-debuggable", "prevention.slsa-sigstore-missing", "prevention.release-provenance-automation-missing")),
+    StandardCategory("masvs-privacy", {"en": "MASVS-PRIVACY Privacy", "ko": "MASVS-PRIVACY 개인정보 보호"}, scanner_categories=("secrets", "code", "prevention"), rule_ids=SENSITIVE_DATA_RULE_IDS + ("code.logging-sensitive-data", "prevention.mobile-security-plan-missing")),
+)
+
+OWASP_MASVS = SecurityStandard(
+    "owasp-masvs",
+    {"en": "OWASP MASVS", "ko": "OWASP MASVS"},
+    (
+        _all_category(_OWASP_MASVS_CATEGORIES, {"en": "All mapped MASVS checks", "ko": "매핑된 MASVS 항목 전체"}),
+        *_OWASP_MASVS_CATEGORIES,
+    ),
+    description=_text(
+        "OWASP Mobile Application Security Verification Standard control groups mapped to mobile source, manifest, plist, dependency, and prevention evidence.",
+        "OWASP 모바일 애플리케이션 보안 검증 표준의 통제 그룹을 모바일 소스, Manifest, plist, 의존성, 예방 증거에 매핑한 프로파일입니다.",
+    ),
+    coverage=_text(
+        "Local mobile source and configuration checks run automatically. Complete MASVS validation still needs device/runtime testing and manual evidence.",
+        "모바일 소스와 설정 점검은 자동으로 실행합니다. 완전한 MASVS 검증에는 기기/런타임 테스트와 수동 증적이 필요합니다.",
+    ),
+    references=(
+        _reference("OWASP MASVS", "OWASP MASVS", "https://mas.owasp.org/MASVS/"),
+        _reference("OWASP MASTG", "OWASP MASTG", "https://mas.owasp.org/MASTG/"),
+    ),
+    coverage_level="external",
+)
+
+
+_OWASP_LLM_TOP_10_2025_CATEGORIES = (
+    StandardCategory("llm01-prompt-injection", {"en": "LLM01 Prompt Injection", "ko": "LLM01 프롬프트 인젝션"}, scanner_categories=("code", "prevention"), rule_ids=("code.llm-prompt-user-concat", "prevention.threat-model-missing", "prevention.ai-llm-security-plan-missing")),
+    StandardCategory("llm02-sensitive-information-disclosure", {"en": "LLM02 Sensitive Information Disclosure", "ko": "LLM02 민감정보 노출"}, scanner_categories=("secrets", "code", "prevention"), rule_ids=SECRET_RULE_IDS + ("code.llm-sensitive-data-in-prompt", "code.logging-sensitive-data", "prevention.secret-rotation-runbook-missing")),
+    StandardCategory("llm03-supply-chain", {"en": "LLM03 Supply Chain", "ko": "LLM03 공급망"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + ("prevention.sbom-missing", "prevention.vex-missing", "prevention.dependency-track-integration-missing")),
+    StandardCategory("llm04-data-model-poisoning", {"en": "LLM04 Data and Model Poisoning", "ko": "LLM04 데이터 및 모델 오염"}, scanner_categories=("prevention",), rule_ids=("prevention.ai-llm-security-plan-missing", "prevention.threat-model-missing")),
+    StandardCategory("llm05-improper-output-handling", {"en": "LLM05 Improper Output Handling", "ko": "LLM05 부적절한 출력 처리"}, scanner_categories=("code",), rule_ids=("code.eval-user-input", "code.command-injection", "code.unsafe-deserialization", "code.xss-dom-sink")),
+    StandardCategory("llm06-excessive-agency", {"en": "LLM06 Excessive Agency", "ko": "LLM06 과도한 자율 권한"}, scanner_categories=("code", "prevention"), rule_ids=("code.llm-tool-unrestricted", "prevention.threat-model-missing")),
+    StandardCategory("llm07-system-prompt-leakage", {"en": "LLM07 System Prompt Leakage", "ko": "LLM07 시스템 프롬프트 누출"}, scanner_categories=("code", "secrets"), rule_ids=("code.llm-sensitive-data-in-prompt", "code.logging-sensitive-data") + SECRET_RULE_IDS),
+    StandardCategory("llm08-vector-embedding-weakness", {"en": "LLM08 Vector and Embedding Weaknesses", "ko": "LLM08 벡터 및 임베딩 약점"}, scanner_categories=("prevention",), rule_ids=("prevention.ai-llm-security-plan-missing", "prevention.threat-model-missing")),
+    StandardCategory("llm09-misinformation", {"en": "LLM09 Misinformation", "ko": "LLM09 잘못된 정보"}, scanner_categories=("prevention",), rule_ids=("prevention.ai-llm-security-plan-missing", "prevention.threat-model-missing")),
+    StandardCategory("llm10-unbounded-consumption", {"en": "LLM10 Unbounded Consumption", "ko": "LLM10 무제한 소비"}, scanner_categories=("code", "prevention"), rule_ids=("code.unbounded-request-body", "prevention.ai-llm-security-plan-missing")),
+)
+
+OWASP_LLM_TOP_10_2025 = SecurityStandard(
+    "owasp-llm-top-10-2025",
+    {"en": "OWASP Top 10 for LLM Applications:2025", "ko": "OWASP LLM Top 10:2025"},
+    (
+        _all_category(_OWASP_LLM_TOP_10_2025_CATEGORIES, {"en": "All mapped LLM Top 10 checks", "ko": "매핑된 LLM Top 10 항목 전체"}),
+        *_OWASP_LLM_TOP_10_2025_CATEGORIES,
+    ),
+    description=_text(
+        "OWASP LLM application risks mapped to prompt construction, broad tool access, sensitive prompt data, dependency, and AI security-plan evidence.",
+        "OWASP LLM 애플리케이션 위험을 프롬프트 구성, 광범위한 도구 권한, 민감정보 프롬프트 전달, 의존성, AI 보안 계획 증거에 매핑한 프로파일입니다.",
+    ),
+    coverage=_text(
+        "Automatic local heuristics for code and prevention evidence. Adversarial prompt tests, model behavior validation, and runtime guardrails still need live testing.",
+        "코드와 예방 증거에 대한 로컬 휴리스틱을 자동 실행합니다. 적대적 프롬프트 테스트, 모델 동작 검증, 런타임 가드레일은 별도 실행 검증이 필요합니다.",
+    ),
+    references=(
+        _reference("OWASP Top 10 for LLM Applications", "OWASP LLM Top 10", "https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/"),
+    ),
+)
+
+
+_NIST_CSF_2_CATEGORIES = (
+    StandardCategory("govern", {"en": "Govern", "ko": "거버넌스"}, scanner_categories=("prevention",), rule_ids=("prevention.nist-csf-profile-missing", "prevention.security-policy-missing", "prevention.codeowners-missing", "prevention.secure-by-design-program-missing")),
+    StandardCategory("identify", {"en": "Identify", "ko": "식별"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + ("prevention.sbom-missing", "prevention.repository-security-settings-missing")),
+    StandardCategory("protect", {"en": "Protect", "ko": "보호"}, scanner_categories=("secrets", "configuration", "code", "prevention"), rule_ids=SECRET_RULE_IDS + MISCONFIGURATION_RULE_IDS + SESSION_MANAGEMENT_RULE_IDS + ("prevention.pre-commit-hook-missing", "prevention.secret-rotation-runbook-missing")),
+    StandardCategory("detect", {"en": "Detect", "ko": "탐지"}, scanner_categories=("code", "prevention"), rule_ids=LOGGING_MONITORING_RULE_IDS + ("prevention.ci-security-scan-missing", "prevention.sast-workflow-missing", "prevention.openssf-scorecard-missing")),
+    StandardCategory("respond", {"en": "Respond", "ko": "대응"}, scanner_categories=("dependencies", "prevention"), rule_ids=("dependency.osv-known-vulnerability", "prevention.vex-missing", "prevention.security-policy-missing", "prevention.secret-rotation-runbook-missing")),
+    StandardCategory("recover", {"en": "Recover", "ko": "복구"}, scanner_categories=("prevention",), rule_ids=("prevention.release-provenance-automation-missing", "prevention.slsa-sigstore-missing", "prevention.cisa-attestation-missing")),
+)
+
+NIST_CSF_2 = SecurityStandard(
+    "nist-csf-2",
+    {"en": "NIST Cybersecurity Framework 2.0", "ko": "NIST CSF 2.0"},
+    (
+        _all_category(_NIST_CSF_2_CATEGORIES, {"en": "All mapped NIST CSF checks", "ko": "매핑된 NIST CSF 항목 전체"}),
+        *_NIST_CSF_2_CATEGORIES,
+    ),
+    description=_text(
+        "NIST CSF 2.0 Govern, Identify, Protect, Detect, Respond, and Recover functions mapped to local prevention and technical evidence.",
+        "NIST CSF 2.0의 Govern, Identify, Protect, Detect, Respond, Recover 기능을 로컬 예방 및 기술 증거에 매핑한 프로파일입니다.",
+    ),
+    coverage=_text(
+        "Evidence review required. KODA can collect file-level signals, but organization-level risk management evidence must be confirmed by the team.",
+        "증적 확인이 필요합니다. KODA는 파일 수준 단서를 수집하지만 조직 차원의 위험관리 증거는 팀이 확인해야 합니다.",
+    ),
+    references=(
+        _reference("NIST Cybersecurity Framework", "NIST Cybersecurity Framework", "https://www.nist.gov/cyberframework"),
+    ),
+    coverage_level="evidence",
+)
+
+
+_CISA_ATTESTATION_CATEGORIES = (
+    StandardCategory("development-environment", {"en": "Secure Development Environment", "ko": "안전한 개발 환경"}, scanner_categories=("prevention", "configuration"), rule_ids=("prevention.cisa-attestation-missing", "prevention.repository-security-settings-missing", "prevention.codeowners-missing", "prevention.pre-commit-hook-missing") + MISCONFIGURATION_RULE_IDS),
+    StandardCategory("secure-development", {"en": "Secure Development Practices", "ko": "안전한 개발 실천"}, scanner_categories=("code", "prevention"), rule_ids=CODE_PATTERN_RULE_IDS + ("prevention.ssdf-workflow-missing", "prevention.secure-by-design-program-missing", "prevention.threat-model-missing")),
+    StandardCategory("third-party-components", {"en": "Third-Party Components", "ko": "제3자 구성요소"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + ("prevention.sbom-missing", "prevention.dependency-update-automation-missing", "prevention.vex-missing")),
+    StandardCategory("vulnerability-response", {"en": "Vulnerability Response", "ko": "취약점 대응"}, scanner_categories=("dependencies", "prevention"), rule_ids=("dependency.osv-known-vulnerability", "prevention.security-policy-missing", "prevention.vex-missing", "prevention.secret-rotation-runbook-missing")),
+    StandardCategory("attestation-evidence", {"en": "Attestation Evidence", "ko": "확인서 증적"}, scanner_categories=("prevention",), rule_ids=("prevention.cisa-attestation-missing", "prevention.nist-csf-profile-missing", "prevention.release-provenance-automation-missing")),
+)
+
+CISA_SECURE_SOFTWARE_ATTESTATION = SecurityStandard(
+    "cisa-secure-software-attestation",
+    {"en": "CISA Secure Software Development Attestation", "ko": "CISA 보안 소프트웨어 개발 확인서"},
+    (
+        _all_category(_CISA_ATTESTATION_CATEGORIES, {"en": "All mapped attestation checks", "ko": "매핑된 확인서 항목 전체"}),
+        *_CISA_ATTESTATION_CATEGORIES,
+    ),
+    description=_text(
+        "CISA/OMB secure software development attestation readiness mapped to SSDF-style local evidence, supply-chain artifacts, and response records.",
+        "CISA/OMB 보안 소프트웨어 개발 확인서 준비성을 SSDF 기반 로컬 증거, 공급망 산출물, 대응 기록에 매핑한 프로파일입니다.",
+    ),
+    coverage=_text(
+        "Evidence review required. KODA can prepare evidence files and local findings; the producer must confirm organizational practices before attestation.",
+        "증적 확인이 필요합니다. KODA는 증거 파일과 로컬 발견 항목을 준비하지만, 확인서 제출 전 조직 실천 여부는 제작자가 확인해야 합니다.",
+    ),
+    references=(
+        _reference("CISA Secure Software Development Attestation Form", "CISA 보안 소프트웨어 개발 확인서", "https://www.cisa.gov/secure-software-attestation-form"),
+        _reference("NIST SSDF SP 800-218", "NIST SSDF SP 800-218", "https://csrc.nist.gov/publications/detail/sp/800-218/final"),
+    ),
+    coverage_level="evidence",
+)
+
+
 SECURITY_STANDARDS = (
     LOCAL_STANDARD,
     OWASP_TOP_10_2025,
@@ -1600,6 +1817,8 @@ SECURITY_STANDARDS = (
     CWE_GENERAL,
     OWASP_API_SECURITY_2023,
     OWASP_MOBILE_TOP_10_2024,
+    OWASP_MASVS,
+    OWASP_LLM_TOP_10_2025,
     SW_DEV_SECURITY_49,
     SW_DEV_SECURITY_7_TYPES,
     KISA_SECURE_CODING_GUIDE,
@@ -1613,6 +1832,9 @@ SECURITY_STANDARDS = (
     OWASP_DEPENDENCY_CHECK_BASELINE,
     OWASP_DEPENDENCY_TRACK_BASELINE,
     OPENSSF_SCORECARD_BASELINE,
+    CISA_SECURE_BY_DESIGN,
+    NIST_CSF_2,
+    CISA_SECURE_SOFTWARE_ATTESTATION,
     CISA_KEV_EPSS_PRIORITY,
     SLSA_SIGSTORE_BASELINE,
 )
@@ -1626,12 +1848,14 @@ AUTOMATIC_COVERAGE_STANDARD_IDS = {
     "cwe-sans-top-25-2025",
     "cwe",
     "owasp-api-security-2023",
+    "owasp-llm-top-10-2025",
     "sw-dev-security-49",
     "sw-dev-security-7-types",
     "kisa-secure-coding-guide",
 }
 EXTERNAL_COVERAGE_STANDARD_IDS = {
     "owasp-mobile-top-10-2024",
+    "owasp-masvs",
     "ncsc-web-8",
     "electronic-financial-supervision-8",
     "owasp-wstg",

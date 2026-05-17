@@ -34,6 +34,8 @@ CODE_EXTENSIONS = {
     ".tsx",
     ".vue",
     ".xml",
+    ".md",
+    ".txt",
 }
 
 CODE_FILENAMES = {
@@ -351,6 +353,39 @@ CODE_PATTERN_RULES = (
         "XML parsing appears to use APIs that can be unsafe when external entity processing is not disabled.",
         "Disable DTD and external entity resolution, or use hardened XML parser configurations for untrusted XML.",
         frozenset({".cs", ".java", ".kt", ".py", ".xml"}),
+    ),
+    CodePatternRule(
+        "code.llm-prompt-user-concat",
+        "LLM prompt appears to concatenate user input",
+        "medium",
+        re.compile(
+            rf"(system|developer|prompt|messages?)\s*[:=][^#\n]*(\+|f[\"']|`\$\{{)[^#\n]*{UNTRUSTED_SOURCE}",
+            re.IGNORECASE,
+        ),
+        "User-controlled input appears to be concatenated into a privileged prompt or message.",
+        "Keep system/developer instructions fixed, place user content in separate message fields, and add prompt-injection tests.",
+        frozenset({".js", ".jsx", ".py", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.llm-tool-unrestricted",
+        "LLM tool or function call appears unrestricted",
+        "high",
+        re.compile(
+            r"(tool_choice\s*[:=]\s*[\"']auto|function_call\s*[:=]\s*[\"']auto|tools\s*[:=]\s*\[[^\]]*(exec|shell|browser|http|file|database))",
+            re.IGNORECASE,
+        ),
+        "The model appears able to call broad tools without an obvious allowlist or confirmation boundary.",
+        "Constrain tools by task, validate tool arguments, require confirmation for side effects, and log tool decisions.",
+        frozenset({".js", ".jsx", ".py", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.llm-sensitive-data-in-prompt",
+        "Sensitive data may be sent to an LLM prompt",
+        "medium",
+        re.compile(rf"(openai|anthropic|chat\.completions|responses\.create|generateContent)[^#\n]*{SENSITIVE_NAME}", re.IGNORECASE),
+        "A prompt or LLM request appears to include credential, session, cookie, or other sensitive fields.",
+        "Redact sensitive values before LLM calls and document whether prompts may leave the local trust boundary.",
+        frozenset({".js", ".jsx", ".py", ".ts", ".tsx"}),
     ),
 )
 

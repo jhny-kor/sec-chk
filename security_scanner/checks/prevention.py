@@ -73,8 +73,30 @@ SCORECARD_WORKFLOW_KEYWORDS = ("scorecard-action", "openssf/scorecard", "scoreca
 DAST_WORKFLOW_KEYWORDS = ("zap-baseline", "zaproxy", "owasp/zap", "ghcr.io/zaproxy")
 DEPENDENCY_TRACK_KEYWORDS = ("dependency-track", "/api/v1/bom")
 SLSA_SIGSTORE_KEYWORDS = ("slsa", "sigstore", "cosign", "provenance", "attestation", "attest")
+AI_LLM_KEYWORDS = ("openai", "anthropic", "langchain", "llamaindex", "chat.completions", "responses.create", "generatecontent", "tool_choice", "function_call")
 VEX_NAMES = {"vex.json", "vex.cdx.json", "cyclonedx-vex.json", "openvex.json"}
 VEX_SUFFIXES = {".json"}
+PRE_COMMIT_GUIDE_PATHS = {"docs/security/pre_commit.md", "docs/security/pre-commit.md"}
+REPOSITORY_SECURITY_GUIDE_PATHS = {"docs/security/github_repository_security.md", "docs/security/repository_security.md"}
+CODEOWNERS_PATHS = {".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"}
+SSDF_WORKFLOW_PATHS = {"docs/security/nist_ssdf_workflow.md", "docs/security/ssdf_workflow.md"}
+SECURE_BY_DESIGN_PATHS = {"docs/security/secure_by_design.md"}
+THREAT_MODEL_PATHS = {"docs/security/threat_model.md", "docs/security/threat-model.md"}
+SECRET_ROTATION_PATHS = {"docs/security/secret_rotation.md", "docs/security/secrets_rotation.md", "docs/security/secret-rotation.md"}
+AI_LLM_SECURITY_PATHS = {"docs/security/ai_llm_security.md", "docs/security/llm_security.md", "docs/security/ai-security.md"}
+MOBILE_SECURITY_PATHS = {"docs/security/mobile_security.md", "docs/security/mobile-security.md"}
+NIST_CSF_PROFILE_PATHS = {"docs/security/nist_csf_2_profile.md", "docs/security/nist-csf-2-profile.md"}
+CISA_ATTESTATION_PATHS = {"docs/security/cisa_secure_software_attestation.md", "docs/security/cisa-attestation.md"}
+RELEASE_PROVENANCE_WORKFLOW_PATHS = {".github/workflows/koda-release-provenance.yml", ".github/workflows/koda-release-provenance.yaml"}
+RELEASE_PROVENANCE_KEYWORDS = (
+    "slsa-framework",
+    "slsa-github-generator",
+    "sigstore",
+    "cosign",
+    "sign-blob",
+    "attestation",
+    "provenance",
+)
 BINARY_ARTIFACT_SUFFIXES = {
     ".app",
     ".apk",
@@ -116,6 +138,8 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
     findings: list[Finding] = []
     has_dependency_manifest = bool(DEPENDENCY_MANIFEST_NAMES & basenames)
     has_source_code = any(path.suffix.lower() in {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rb", ".php", ".cs", ".swift", ".rs"} for path in file_list)
+    has_ai_llm_code = _project_text_contains(file_list, target, AI_LLM_KEYWORDS)
+    has_mobile_project = _looks_like_mobile_project(file_list, basenames, lower_rel_paths, target)
     dockerfiles = [path for path in file_list if path.name == "Dockerfile" or path.name.startswith("Dockerfile.")]
     env_files = [
         path
@@ -139,6 +163,19 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
             )
         )
 
+    if (has_source_code or has_dependency_manifest) and _is_git_repo(root) and not _has_pre_commit_hook(root, target) and not (PRE_COMMIT_GUIDE_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.pre-commit-hook-missing",
+                "low",
+                root,
+                "Pre-commit security gate is not installed",
+                ".git/hooks/pre-commit",
+                "No KODA pre-commit hook or pre-commit guide found",
+                "Install the KODA pre-commit hook so high-risk findings block commits before they enter the repository.",
+            )
+        )
+
     if has_dependency_manifest and not (DEPENDENCY_AUTOMATION_PATHS & rel_paths):
         findings.append(
             _finding(
@@ -149,6 +186,32 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
                 "dependency automation",
                 "No Dependabot or Renovate configuration found",
                 "Add Dependabot or Renovate so vulnerable and outdated dependencies are surfaced continuously.",
+            )
+        )
+
+    if (workflow_files or ".github" in {path.split("/", 1)[0] for path in lower_rel_paths}) and not (CODEOWNERS_PATHS & rel_paths):
+        findings.append(
+            _finding(
+                "prevention.codeowners-missing",
+                "info",
+                root,
+                "CODEOWNERS is not configured",
+                "CODEOWNERS",
+                "No CODEOWNERS file found",
+                "Add CODEOWNERS so security-sensitive paths require review from accountable owners.",
+            )
+        )
+
+    if (workflow_files or ".github" in {path.split("/", 1)[0] for path in lower_rel_paths}) and not (REPOSITORY_SECURITY_GUIDE_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.repository-security-settings-missing",
+                "info",
+                root,
+                "GitHub repository security settings are not documented",
+                "GitHub repository settings",
+                "No branch protection, secret scanning, and Actions-hardening checklist found",
+                "Document and enable branch protection, required reviews, secret scanning, Dependabot alerts, and least-privilege Actions settings.",
             )
         )
 
@@ -165,6 +228,24 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
             )
         )
 
+    if (
+        (has_dependency_manifest or has_source_code)
+        and not (RELEASE_PROVENANCE_WORKFLOW_PATHS & lower_rel_paths)
+        and not _contains_any(combined_workflow_text, RELEASE_PROVENANCE_KEYWORDS)
+        and "docs/security/slsa_sigstore.md" not in lower_rel_paths
+    ):
+        findings.append(
+            _finding(
+                "prevention.release-provenance-automation-missing",
+                "info",
+                root,
+                "Release signing automation is not prepared",
+                "release provenance workflow",
+                "No release provenance/signing workflow found",
+                "Add a release workflow that builds artifacts in CI, generates provenance, signs artifacts, and publishes checksums.",
+            )
+        )
+
     if (has_source_code or has_dependency_manifest) and not _contains_any(combined_workflow_text, SAST_WORKFLOW_KEYWORDS):
         findings.append(
             _finding(
@@ -175,6 +256,110 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
                 ".github/workflows",
                 "No CodeQL, Semgrep, or similar static analysis workflow found",
                 "Add a SAST workflow such as CodeQL or Semgrep so code-level security checks run on pull requests.",
+            )
+        )
+
+    if (has_source_code or has_dependency_manifest) and not (SSDF_WORKFLOW_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.ssdf-workflow-missing",
+                "info",
+                root,
+                "NIST SSDF workflow is not documented",
+                "docs/security/NIST_SSDF_WORKFLOW.md",
+                "No SSDF workflow checklist found",
+                "Map design, implementation, verification, release, and vulnerability response activities to NIST SSDF evidence.",
+            )
+        )
+
+    if (has_source_code or has_dependency_manifest) and not (SECURE_BY_DESIGN_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.secure-by-design-program-missing",
+                "info",
+                root,
+                "Secure by Design prevention plan is not documented",
+                "docs/security/SECURE_BY_DESIGN.md",
+                "No Secure by Design checklist found",
+                "Track secure defaults, customer-impact ownership, radical transparency, and product-security metrics as a product-level prevention program.",
+            )
+        )
+
+    if (has_source_code or has_dependency_manifest) and not (THREAT_MODEL_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.threat-model-missing",
+                "info",
+                root,
+                "Threat model is not documented",
+                "docs/security/THREAT_MODEL.md",
+                "No threat model found",
+                "Document trust boundaries, assets, abuse cases, and security assumptions before release.",
+            )
+        )
+
+    if (has_source_code or env_files) and not (SECRET_ROTATION_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.secret-rotation-runbook-missing",
+                "info",
+                root,
+                "Secret rotation runbook is not documented",
+                "docs/security/SECRET_ROTATION.md",
+                "No secret rotation runbook found",
+                "Document how to revoke, rotate, audit, and re-scan after any exposed credential.",
+            )
+        )
+
+    if has_ai_llm_code and not (AI_LLM_SECURITY_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.ai-llm-security-plan-missing",
+                "info",
+                root,
+                "AI/LLM security plan is not documented",
+                "docs/security/AI_LLM_SECURITY.md",
+                "AI or LLM usage detected without a security plan",
+                "Document prompt-injection controls, tool boundaries, sensitive data handling, model/provider inventory, and adversarial tests.",
+            )
+        )
+
+    if has_mobile_project and not (MOBILE_SECURITY_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.mobile-security-plan-missing",
+                "info",
+                root,
+                "Mobile security plan is not documented",
+                "docs/security/MOBILE_SECURITY.md",
+                "Mobile project files detected without a mobile security plan",
+                "Document MASVS coverage, platform configuration, storage, network, release signing, and device-test requirements.",
+            )
+        )
+
+    if (has_source_code or has_dependency_manifest) and not (NIST_CSF_PROFILE_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.nist-csf-profile-missing",
+                "info",
+                root,
+                "NIST CSF 2.0 profile is not documented",
+                "docs/security/NIST_CSF_2_PROFILE.md",
+                "No NIST CSF profile found",
+                "Map Govern, Identify, Protect, Detect, Respond, and Recover activities to project evidence and owners.",
+            )
+        )
+
+    if (has_source_code or has_dependency_manifest) and not (CISA_ATTESTATION_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.cisa-attestation-missing",
+                "info",
+                root,
+                "CISA secure software attestation evidence is not documented",
+                "docs/security/CISA_SECURE_SOFTWARE_ATTESTATION.md",
+                "No secure software attestation evidence checklist found",
+                "Record SSDF-aligned development, dependency, verification, and vulnerability-response evidence before attesting.",
             )
         )
 
@@ -381,6 +566,50 @@ def _has_security_workflow(workflow_files: Iterable[Path], target: TargetConfig)
         if any(keyword in text for keyword in SECURITY_WORKFLOW_KEYWORDS):
             return True
     return False
+
+
+def _project_text_contains(files: Iterable[Path], target: TargetConfig, keywords: tuple[str, ...]) -> bool:
+    source_suffixes = {".js", ".jsx", ".md", ".py", ".ts", ".tsx", ".txt"}
+    for path in files:
+        if path.suffix.lower() not in source_suffixes:
+            continue
+        lines = read_text_lines(path, target.max_file_size_bytes)
+        if not lines:
+            continue
+        text = "\n".join(lines).lower()
+        if any(keyword in text for keyword in keywords):
+            return True
+    return False
+
+
+def _looks_like_mobile_project(files: Iterable[Path], basenames: set[str], lower_rel_paths: set[str], target: TargetConfig) -> bool:
+    if "AndroidManifest.xml" in basenames:
+        return True
+    if "Info.plist" in basenames and any(part in rel_path for rel_path in lower_rel_paths for part in ("/ios/", "/app/", "/mobile/")):
+        return True
+    if any(rel_path.endswith(".xcodeproj/project.pbxproj") or rel_path.endswith(".xcworkspace/contents.xcworkspacedata") for rel_path in lower_rel_paths):
+        return True
+    for path in files:
+        if path.name not in {"build.gradle", "build.gradle.kts"}:
+            continue
+        lines = read_text_lines(path, target.max_file_size_bytes)
+        text = "\n".join(lines or []).lower()
+        if "com.android.application" in text or "com.android.library" in text:
+            return True
+    return False
+
+
+def _is_git_repo(root: Path) -> bool:
+    return (root / ".git").exists()
+
+
+def _has_pre_commit_hook(root: Path, target: TargetConfig) -> bool:
+    hook = root / ".git" / "hooks" / "pre-commit"
+    lines = read_text_lines(hook, target.max_file_size_bytes)
+    if not lines:
+        return False
+    text = "\n".join(lines).lower()
+    return "koda" in text or "security_scanner" in text or "local-security-scan" in text
 
 
 def _workflow_texts(workflow_files: Iterable[Path], target: TargetConfig) -> list[str]:

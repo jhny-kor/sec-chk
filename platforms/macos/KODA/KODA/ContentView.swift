@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var showScoreHistory = false
     @State private var showMainHelp = false
     @State private var showProjectProfiles = false
+    @State private var showThreatModelWizard = false
+    @State private var showComplianceDashboard = false
     @AppStorage("koda.dashboard.topFraction.v2") private var dashboardTopFraction = 0.25
 
     var body: some View {
@@ -38,7 +40,8 @@ struct ContentView: View {
             } else if let activeReport {
                 ScanReportDetailScreen(
                     report: activeReport,
-                    language: $language
+                    language: $language,
+                    maskReportExports: $scanner.maskReportExports
                 ) {
                     self.activeReport = nil
                 } onHelp: {
@@ -103,6 +106,23 @@ struct ContentView: View {
                 }
             )
         }
+        .sheet(isPresented: $showThreatModelWizard) {
+            ThreatModelWizardSheet(language: language) { markdown in
+                scanner.exportThreatModelTemplate(markdown: markdown, language: language)
+                showThreatModelWizard = false
+            } onClose: {
+                showThreatModelWizard = false
+            }
+        }
+        .sheet(isPresented: $showComplianceDashboard) {
+            ComplianceDashboardSheet(
+                standards: SecurityStandardCatalog.all,
+                reports: scanner.reportItems,
+                language: language
+            ) {
+                showComplianceDashboard = false
+            }
+        }
     }
 
     private func homeView(size: CGSize) -> some View {
@@ -154,6 +174,13 @@ struct ContentView: View {
                     Label(language.applyPreventionToolkitTitle, systemImage: "folder.badge.gearshape")
                 }
                 .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.installPreCommitHook(language: language)
+                } label: {
+                    Label(language.installPreCommitHookTitle, systemImage: "checkmark.seal")
+                }
+                .disabled(!scanner.hasSelection || scanner.isRunning)
 
                 Divider()
 
@@ -209,6 +236,13 @@ struct ContentView: View {
                 .disabled(scanner.isRunning)
 
                 Button {
+                    scanner.exportReleaseSigningPlan(language: language)
+                } label: {
+                    Label(language.releaseSigningPlanTitle, systemImage: "signature")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
                     scanner.exportScoreDiff(language: language)
                 } label: {
                     Label(language.scoreDiffTitle, systemImage: "arrow.triangle.2.circlepath")
@@ -221,6 +255,75 @@ struct ContentView: View {
                     scanner.createIgnoreTemplate(language: language)
                 } label: {
                     Label(language.createIgnoreFileTitle, systemImage: "eye.slash")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportRepositorySecurityChecklist(language: language)
+                } label: {
+                    Label(language.repositorySecurityChecklistTitle, systemImage: "lock.shield")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportSSDFWorkflowPlan(language: language)
+                } label: {
+                    Label(language.ssdfWorkflowPlanTitle, systemImage: "list.clipboard")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportSecureByDesignPlan(language: language)
+                } label: {
+                    Label(language.secureByDesignPlanTitle, systemImage: "shield.righthalf.filled")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    showThreatModelWizard = true
+                } label: {
+                    Label(language.threatModelWizardTitle, systemImage: "person.text.rectangle")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    showComplianceDashboard = true
+                } label: {
+                    Label(language.complianceDashboardTitle, systemImage: "checkmark.rectangle.stack")
+                }
+
+                Button {
+                    scanner.exportSecretResponseChecklist(language: language)
+                } label: {
+                    Label(language.secretRotationRunbookTitle, systemImage: "key.horizontal")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportAILLMSecurityPlan(language: language)
+                } label: {
+                    Label(language.aiLLMSecurityPlanTitle, systemImage: "sparkles")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportMobileSecurityPlan(language: language)
+                } label: {
+                    Label(language.mobileSecurityPlanTitle, systemImage: "iphone.and.arrow.forward")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportNISTCSFProfile(language: language)
+                } label: {
+                    Label(language.nistCSFProfileTitle, systemImage: "hexagon.lefthalf.filled")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportCISAAttestationChecklist(language: language)
+                } label: {
+                    Label(language.cisaAttestationChecklistTitle, systemImage: "doc.text.badge.checkmark")
                 }
                 .disabled(scanner.isRunning)
 
@@ -262,6 +365,11 @@ struct ContentView: View {
                 Label(language.helpTitle, systemImage: "questionmark.circle")
             }
             .buttonStyle(.borderless)
+
+            Toggle(language.maskReportExportTitle, isOn: $scanner.maskReportExports)
+                .toggleStyle(.switch)
+                .font(.caption.weight(.semibold))
+                .help(language.maskReportExportHelp)
 
             LanguageToggle(language: $language)
         }
@@ -539,11 +647,11 @@ private struct MainHelpScreen: View {
 
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(language.preventionToolkitTitle)
-                                    .font(.system(size: 36, weight: .bold))
+                                    .font(.system(size: 30, weight: .bold))
                                 Text(language.mainHelpSubtitle)
-                                    .font(.system(size: 26, weight: .regular))
+                                    .font(.system(size: 20, weight: .regular))
                                     .foregroundStyle(.secondary)
-                                    .lineSpacing(5)
+                                    .lineSpacing(4)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -558,6 +666,11 @@ private struct MainHelpScreen: View {
                                 icon: "shield.checkered",
                                 title: language.preventionKitAboutTitle,
                                 items: language.preventionKitAboutItems
+                            )
+                            HelpSummaryBlock(
+                                icon: "checklist.checked",
+                                title: language.preventionKitItemsTitle,
+                                items: language.preventionKitItems
                             )
                             HelpSummaryBlock(
                                 icon: "list.bullet.rectangle",
@@ -596,18 +709,18 @@ private struct HelpSummaryBlock: View {
             Label(title, systemImage: icon)
                 .font(.title2.weight(.bold))
 
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .top, spacing: 12) {
                         Circle()
                             .fill(Color.secondary.opacity(0.75))
                             .frame(width: 7, height: 7)
-                            .padding(.top, 11)
+                            .padding(.top, 7)
 
                         Text(item)
-                            .font(.system(size: 19, weight: .regular))
+                            .font(.callout)
                             .foregroundStyle(.secondary)
-                            .lineSpacing(4)
+                            .lineSpacing(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -899,6 +1012,250 @@ private struct ProjectProfilesSheet: View {
     }
 }
 
+private struct ThreatModelWizardSheet: View {
+    let language: AppLanguage
+    let onSave: (String) -> Void
+    let onClose: () -> Void
+    @State private var hasAuth = true
+    @State private var hasPII = true
+    @State private var hasPayment = false
+    @State private var hasAdmin = true
+    @State private var hasPublicAPI = true
+    @State private var hasFileUpload = false
+    @State private var hasAILLM = false
+    @State private var hasMobile = false
+    @State private var hasCloud = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "person.text.rectangle")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(language.threatModelWizardTitle)
+                        .font(.title2.weight(.bold))
+                    Text(language.threatModelWizardSubtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Toggle(language.threatModelAuthTitle, isOn: $hasAuth)
+                    Toggle(language.threatModelPIITitle, isOn: $hasPII)
+                    Toggle(language.threatModelPaymentTitle, isOn: $hasPayment)
+                    Toggle(language.threatModelAdminTitle, isOn: $hasAdmin)
+                    Toggle(language.threatModelPublicAPITitle, isOn: $hasPublicAPI)
+                    Toggle(language.threatModelFileUploadTitle, isOn: $hasFileUpload)
+                    Toggle(language.threatModelAILLMTitle, isOn: $hasAILLM)
+                    Toggle(language.threatModelMobileTitle, isOn: $hasMobile)
+                    Toggle(language.threatModelCloudTitle, isOn: $hasCloud)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(language.recommendedControlsTitle)
+                            .font(.headline)
+                        ForEach(recommendations, id: \.self) { item in
+                            Label(item, systemImage: "checkmark.circle")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(KODATheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .toggleStyle(.checkbox)
+                .padding(20)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button(language.cancelTitle) { onClose() }
+                Button(language.saveThreatModelTitle) { onSave(markdown) }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(16)
+        }
+        .frame(width: 720, height: 620)
+    }
+
+    private var recommendations: [String] {
+        var items: [String] = [
+            language.recommendThreatModelBase,
+            language.recommendSecurityPolicy,
+            language.recommendSASTDependency,
+        ]
+        if hasAuth || hasAdmin { items.append(language.recommendAuthSession) }
+        if hasPII || hasPayment { items.append(language.recommendSecretRotation) }
+        if hasPublicAPI || hasFileUpload { items.append(language.recommendDASTASVS) }
+        if hasAILLM { items.append(language.recommendLLMPlan) }
+        if hasMobile { items.append(language.recommendMASVSPlan) }
+        if hasCloud { items.append(language.recommendIaCContainer) }
+        return items
+    }
+
+    private var markdown: String {
+        let selected = [
+            (hasAuth, language.threatModelAuthTitle),
+            (hasPII, language.threatModelPIITitle),
+            (hasPayment, language.threatModelPaymentTitle),
+            (hasAdmin, language.threatModelAdminTitle),
+            (hasPublicAPI, language.threatModelPublicAPITitle),
+            (hasFileUpload, language.threatModelFileUploadTitle),
+            (hasAILLM, language.threatModelAILLMTitle),
+            (hasMobile, language.threatModelMobileTitle),
+            (hasCloud, language.threatModelCloudTitle),
+        ].filter { $0.0 }.map { $0.1 }
+        let title = language == .ko ? "KODA 위협 모델 초안" : "KODA Threat Model Draft"
+        let selectedTitle = language == .ko ? "선택된 특성" : "Selected Characteristics"
+        let recommendationsTitle = language == .ko ? "권장 통제" : "Recommended Controls"
+        return """
+        # \(title)
+
+        ## \(selectedTitle)
+
+        \(selected.map { "- [ ] \($0)" }.joined(separator: "\n"))
+
+        ## \(recommendationsTitle)
+
+        \(recommendations.map { "- [ ] \($0)" }.joined(separator: "\n"))
+
+        ## Assets
+
+        | Asset | Sensitivity | Owner | Notes |
+        | --- | --- | --- | --- |
+        | Customer data | high | TBD | TBD |
+        | Secrets and tokens | critical | TBD | TBD |
+        | Build and release artifacts | high | TBD | TBD |
+
+        ## Abuse Cases
+
+        - [ ] Unauthorized access to sensitive functions
+        - [ ] Secret exposure through source, logs, prompts, or artifacts
+        - [ ] Supply-chain compromise through dependency or CI workflow
+        - [ ] File upload/download or path traversal abuse
+        - [ ] Runtime-only risks requiring DAST or penetration testing
+        """
+    }
+}
+
+private struct ComplianceDashboardSheet: View {
+    let standards: [AppSecurityStandard]
+    let reports: [ScanReportItem]
+    let language: AppLanguage
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "checkmark.rectangle.stack")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.green)
+                    .frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(language.complianceDashboardTitle)
+                        .font(.title2.weight(.bold))
+                    Text(language.complianceDashboardSubtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
+                    ForEach(standards) { standard in
+                        complianceCard(standard)
+                    }
+                }
+                .padding(20)
+            }
+
+            Divider()
+            HStack {
+                Spacer()
+                Button(language.closeTitle) { onClose() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(16)
+        }
+        .frame(width: 880, height: 640)
+    }
+
+    private func complianceCard(_ standard: AppSecurityStandard) -> some View {
+        let report = reports.first { $0.id == standard.id }
+        let state = complianceState(for: standard, report: report)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: standard.icon)
+                    .foregroundStyle(standard.accent.color)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(standard.title(language: language))
+                        .font(.headline)
+                    Text(standard.badge(language: language))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(standard.accent.color)
+                }
+                Spacer()
+                Text(state.label)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(state.color)
+            }
+            Text(reportSummary(report))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KODATheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+
+    private func complianceState(for standard: AppSecurityStandard, report: ScanReportItem?) -> (label: String, color: Color) {
+        guard let report else {
+            return (language == .ko ? "점검 전" : "Not scanned", .secondary)
+        }
+        if report.findingCount > 0 {
+            return (language == .ko ? "조치 필요" : "Needs action", .orange)
+        }
+        if standard.coverage(language: language).localizedCaseInsensitiveContains(language.evidenceRequiredBadge) || standard.coverage(language: language).localizedCaseInsensitiveContains(language.externalIntegrationBadge) {
+            return (language == .ko ? "증적 보완" : "Evidence needed", .blue)
+        }
+        return (language == .ko ? "자동 확인" : "Auto verified", .green)
+    }
+
+    private func reportSummary(_ report: ScanReportItem?) -> String {
+        guard let report else {
+            return language == .ko ? "스캔 실행 후 기준별 발견 항목과 위험점수를 표시합니다." : "Run a scan to show findings and risk score for this standard."
+        }
+        switch language {
+        case .ko:
+            return "발견 \(report.findingCount)건 · 위험점수 \(report.riskScore)점"
+        case .en:
+            return "\(report.findingCount) findings · \(report.riskScore) risk points"
+        }
+    }
+}
+
 private struct SecurityScoreHistorySheet: View {
     let snapshots: [SecurityScoreSnapshot]
     let language: AppLanguage
@@ -1143,6 +1500,7 @@ private struct ScoreHistoryComparisonCard: View {
 private struct ScanReportDetailScreen: View {
     let report: ScanReportItem
     @Binding var language: AppLanguage
+    @Binding var maskReportExports: Bool
     let onBack: () -> Void
     let onHelp: () -> Void
     let onRemediation: () -> Void
@@ -1172,6 +1530,8 @@ private struct ScanReportDetailScreen: View {
             }
         } actions: {
             Menu {
+                Toggle(language.maskReportExportTitle, isOn: $maskReportExports)
+                Divider()
                 ForEach(ReportExportFormat.allCases, id: \.self) { format in
                     Button(format.title(language: language)) {
                         onExport(format)

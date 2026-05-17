@@ -86,6 +86,37 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{result.status}\t{result.path}")
         return 0
 
+    if args.command == "install-hook":
+        from .toolkit import install_pre_commit_hook
+
+        try:
+            result = install_pre_commit_hook(expand_path(args.target, Path.cwd()), fail_on=args.fail_on, force=bool(args.force))
+        except (OSError, ValueError) as exc:
+            print(f"Hook install error: {exc}", file=sys.stderr)
+            return 2
+        print(f"{result.status}\t{result.path}")
+        return 0
+
+    if args.command in {"repo-security-checklist", "ssdf-plan", "secure-by-design-plan", "sigstore-plan"}:
+        from .toolkit import (
+            render_release_signing_plan,
+            render_repository_security_checklist,
+            render_secure_by_design_plan,
+            render_ssdf_workflow_plan,
+        )
+
+        project_name = args.project_name or Path(args.target).expanduser().name or "KODA Project"
+        if args.command == "repo-security-checklist":
+            content = render_repository_security_checklist(project_name)
+        elif args.command == "ssdf-plan":
+            content = render_ssdf_workflow_plan(project_name)
+        elif args.command == "secure-by-design-plan":
+            content = render_secure_by_design_plan(project_name)
+        else:
+            content = render_release_signing_plan(project_name, artifact_path=args.artifact)
+        write_report(content, expand_path(str(args.output), Path.cwd()) if args.output else None)
+        return 0
+
     if args.command == "zap-command":
         from .integrations import zap_baseline_command
 
@@ -309,6 +340,32 @@ def build_parser() -> argparse.ArgumentParser:
     init_security.add_argument("--project-name", default="", help="project name to include in templates")
     init_security.add_argument("--force", action="store_true", help="overwrite existing template files")
     init_security.add_argument("--dry-run", action="store_true", help="print files that would be created")
+
+    install_hook = subparsers.add_parser("install-hook", help="install a KODA pre-commit security gate into a Git repository")
+    install_hook.add_argument("--target", default=".", help="Git repository folder")
+    install_hook.add_argument("--fail-on", choices=SEVERITIES, default="high", help="block commits at or above this severity")
+    install_hook.add_argument("--force", action="store_true", help="overwrite an existing pre-commit hook")
+
+    repo_security = subparsers.add_parser("repo-security-checklist", help="write a GitHub repository security settings checklist")
+    repo_security.add_argument("--target", default=".", help="project folder name used for the checklist")
+    repo_security.add_argument("--project-name", default="", help="project name")
+    repo_security.add_argument("--output", type=Path, help="checklist output path")
+
+    ssdf_plan = subparsers.add_parser("ssdf-plan", help="write a NIST SSDF workflow plan")
+    ssdf_plan.add_argument("--target", default=".", help="project folder name used for the plan")
+    ssdf_plan.add_argument("--project-name", default="", help="project name")
+    ssdf_plan.add_argument("--output", type=Path, help="plan output path")
+
+    secure_by_design = subparsers.add_parser("secure-by-design-plan", help="write a CISA Secure by Design prevention plan")
+    secure_by_design.add_argument("--target", default=".", help="project folder name used for the plan")
+    secure_by_design.add_argument("--project-name", default="", help="project name")
+    secure_by_design.add_argument("--output", type=Path, help="plan output path")
+
+    sigstore_plan = subparsers.add_parser("sigstore-plan", help="write a SLSA/Sigstore release signing plan")
+    sigstore_plan.add_argument("--target", default=".", help="project folder name used for the plan")
+    sigstore_plan.add_argument("--project-name", default="", help="project name")
+    sigstore_plan.add_argument("--artifact", default="dist/app.tar.gz", help="artifact path to reference in commands")
+    sigstore_plan.add_argument("--output", type=Path, help="plan output path")
 
     zap_command = subparsers.add_parser("zap-command", help="print an OWASP ZAP baseline Docker command")
     zap_command.add_argument("--url", required=True, help="authorized http(s) URL to check")

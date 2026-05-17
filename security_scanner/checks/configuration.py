@@ -27,6 +27,8 @@ K8S_FILE_NAMES = {
     "statefulset.yaml",
 }
 WORKFLOW_PARTS = (".github", "workflows")
+ANDROID_MANIFEST_NAMES = {"AndroidManifest.xml"}
+IOS_PLIST_NAMES = {"Info.plist"}
 
 
 def check_file(path: Path, target: TargetConfig) -> list[Finding]:
@@ -48,6 +50,10 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
         findings.extend(_check_terraform(path, target))
     if _looks_like_github_workflow(path):
         findings.extend(_check_github_workflow(path, target))
+    if path.name in ANDROID_MANIFEST_NAMES:
+        findings.extend(_check_android_manifest(path, target))
+    if path.name in IOS_PLIST_NAMES:
+        findings.extend(_check_ios_plist(path, target))
     return findings
 
 
@@ -239,6 +245,34 @@ def _check_compose(path: Path, target: TargetConfig) -> list[Finding]:
                     recommendation="Avoid mounting the Docker socket or isolate it behind a purpose-built proxy.",
                 )
             )
+        if re.search(r"\b(cap_add|capabilities)\s*:", lowered) or lowered in {"- sys_admin", "- net_admin"}:
+            findings.append(
+                Finding(
+                    rule_id="config.compose-dangerous-capability",
+                    category="configuration",
+                    severity="medium",
+                    title="Compose service grants broad Linux capabilities",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Broad capabilities such as SYS_ADMIN and NET_ADMIN can weaken container isolation.",
+                    recommendation="Remove broad capabilities and grant only the minimum capability required by the workload.",
+                )
+            )
+        if lowered == "pid: host":
+            findings.append(
+                Finding(
+                    rule_id="config.compose-host-pid",
+                    category="configuration",
+                    severity="medium",
+                    title="Compose service uses host PID namespace",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Sharing the host PID namespace exposes host process metadata to the container.",
+                    recommendation="Use the default container PID namespace unless host PID access is explicitly required and reviewed.",
+                )
+            )
     return findings
 
 
@@ -317,6 +351,48 @@ def _check_kubernetes_manifest(path: Path, target: TargetConfig) -> list[Finding
                     recommendation="Replace hostPath with scoped PersistentVolumes or document why host access is unavoidable.",
                 )
             )
+        if lowered == "runasnonroot: false":
+            findings.append(
+                Finding(
+                    rule_id="config.k8s-run-as-root",
+                    category="configuration",
+                    severity="medium",
+                    title="Kubernetes workload allows root containers",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Containers that can run as root increase impact after compromise.",
+                    recommendation="Set runAsNonRoot: true and use a non-root runtime user where possible.",
+                )
+            )
+        if lowered == "automountserviceaccounttoken: true":
+            findings.append(
+                Finding(
+                    rule_id="config.k8s-service-account-token",
+                    category="configuration",
+                    severity="low",
+                    title="Kubernetes service account token is auto-mounted",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Default service account tokens can be abused if the workload is compromised.",
+                    recommendation="Set automountServiceAccountToken: false unless the workload needs Kubernetes API access.",
+                )
+            )
+        if re.match(r"^-?\s*image:", lowered) and (":latest" in lowered or re.match(r"^-?\s*image:\s*[^:@\s]+$", lowered)):
+            findings.append(
+                Finding(
+                    rule_id="config.k8s-unpinned-image",
+                    category="configuration",
+                    severity="medium",
+                    title="Kubernetes image is not pinned tightly",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Floating image tags make deployments less reproducible and harder to verify.",
+                    recommendation="Pin images to reviewed version tags or immutable digests.",
+                )
+            )
     return findings
 
 
@@ -369,6 +445,34 @@ def _check_terraform(path: Path, target: TargetConfig) -> list[Finding]:
                     evidence=line,
                     description="SSH or RDP exposed to 0.0.0.0/0 is a common initial access path.",
                     recommendation="Restrict admin ports to VPN, bastion, or approved source CIDRs.",
+                )
+            )
+        if re.search(r'\b(actions?|not_actions?)\s*=\s*\[\s*"\*"\s*\]', lowered) or re.search(r'\b(actions?|not_actions?)\s*=\s*"\*"', lowered):
+            findings.append(
+                Finding(
+                    rule_id="config.terraform-wildcard-iam-action",
+                    category="configuration",
+                    severity="medium",
+                    title="Terraform IAM policy grants wildcard actions",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Wildcard IAM actions are difficult to review and often exceed least privilege.",
+                    recommendation="Replace wildcard actions with the minimum service actions required by the workload.",
+                )
+            )
+        if re.search(r'\b(principals?|identifiers?)\s*=\s*\[\s*"\*"\s*\]', lowered) or re.search(r'\b(principal|identifier)\s*=\s*"\*"', lowered):
+            findings.append(
+                Finding(
+                    rule_id="config.terraform-wildcard-principal",
+                    category="configuration",
+                    severity="high",
+                    title="Terraform IAM policy allows wildcard principal",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Wildcard principals can expose resources to unintended identities.",
+                    recommendation="Scope principals to approved accounts, roles, services, or federated identities.",
                 )
             )
     return findings
@@ -424,3 +528,132 @@ def _check_github_workflow(path: Path, target: TargetConfig) -> list[Finding]:
                 )
             )
     return findings
+
+
+def _check_android_manifest(path: Path, target: TargetConfig) -> list[Finding]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    findings: list[Finding] = []
+    for line_number, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        lowered = line.lower()
+        if "android:debuggable=\"true\"" in lowered:
+            findings.append(
+                Finding(
+                    rule_id="config.android-debuggable",
+                    category="configuration",
+                    severity="high",
+                    title="Android app is debuggable",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Debuggable Android builds expose runtime inspection and tampering paths.",
+                    recommendation="Disable android:debuggable for release builds.",
+                )
+            )
+        if "android:allowbackup=\"true\"" in lowered:
+            findings.append(
+                Finding(
+                    rule_id="config.android-allow-backup",
+                    category="configuration",
+                    severity="medium",
+                    title="Android backup is allowed",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Application backup can expose local app data if not deliberately controlled.",
+                    recommendation="Disable backups for sensitive apps or define precise backup exclusion rules.",
+                )
+            )
+        if "android:usescleartexttraffic=\"true\"" in lowered:
+            findings.append(
+                Finding(
+                    rule_id="config.android-cleartext-traffic",
+                    category="configuration",
+                    severity="high",
+                    title="Android cleartext traffic is allowed",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Cleartext traffic can expose credentials and session data in transit.",
+                    recommendation="Require HTTPS and use a network security config only for reviewed exceptions.",
+                )
+            )
+        if "android:exported=\"true\"" in lowered:
+            findings.append(
+                Finding(
+                    rule_id="config.android-exported-component",
+                    category="configuration",
+                    severity="medium",
+                    title="Android component is exported",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Exported components expand the mobile app attack surface.",
+                    recommendation="Export only intentional entry points and protect sensitive components with permissions.",
+                )
+            )
+    return findings
+
+
+def _check_ios_plist(path: Path, target: TargetConfig) -> list[Finding]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    text = "\n".join(lines)
+    findings: list[Finding] = []
+    for key, rule_id, severity, title, description, recommendation in (
+        (
+            "NSAllowsArbitraryLoads",
+            "config.ios-ats-arbitrary-loads",
+            "high",
+            "iOS App Transport Security allows arbitrary loads",
+            "Allowing arbitrary network loads weakens TLS enforcement.",
+            "Keep ATS enabled and scope any exceptions to reviewed domains.",
+        ),
+        (
+            "UIFileSharingEnabled",
+            "config.ios-file-sharing-enabled",
+            "medium",
+            "iOS file sharing is enabled",
+            "File sharing can expose app documents through Finder or iTunes-style access.",
+            "Disable file sharing unless users explicitly need access to non-sensitive documents.",
+        ),
+        (
+            "LSSupportsOpeningDocumentsInPlace",
+            "config.ios-open-documents-in-place",
+            "low",
+            "iOS opens documents in place",
+            "Opening documents in place can widen file access and data handling assumptions.",
+            "Review document-provider flows and restrict sensitive file types.",
+        ),
+    ):
+        if key in text and _plist_key_true(text, key):
+            findings.append(
+                Finding(
+                    rule_id=rule_id,
+                    category="configuration",
+                    severity=severity,
+                    title=title,
+                    path=path,
+                    line=_line_number_for_key(lines, key),
+                    evidence=key,
+                    description=description,
+                    recommendation=recommendation,
+                )
+            )
+    return findings
+
+
+def _plist_key_true(text: str, key: str) -> bool:
+    return bool(re.search(rf"<key>\s*{re.escape(key)}\s*</key>\s*<true\s*/>", text, re.IGNORECASE))
+
+
+def _line_number_for_key(lines: list[str], key: str) -> int | None:
+    for index, line in enumerate(lines, start=1):
+        if key in line:
+            return index
+    return None

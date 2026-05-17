@@ -178,6 +178,81 @@ class ScannerTests(unittest.TestCase):
             }:
                 self.assertIn(rule_id, rule_ids)
 
+    def test_detects_mobile_iac_and_llm_security_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            k8s_dir = root / "manifests"
+            k8s_dir.mkdir()
+            (root / "docker-compose.yml").write_text(
+                "services:\n"
+                "  app:\n"
+                "    cap_add:\n"
+                "      - SYS_ADMIN\n"
+                "    pid: host\n",
+                encoding="utf-8",
+            )
+            (k8s_dir / "pod.yaml").write_text(
+                "apiVersion: v1\n"
+                "kind: Pod\n"
+                "spec:\n"
+                "  automountServiceAccountToken: true\n"
+                "  containers:\n"
+                "    - image: nginx\n"
+                "      securityContext:\n"
+                "        runAsNonRoot: false\n",
+                encoding="utf-8",
+            )
+            (root / "iam.tf").write_text(
+                'resource "aws_iam_policy_document" "wide" {\n'
+                '  statement {\n'
+                '    actions = ["*"]\n'
+                '    principals { identifiers = ["*"] }\n'
+                '  }\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (root / "AndroidManifest.xml").write_text(
+                '<manifest><application android:debuggable="true" android:allowBackup="true" '
+                'android:usesCleartextTraffic="true"><activity android:exported="true" /></application></manifest>\n',
+                encoding="utf-8",
+            )
+            (root / "Info.plist").write_text(
+                "<plist><dict><key>NSAllowsArbitraryLoads</key><true/>"
+                "<key>UIFileSharingEnabled</key><true/>"
+                "<key>LSSupportsOpeningDocumentsInPlace</key><true/></dict></plist>\n",
+                encoding="utf-8",
+            )
+            (root / "llm.py").write_text(
+                'prompt = system + request.args["q"]\n'
+                'client.responses.create(input={"token": token})\n'
+                'tools = [{"name": "shell_exec"}]\n'
+                'tool_choice = "auto"\n',
+                encoding="utf-8",
+            )
+
+            rule_ids = {finding.rule_id for finding in _scan(root, categories=("configuration", "code"))}
+
+            for rule_id in {
+                "config.compose-dangerous-capability",
+                "config.compose-host-pid",
+                "config.k8s-run-as-root",
+                "config.k8s-service-account-token",
+                "config.k8s-unpinned-image",
+                "config.terraform-wildcard-iam-action",
+                "config.terraform-wildcard-principal",
+                "config.android-debuggable",
+                "config.android-allow-backup",
+                "config.android-cleartext-traffic",
+                "config.android-exported-component",
+                "config.ios-ats-arbitrary-loads",
+                "config.ios-file-sharing-enabled",
+                "config.ios-open-documents-in-place",
+                "code.llm-prompt-user-concat",
+                "code.llm-tool-unrestricted",
+                "code.llm-sensitive-data-in-prompt",
+            }:
+                self.assertIn(rule_id, rule_ids)
+
     def test_excludes_configured_globs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -340,12 +415,17 @@ class ScannerTests(unittest.TestCase):
             "cwe",
             "kisa-secure-coding-guide",
             "sw-dev-security-7-types",
+            "owasp-masvs",
+            "owasp-llm-top-10-2025",
             "ncsc-web-8",
             "electronic-financial-supervision-8",
             "owasp-asvs-5",
             "owasp-wstg",
             "nist-ssdf-sp800-218",
+            "nist-csf-2",
             "owasp-samm-2",
+            "cisa-secure-by-design",
+            "cisa-secure-software-attestation",
             "owasp-dependency-check-baseline",
             "owasp-dependency-track-baseline",
             "openssf-scorecard-baseline",
@@ -411,6 +491,15 @@ class ScannerTests(unittest.TestCase):
             self.assertIn("prevention.env-example-missing", rule_ids)
             self.assertIn("prevention.dockerignore-missing", rule_ids)
             self.assertIn("prevention.sbom-missing", rule_ids)
+            self.assertIn("prevention.codeowners-missing", rule_ids)
+            self.assertIn("prevention.repository-security-settings-missing", rule_ids)
+            self.assertIn("prevention.release-provenance-automation-missing", rule_ids)
+            self.assertIn("prevention.ssdf-workflow-missing", rule_ids)
+            self.assertIn("prevention.secure-by-design-program-missing", rule_ids)
+            self.assertIn("prevention.threat-model-missing", rule_ids)
+            self.assertIn("prevention.secret-rotation-runbook-missing", rule_ids)
+            self.assertIn("prevention.nist-csf-profile-missing", rule_ids)
+            self.assertIn("prevention.cisa-attestation-missing", rule_ids)
 
     def test_prevention_guardrails_accept_configured_controls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -427,7 +516,17 @@ class ScannerTests(unittest.TestCase):
             (root / ".dockerignore").write_text(".env\n.git\n", encoding="utf-8")
             (root / "sbom.cdx.json").write_text("{}", encoding="utf-8")
             (root / "vex.cdx.json").write_text("{}", encoding="utf-8")
+            (dependabot / "CODEOWNERS").write_text("* @security-team\n", encoding="utf-8")
             (dependabot / "dependabot.yml").write_text("version: 2\nupdates: []\n", encoding="utf-8")
+            docs = root / "docs" / "security"
+            docs.mkdir(parents=True)
+            (docs / "GITHUB_REPOSITORY_SECURITY.md").write_text("# GitHub Repository Security\n", encoding="utf-8")
+            (docs / "NIST_SSDF_WORKFLOW.md").write_text("# NIST SSDF\n", encoding="utf-8")
+            (docs / "SECURE_BY_DESIGN.md").write_text("# Secure by Design\n", encoding="utf-8")
+            (docs / "THREAT_MODEL.md").write_text("# Threat Model\n", encoding="utf-8")
+            (docs / "SECRET_ROTATION.md").write_text("# Secret Rotation\n", encoding="utf-8")
+            (docs / "NIST_CSF_2_PROFILE.md").write_text("# NIST CSF\n", encoding="utf-8")
+            (docs / "CISA_SECURE_SOFTWARE_ATTESTATION.md").write_text("# CISA Attestation\n", encoding="utf-8")
             (workflows / "security.yml").write_text(
                 "name: security\n"
                 "permissions:\n"
@@ -638,6 +737,83 @@ packages:
             self.assertIn(("npm", "lodash", "4.17.21", "pnpm-lock", "required"), names)
             self.assertIn(("npm", "@scope/thing", "1.2.3", "pnpm-lock", "required"), names)
 
+    def test_dependency_inventory_reads_additional_osv_ecosystems(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "go.mod").write_text(
+                """
+module example.com/app
+
+require (
+    golang.org/x/crypto v0.22.0
+)
+""",
+                encoding="utf-8",
+            )
+            (root / "Cargo.lock").write_text(
+                """
+[[package]]
+name = "regex"
+version = "1.10.4"
+""",
+                encoding="utf-8",
+            )
+            (root / "Gemfile.lock").write_text(
+                """
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rack (2.2.8)
+""",
+                encoding="utf-8",
+            )
+            (root / "composer.lock").write_text(
+                json.dumps(
+                    {
+                        "packages": [{"name": "symfony/http-foundation", "version": "v6.4.7"}],
+                        "packages-dev": [{"name": "phpunit/phpunit", "version": "10.5.20"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "pom.xml").write_text(
+                """
+<project>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-core</artifactId>
+      <version>6.1.6</version>
+    </dependency>
+  </dependencies>
+</project>
+""",
+                encoding="utf-8",
+            )
+            (root / "app.csproj").write_text(
+                """
+<Project>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>
+""",
+                encoding="utf-8",
+            )
+
+            scanner = SecurityScanner(ScannerConfig(targets=(TargetConfig(name="tmp", path=root, categories=("dependencies",)),)))
+            scanner.scan()
+            components = queryable_osv_components(scanner.components)
+            names = {(component.ecosystem, component.name, component.version, component.source, component.scope, component.purl) for component in components}
+
+            self.assertIn(("Go", "golang.org/x/crypto", "v0.22.0", "go.mod", "required", "pkg:golang/golang.org/x/crypto@v0.22.0"), names)
+            self.assertIn(("crates.io", "regex", "1.10.4", "Cargo.lock", "required", "pkg:cargo/regex@1.10.4"), names)
+            self.assertIn(("RubyGems", "rack", "2.2.8", "Gemfile.lock", "required", "pkg:gem/rack@2.2.8"), names)
+            self.assertIn(("Packagist", "symfony/http-foundation", "6.4.7", "packages", "required", "pkg:composer/symfony/http-foundation@6.4.7"), names)
+            self.assertIn(("Packagist", "phpunit/phpunit", "10.5.20", "packages-dev", "excluded", "pkg:composer/phpunit/phpunit@10.5.20"), names)
+            self.assertIn(("Maven", "org.springframework:spring-core", "6.1.6", "pom.xml", "required", "pkg:maven/org.springframework/spring-core@6.1.6"), names)
+            self.assertIn(("NuGet", "Newtonsoft.Json", "13.0.3", "app.csproj", "required", "pkg:nuget/Newtonsoft.Json@13.0.3"), names)
+
     def test_scan_command_accepts_multiple_files_and_zip_archives(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -786,9 +962,48 @@ packages:
             self.assertEqual(statuses["SECURITY.md"], "skipped")
             self.assertEqual(statuses[".github/dependabot.yml"], "written")
             self.assertEqual(statuses[".github/workflows/koda-security.yml"], "written")
+            self.assertEqual(statuses[".github/workflows/koda-release-provenance.yml"], "written")
+            self.assertEqual(statuses[".github/CODEOWNERS"], "written")
+            self.assertEqual(statuses["docs/security/PRE_COMMIT.md"], "written")
+            self.assertEqual(statuses["docs/security/GITHUB_REPOSITORY_SECURITY.md"], "written")
             self.assertEqual(statuses["docs/security/VEX.md"], "written")
             self.assertEqual(statuses["docs/security/SLSA_SIGSTORE.md"], "written")
+            self.assertEqual(statuses["docs/security/NIST_SSDF_WORKFLOW.md"], "written")
+            self.assertEqual(statuses["docs/security/SECURE_BY_DESIGN.md"], "written")
             self.assertEqual((root / "SECURITY.md").read_text(encoding="utf-8"), "custom\n")
+
+    def test_cli_writes_prevention_workflow_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            hook_output = io.StringIO()
+            with redirect_stdout(hook_output):
+                hook_code = cli_main(["install-hook", "--target", str(root), "--fail-on", "medium"])
+            hook = root / ".git" / "hooks" / "pre-commit"
+
+            checklist = root / "repo-security.md"
+            ssdf = root / "ssdf.md"
+            secure_by_design = root / "secure-by-design.md"
+            sigstore = root / "sigstore.md"
+
+            self.assertEqual(hook_code, 0)
+            self.assertTrue(hook.exists())
+            self.assertTrue(os.access(hook, os.X_OK))
+            self.assertIn("KODA_PRE_COMMIT_FAIL_ON:-medium", hook.read_text(encoding="utf-8"))
+            self.assertIn("written", hook_output.getvalue())
+
+            self.assertEqual(
+                cli_main(["repo-security-checklist", "--target", str(root), "--project-name", "Example", "--output", str(checklist)]),
+                0,
+            )
+            self.assertEqual(cli_main(["ssdf-plan", "--target", str(root), "--output", str(ssdf)]), 0)
+            self.assertEqual(cli_main(["secure-by-design-plan", "--target", str(root), "--output", str(secure_by_design)]), 0)
+            self.assertEqual(cli_main(["sigstore-plan", "--target", str(root), "--artifact", "dist/example.tar.gz", "--output", str(sigstore)]), 0)
+
+            self.assertIn("GitHub Repository Security Checklist", checklist.read_text(encoding="utf-8"))
+            self.assertIn("NIST SSDF Workflow", ssdf.read_text(encoding="utf-8"))
+            self.assertIn("CISA Secure by Design Plan", secure_by_design.read_text(encoding="utf-8"))
+            self.assertIn("dist/example.tar.gz", sigstore.read_text(encoding="utf-8"))
 
     def test_cli_prints_external_security_integration_commands(self) -> None:
         zap_output = io.StringIO()
@@ -1317,6 +1532,7 @@ packages:
         self.assertIn("dist/macos", mac_xcode_builder.read_text(encoding="utf-8"))
         self.assertIn("com.apple.security.app-sandbox", mac_entitlements.read_text(encoding="utf-8"))
         self.assertIn("com.apple.security.files.user-selected.read-write", mac_entitlements.read_text(encoding="utf-8"))
+        self.assertNotIn("com.apple.security.network.server", mac_entitlements.read_text(encoding="utf-8"))
         self.assertEqual(mac_icon.read_bytes()[:4], b"icns")
         self.assertIn("KODA macOS App Store Packaging", mac_packaging_readme.read_text(encoding="utf-8"))
         self.assertIn("productType = \"com.apple.product-type.application\"", koda_project.read_text(encoding="utf-8"))
@@ -1358,10 +1574,24 @@ packages:
         self.assertIn("pipfileLockComponents", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("yarnLockComponents", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("pnpmLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("goModuleComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("cargoLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("gemfileLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("composerLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("pomComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("nugetComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("supportedOSVEcosystems", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("NativeReportSanitizer", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("writeSanitizedReport", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("poetry.lock", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("Pipfile.lock", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("yarn.lock", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("pnpm-lock.yaml", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("Cargo.lock", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("Gemfile.lock", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("composer.lock", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("pom.xml", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("packages.config", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("SecurityPreventionTemplateWrite", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("SecurityPreventionToolkit", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("NSSavePanel", koda_bridge.read_text(encoding="utf-8"))
@@ -1378,6 +1608,7 @@ packages:
         self.assertIn("LanguageToggle(language: $language)", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.exportSecurityToolkit", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.applySecurityToolkit", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.installPreCommitHook", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.buildSecurityFixPlans", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.applySecurityFixPlans", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.exportSBOM", koda_content_view.read_text(encoding="utf-8"))
@@ -1387,10 +1618,21 @@ packages:
         self.assertIn("scanner.runZAPBaseline", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.exportEvidenceChecklist", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.exportReleaseSecurityPackage", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportReleaseSigningPlan", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.exportScoreDiff", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.createIgnoreTemplate", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportRepositorySecurityChecklist", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportSSDFWorkflowPlan", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportSecureByDesignPlan", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportSecretResponseChecklist", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportAILLMSecurityPlan", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportMobileSecurityPlan", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportNISTCSFProfile", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportCISAAttestationChecklist", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("SecurityFixWizardSheet", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("SecurityScoreHistorySheet", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("ThreatModelWizardSheet", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("ComplianceDashboardSheet", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("shield.lefthalf.filled", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("folder.badge.gearshape", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("wand.and.sparkles", koda_content_view.read_text(encoding="utf-8"))
@@ -1398,11 +1640,17 @@ packages:
         self.assertIn("chart.line.uptrend.xyaxis", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.export", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("square.and.arrow.down", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("maskReportExports", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("maskReportExportTitle", koda_content_view.read_text(encoding="utf-8"))
         self.assertNotIn("scanner.openReport", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("showMainHelp", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("MainHelpScreen", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("HelpSummaryBlock", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("preventionKitItemsTitle", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("preventionKitItems", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("preventionKitUsageItems", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("threatModelWizardTitle", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("complianceDashboardTitle", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("GeometryReader", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn('@AppStorage("koda.dashboard.topFraction.v2")', koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("dashboardTopFraction = 0.25", koda_content_view.read_text(encoding="utf-8"))
@@ -1436,7 +1684,12 @@ packages:
         self.assertIn("증적 확인 필요", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("예방 키트", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("보안 예방 키트 파일로 저장", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("예방 키트에 포함된 항목", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("Apply Guardrails to Folders", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("release provenance workflow", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("KODA_PRE_COMMIT_FAIL_ON", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("선택 폴더에 예방 설정 적용", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("커밋 전 보안 차단 설치", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("자동 수정 마법사", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("SBOM 생성", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("OSV/CVE + KEV/EPSS 조회", koda_standards_view.read_text(encoding="utf-8"))
@@ -1445,8 +1698,12 @@ packages:
         self.assertIn("ZAP DAST 실행", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("수동 증적 체크리스트", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("릴리스 보안 패키지 생성", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("릴리스 서명 계획 생성", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("점검 변경 리포트", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("예외 파일 생성", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("저장소 보안 설정 체크리스트", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("NIST SSDF 워크플로 계획", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("Secure by Design 예방 계획", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("보안 점수 추적", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("파일 기반 정적 점검", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("KO", koda_standards_view.read_text(encoding="utf-8"))
@@ -1464,9 +1721,16 @@ packages:
         self.assertIn("전자금융감독규정 8대 취약점", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("OWASP ASVS 5.0", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("NIST SSDF SP 800-218", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("CISA Secure by Design", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("OWASP MASVS", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("OWASP LLM Top 10:2025", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("NIST CSF 2.0", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("CISA 보안 소프트웨어 개발 확인서", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("국제 원칙", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_TARGETS", koda_app.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_OUTPUT_MARKDOWN", koda_app.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_OUTPUT_PDF", koda_app.read_text(encoding="utf-8"))
+        self.assertIn("KODA_SCAN_FAIL_ON", koda_app.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_LANGUAGE", koda_app.read_text(encoding="utf-8"))
         self.assertIn("koda-ignore.yml", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("NativeIgnoreRules", koda_native_scanner.read_text(encoding="utf-8"))
@@ -1503,15 +1767,29 @@ packages:
             "config.docker-no-user",
             "config.compose-host-network",
             "config.compose-docker-sock",
+            "config.compose-dangerous-capability",
+            "config.compose-host-pid",
             "config.k8s-privileged-container",
             "config.k8s-allow-privilege-escalation",
             "config.k8s-host-network",
             "config.k8s-hostpath-volume",
+            "config.k8s-run-as-root",
+            "config.k8s-service-account-token",
+            "config.k8s-unpinned-image",
             "config.terraform-public-storage",
             "config.terraform-public-access-block-disabled",
             "config.terraform-open-admin-port",
+            "config.terraform-wildcard-iam-action",
+            "config.terraform-wildcard-principal",
             "config.github-pull-request-target",
             "config.github-untrusted-event-in-run",
+            "config.android-debuggable",
+            "config.android-allow-backup",
+            "config.android-cleartext-traffic",
+            "config.android-exported-component",
+            "config.ios-ats-arbitrary-loads",
+            "config.ios-file-sharing-enabled",
+            "config.ios-open-documents-in-place",
             "code.csrf-disabled",
             "code.auth-disabled-endpoint",
             "code.eval-user-input",
@@ -1525,14 +1803,23 @@ packages:
             "code.unversioned-api-route",
             "code.legacy-board-software",
             "code.xml-external-entity",
+            "code.llm-prompt-user-concat",
+            "code.llm-tool-unrestricted",
+            "code.llm-sensitive-data-in-prompt",
             "prevention.security-policy-missing",
+            "prevention.pre-commit-hook-missing",
             "prevention.dependency-update-automation-missing",
+            "prevention.codeowners-missing",
+            "prevention.repository-security-settings-missing",
             "prevention.ci-security-scan-missing",
+            "prevention.release-provenance-automation-missing",
             "prevention.env-not-gitignored",
             "prevention.env-example-missing",
             "prevention.dockerignore-missing",
             "prevention.sbom-missing",
             "prevention.sast-workflow-missing",
+            "prevention.ssdf-workflow-missing",
+            "prevention.secure-by-design-program-missing",
             "prevention.openssf-scorecard-missing",
             "prevention.github-token-permissions-not-readonly",
             "prevention.github-actions-unpinned",
@@ -1541,6 +1828,12 @@ packages:
             "prevention.dependency-track-integration-missing",
             "prevention.vex-missing",
             "prevention.binary-artifact-committed",
+            "prevention.threat-model-missing",
+            "prevention.secret-rotation-runbook-missing",
+            "prevention.ai-llm-security-plan-missing",
+            "prevention.mobile-security-plan-missing",
+            "prevention.nist-csf-profile-missing",
+            "prevention.cisa-attestation-missing",
         ):
             self.assertIn(rule_id, koda_native_scanner.read_text(encoding="utf-8"))
         self.assertNotIn("scaleBy(x: 1, y: -1)", koda_native_scanner.read_text(encoding="utf-8"))
@@ -1565,6 +1858,11 @@ packages:
         self.assertIn("init-security", readme)
         self.assertIn("zap-command", readme)
         self.assertIn("upload-sbom", readme)
+        self.assertIn("THREAT_MODEL.md", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("AI_LLM_SECURITY.md", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("MOBILE_SECURITY.md", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("NIST_CSF_2_PROFILE.md", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("CISA_SECURE_SOFTWARE_ATTESTATION.md", koda_bridge.read_text(encoding="utf-8"))
 
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")
@@ -1598,6 +1896,9 @@ packages:
         self.assertIn("CWE Top 25:2025", html)
         self.assertIn("OWASP API Security Top 10:2023", html)
         self.assertIn("OWASP Mobile Top 10:2024", html)
+        self.assertIn("OWASP MASVS", html)
+        self.assertIn("OWASP LLM Top 10:2025", html)
+        self.assertIn("NIST CSF 2.0", html)
         self.assertIn("소프트웨어 개발보안 49", html)
         self.assertIn("ISMS-P 2.8 개발보안", html)
         self.assertIn("점검 실행", html)

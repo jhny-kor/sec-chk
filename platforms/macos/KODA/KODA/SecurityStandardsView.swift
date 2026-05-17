@@ -295,16 +295,84 @@ enum AppLanguage: String, Hashable {
         case .ko:
             return [
                 "예방 키트는 취약점을 찾은 뒤 고치는 것에 그치지 않고, 프로젝트에 기본 보안 장치를 미리 갖추도록 돕는 기능 묶음입니다.",
-                "자동 수정 마법사는 SECURITY.md, Dependabot 설정, CI 보안 점검 workflow, .dockerignore, .env.example 같은 파일을 만들거나 부족한 줄을 추가합니다.",
+                "자동 수정 마법사는 SECURITY.md, Dependabot 설정, CI 보안 점검 workflow, CODEOWNERS, .dockerignore, .env.example 같은 파일을 만들거나 부족한 줄을 추가합니다.",
                 "기존 파일을 무작정 덮어쓰지 않고, 적용 전에 변경 후보를 보여주므로 필요한 항목만 선택해서 적용할 수 있습니다.",
-                "팀이나 릴리스 과정에서 필요한 SBOM, VEX, 증적 체크리스트, 릴리스 보안 패키지도 같은 메뉴에서 생성합니다.",
+                "팀이나 릴리스 과정에서 필요한 SBOM, VEX, 저장소 보안 체크리스트, SSDF/Secure by Design 계획, 릴리스 보안 패키지도 같은 메뉴에서 생성합니다.",
             ]
         case .en:
             return [
                 "The Prevention Kit is a set of actions that helps you prepare baseline security controls, not just find issues after they happen.",
-                "The Auto-Fix Wizard creates or updates files such as SECURITY.md, Dependabot configuration, CI security workflows, .dockerignore, and .env.example.",
+                "The Auto-Fix Wizard creates or updates files such as SECURITY.md, Dependabot configuration, CI security workflows, CODEOWNERS, .dockerignore, and .env.example.",
                 "It previews candidate changes before applying them, so you can select only the guardrails you want instead of overwriting files blindly.",
-                "The same menu can also generate SBOM, VEX, evidence checklists, and release security packages for team and release workflows.",
+                "The same menu can also generate SBOM, VEX, repository security checklists, SSDF/Secure by Design plans, and release security packages for team and release workflows.",
+            ]
+        }
+    }
+
+    var preventionKitItemsTitle: String {
+        switch self {
+        case .ko: return "예방 키트에 포함된 항목"
+        case .en: return "What's Included"
+        }
+    }
+
+    var preventionKitItems: [String] {
+        switch self {
+        case .ko:
+            return [
+                "자동 수정 마법사: 선택한 폴더의 누락된 예방 가드레일을 계산해 목록으로 보여줍니다. 새 파일 생성과 기존 파일 보수적 줄 추가를 구분해서 표시하므로, 운영 중인 프로젝트에서는 이 항목으로 변경 내용을 먼저 검토한 뒤 필요한 것만 적용합니다.",
+                "선택 폴더에 예방 설정 적용: 새 프로젝트나 보안 기준 파일이 거의 없는 폴더에 기본 예방 파일을 한 번에 생성합니다. SECURITY.md, Dependabot, KODA 보안 workflow, release provenance workflow, CODEOWNERS, .dockerignore, .env.example, pre-commit 안내, 저장소 보안 체크리스트, ZAP/Dependency-Track/VEX/SLSA/SSDF/Secure by Design 문서가 포함됩니다.",
+                "커밋 전 보안 차단 설치: Git 저장소의 .git/hooks/pre-commit에 KODA hook을 설치합니다. commit 직전에 앱 내장 스캐너가 로컬 점검을 실행하고, 기본적으로 high 이상 발견 항목이 있으면 commit을 막습니다. 차단 기준은 KODA_PRE_COMMIT_FAIL_ON으로 조정합니다.",
+                "SBOM 생성: 선택한 프로젝트의 의존성을 CycloneDX JSON으로 저장합니다. requirements, pyproject/poetry, Pipfile.lock, package-lock, yarn.lock, pnpm-lock 같은 lockfile 기반 의존성 목록을 릴리스 검토 자료로 남길 때 사용합니다.",
+                "OSV/CVE + KEV/EPSS 조회: 고정 버전이 있는 의존성을 OSV.dev로 조회하고, CVE가 있으면 CISA KEV와 FIRST EPSS 우선순위를 덧붙입니다. 네트워크 조회가 필요하므로 오프라인 기본 스캔과 분리되어 있습니다.",
+                "VEX 문서 생성: OSV/CVE 조회 결과를 CycloneDX VEX 초안으로 저장합니다. 실제 영향 없음, 수정됨, 검토 중 같은 상태를 릴리스 산출물로 추적하기 위한 시작점이며 최종 판단은 사람이 확인해야 합니다.",
+                "ZAP DAST 계획 생성: 운영 승인 전 단계에서 허가된 URL, 실행 명령, 결과 저장 위치, 주의사항을 Markdown 계획으로 만듭니다. 아직 실제 HTTP 요청을 보내지 않으므로 점검 승인 문서화에 적합합니다.",
+                "ZAP DAST 실행: Docker 기반 OWASP ZAP baseline을 실행해 실제 웹 URL에 요청을 보냅니다. 소유하거나 명시적으로 허가받은 staging/local URL에만 사용하고, 운영 시간대와 범위를 확인한 뒤 실행합니다.",
+                "수동 증적 체크리스트: ASVS, WSTG, ISMS-P, NIST SSDF, OWASP SAMM처럼 로컬 파일만으로 전부 입증할 수 없는 기준의 확인 질문과 증적 칸을 생성합니다. 정책, 승인 기록, 운영 절차 검토에 사용합니다.",
+                "릴리스 보안 패키지 생성: SBOM, VEX, 점검 결과, 수동 증적 체크리스트, checksum, manifest를 한 폴더에 묶습니다. 배포 전 보안 검토 자료나 릴리스 승인 첨부 자료로 사용합니다.",
+                "릴리스 서명 계획 생성: SLSA/Sigstore 관점에서 산출물 checksum, cosign sign/verify, provenance 게시 절차를 Markdown 계획으로 저장합니다. 실제 키와 CI 신원은 프로젝트 릴리스 체계에 맞게 채웁니다.",
+                "점검 변경 리포트: 최근 점검과 이전 점검의 위험점수, 심각도 분포, 새로 생긴 발견 항목과 해결된 항목을 비교합니다. 수정 전후 검증이나 정기 보안 추이 확인에 사용합니다.",
+                "예외 파일 생성: 오탐이나 의도적으로 수용한 항목을 koda-ignore.yml 템플릿으로 만듭니다. rule, path, reason, until을 기록해 임시 예외가 영구 방치되지 않도록 관리합니다.",
+                "저장소 보안 설정 체크리스트: GitHub 같은 저장소 호스팅 화면에서 켜야 하는 branch protection, required review, secret scanning, Dependabot alerts, Actions 최소 권한 설정을 체크리스트로 저장합니다.",
+                "NIST SSDF 워크플로 계획: Prepare, Protect, Produce, Respond 단계별로 KODA 점검과 팀 증적을 연결합니다. 개발보안 프로세스를 문서화하거나 내부 감사 준비에 사용합니다.",
+                "Secure by Design 예방 계획: CISA Secure by Design 원칙에 맞춰 고객 보안 결과 책임, 안전한 기본값, 투명성, 경영진 주도 지표를 기록합니다. 제품 보안 개선 로드맵으로 사용합니다.",
+                "위협 모델 마법사: 로그인, 개인정보, 결제, 관리자, 공개 API, 파일 처리, AI/LLM, 모바일, 클라우드 특성을 선택해 위협 모델 초안과 권장 통제를 만듭니다.",
+                "기준 준수 현황: OWASP, CWE, ISMS-P, NIST, CISA 등 보안 기준별로 자동 확인, 조치 필요, 증적 보완 상태를 한 화면에서 확인합니다.",
+                "비밀값 회전 절차: 실제 키나 토큰이 발견됐을 때 폐기, 재발급, 사용 이력 감사, 재점검 순서를 runbook으로 저장합니다.",
+                "AI/LLM 보안 계획: OWASP LLM Top 10 기준으로 프롬프트 인젝션, 민감정보 전달, 도구 권한, 모델/SDK 공급망, 적대적 테스트를 정리합니다.",
+                "모바일 보안 계획: OWASP MASVS 기준으로 Android Manifest, iOS plist, 저장소, 통신, 플랫폼 상호작용, 릴리스 서명, 기기 테스트 항목을 기록합니다.",
+                "NIST CSF 2.0 프로파일과 CISA 확인서 체크리스트: 조직 위험관리와 보안 소프트웨어 개발 확인에 필요한 증적 위치, 담당자, 검토 항목을 정리합니다.",
+                "보안 점수 추적: 점검 때마다 위험점수와 발견 항목 수를 저장해 시간 흐름에 따른 개선/악화를 봅니다. 특정 수정이 실제로 위험점수를 낮췄는지 확인할 때 유용합니다.",
+                "현재 대상을 프로파일로 저장 / 프로젝트 프로파일: 자주 점검하는 여러 폴더와 파일 묶음을 이름 붙여 저장하고 다시 불러옵니다. 반복 점검 대상이 많은 경우 매번 폴더를 다시 선택하지 않아도 됩니다.",
+                "보안 예방 키트 파일로 저장: 실제 파일을 프로젝트에 쓰지 않고, 예방 키트 전체 내용을 하나의 Markdown 문서로 내보냅니다. 팀 공유, 리뷰, 사전 검토가 필요할 때 사용합니다.",
+            ]
+        case .en:
+            return [
+                "Auto-Fix Wizard: calculates missing prevention guardrails for selected folders and previews them as a selectable list. It separates new file creation from conservative line additions, so use it on existing projects when you want to review changes before applying them.",
+                "Apply Guardrails to Folders: creates the baseline prevention files at once for new or lightly configured projects. It includes SECURITY.md, Dependabot, KODA security workflow, release provenance workflow, CODEOWNERS, .dockerignore, .env.example, pre-commit guide, repository security checklist, and ZAP/Dependency-Track/VEX/SLSA/SSDF/Secure by Design documents.",
+                "Install Pre-Commit Gate: writes a KODA hook to .git/hooks/pre-commit. Before commit, the built-in app scanner runs a local scan and blocks the commit when high-or-higher findings are present by default. Adjust the threshold with KODA_PRE_COMMIT_FAIL_ON.",
+                "Generate SBOM: saves project dependencies as CycloneDX JSON. Use it to keep release review material for requirements, pyproject/poetry, Pipfile.lock, package locks, yarn.lock, and pnpm-lock dependency sources.",
+                "Run OSV/CVE + KEV/EPSS: queries OSV.dev for exact-version dependencies and enriches CVEs with CISA KEV and FIRST EPSS priority when available. It requires network access, so it is separate from the offline default scan.",
+                "Generate VEX: writes a CycloneDX VEX draft from OSV/CVE lookup results. Use it as a starting point to track not affected, fixed, in triage, or other reviewed vulnerability states; a human must confirm final status.",
+                "Create ZAP DAST Plan: writes a Markdown plan with authorized URL, run command, output location, and cautions before active testing. It does not send HTTP requests, so it is useful for approval documentation.",
+                "Run ZAP DAST: runs Docker-based OWASP ZAP baseline and sends real requests to a web URL. Use it only against owned or explicitly authorized staging/local URLs after confirming scope and timing.",
+                "Manual Evidence Checklist: creates questions and evidence fields for standards that cannot be fully proven from local files, such as ASVS, WSTG, ISMS-P, NIST SSDF, and OWASP SAMM. Use it for policy, approval, and operating-procedure review.",
+                "Create Release Security Package: bundles SBOM, VEX, scan results, manual evidence checklist, checksums, and a manifest into one folder. Use it for pre-release security review or release approval attachments.",
+                "Create Release Signing Plan: saves SLSA/Sigstore-oriented checksum, cosign sign/verify, and provenance publication guidance as Markdown. Fill in real keys and CI identities according to the project release process.",
+                "Scan Change Report: compares the latest scan with the previous scan across risk score, severity distribution, newly introduced findings, and resolved findings. Use it to validate remediation or monitor security trends.",
+                "Create Ignore File: creates a koda-ignore.yml template for false positives or explicitly accepted findings. Record rule, path, reason, and until date so temporary exceptions do not become permanent.",
+                "Repository Security Checklist: exports hosted-repository controls such as branch protection, required reviews, secret scanning, Dependabot alerts, and least-privilege Actions permissions.",
+                "NIST SSDF Workflow Plan: maps KODA checks and team evidence to Prepare, Protect, Produce, and Respond activities. Use it to document secure-development process and internal audit readiness.",
+                "Secure by Design Plan: records CISA Secure by Design work across customer security outcomes, secure defaults, transparency, and executive ownership. Use it as a product-security improvement roadmap.",
+                "Threat Model Wizard: selects login, PII, payment, admin, public API, file handling, AI/LLM, mobile, and cloud traits to generate a threat-model draft and recommended controls.",
+                "Compliance Dashboard: shows automatic, needs-action, and evidence-needed status by security standard across OWASP, CWE, ISMS-P, NIST, and CISA views.",
+                "Secret Rotation Runbook: saves the revoke, rotate, audit, and re-scan steps to follow when a real key or token is found.",
+                "AI/LLM Security Plan: records OWASP LLM Top 10 controls for prompt injection, sensitive-data flow, tool authority, model/SDK supply chain, and adversarial tests.",
+                "Mobile Security Plan: records OWASP MASVS work for Android manifests, iOS plists, storage, network, platform interaction, release signing, and device tests.",
+                "NIST CSF 2.0 Profile and CISA Attestation Checklist: organize evidence locations, owners, and review items for organizational risk management and secure software development attestation.",
+                "Security Score History: stores risk score and finding count after scans so you can see improvement or regression over time. It helps verify whether a remediation actually lowered risk.",
+                "Save Current Targets as Profile / Project Profiles: save frequently scanned folder and file sets by name and load them later. This avoids repeatedly selecting the same targets for recurring reviews.",
+                "Save Security Prevention Kit: exports the full prevention kit as one Markdown document without writing files into the project. Use it for team sharing, review, or pre-approval.",
             ]
         }
     }
@@ -313,17 +381,19 @@ enum AppLanguage: String, Hashable {
         switch self {
         case .ko:
             return [
-                "점검 대상을 선택한 뒤 예방 키트 메뉴를 열고 자동 수정 마법사를 실행합니다. 마법사는 선택 폴더에서 빠진 보안 가드레일을 계산합니다.",
-                "목록에서 적용할 항목을 확인합니다. 새 파일을 만들 항목과 기존 파일에 줄을 추가할 항목을 구분해서 볼 수 있습니다.",
-                "선택 항목 적용을 누르면 KODA가 선택된 폴더에 필요한 파일만 생성하거나, 기존 파일에는 필요한 줄만 보수적으로 추가합니다.",
-                "외부 서비스가 필요한 작업은 별도로 실행합니다. OSV/CVE 조회는 인터넷 취약점 피드를 사용하고, ZAP DAST 실행은 Docker와 허가된 URL이 필요합니다.",
+                "먼저 점검 대상 폴더나 파일을 선택하고 보안 점검 실행을 누릅니다. 발견 항목을 본 뒤 예방 키트에서 필요한 조치만 선택하면 과도한 파일 생성이나 설정 변경을 줄일 수 있습니다.",
+                "초기 프로젝트에는 선택 폴더에 예방 설정 적용으로 기본 파일을 빠르게 깔고, 이미 운영 중인 프로젝트에는 자동 수정 마법사로 변경 후보를 확인한 뒤 필요한 항목만 적용하는 방식을 권장합니다.",
+                "Git 저장소에는 커밋 전 보안 차단 설치를 적용합니다. 설치 후 commit 시 KODA가 로컬 스캔을 실행하며, 기준 심각도는 KODA_PRE_COMMIT_FAIL_ON 환경변수로 조정할 수 있습니다.",
+                "릴리스 전에는 SBOM 생성, VEX 문서 생성, 릴리스 보안 패키지 생성, 릴리스 서명 계획 생성을 순서대로 사용하면 의존성, 검토 상태, 체크섬, 서명 계획을 한 묶음으로 정리할 수 있습니다.",
+                "OSV/CVE 조회와 ZAP DAST 실행은 외부 네트워크나 Docker가 필요합니다. 사내망, 운영 서버, 고객 시스템에는 승인된 범위와 시간대를 확인한 뒤 실행합니다.",
             ]
         case .en:
             return [
-                "After selecting targets, open the Prevention Kit menu and run the Auto-Fix Wizard. It calculates missing guardrails for the selected folders.",
-                "Review the list before applying. The wizard separates new files from conservative line additions to existing files.",
-                "Apply Selected writes only the chosen items: missing files are created and existing files receive only the needed lines.",
-                "Run external actions separately. OSV/CVE lookup uses online vulnerability feeds, and ZAP DAST execution requires Docker plus an authorized URL.",
+                "First choose folders or files and run a security scan. Review the findings, then use the Prevention Kit for the specific actions you need instead of creating every artifact blindly.",
+                "For new projects, use Apply Guardrails to Folders to lay down the baseline quickly. For existing projects, use the Auto-Fix Wizard so you can review candidate changes before applying them.",
+                "For Git repositories, install the Pre-Commit Gate. After installation, KODA runs a local scan before commit, and you can adjust the blocking threshold with KODA_PRE_COMMIT_FAIL_ON.",
+                "Before release, use Generate SBOM, Generate VEX, Create Release Security Package, and Create Release Signing Plan to collect dependencies, review status, checksums, and signing guidance together.",
+                "OSV/CVE lookup and ZAP DAST require external network access or Docker. For internal networks, production servers, or customer systems, confirm the approved scope and time window first.",
             ]
         }
     }
@@ -389,6 +459,13 @@ enum AppLanguage: String, Hashable {
         switch self {
         case .ko: return "선택 폴더에 예방 설정 적용"
         case .en: return "Apply Guardrails to Folders"
+        }
+    }
+
+    var installPreCommitHookTitle: String {
+        switch self {
+        case .ko: return "커밋 전 보안 차단 설치"
+        case .en: return "Install Pre-Commit Gate"
         }
     }
 
@@ -490,6 +567,13 @@ enum AppLanguage: String, Hashable {
         }
     }
 
+    var releaseSigningPlanTitle: String {
+        switch self {
+        case .ko: return "릴리스 서명 계획 생성"
+        case .en: return "Create Release Signing Plan"
+        }
+    }
+
     var scoreDiffTitle: String {
         switch self {
         case .ko: return "점검 변경 리포트"
@@ -501,6 +585,230 @@ enum AppLanguage: String, Hashable {
         switch self {
         case .ko: return "예외 파일 생성"
         case .en: return "Create Ignore File"
+        }
+    }
+
+    var repositorySecurityChecklistTitle: String {
+        switch self {
+        case .ko: return "저장소 보안 설정 체크리스트"
+        case .en: return "Repository Security Checklist"
+        }
+    }
+
+    var ssdfWorkflowPlanTitle: String {
+        switch self {
+        case .ko: return "NIST SSDF 워크플로 계획"
+        case .en: return "NIST SSDF Workflow Plan"
+        }
+    }
+
+    var secureByDesignPlanTitle: String {
+        switch self {
+        case .ko: return "Secure by Design 예방 계획"
+        case .en: return "Secure by Design Plan"
+        }
+    }
+
+    var threatModelWizardTitle: String {
+        switch self {
+        case .ko: return "위협 모델 마법사"
+        case .en: return "Threat Model Wizard"
+        }
+    }
+
+    var threatModelWizardSubtitle: String {
+        switch self {
+        case .ko: return "프로젝트 특성을 선택하면 필요한 예방 통제와 위협 모델 초안을 만듭니다."
+        case .en: return "Select project characteristics to generate recommended controls and a threat-model draft."
+        }
+    }
+
+    var complianceDashboardTitle: String {
+        switch self {
+        case .ko: return "기준 준수 현황"
+        case .en: return "Compliance Dashboard"
+        }
+    }
+
+    var complianceDashboardSubtitle: String {
+        switch self {
+        case .ko: return "보안 기준별 자동 확인, 조치 필요, 증적 보완 상태를 한 화면에서 봅니다."
+        case .en: return "Review automatic, needs-action, and evidence-needed status by security standard."
+        }
+    }
+
+    var secretRotationRunbookTitle: String {
+        switch self {
+        case .ko: return "비밀값 회전 절차"
+        case .en: return "Secret Rotation Runbook"
+        }
+    }
+
+    var aiLLMSecurityPlanTitle: String {
+        switch self {
+        case .ko: return "AI/LLM 보안 계획"
+        case .en: return "AI/LLM Security Plan"
+        }
+    }
+
+    var mobileSecurityPlanTitle: String {
+        switch self {
+        case .ko: return "모바일 보안 계획"
+        case .en: return "Mobile Security Plan"
+        }
+    }
+
+    var nistCSFProfileTitle: String {
+        switch self {
+        case .ko: return "NIST CSF 2.0 프로파일"
+        case .en: return "NIST CSF 2.0 Profile"
+        }
+    }
+
+    var cisaAttestationChecklistTitle: String {
+        switch self {
+        case .ko: return "CISA 확인서 체크리스트"
+        case .en: return "CISA Attestation Checklist"
+        }
+    }
+
+    var threatModelAuthTitle: String {
+        switch self {
+        case .ko: return "로그인/인증 기능"
+        case .en: return "Login or authentication"
+        }
+    }
+
+    var threatModelPIITitle: String {
+        switch self {
+        case .ko: return "개인정보/민감정보 처리"
+        case .en: return "PII or sensitive data"
+        }
+    }
+
+    var threatModelPaymentTitle: String {
+        switch self {
+        case .ko: return "결제/금융 데이터"
+        case .en: return "Payment or financial data"
+        }
+    }
+
+    var threatModelAdminTitle: String {
+        switch self {
+        case .ko: return "관리자 기능"
+        case .en: return "Administrative functions"
+        }
+    }
+
+    var threatModelPublicAPITitle: String {
+        switch self {
+        case .ko: return "외부 공개 API"
+        case .en: return "Public API"
+        }
+    }
+
+    var threatModelFileUploadTitle: String {
+        switch self {
+        case .ko: return "파일 업로드/다운로드"
+        case .en: return "File upload or download"
+        }
+    }
+
+    var threatModelAILLMTitle: String {
+        switch self {
+        case .ko: return "AI/LLM 기능"
+        case .en: return "AI/LLM features"
+        }
+    }
+
+    var threatModelMobileTitle: String {
+        switch self {
+        case .ko: return "모바일 앱"
+        case .en: return "Mobile app"
+        }
+    }
+
+    var threatModelCloudTitle: String {
+        switch self {
+        case .ko: return "컨테이너/클라우드 배포"
+        case .en: return "Container or cloud deployment"
+        }
+    }
+
+    var recommendedControlsTitle: String {
+        switch self {
+        case .ko: return "권장 통제"
+        case .en: return "Recommended Controls"
+        }
+    }
+
+    var saveThreatModelTitle: String {
+        switch self {
+        case .ko: return "위협 모델 저장"
+        case .en: return "Save Threat Model"
+        }
+    }
+
+    var recommendThreatModelBase: String {
+        switch self {
+        case .ko: return "신뢰 경계, 주요 자산, 악용 시나리오를 문서화합니다."
+        case .en: return "Document trust boundaries, critical assets, and abuse cases."
+        }
+    }
+
+    var recommendSecurityPolicy: String {
+        switch self {
+        case .ko: return "SECURITY.md, CODEOWNERS, 예외 만료 기준을 준비합니다."
+        case .en: return "Prepare SECURITY.md, CODEOWNERS, and exception expiry rules."
+        }
+    }
+
+    var recommendSASTDependency: String {
+        switch self {
+        case .ko: return "SAST, 의존성, 비밀값 점검을 PR/릴리스 게이트로 연결합니다."
+        case .en: return "Connect SAST, dependency, and secret checks to PR/release gates."
+        }
+    }
+
+    var recommendAuthSession: String {
+        switch self {
+        case .ko: return "인증, 인가, 세션, 쿠키 설정을 ASVS 관점으로 검토합니다."
+        case .en: return "Review authentication, authorization, sessions, and cookies against ASVS."
+        }
+    }
+
+    var recommendSecretRotation: String {
+        switch self {
+        case .ko: return "비밀값 회전 절차와 민감정보 로깅 마스킹을 준비합니다."
+        case .en: return "Prepare secret rotation and sensitive-log masking procedures."
+        }
+    }
+
+    var recommendDASTASVS: String {
+        switch self {
+        case .ko: return "파일 처리, 공개 API, 런타임 동작은 DAST/침투테스트 범위에 넣습니다."
+        case .en: return "Include file handling, public APIs, and runtime behavior in DAST or penetration testing scope."
+        }
+    }
+
+    var recommendLLMPlan: String {
+        switch self {
+        case .ko: return "OWASP LLM Top 10 기준으로 프롬프트, 도구 권한, 민감정보 전달을 점검합니다."
+        case .en: return "Use OWASP LLM Top 10 to review prompts, tool authority, and sensitive-data flow."
+        }
+    }
+
+    var recommendMASVSPlan: String {
+        switch self {
+        case .ko: return "OWASP MASVS 기준으로 모바일 저장소, 통신, 플랫폼 설정, 릴리스 서명을 검토합니다."
+        case .en: return "Use OWASP MASVS for mobile storage, network, platform settings, and release signing."
+        }
+    }
+
+    var recommendIaCContainer: String {
+        switch self {
+        case .ko: return "Docker, Compose, Kubernetes, Terraform 권한과 이미지 고정 상태를 확인합니다."
+        case .en: return "Check Docker, Compose, Kubernetes, Terraform permissions, and image pinning."
         }
     }
 
@@ -634,6 +942,20 @@ enum AppLanguage: String, Hashable {
         switch self {
         case .ko: return "다운로드"
         case .en: return "Download"
+        }
+    }
+
+    var maskReportExportTitle: String {
+        switch self {
+        case .ko: return "공유용 마스킹"
+        case .en: return "Mask for Sharing"
+        }
+    }
+
+    var maskReportExportHelp: String {
+        switch self {
+        case .ko: return "다운로드하는 HTML/PDF/Markdown 리포트에서 로컬 경로와 토큰처럼 보이는 값을 가립니다."
+        case .en: return "Hide local paths and token-like values in downloaded HTML/PDF/Markdown reports."
         }
     }
 
@@ -1016,6 +1338,7 @@ private enum SecurityStandardLocalization {
         "국제 테스트가이드": "International Testing Guide",
         "국제 프레임워크": "International Framework",
         "국제 성숙도모델": "International Maturity Model",
+        "국제 원칙": "International Principles",
         "공급망": "Supply Chain",
     ]
 
@@ -1067,6 +1390,18 @@ private enum SecurityStandardLocalization {
             subtitle: "Checks security risks visible in mobile app source and configuration.",
             scope: "Mobile source and configuration files",
             coverage: "External integration required"
+        ),
+        "owasp-masvs": StandardText(
+            title: "OWASP MASVS",
+            subtitle: "Checks mobile application security verification areas including storage, cryptography, authentication, network, platform interaction, code quality, resilience, and privacy.",
+            scope: "Mobile source, manifests, plists, and release evidence",
+            coverage: "External integration required"
+        ),
+        "owasp-llm-top-10-2025": StandardText(
+            title: "OWASP LLM Top 10:2025",
+            subtitle: "Checks LLM prompts, sensitive data flow, tool permissions, supply chain, and AI security-plan evidence.",
+            scope: "AI/LLM application code and prevention evidence",
+            coverage: "Automatic file-based checks"
         ),
         "sw-dev-security-49": StandardText(
             title: "Korean Software Development Security 49",
@@ -1128,6 +1463,24 @@ private enum SecurityStandardLocalization {
             scope: "Software assurance maturity",
             coverage: "Evidence review required"
         ),
+        "cisa-secure-by-design": StandardText(
+            title: "CISA Secure by Design",
+            subtitle: "Maps Secure by Design principles to local prevention evidence, secure defaults, transparency artifacts, and ownership signals.",
+            scope: "Product security prevention program",
+            coverage: "Evidence review required"
+        ),
+        "nist-csf-2": StandardText(
+            title: "NIST Cybersecurity Framework 2.0",
+            subtitle: "Maps Govern, Identify, Protect, Detect, Respond, and Recover functions to local checks and organizational evidence.",
+            scope: "Organizational cybersecurity risk management profile",
+            coverage: "Evidence review required"
+        ),
+        "cisa-secure-software-attestation": StandardText(
+            title: "CISA Secure Software Development Attestation",
+            subtitle: "Organizes secure development environment, third-party component, verification, and vulnerability response evidence for attestation readiness.",
+            scope: "SSDF-based secure development attestation evidence",
+            coverage: "Evidence review required"
+        ),
         "owasp-dependency-check": StandardText(
             title: "OWASP Dependency-Check Baseline",
             subtitle: "Dependency hygiene baseline for identifying known vulnerable components.",
@@ -1173,6 +1526,10 @@ private enum SecurityStandardLocalization {
         "통신 보안": "Communication Security",
         "앱 설정": "App Configuration",
         "모바일 의존성": "Mobile Dependencies",
+        "안전한 개발 환경": "Secure Development Environment",
+        "안전한 개발 실천": "Secure Development Practices",
+        "제3자 구성요소": "Third-Party Components",
+        "검증 및 대응": "Verification and Response",
         "입력 데이터 검증 및 표현": "Input Validation and Representation",
         "보안 기능": "Security Functions",
         "시간 및 상태": "Time and State",
@@ -1194,6 +1551,10 @@ private enum SecurityStandardLocalization {
         "시험 데이터 보호": "Test Data Protection",
         "소스 프로그램 관리": "Source Program Management",
         "운영 이관": "Production Handoff",
+        "고객 보안 결과 책임": "Own Customer Security Outcomes",
+        "안전한 기본값": "Secure Defaults",
+        "투명성 및 책임성": "Transparency and Accountability",
+        "경영진 주도": "Lead From the Top",
         "입력 검증": "Input Validation",
         "인증 및 세션": "Authentication and Session",
         "접근통제": "Access Control",
@@ -1228,6 +1589,7 @@ private enum SecurityStandardLocalization {
         "SBOM 추적": "SBOM Tracking",
         "빌드 출처 증명": "Build Provenance",
         "서명된 산출물": "Signed Artifacts",
+        "Respond / Recover": "Respond / Recover",
         "SBOM 준비성": "SBOM Readiness",
         "버전 위생": "Version Hygiene",
         "CWE-79 XSS": "CWE-79 XSS",
@@ -2227,6 +2589,47 @@ enum SecurityStandardCatalog {
             ]
         ),
         AppSecurityStandard(
+            id: "owasp-masvs",
+            title: "OWASP MASVS",
+            subtitle: "모바일 앱 보안 검증 표준의 저장소, 암호, 인증, 네트워크, 플랫폼, 코드 품질, 회복탄력성, 개인정보 항목을 확인합니다.",
+            scope: "모바일 앱 소스, Manifest, plist, 릴리스 증적",
+            coverage: "외부 연동 필요",
+            badge: "국제 검증표준",
+            icon: "iphone.and.arrow.forward",
+            accent: .green,
+            categories: [
+                category("storage", "MASVS-STORAGE", "민감정보 저장, 백업, iOS 파일 공유, Android 백업 설정을 확인합니다."),
+                category("network", "MASVS-NETWORK", "ATS 예외, Android cleartext traffic, 평문 의존성 소스를 확인합니다."),
+                category("platform", "MASVS-PLATFORM", "Android exported component, iOS document sharing, 파일 처리 위험을 확인합니다."),
+                category("code", "MASVS-CODE", "debuggable, 로깅, 인젝션, 파일 처리, 의존성 위생을 확인합니다."),
+                category("resilience", "MASVS-RESILIENCE", "릴리스 서명, provenance, debug build 잔존 여부를 확인합니다.")
+            ],
+            references: [
+                reference("OWASP MASVS", "https://mas.owasp.org/MASVS/"),
+                reference("OWASP MASTG", "https://mas.owasp.org/MASTG/")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "owasp-llm-top-10-2025",
+            title: "OWASP LLM Top 10:2025",
+            subtitle: "LLM 프롬프트, 민감정보 전달, 도구 권한, 공급망, AI 보안 계획을 로컬 증거로 확인합니다.",
+            scope: "AI/LLM 애플리케이션 코드 및 예방 증적",
+            coverage: "자동 점검",
+            badge: "국제 기준",
+            icon: "sparkles",
+            accent: .indigo,
+            categories: [
+                category("llm01", "LLM01 Prompt Injection", "사용자 입력이 privileged prompt에 직접 결합되는 패턴을 확인합니다."),
+                category("llm02", "LLM02 Sensitive Information Disclosure", "비밀값이 LLM 요청이나 로그로 전달될 수 있는 패턴을 확인합니다."),
+                category("llm03", "LLM03 Supply Chain", "LLM SDK, 의존성, SBOM, VEX 준비성을 확인합니다."),
+                category("llm05", "LLM05 Improper Output Handling", "모델 출력이 HTML, shell, SQL, 파일 처리로 바로 연결될 수 있는지 확인합니다."),
+                category("llm06", "LLM06 Excessive Agency", "도구 호출이 광범위하거나 자동으로 열려 있는 패턴을 확인합니다.")
+            ],
+            references: [
+                reference("OWASP Top 10 for LLM Applications", "https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/")
+            ]
+        ),
+        AppSecurityStandard(
             id: "sw-dev-security-49",
             title: "소프트웨어 개발보안 49",
             subtitle: "국내 소프트웨어 개발보안 가이드 49개 기준을 로컬 룰에 매핑합니다.",
@@ -2423,6 +2826,66 @@ enum SecurityStandardCatalog {
             references: [
                 reference("OWASP SAMM", "https://owasp.org/www-project-samm/"),
                 reference("OWASP SAMM Model", "https://owaspsamm.org/model/")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "cisa-secure-by-design",
+            title: "CISA Secure by Design",
+            subtitle: "제품 보안 결과 책임, 안전한 기본값, 투명성, 경영진 책임을 예방 통제와 증적 기준으로 확인합니다.",
+            scope: "제품 보안 예방 프로그램",
+            coverage: "증적 확인 필요",
+            badge: "국제 원칙",
+            icon: "shield.righthalf.filled",
+            accent: .red,
+            categories: [
+                category("ownership", "고객 보안 결과 책임", "보안 정책, 취약점 대응, 의존성 위험 대응 책임이 드러나는지 확인합니다."),
+                category("secure-defaults", "안전한 기본값", "쿠키, CORS, debug, 컨테이너, CI token처럼 기본 설정이 안전한지 확인합니다."),
+                category("transparency", "투명성 및 책임성", "SECURITY.md, SBOM, VEX, 예외 만료, 점수 추적 같은 공개·추적 산출물을 확인합니다."),
+                category("leadership", "경영진 주도", "CODEOWNERS, SSDF workflow, Secure by Design 계획처럼 책임 구조와 정기 검토 증적을 확인합니다.")
+            ],
+            references: [
+                reference("CISA Secure by Design", "https://www.cisa.gov/resources-tools/resources/secure-by-design"),
+                reference("CISA Secure by Design Pledge", "https://www.cisa.gov/securebydesign")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "nist-csf-2",
+            title: "NIST CSF 2.0",
+            subtitle: "Govern, Identify, Protect, Detect, Respond, Recover 기능을 로컬 점검과 조직 증적에 매핑합니다.",
+            scope: "조직 사이버보안 위험관리 프로파일",
+            coverage: "증적 확인 필요",
+            badge: "국제 프레임워크",
+            icon: "hexagon.lefthalf.filled",
+            accent: .slate,
+            categories: [
+                category("govern", "Govern", "정책, owner, 예외, Secure by Design, CSF 프로파일 증적을 확인합니다."),
+                category("identify", "Identify", "자산, 의존성, SBOM, 저장소 보안 설정 준비성을 확인합니다."),
+                category("protect", "Protect", "비밀값, 인증, 세션, 컨테이너, 모바일, AI, CI 보안 기본값을 확인합니다."),
+                category("detect", "Detect", "KODA/SAST/의존성 점검과 보안 로깅 준비성을 확인합니다."),
+                category("respond-recover", "Respond / Recover", "VEX, 취약점 대응, secret rotation, 릴리스 보안 패키지를 확인합니다.")
+            ],
+            references: [
+                reference("NIST Cybersecurity Framework", "https://www.nist.gov/cyberframework")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "cisa-secure-software-attestation",
+            title: "CISA 보안 소프트웨어 개발 확인서",
+            subtitle: "보안 개발 환경, 제3자 구성요소, 검증, 취약점 대응 증적을 확인서 관점으로 정리합니다.",
+            scope: "SSDF 기반 보안 개발 확인 증적",
+            coverage: "증적 확인 필요",
+            badge: "국제 프레임워크",
+            icon: "doc.text.badge.checkmark",
+            accent: .red,
+            categories: [
+                category("environment", "안전한 개발 환경", "브랜치 보호, CODEOWNERS, CI 게이트, 비밀값 회전 절차를 확인합니다."),
+                category("development", "안전한 개발 실천", "위협 모델, 시큐어코딩, 예외 만료, SSDF 워크플로를 확인합니다."),
+                category("components", "제3자 구성요소", "SBOM, 버전 고정, 의존성 업데이트, VEX 대응을 확인합니다."),
+                category("response", "검증 및 대응", "SAST, OSV/CVE, 취약점 신고와 조치 증적을 확인합니다.")
+            ],
+            references: [
+                reference("CISA Secure Software Development Attestation", "https://www.cisa.gov/secure-software-attestation-form"),
+                reference("NIST SSDF SP 800-218", "https://csrc.nist.gov/publications/detail/sp/800-218/final")
             ]
         ),
         AppSecurityStandard(

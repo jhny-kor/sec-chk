@@ -322,6 +322,36 @@ RULE_TRANSLATIONS_KO = {
         "description": "소스 저장소에 실행 파일 또는 빌드 산출물로 보이는 파일이 포함되어 있습니다.",
         "recommendation": "의도적으로 vendoring한 파일이 아니라면 제거하고, 필요한 경우 출처 증명·체크섬·서명을 함께 관리하세요.",
     },
+    "prevention.threat-model-missing": {
+        "title": "위협 모델 문서가 없음",
+        "description": "신뢰 경계, 주요 자산, 악용 시나리오, 보안 가정이 문서화되어 있지 않습니다.",
+        "recommendation": "출시 전 위협 모델을 작성하고 인증, 데이터, 외부 연동, 운영 권한의 경계를 정리하세요.",
+    },
+    "prevention.secret-rotation-runbook-missing": {
+        "title": "비밀값 회전 절차 문서가 없음",
+        "description": "비밀값 노출 시 폐기, 재발급, 사용 이력 확인, 재점검 절차가 문서화되어 있지 않습니다.",
+        "recommendation": "비밀값 노출 대응 runbook을 작성하고 키 회전, 감사, 재점검 책임자를 지정하세요.",
+    },
+    "prevention.ai-llm-security-plan-missing": {
+        "title": "AI/LLM 보안 계획이 없음",
+        "description": "AI 또는 LLM 사용 흔적이 있으나 프롬프트 인젝션, 도구 권한, 민감정보 처리 기준이 문서화되어 있지 않습니다.",
+        "recommendation": "프롬프트 경계, 도구 allowlist, 민감정보 마스킹, 모델/제공자 목록, 적대적 테스트를 문서화하세요.",
+    },
+    "prevention.mobile-security-plan-missing": {
+        "title": "모바일 보안 계획이 없음",
+        "description": "모바일 프로젝트 파일이 있으나 MASVS 범위, 플랫폼 설정, 저장소/네트워크/릴리스 테스트 기준이 문서화되어 있지 않습니다.",
+        "recommendation": "Android/iOS 설정, 저장소, 통신, 서명, 기기 테스트 요구사항을 모바일 보안 계획에 정리하세요.",
+    },
+    "prevention.nist-csf-profile-missing": {
+        "title": "NIST CSF 2.0 프로파일이 없음",
+        "description": "Govern, Identify, Protect, Detect, Respond, Recover 기능에 대한 프로젝트 증적 매핑이 없습니다.",
+        "recommendation": "NIST CSF 2.0 기능별 소유자, 증적, 점검 주기, 예외 처리 기준을 문서화하세요.",
+    },
+    "prevention.cisa-attestation-missing": {
+        "title": "CISA 보안 소프트웨어 개발 확인서 증적이 없음",
+        "description": "CISA/OMB 확인서에 필요한 개발, 검증, 공급망, 취약점 대응 증적이 문서화되어 있지 않습니다.",
+        "recommendation": "SSDF 기반 개발 환경, 제3자 구성요소, 검증, 취약점 대응 증적을 확인서 체크리스트로 관리하세요.",
+    },
     "secret.private-key": {
         "title": "개인 키 자료",
         "description": "개인 키로 보이는 값이 로컬 프로젝트 파일에 포함되어 있습니다.",
@@ -452,6 +482,16 @@ RULE_TRANSLATIONS_KO = {
         "description": "Docker 소켓 접근은 사실상 호스트 수준 제어 권한에 가깝습니다.",
         "recommendation": "Docker 소켓 마운트를 피하거나 목적별 프록시 뒤로 격리하세요.",
     },
+    "config.compose-dangerous-capability": {
+        "title": "Compose 서비스가 광범위한 Linux capability를 부여함",
+        "description": "SYS_ADMIN, NET_ADMIN 같은 capability는 컨테이너 격리와 호스트 보호를 약화시킬 수 있습니다.",
+        "recommendation": "불필요한 capability를 제거하고 필요한 권한만 명시적으로 부여하세요.",
+    },
+    "config.compose-host-pid": {
+        "title": "Compose 서비스가 host PID namespace를 사용함",
+        "description": "host PID namespace는 호스트 프로세스 가시성을 넓혀 격리를 약화시킵니다.",
+        "recommendation": "host PID 접근이 꼭 필요한 경우가 아니면 기본 PID namespace를 사용하세요.",
+    },
     "config.k8s-privileged-container": {
         "title": "Kubernetes 컨테이너가 privileged 모드를 사용함",
         "description": "privileged 컨테이너는 호스트 수준 접근 권한을 얻을 수 있습니다.",
@@ -472,6 +512,21 @@ RULE_TRANSLATIONS_KO = {
         "description": "hostPath는 호스트 파일시스템 경로를 컨테이너에 노출합니다.",
         "recommendation": "가능하면 PersistentVolume으로 대체하고, 불가피한 경우 사유를 문서화하세요.",
     },
+    "config.k8s-run-as-root": {
+        "title": "Kubernetes workload가 root 실행을 허용함",
+        "description": "root 사용자 실행은 컨테이너 침해 시 영향 범위를 키울 수 있습니다.",
+        "recommendation": "runAsNonRoot: true와 비root 런타임 사용자를 설정하세요.",
+    },
+    "config.k8s-service-account-token": {
+        "title": "Kubernetes service account token 자동 마운트",
+        "description": "불필요한 service account token은 Pod 침해 시 Kubernetes API 접근 경로가 될 수 있습니다.",
+        "recommendation": "Kubernetes API 접근이 필요하지 않다면 automountServiceAccountToken: false를 설정하세요.",
+    },
+    "config.k8s-unpinned-image": {
+        "title": "Kubernetes 이미지가 고정되지 않음",
+        "description": "latest 또는 태그 없는 이미지는 검토 없이 내용이 바뀔 수 있습니다.",
+        "recommendation": "검토된 버전 태그 또는 immutable digest로 이미지를 고정하세요.",
+    },
     "config.terraform-public-storage": {
         "title": "Terraform 저장소 ACL이 public으로 설정됨",
         "description": "공개 저장소 설정은 데이터 노출로 이어질 수 있습니다.",
@@ -487,6 +542,16 @@ RULE_TRANSLATIONS_KO = {
         "description": "SSH/RDP를 0.0.0.0/0에 공개하면 초기 침투 경로가 될 수 있습니다.",
         "recommendation": "관리자 포트는 VPN, bastion, 승인된 CIDR로 제한하세요.",
     },
+    "config.terraform-wildcard-iam-action": {
+        "title": "Terraform IAM 정책이 wildcard action을 허용함",
+        "description": "IAM action wildcard는 최소 권한 원칙을 약화시키고 권한 확대 위험을 키웁니다.",
+        "recommendation": "필요한 최소 action만 명시하고 예외 사유를 문서화하세요.",
+    },
+    "config.terraform-wildcard-principal": {
+        "title": "Terraform IAM 정책이 wildcard principal을 허용함",
+        "description": "wildcard principal은 의도하지 않은 주체에게 접근을 허용할 수 있습니다.",
+        "recommendation": "승인된 계정, 역할, 서비스 주체로 principal을 제한하세요.",
+    },
     "config.github-pull-request-target": {
         "title": "GitHub Actions가 pull_request_target을 사용함",
         "description": "pull_request_target은 권한 있는 저장소 컨텍스트에서 실행되어 PR 코드와 함께 쓰면 위험합니다.",
@@ -496,6 +561,41 @@ RULE_TRANSLATIONS_KO = {
         "title": "GitHub Actions run 단계에 이벤트 데이터가 직접 삽입됨",
         "description": "PR 이벤트 필드는 공격자가 제어할 수 있는 문자열을 포함할 수 있습니다.",
         "recommendation": "이벤트 값은 환경변수로 전달하고 셸 사용 전에 quoting과 검증을 적용하세요.",
+    },
+    "config.android-debuggable": {
+        "title": "Android 앱이 debuggable로 설정됨",
+        "description": "릴리스 앱의 debuggable 설정은 런타임 조작과 정보 노출 위험을 높입니다.",
+        "recommendation": "릴리스 빌드에서는 android:debuggable을 비활성화하고 빌드 타입별 설정을 분리하세요.",
+    },
+    "config.android-allow-backup": {
+        "title": "Android 백업이 허용됨",
+        "description": "민감 데이터가 포함된 앱에서 백업 허용은 로컬 데이터 유출 위험을 키울 수 있습니다.",
+        "recommendation": "민감 앱은 백업을 비활성화하거나 백업 제외 규칙을 명확히 설정하세요.",
+    },
+    "config.android-cleartext-traffic": {
+        "title": "Android cleartext traffic이 허용됨",
+        "description": "평문 HTTP 통신은 네트워크 구간에서 변조와 도청 위험이 있습니다.",
+        "recommendation": "HTTPS를 기본으로 강제하고 예외는 network security config로 제한하세요.",
+    },
+    "config.android-exported-component": {
+        "title": "Android component가 exported로 설정됨",
+        "description": "exported component는 외부 앱의 진입점이 될 수 있어 권한 검토가 필요합니다.",
+        "recommendation": "의도한 component만 export하고 민감 component에는 permission을 요구하세요.",
+    },
+    "config.ios-ats-arbitrary-loads": {
+        "title": "iOS ATS가 임의 네트워크 로드를 허용함",
+        "description": "NSAllowsArbitraryLoads는 앱 전체의 전송 보안 기본값을 약화시킬 수 있습니다.",
+        "recommendation": "ATS를 유지하고 필요한 예외는 검토된 도메인 단위로 제한하세요.",
+    },
+    "config.ios-file-sharing-enabled": {
+        "title": "iOS 파일 공유가 활성화됨",
+        "description": "UIFileSharingEnabled는 앱 문서를 사용자가 직접 접근할 수 있게 하므로 민감 파일 검토가 필요합니다.",
+        "recommendation": "민감 문서가 아니라는 근거가 없다면 파일 공유를 비활성화하세요.",
+    },
+    "config.ios-open-documents-in-place": {
+        "title": "iOS 문서 제자리 열기가 활성화됨",
+        "description": "문서 provider 흐름에서 외부 앱과 파일 변경 범위가 넓어질 수 있습니다.",
+        "recommendation": "문서 provider 흐름과 민감 파일 처리 범위를 검토하고 필요한 경우 제한하세요.",
     },
     "code.xss-dom-sink": {
         "title": "XSS 의심 HTML 출력 지점",
@@ -621,6 +721,21 @@ RULE_TRANSLATIONS_KO = {
         "title": "XML 외부 엔티티 처리 위험",
         "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다.",
         "recommendation": "DTD와 외부 엔티티 해석을 비활성화하거나 신뢰할 수 없는 XML에는 강화된 파서 설정을 사용하세요.",
+    },
+    "code.llm-prompt-user-concat": {
+        "title": "LLM 프롬프트에 사용자 입력이 직접 결합됨",
+        "description": "사용자 제어 입력이 system/developer prompt 또는 메시지 구성에 직접 섞이는 패턴입니다.",
+        "recommendation": "시스템 지시는 고정하고 사용자 콘텐츠는 별도 메시지 필드로 분리하며 프롬프트 인젝션 테스트를 추가하세요.",
+    },
+    "code.llm-tool-unrestricted": {
+        "title": "LLM 도구 호출 권한이 넓게 열려 있음",
+        "description": "모델이 셸, 파일, 브라우저, HTTP, 데이터베이스 같은 광범위한 도구를 제한 없이 호출할 수 있는 패턴입니다.",
+        "recommendation": "작업별 도구 allowlist, 인자 검증, 부작용 작업 확인, 도구 호출 로그를 적용하세요.",
+    },
+    "code.llm-sensitive-data-in-prompt": {
+        "title": "민감정보가 LLM 프롬프트로 전달될 수 있음",
+        "description": "credential, token, cookie, session 같은 민감 필드가 LLM 요청에 포함될 수 있는 패턴입니다.",
+        "recommendation": "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요.",
     },
     "dependency.osv-known-vulnerability": {
         "title": "OSV에 보고된 알려진 취약 의존성",

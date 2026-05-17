@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -13,7 +14,15 @@ from .models import DependencyComponent, TargetConfig
 PYTHON_EXACT_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*==\s*([A-Za-z0-9][^\s;#]*)")
 POETRY_LOCK_KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$")
 PNPM_PACKAGE_KEY_RE = re.compile(r"^\s*['\"]?/(.+?)['\"]?:\s*$")
+GO_REQUIRE_RE = re.compile(r"^\s*([A-Za-z0-9_.\-~/]+(?:/[A-Za-z0-9_.\-~]+)+)\s+(v?[0-9][^\s]+)")
+GO_SUM_RE = re.compile(r"^\s*([A-Za-z0-9_.\-~/]+(?:/[A-Za-z0-9_.\-~]+)+)\s+(v?[0-9][^\s/]+)(?:/go\.mod)?\s+")
+GEM_LOCK_RE = re.compile(r"^\s{4}([A-Za-z0-9_.\-]+)\s+\(([^()\s]+)\)")
+NUGET_PACKAGE_RE = re.compile(r"<package\b[^>]*\bid=[\"']([^\"']+)[\"'][^>]*\bversion=[\"']([^\"']+)[\"']", re.IGNORECASE)
+NUGET_REFERENCE_RE = re.compile(r"<PackageReference\b([^>]*)>(.*?)</PackageReference>|<PackageReference\b([^>]*)/?>", re.IGNORECASE | re.DOTALL)
+XML_ATTR_RE = re.compile(r"([A-Za-z_:][A-Za-z0-9_.:-]*)=[\"']([^\"']+)[\"']")
+XML_VERSION_RE = re.compile(r"<Version>\s*([^<\s]+)\s*</Version>", re.IGNORECASE)
 NODE_RANGE_PREFIXES = ("^", "~", ">", "<", "=", "*")
+SUPPORTED_OSV_ECOSYSTEMS = {"npm", "PyPI", "Maven", "Go", "crates.io", "RubyGems", "Packagist", "NuGet"}
 
 
 def components_from_file(path: Path, target: TargetConfig) -> list[DependencyComponent]:
@@ -33,6 +42,18 @@ def components_from_file(path: Path, target: TargetConfig) -> list[DependencyCom
         return _components_from_poetry_lock(path, target)
     if path.name == "Pipfile.lock":
         return _components_from_pipfile_lock(path, target)
+    if path.name in {"go.mod", "go.sum"}:
+        return _components_from_go_modules(path, target)
+    if path.name == "Cargo.lock":
+        return _components_from_cargo_lock(path, target)
+    if path.name == "Gemfile.lock":
+        return _components_from_gemfile_lock(path, target)
+    if path.name == "composer.lock":
+        return _components_from_composer_lock(path, target)
+    if path.name == "pom.xml":
+        return _components_from_pom(path, target)
+    if path.name == "packages.config" or path.suffix.lower() in {".csproj", ".fsproj", ".vbproj"}:
+        return _components_from_nuget(path, target)
     if path.name == "Dockerfile" or path.name.startswith("Dockerfile."):
         return _components_from_dockerfile(path, target)
     return []
@@ -51,11 +72,10 @@ def unique_components(components: list[DependencyComponent] | tuple[DependencyCo
 
 
 def queryable_osv_components(components: list[DependencyComponent] | tuple[DependencyComponent, ...]) -> tuple[DependencyComponent, ...]:
-    supported_ecosystems = {"npm", "PyPI"}
     return tuple(
         component
         for component in unique_components(components)
-        if component.ecosystem in supported_ecosystems and _is_exact_version(component.version)
+        if component.ecosystem in SUPPORTED_OSV_ECOSYSTEMS and _is_exact_version(component.version)
     )
 
 
@@ -448,6 +468,240 @@ def _components_from_dockerfile(path: Path, target: TargetConfig) -> list[Depend
     return components
 
 
+def _components_from_go_modules(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    components: list[DependencyComponent] = []
+    in_require_block = False
+    regex = GO_SUM_RE if path.name == "go.sum" else GO_REQUIRE_RE
+    for line_number, raw_line in enumerate(lines, start=1):
+        line = raw_line.split("//", maxsplit=1)[0].strip()
+        if not line:
+            continue
+        if path.name == "go.mod":
+            if line == "require (":
+                in_require_block = True
+                continue
+            if in_require_block and line == ")":
+                in_require_block = False
+                continue
+            if line.startswith("require "):
+                line = line.removeprefix("require ").strip()
+            elif not in_require_block:
+                continue
+        match = regex.match(line)
+        if not match:
+            continue
+        name, version = match.groups()
+        components.append(
+            _component(
+                name=name,
+                ecosystem="Go",
+                version=version,
+                path=path,
+                target=target,
+                line=line_number,
+                source=path.name,
+            )
+        )
+    return components
+
+
+def _components_from_cargo_lock(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    components: list[DependencyComponent] = []
+    current: dict[str, str] = {}
+    current_line: int | None = None
+
+    def flush() -> None:
+        name = current.get("name", "").strip()
+        version = current.get("version", "").strip()
+        if not name or not version:
+            return
+        components.append(
+            _component(
+                name=name,
+                ecosystem="crates.io",
+                version=version,
+                path=path,
+                target=target,
+                line=current_line,
+                source="Cargo.lock",
+            )
+        )
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        stripped = raw_line.strip()
+        if stripped == "[[package]]":
+            flush()
+            current = {}
+            current_line = line_number
+            continue
+        match = POETRY_LOCK_KEY_VALUE_RE.match(raw_line)
+        if not match or current_line is None:
+            continue
+        key, raw_value = match.groups()
+        if key in {"name", "version"}:
+            current[key] = _strip_toml_value(raw_value)
+    flush()
+    return components
+
+
+def _components_from_gemfile_lock(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    components: list[DependencyComponent] = []
+    in_specs = False
+    for line_number, raw_line in enumerate(lines, start=1):
+        stripped = raw_line.strip()
+        if stripped == "GEM":
+            in_specs = False
+            continue
+        if stripped == "specs:":
+            in_specs = True
+            continue
+        if in_specs and raw_line and not raw_line.startswith((" ", "\t")):
+            in_specs = False
+        if not in_specs:
+            continue
+        match = GEM_LOCK_RE.match(raw_line)
+        if not match:
+            continue
+        name, version = match.groups()
+        components.append(
+            _component(
+                name=name,
+                ecosystem="RubyGems",
+                version=version,
+                path=path,
+                target=target,
+                line=line_number,
+                source="Gemfile.lock",
+            )
+        )
+    return components
+
+
+def _components_from_composer_lock(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+    try:
+        data = json.loads("\n".join(lines))
+    except json.JSONDecodeError:
+        return []
+
+    components: list[DependencyComponent] = []
+    for section, scope in (("packages", "required"), ("packages-dev", "excluded")):
+        packages = data.get(section, [])
+        if not isinstance(packages, list):
+            continue
+        for package in packages:
+            if not isinstance(package, dict):
+                continue
+            name = package.get("name")
+            version = package.get("version")
+            if not isinstance(name, str) or not isinstance(version, str):
+                continue
+            components.append(
+                _component(
+                    name=name,
+                    ecosystem="Packagist",
+                    version=version.lstrip("v"),
+                    path=path,
+                    target=target,
+                    line=find_line_containing(lines, f'"{name}"'),
+                    scope=scope,
+                    source=section,
+                )
+            )
+    return components
+
+
+def _components_from_pom(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+
+    components: list[DependencyComponent] = []
+    for dependency in root.iter():
+        if _xml_tag_name(dependency.tag) != "dependency":
+            continue
+        values = {_xml_tag_name(child.tag): (child.text or "").strip() for child in list(dependency)}
+        group_id = values.get("groupId", "")
+        artifact_id = values.get("artifactId", "")
+        version = values.get("version", "")
+        if not group_id or not artifact_id or not version or version.startswith("${"):
+            continue
+        name = f"{group_id}:{artifact_id}"
+        components.append(
+            _component(
+                name=name,
+                ecosystem="Maven",
+                version=version,
+                path=path,
+                target=target,
+                line=_line_number_for_text(text, f"<artifactId>{artifact_id}</artifactId>"),
+                scope="excluded" if values.get("scope", "").lower() == "test" else "required",
+                source="pom.xml",
+            )
+        )
+    return components
+
+
+def _components_from_nuget(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+    text = "\n".join(lines)
+    components: list[DependencyComponent] = []
+
+    if path.name == "packages.config":
+        for match in NUGET_PACKAGE_RE.finditer(text):
+            name, version = match.groups()
+            components.append(
+                _component(
+                    name=name,
+                    ecosystem="NuGet",
+                    version=version,
+                    path=path,
+                    target=target,
+                    line=_line_number_at_offset(text, match.start()),
+                    source="packages.config",
+                )
+            )
+        return components
+
+    for match in NUGET_REFERENCE_RE.finditer(text):
+        attributes = _xml_attributes(match.group(1) or match.group(3) or "")
+        body = match.group(2) or ""
+        name = attributes.get("Include") or attributes.get("Update")
+        version = attributes.get("Version") or _version_from_xml_body(body)
+        if not name or not version:
+            continue
+        components.append(
+            _component(
+                name=name,
+                ecosystem="NuGet",
+                version=version,
+                path=path,
+                target=target,
+                line=_line_number_at_offset(text, match.start()),
+                source=path.name,
+            )
+        )
+    return components
+
+
 def _append_python_requirement_component(
     components: list[DependencyComponent],
     requirement: str,
@@ -578,17 +832,52 @@ def _normalize_python_name(name: str) -> str:
 
 def _is_exact_version(version: str) -> bool:
     cleaned = version.strip()
+    if cleaned.startswith("v") and len(cleaned) > 1 and cleaned[1].isdigit():
+        cleaned = cleaned[1:]
     if not cleaned or cleaned.startswith(NODE_RANGE_PREFIXES):
         return False
-    return not any(token in cleaned for token in ("*", "||", " - ", "x", "X"))
+    return not any(token in cleaned for token in ("*", "||", " - ", "x", "X", "${", "[", "]"))
 
 
 def _purl(ecosystem: str, name: str, version: str) -> str:
+    if ecosystem == "Maven" and ":" in name:
+        group, artifact = name.split(":", maxsplit=1)
+        quoted_group = quote(group, safe=".")
+        quoted_artifact = quote(artifact, safe="")
+        quoted_version = quote(version, safe="")
+        return f"pkg:maven/{quoted_group}/{quoted_artifact}@{quoted_version}" if quoted_version else f"pkg:maven/{quoted_group}/{quoted_artifact}"
     purl_type = {
         "npm": "npm",
         "PyPI": "pypi",
         "Docker": "docker",
+        "Go": "golang",
+        "crates.io": "cargo",
+        "RubyGems": "gem",
+        "Packagist": "composer",
+        "NuGet": "nuget",
     }.get(ecosystem, ecosystem.lower())
     quoted_name = quote(name, safe="/")
     quoted_version = quote(version, safe="")
     return f"pkg:{purl_type}/{quoted_name}@{quoted_version}" if quoted_version else f"pkg:{purl_type}/{quoted_name}"
+
+
+def _xml_tag_name(tag: str) -> str:
+    return tag.rsplit("}", maxsplit=1)[-1] if "}" in tag else tag
+
+
+def _xml_attributes(value: str) -> dict[str, str]:
+    return {key: raw_value for key, raw_value in XML_ATTR_RE.findall(value)}
+
+
+def _version_from_xml_body(value: str) -> str:
+    match = XML_VERSION_RE.search(value)
+    return match.group(1).strip() if match else ""
+
+
+def _line_number_for_text(text: str, needle: str) -> int | None:
+    offset = text.find(needle)
+    return _line_number_at_offset(text, offset) if offset != -1 else None
+
+
+def _line_number_at_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, max(0, offset)) + 1

@@ -1095,6 +1095,15 @@ final class NativeSecurityScanner {
                 if lowered == "hostpath:" || lowered.hasSuffix(" hostpath:") || lowered.hasSuffix("- hostpath:") {
                     findings.append(finding("config.k8s-hostpath-volume", "medium", "configuration", "Kubernetes workload가 hostPath 볼륨을 마운트함", displayPath, index + 1, line, "가능하면 PersistentVolume으로 대체하고 예외 사유를 문서화하세요."))
                 }
+                if lowered == "runasnonroot: false" {
+                    findings.append(finding("config.k8s-run-as-root", "medium", "configuration", "Kubernetes workload가 root 실행을 허용함", displayPath, index + 1, line, "runAsNonRoot: true와 비root 런타임 사용자를 설정하세요."))
+                }
+                if lowered == "automountserviceaccounttoken: true" {
+                    findings.append(finding("config.k8s-service-account-token", "low", "configuration", "Kubernetes service account token 자동 마운트", displayPath, index + 1, line, "Kubernetes API 접근이 필요하지 않다면 automountServiceAccountToken: false를 설정하세요."))
+                }
+                if matches(#"(?i)^-?\s*image:"#, lowered) && (lowered.contains(":latest") || matches(#"(?i)^-?\s*image:\s*[^:@\s]+$"#, lowered)) {
+                    findings.append(finding("config.k8s-unpinned-image", "medium", "configuration", "Kubernetes 이미지가 고정되지 않음", displayPath, index + 1, line, "검토된 버전 태그나 immutable digest로 이미지를 고정하세요."))
+                }
             }
             if ["tf", "tfvars"].contains(file.pathExtension.lowercased()) {
                 if matches(#"(?i)\bacl\s*=\s*"(public-read|public-read-write|website)""#, line) {
@@ -1105,6 +1114,12 @@ final class NativeSecurityScanner {
                 }
                 if lowered.contains("0.0.0.0/0") && nearbyAdminPort(lines: lines, index: index) {
                     findings.append(finding("config.terraform-open-admin-port", "high", "configuration", "Terraform 보안그룹이 관리자 포트를 인터넷에 공개함", displayPath, index + 1, line, "관리자 포트는 VPN, bastion, 승인된 CIDR로 제한하세요."))
+                }
+                if matches(#"(?i)\b(actions?|not_actions?)\s*=\s*(\[\s*)?"\*""#, line) {
+                    findings.append(finding("config.terraform-wildcard-iam-action", "medium", "configuration", "Terraform IAM 정책이 wildcard action을 허용함", displayPath, index + 1, line, "필요한 최소 action만 명시하세요."))
+                }
+                if matches(#"(?i)\b(principals?|identifiers?|principal|identifier)\s*=\s*(\[\s*)?"\*""#, line) {
+                    findings.append(finding("config.terraform-wildcard-principal", "high", "configuration", "Terraform IAM 정책이 wildcard principal을 허용함", displayPath, index + 1, line, "승인된 계정, 역할, 서비스 주체로 principal을 제한하세요."))
                 }
             }
             if looksLikeGitHubWorkflow(file) {
@@ -1124,6 +1139,12 @@ final class NativeSecurityScanner {
             if isComposeFile(name) && line.lowercased().contains("/var/run/docker.sock") {
                 findings.append(finding("config.compose-docker-sock", "high", "configuration", "Compose 서비스가 Docker socket을 마운트함", displayPath, index + 1, line, "Docker socket 마운트를 피하거나 제한된 프록시를 사용하세요."))
             }
+            if isComposeFile(name) && (matches(#"(?i)\b(cap_add|capabilities)\s*:"#, line) || matches(#"(?i)^\s*-\s*(SYS_ADMIN|NET_ADMIN)\s*$"#, line)) {
+                findings.append(finding("config.compose-dangerous-capability", "medium", "configuration", "Compose 서비스가 광범위한 Linux capability를 부여함", displayPath, index + 1, line, "SYS_ADMIN/NET_ADMIN 같은 광범위 권한을 제거하고 필요한 capability만 부여하세요."))
+            }
+            if isComposeFile(name) && matches(#"(?i)^\s*pid\s*:\s*host\s*$"#, line) {
+                findings.append(finding("config.compose-host-pid", "medium", "configuration", "Compose 서비스가 host PID namespace를 사용함", displayPath, index + 1, line, "host PID 접근이 꼭 필요한 경우가 아니면 기본 PID namespace를 사용하세요."))
+            }
             if name == "Dockerfile" {
                 if matches(#"(?i)^USER\s+"#, line) {
                     dockerHasUserDirective = true
@@ -1133,6 +1154,32 @@ final class NativeSecurityScanner {
                 }
                 if matches(#"(?i)^ADD\s+http://"#, line) {
                     findings.append(finding("config.docker-add-http", "medium", "configuration", "Dockerfile ADD가 HTTP를 사용함", displayPath, index + 1, line, "HTTPS와 체크섬 검증을 사용하세요."))
+                }
+            }
+            if name == "AndroidManifest.xml" {
+                if lowered.contains("android:debuggable=\"true\"") {
+                    findings.append(finding("config.android-debuggable", "high", "configuration", "Android 앱이 debuggable로 설정됨", displayPath, index + 1, line, "릴리스 빌드에서는 android:debuggable을 비활성화하세요."))
+                }
+                if lowered.contains("android:allowbackup=\"true\"") {
+                    findings.append(finding("config.android-allow-backup", "medium", "configuration", "Android 백업이 허용됨", displayPath, index + 1, line, "민감 앱은 백업을 비활성화하거나 백업 제외 규칙을 명확히 설정하세요."))
+                }
+                if lowered.contains("android:usescleartexttraffic=\"true\"") {
+                    findings.append(finding("config.android-cleartext-traffic", "high", "configuration", "Android cleartext traffic이 허용됨", displayPath, index + 1, line, "HTTPS를 기본으로 강제하고 예외는 network security config로 제한하세요."))
+                }
+                if lowered.contains("android:exported=\"true\"") {
+                    findings.append(finding("config.android-exported-component", "medium", "configuration", "Android component가 exported로 설정됨", displayPath, index + 1, line, "의도한 진입점만 export하고 민감 component에는 permission을 요구하세요."))
+                }
+            }
+            if name == "Info.plist" {
+                let text = lines.joined(separator: "\n")
+                if line.contains("NSAllowsArbitraryLoads") && plistKeyTrue(text, key: "NSAllowsArbitraryLoads") {
+                    findings.append(finding("config.ios-ats-arbitrary-loads", "high", "configuration", "iOS ATS가 임의 네트워크 로드를 허용함", displayPath, index + 1, "NSAllowsArbitraryLoads", "ATS를 유지하고 예외는 검토된 도메인으로 제한하세요."))
+                }
+                if line.contains("UIFileSharingEnabled") && plistKeyTrue(text, key: "UIFileSharingEnabled") {
+                    findings.append(finding("config.ios-file-sharing-enabled", "medium", "configuration", "iOS 파일 공유가 활성화됨", displayPath, index + 1, "UIFileSharingEnabled", "민감 문서가 아니라는 근거가 없다면 파일 공유를 비활성화하세요."))
+                }
+                if line.contains("LSSupportsOpeningDocumentsInPlace") && plistKeyTrue(text, key: "LSSupportsOpeningDocumentsInPlace") {
+                    findings.append(finding("config.ios-open-documents-in-place", "low", "configuration", "iOS 문서 제자리 열기가 활성화됨", displayPath, index + 1, "LSSupportsOpeningDocumentsInPlace", "문서 provider 흐름과 민감 파일 처리 범위를 검토하세요."))
                 }
             }
         }
@@ -1169,6 +1216,12 @@ final class NativeSecurityScanner {
         let upper = min(lines.count, index + 8)
         let window = lines[lower..<upper].joined(separator: "\n").lowercased()
         return matches(#"\b(from_port|to_port|port)\s*=\s*(22|3389)\b"#, window)
+    }
+
+    private func plistKeyTrue(_ text: String, key: String) -> Bool {
+        let escapedKey = NSRegularExpression.escapedPattern(for: key)
+        return matches(#"<key>\s*\#(escapedKey)\s*</key>\s*<true\s*/>"#, text)
+            || matches(#"\#(escapedKey)\s*=\s*(true|YES|1)"#, text)
     }
 
     private func isRealEnvironmentFile(_ name: String) -> Bool {
@@ -1273,6 +1326,15 @@ final class NativeSecurityScanner {
             if matches(#"(?i)(resolve_entities\s*=\s*True|load_dtd\s*=\s*True|DocumentBuilderFactory|SAXParserFactory|XmlReaderSettings|XmlDocument)"#, line) {
                 findings.append(finding("code.xml-external-entity", "high", "code", "XML 외부 엔티티 처리가 허용될 수 있음", displayPath, lineNumber, line, "DTD와 외부 엔티티 해석을 비활성화한 안전한 XML parser 설정을 사용하세요."))
             }
+            if matches(#"(?i)(system|developer|prompt|messages?)\s*[:=].*(\+|f["']|`\$\{).*(request|req\.|params|query|body|input\(|user)"#, line) {
+                findings.append(finding("code.llm-prompt-user-concat", "medium", "code", "LLM 프롬프트에 사용자 입력이 직접 결합됨", displayPath, lineNumber, line, "시스템 지시는 고정하고 사용자 콘텐츠는 별도 메시지 필드로 분리하며 프롬프트 인젝션 테스트를 추가하세요."))
+            }
+            if matches(#"(?i)(tool_choice\s*[:=]\s*["']auto|function_call\s*[:=]\s*["']auto|tools\s*[:=]\s*\[[^\]]*(exec|shell|browser|http|file|database))"#, line) {
+                findings.append(finding("code.llm-tool-unrestricted", "high", "code", "LLM 도구 호출 권한이 넓게 열려 있음", displayPath, lineNumber, line, "작업별 도구 allowlist, 인자 검증, 부작용 확인, 도구 호출 로그를 적용하세요."))
+            }
+            if matches(#"(?i)(openai|anthropic|chat\.completions|responses\.create|generateContent).*(password|pwd|secret|token|api[_-]?key|authorization|credential|session|cookie)"#, line) {
+                findings.append(finding("code.llm-sensitive-data-in-prompt", "medium", "code", "민감정보가 LLM 프롬프트로 전달될 수 있음", displayPath, lineNumber, line, "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요."))
+            }
         }
         return findings
     }
@@ -1295,6 +1357,18 @@ final class NativeSecurityScanner {
             ".github/dependabot.yml", ".github/dependabot.yaml", "dependabot.yml", "dependabot.yaml",
             "renovate.json", ".renovaterc", ".renovaterc.json", ".github/renovate.json",
         ]
+        let preCommitGuidePaths: Set<String> = ["docs/security/pre_commit.md", "docs/security/pre-commit.md"]
+        let repositorySecurityGuidePaths: Set<String> = ["docs/security/github_repository_security.md", "docs/security/repository_security.md"]
+        let codeownersPaths: Set<String> = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
+        let ssdfWorkflowPaths: Set<String> = ["docs/security/nist_ssdf_workflow.md", "docs/security/ssdf_workflow.md"]
+        let secureByDesignPaths: Set<String> = ["docs/security/secure_by_design.md"]
+        let threatModelPaths: Set<String> = ["docs/security/threat_model.md", "docs/security/threat-model.md"]
+        let secretRotationPaths: Set<String> = ["docs/security/secret_rotation.md", "docs/security/secrets_rotation.md", "docs/security/secret-rotation.md"]
+        let aiLLMSecurityPaths: Set<String> = ["docs/security/ai_llm_security.md", "docs/security/llm_security.md", "docs/security/ai-security.md"]
+        let mobileSecurityPaths: Set<String> = ["docs/security/mobile_security.md", "docs/security/mobile-security.md"]
+        let nistCSFProfilePaths: Set<String> = ["docs/security/nist_csf_2_profile.md", "docs/security/nist-csf-2-profile.md"]
+        let cisaAttestationPaths: Set<String> = ["docs/security/cisa_secure_software_attestation.md", "docs/security/cisa-attestation.md"]
+        let releaseProvenanceWorkflowPaths: Set<String> = [".github/workflows/koda-release-provenance.yml", ".github/workflows/koda-release-provenance.yaml"]
         let envExampleNames: Set<String> = [".env.example", ".env.sample", ".env.template", ".env.local.example", ".env.development.example", ".env.production.example"]
         let hasDependencyManifest = !dependencyManifestNames.intersection(basenames).isEmpty
         let hasSourceCode = files.contains { sourceExtensions.contains($0.pathExtension.lowercased()) }
@@ -1306,16 +1380,31 @@ final class NativeSecurityScanner {
         let workflowFiles = files.filter { relativePath($0, root: root).hasPrefix(".github/workflows/") }
         let workflowTexts = workflowFiles.compactMap { readTextLines($0)?.joined(separator: "\n").lowercased() }
         let workflowText = workflowTexts.joined(separator: "\n")
+        let hasAILLMCode = projectTextContains(files: files, keywords: ["openai", "anthropic", "langchain", "llamaindex", "chat.completions", "responses.create", "generatecontent", "tool_choice", "function_call"])
+        let hasMobileProject = looksLikeMobileProject(files: files, basenames: basenames, lowerRelPaths: lowerRelPaths)
 
         var findings: [NativeFinding] = []
         if (hasSourceCode || hasDependencyManifest) && securityPolicyPaths.intersection(relPaths).isEmpty {
             findings.append(finding("prevention.security-policy-missing", "info", "prevention", "보안 정책 문서가 없음", ".", nil, "SECURITY.md 없음", "SECURITY.md에 신고 연락처, 지원 범위, 취약점 공개 기대사항을 작성하세요."))
         }
+        if (hasSourceCode || hasDependencyManifest) && fileManager.fileExists(atPath: root.appendingPathComponent(".git").path) && !hasPreCommitHook(root: root) && preCommitGuidePaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.pre-commit-hook-missing", "low", "prevention", "커밋 전 보안 차단 훅이 없음", ".", nil, "KODA pre-commit hook 없음", "고위험 항목이 저장소에 들어오기 전에 차단되도록 KODA pre-commit hook을 설치하세요."))
+        }
         if hasDependencyManifest && dependencyAutomationPaths.intersection(relPaths).isEmpty {
             findings.append(finding("prevention.dependency-update-automation-missing", "low", "prevention", "의존성 업데이트 자동화가 없음", ".", nil, "Dependabot/Renovate 설정 없음", "Dependabot 또는 Renovate를 추가해 의존성 업데이트와 취약점 알림을 자동화하세요."))
         }
+        let hasGithubMetadata = workflowFiles.count > 0 || lowerRelPaths.contains { $0.hasPrefix(".github/") }
+        if hasGithubMetadata && codeownersPaths.intersection(relPaths).isEmpty {
+            findings.append(finding("prevention.codeowners-missing", "info", "prevention", "CODEOWNERS가 설정되지 않음", ".", nil, "CODEOWNERS 파일 없음", "보안 민감 경로에 책임 리뷰어가 지정되도록 CODEOWNERS를 추가하세요."))
+        }
+        if hasGithubMetadata && repositorySecurityGuidePaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.repository-security-settings-missing", "info", "prevention", "GitHub 저장소 보안 설정 문서가 없음", ".", nil, "브랜치 보호/secret scanning 체크리스트 없음", "브랜치 보호, 필수 리뷰, secret scanning, Dependabot alerts, Actions 최소 권한 설정을 문서화하고 활성화하세요."))
+        }
         if (hasDependencyManifest || hasSourceCode) && !hasSecurityWorkflow(workflowFiles) {
             findings.append(finding("prevention.ci-security-scan-missing", "info", "prevention", "CI 보안 점검 워크플로가 없음", ".", nil, "보안 점검 workflow 없음", "KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline 같은 보안 점검을 CI에 추가하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && releaseProvenanceWorkflowPaths.intersection(lowerRelPaths).isEmpty && !containsAny(workflowText, ["slsa-framework", "slsa-github-generator", "sigstore", "cosign", "sign-blob", "attestation", "provenance"]) && !lowerRelPaths.contains("docs/security/slsa_sigstore.md") {
+            findings.append(finding("prevention.release-provenance-automation-missing", "info", "prevention", "릴리스 서명 자동화가 준비되지 않음", ".", nil, "릴리스 provenance/signing workflow 없음", "CI에서 산출물을 빌드하고 provenance 생성, 서명, 체크섬 게시까지 수행하는 릴리스 workflow를 추가하세요."))
         }
         if !envFiles.isEmpty && !gitignoreIgnoresEnv(root: root) {
             findings.append(finding("prevention.env-not-gitignored", "low", "prevention", ".env 파일이 gitignore로 제외되지 않음", ".", nil, ".env 제외 패턴 없음", ".gitignore에 .env, .env.* 또는 동등한 제외 패턴을 추가하세요."))
@@ -1331,6 +1420,30 @@ final class NativeSecurityScanner {
         }
         if (hasSourceCode || hasDependencyManifest) && !containsAny(workflowText, ["codeql", "semgrep", "sonar", "bandit", "brakeman", "gosec"]) {
             findings.append(finding("prevention.sast-workflow-missing", "info", "prevention", "SAST 워크플로가 없음", ".", nil, "CodeQL/Semgrep workflow 없음", "Pull request에서 코드 수준 보안 점검이 실행되도록 CodeQL 또는 Semgrep 같은 SAST workflow를 추가하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && ssdfWorkflowPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.ssdf-workflow-missing", "info", "prevention", "NIST SSDF 워크플로 문서가 없음", ".", nil, "SSDF 체크리스트 없음", "설계, 구현, 검증, 릴리스, 취약점 대응 활동을 NIST SSDF 증적에 매핑하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && secureByDesignPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.secure-by-design-program-missing", "info", "prevention", "Secure by Design 예방 계획이 없음", ".", nil, "Secure by Design 체크리스트 없음", "안전한 기본값, 고객 보안 결과 책임, 투명성, 제품 보안 지표를 추적하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && threatModelPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.threat-model-missing", "info", "prevention", "위협 모델 문서가 없음", ".", nil, "위협 모델 없음", "신뢰 경계, 자산, 악용 시나리오, 보안 가정을 출시 전 문서화하세요."))
+        }
+        if (hasSourceCode || !envFiles.isEmpty) && secretRotationPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.secret-rotation-runbook-missing", "info", "prevention", "비밀값 회전 절차 문서가 없음", ".", nil, "비밀값 회전 runbook 없음", "비밀값 노출 시 폐기, 회전, 감사, 재점검 절차를 문서화하세요."))
+        }
+        if hasAILLMCode && aiLLMSecurityPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.ai-llm-security-plan-missing", "info", "prevention", "AI/LLM 보안 계획이 없음", ".", nil, "AI/LLM 사용 흔적은 있으나 보안 계획 없음", "프롬프트 인젝션 통제, 도구 경계, 민감정보 처리, 모델/제공자 목록, 적대적 테스트를 문서화하세요."))
+        }
+        if hasMobileProject && mobileSecurityPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.mobile-security-plan-missing", "info", "prevention", "모바일 보안 계획이 없음", ".", nil, "모바일 프로젝트 파일은 있으나 보안 계획 없음", "MASVS 범위, 플랫폼 설정, 저장소, 네트워크, 릴리스 서명, 기기 테스트 요구사항을 문서화하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && nistCSFProfilePaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.nist-csf-profile-missing", "info", "prevention", "NIST CSF 2.0 프로파일이 없음", ".", nil, "NIST CSF 2.0 프로파일 없음", "Govern, Identify, Protect, Detect, Respond, Recover 활동을 프로젝트 증적과 소유자에 매핑하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && cisaAttestationPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.cisa-attestation-missing", "info", "prevention", "CISA 보안 소프트웨어 개발 확인서 증적이 없음", ".", nil, "CISA 확인서 증적 체크리스트 없음", "SSDF 기반 개발, 의존성, 검증, 취약점 대응 증적을 확인서 제출 전 기록하세요."))
         }
         if (hasSourceCode || hasDependencyManifest) && !containsAny(workflowText, ["scorecard-action", "openssf/scorecard", "scorecard"]) {
             findings.append(finding("prevention.openssf-scorecard-missing", "info", "prevention", "OpenSSF Scorecard 워크플로가 없음", ".", nil, "OpenSSF Scorecard workflow 없음", "토큰 권한, 고정된 액션, SAST, 의존성 업데이트 자동화 상태를 추적하도록 OpenSSF Scorecard를 CI에 추가하세요."))
@@ -1372,6 +1485,46 @@ final class NativeSecurityScanner {
             let text = lines.joined(separator: "\n").lowercased()
             return keywords.contains { text.contains($0) }
         }
+    }
+
+    private func projectTextContains(files: [URL], keywords: [String]) -> Bool {
+        let suffixes: Set<String> = ["js", "jsx", "md", "py", "ts", "tsx", "txt"]
+        for file in files where suffixes.contains(file.pathExtension.lowercased()) {
+            guard let text = readTextLines(file)?.joined(separator: "\n").lowercased() else {
+                continue
+            }
+            if keywords.contains(where: { text.contains($0) }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func looksLikeMobileProject(files: [URL], basenames: Set<String>, lowerRelPaths: Set<String>) -> Bool {
+        if basenames.contains("AndroidManifest.xml") {
+            return true
+        }
+        if basenames.contains("Info.plist"), lowerRelPaths.contains(where: { $0.contains("/ios/") || $0.contains("/app/") || $0.contains("/mobile/") }) {
+            return true
+        }
+        if lowerRelPaths.contains(where: { $0.hasSuffix(".xcodeproj/project.pbxproj") || $0.hasSuffix(".xcworkspace/contents.xcworkspacedata") }) {
+            return true
+        }
+        for file in files where ["build.gradle", "build.gradle.kts"].contains(file.lastPathComponent) {
+            let text = readTextLines(file)?.joined(separator: "\n").lowercased() ?? ""
+            if text.contains("com.android.application") || text.contains("com.android.library") {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func hasPreCommitHook(root: URL) -> Bool {
+        let hook = root.appendingPathComponent(".git/hooks/pre-commit")
+        guard let text = readTextLines(hook)?.joined(separator: "\n").lowercased() else {
+            return false
+        }
+        return text.contains("koda") || text.contains("security_scanner") || text.contains("local-security-scan")
     }
 
     private func gitignoreIgnoresEnv(root: URL) -> Bool {
@@ -2121,6 +2274,12 @@ private extension NativeSecurityScanner {
         case "prevention.security-policy-missing": return "Security policy is not documented"
         case "prevention.dependency-update-automation-missing": return "Dependency update automation is not configured"
         case "prevention.ci-security-scan-missing": return "CI security scan is not configured"
+        case "prevention.pre-commit-hook-missing": return "Pre-commit security gate is not installed"
+        case "prevention.codeowners-missing": return "CODEOWNERS is not configured"
+        case "prevention.repository-security-settings-missing": return "GitHub repository security settings are not documented"
+        case "prevention.release-provenance-automation-missing": return "Release signing automation is not prepared"
+        case "prevention.ssdf-workflow-missing": return "NIST SSDF workflow is not documented"
+        case "prevention.secure-by-design-program-missing": return "Secure by Design prevention plan is not documented"
         case "prevention.env-not-gitignored": return ".env files are not ignored"
         case "prevention.env-example-missing": return "Sanitized environment example is missing"
         case "prevention.dockerignore-missing": return ".dockerignore is missing"
@@ -2134,6 +2293,12 @@ private extension NativeSecurityScanner {
         case "prevention.dependency-track-integration-missing": return "Dependency-Track SBOM upload is not configured"
         case "prevention.vex-missing": return "VEX document is not present"
         case "prevention.binary-artifact-committed": return "Binary release artifact is committed"
+        case "prevention.threat-model-missing": return "Threat model is not documented"
+        case "prevention.secret-rotation-runbook-missing": return "Secret rotation runbook is not documented"
+        case "prevention.ai-llm-security-plan-missing": return "AI/LLM security plan is not documented"
+        case "prevention.mobile-security-plan-missing": return "Mobile security plan is not documented"
+        case "prevention.nist-csf-profile-missing": return "NIST CSF 2.0 profile is not documented"
+        case "prevention.cisa-attestation-missing": return "CISA secure software attestation evidence is not documented"
         case "dependency.package-json-invalid": return "Invalid package.json"
         case "dependency.node-insecure-url": return "Node dependency fetched over insecure HTTP"
         case "dependency.python-unpinned-requirement": return "Unpinned Python dependency"
@@ -2154,15 +2319,29 @@ private extension NativeSecurityScanner {
         case "config.compose-privileged": return "Privileged container configuration"
         case "config.compose-host-network": return "Compose service uses host networking"
         case "config.compose-docker-sock": return "Compose service mounts the Docker socket"
+        case "config.compose-dangerous-capability": return "Compose service grants broad Linux capabilities"
+        case "config.compose-host-pid": return "Compose service uses the host PID namespace"
         case "config.k8s-privileged-container": return "Kubernetes container enables privileged mode"
         case "config.k8s-allow-privilege-escalation": return "Kubernetes container allows privilege escalation"
         case "config.k8s-host-network": return "Kubernetes workload uses host networking"
         case "config.k8s-hostpath-volume": return "Kubernetes workload mounts a hostPath volume"
+        case "config.k8s-run-as-root": return "Kubernetes workload allows root execution"
+        case "config.k8s-service-account-token": return "Kubernetes service account token is auto-mounted"
+        case "config.k8s-unpinned-image": return "Kubernetes image is not pinned"
         case "config.terraform-public-storage": return "Terraform storage ACL is public"
         case "config.terraform-public-access-block-disabled": return "Terraform public access block is disabled"
         case "config.terraform-open-admin-port": return "Terraform security group opens admin access to the internet"
+        case "config.terraform-wildcard-iam-action": return "Terraform IAM policy allows wildcard actions"
+        case "config.terraform-wildcard-principal": return "Terraform IAM policy allows wildcard principals"
         case "config.github-pull-request-target": return "GitHub Actions uses pull_request_target"
         case "config.github-untrusted-event-in-run": return "GitHub Actions run step interpolates untrusted event data"
+        case "config.android-debuggable": return "Android app is debuggable"
+        case "config.android-allow-backup": return "Android backup is allowed"
+        case "config.android-cleartext-traffic": return "Android cleartext traffic is allowed"
+        case "config.android-exported-component": return "Android component is exported"
+        case "config.ios-ats-arbitrary-loads": return "iOS ATS allows arbitrary loads"
+        case "config.ios-file-sharing-enabled": return "iOS file sharing is enabled"
+        case "config.ios-open-documents-in-place": return "iOS open documents in place is enabled"
         case "code.xss-dom-sink": return "DOM XSS sink risk"
         case "code.sql-dynamic-query": return "Dynamic SQL query construction"
         case "code.command-injection": return "Command injection risk"
@@ -2188,6 +2367,9 @@ private extension NativeSecurityScanner {
         case "code.webdav-enabled": return "WebDAV enabled"
         case "code.legacy-board-software": return "Legacy bulletin-board software marker"
         case "code.xml-external-entity": return "XML parser may allow external entities"
+        case "code.llm-prompt-user-concat": return "LLM prompt concatenates user-controlled input"
+        case "code.llm-tool-unrestricted": return "LLM tool or function access is broad"
+        case "code.llm-sensitive-data-in-prompt": return "Sensitive data may be sent to an LLM prompt"
         default: return finding.title
         }
     }
@@ -2213,6 +2395,18 @@ private extension NativeSecurityScanner {
             return "Add Dependabot or Renovate so vulnerable and outdated dependencies are surfaced continuously."
         case "prevention.ci-security-scan-missing":
             return "Add a CI job for KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline, or a similar security scanner."
+        case "prevention.pre-commit-hook-missing":
+            return "Install the KODA pre-commit hook so high-risk findings are blocked before entering Git history."
+        case "prevention.codeowners-missing":
+            return "Add CODEOWNERS so security-sensitive paths require review from accountable owners."
+        case "prevention.repository-security-settings-missing":
+            return "Document and enable branch protection, required reviews, secret scanning, Dependabot alerts, and least-privilege Actions settings."
+        case "prevention.release-provenance-automation-missing":
+            return "Add a release workflow that builds artifacts in CI, generates provenance, signs artifacts, and publishes checksums."
+        case "prevention.ssdf-workflow-missing":
+            return "Map design, implementation, verification, release, and vulnerability response activities to NIST SSDF evidence."
+        case "prevention.secure-by-design-program-missing":
+            return "Track secure defaults, customer-impact ownership, radical transparency, and product-security metrics as a product-level prevention program."
         case "prevention.env-not-gitignored":
             return "Add .env, .env.*, or an equivalent pattern to .gitignore before committing real environment files."
         case "prevention.env-example-missing":
@@ -2239,6 +2433,18 @@ private extension NativeSecurityScanner {
             return "Generate a VEX document for reviewed dependency vulnerabilities so exploitable, fixed, and not-affected decisions are traceable."
         case "prevention.binary-artifact-committed":
             return "Keep build artifacts out of source control unless they are intentionally vendored and covered by provenance, checksums, or signatures."
+        case "prevention.threat-model-missing":
+            return "Document trust boundaries, assets, abuse cases, and security assumptions before release."
+        case "prevention.secret-rotation-runbook-missing":
+            return "Document how to revoke, rotate, audit, and re-scan after any exposed credential."
+        case "prevention.ai-llm-security-plan-missing":
+            return "Document prompt-injection controls, tool boundaries, sensitive data handling, model/provider inventory, and adversarial tests."
+        case "prevention.mobile-security-plan-missing":
+            return "Document MASVS coverage, platform configuration, storage, network, release signing, and device-test requirements."
+        case "prevention.nist-csf-profile-missing":
+            return "Map Govern, Identify, Protect, Detect, Respond, and Recover activities to project evidence and owners."
+        case "prevention.cisa-attestation-missing":
+            return "Record SSDF-aligned development, dependency, verification, and vulnerability-response evidence before attesting."
         case "dependency.package-json-invalid":
             return "Fix package.json syntax so dependency tooling can inspect it reliably."
         case "dependency.node-insecure-url":
@@ -2279,6 +2485,10 @@ private extension NativeSecurityScanner {
             return "Use explicit port mappings unless host networking is required."
         case "config.compose-docker-sock":
             return "Avoid mounting the Docker socket or isolate it behind a purpose-built proxy."
+        case "config.compose-dangerous-capability":
+            return "Remove broad capabilities such as SYS_ADMIN or NET_ADMIN and grant only what is required."
+        case "config.compose-host-pid":
+            return "Use the default PID namespace unless host PID access is explicitly required."
         case "config.k8s-privileged-container":
             return "Remove privileged mode and grant only the specific Linux capabilities that are required."
         case "config.k8s-allow-privilege-escalation":
@@ -2287,16 +2497,40 @@ private extension NativeSecurityScanner {
             return "Use pod networking and explicit Services or NetworkPolicies unless host networking is required."
         case "config.k8s-hostpath-volume":
             return "Replace hostPath with scoped PersistentVolumes or document why host access is unavoidable."
+        case "config.k8s-run-as-root":
+            return "Set runAsNonRoot: true and run containers with a non-root runtime user."
+        case "config.k8s-service-account-token":
+            return "Set automountServiceAccountToken: false when the workload does not need Kubernetes API access."
+        case "config.k8s-unpinned-image":
+            return "Pin images to reviewed version tags or immutable digests."
         case "config.terraform-public-storage":
             return "Use private ACLs and explicit, reviewed public access policies only when required."
         case "config.terraform-public-access-block-disabled":
             return "Keep public access block controls enabled unless a documented public bucket design exists."
         case "config.terraform-open-admin-port":
             return "Restrict admin ports to VPN, bastion, or approved source CIDRs."
+        case "config.terraform-wildcard-iam-action":
+            return "List only the minimum IAM actions required and document any exception."
+        case "config.terraform-wildcard-principal":
+            return "Limit principals to approved accounts, roles, or service principals."
         case "config.github-pull-request-target":
             return "Use pull_request for untrusted code or strictly separate checkout/build steps from privileged operations."
         case "config.github-untrusted-event-in-run":
             return "Pass event values through environment variables and quote/validate them before shell use."
+        case "config.android-debuggable":
+            return "Disable android:debuggable for release builds and keep build-type settings separate."
+        case "config.android-allow-backup":
+            return "Disable backup for sensitive apps or define explicit backup exclusion rules."
+        case "config.android-cleartext-traffic":
+            return "Require HTTPS by default and scope any exception through network security configuration."
+        case "config.android-exported-component":
+            return "Export only intentional entry points and require permissions for sensitive components."
+        case "config.ios-ats-arbitrary-loads":
+            return "Keep ATS enabled and scope exceptions to reviewed domains."
+        case "config.ios-file-sharing-enabled":
+            return "Disable file sharing unless the exposed documents are intentionally user-accessible."
+        case "config.ios-open-documents-in-place":
+            return "Review document-provider flows and restrict sensitive file handling."
         case "code.xss-dom-sink":
             return "Do not inject untrusted input as HTML; escape it or use textContent."
         case "code.sql-dynamic-query":
@@ -2347,6 +2581,12 @@ private extension NativeSecurityScanner {
             return "Confirm the component is still used, then update, isolate, or remove it."
         case "code.xml-external-entity":
             return "Disable DTD and external entity resolution in XML parser configuration."
+        case "code.llm-prompt-user-concat":
+            return "Keep system and developer instructions fixed, separate user content into user-message fields, and add prompt-injection tests."
+        case "code.llm-tool-unrestricted":
+            return "Constrain tools by task, validate tool arguments, require confirmation for side effects, and log tool decisions."
+        case "code.llm-sensitive-data-in-prompt":
+            return "Redact sensitive values before LLM calls and document whether prompts leave the local trust boundary."
         default:
             return finding.recommendation
         }
