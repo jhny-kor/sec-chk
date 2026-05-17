@@ -352,6 +352,71 @@ RULE_TRANSLATIONS_KO = {
         "description": "CISA/OMB 확인서에 필요한 개발, 검증, 공급망, 취약점 대응 증적이 문서화되어 있지 않습니다.",
         "recommendation": "SSDF 기반 개발 환경, 제3자 구성요소, 검증, 취약점 대응 증적을 확인서 체크리스트로 관리하세요.",
     },
+    "prevention.api-security-plan-missing": {
+        "title": "API 보안 계획이 없음",
+        "description": "API 라우트 또는 핸들러가 있으나 인벤토리, 인증/인가, rate limit, 외부 API 사용 기준이 문서화되어 있지 않습니다.",
+        "recommendation": "API_SECURITY.md에 API 목록, 객체/기능 권한, 스키마 검증, 남용 방지, 외부 API timeout/allowlist 기준을 작성하세요.",
+    },
+    "prevention.scvs-plan-missing": {
+        "title": "OWASP SCVS 구성요소 검증 계획이 없음",
+        "description": "의존성 매니페스트가 있으나 구성요소 인벤토리, SBOM, 빌드 환경, 패키지 관리, 출처 증명이 정리되어 있지 않습니다.",
+        "recommendation": "SCVS_PLAN.md에 V1~V6 통제별 증적 위치와 검토 책임자를 기록하세요.",
+    },
+    "prevention.privacy-data-map-missing": {
+        "title": "개인정보 데이터 맵이 없음",
+        "description": "개인정보 필드, 처리 목적, 저장 위치, 보관 기간, 공유 여부가 문서화되어 있지 않습니다.",
+        "recommendation": "PRIVACY_DATA_MAP.md에 개인정보 항목, 로그 제한, 보관/삭제 기준, 외부 전달 여부를 정리하세요.",
+    },
+    "prevention.security-roadmap-missing": {
+        "title": "보안 로드맵이 없음",
+        "description": "보안 backlog, 담당자, 기한, 위험 수용 항목을 추적하는 계획이 없습니다.",
+        "recommendation": "SECURITY_ROADMAP.md로 우선순위, 표준, 담당자, 기한, 증적 위치를 관리하세요.",
+    },
+    "prevention.evidence-register-missing": {
+        "title": "보안 증적 보관대장이 없음",
+        "description": "점검 리포트, SBOM, VEX, DAST, 위협모델, 승인 기록의 위치와 담당자가 정리되어 있지 않습니다.",
+        "recommendation": "EVIDENCE_REGISTER.md에 릴리스/감사에 필요한 보안 증적의 위치, 소유자, 검토일을 기록하세요.",
+    },
+    "prevention.exception-reason-missing": {
+        "title": "예외 항목에 사유가 없음",
+        "description": "koda-ignore.yml 예외에 왜 수용하거나 오탐으로 보는지 사유가 없습니다.",
+        "recommendation": "각 예외에 구체적인 reason을 기록하세요.",
+    },
+    "prevention.exception-owner-missing": {
+        "title": "예외 항목에 담당자가 없음",
+        "description": "koda-ignore.yml 예외에 갱신과 검토를 책임질 owner가 없습니다.",
+        "recommendation": "각 예외에 담당 팀, 담당자, 또는 티켓 큐를 owner로 기록하세요.",
+    },
+    "prevention.exception-expiry-missing": {
+        "title": "예외 항목에 만료일이 없거나 잘못됨",
+        "description": "예외가 영구 방치되지 않도록 until 날짜가 필요합니다.",
+        "recommendation": "until을 YYYY-MM-DD 형식으로 추가하고 만료 전에 재검토하세요.",
+    },
+    "prevention.exception-expired": {
+        "title": "예외 항목이 만료됨",
+        "description": "만료된 예외는 더 이상 발견 항목을 억제하지 않으며 재검토가 필요합니다.",
+        "recommendation": "근본 원인을 수정하거나 새 승인 사유와 만료일로 예외를 갱신하세요.",
+    },
+    "prevention.k8s-network-policy-missing": {
+        "title": "Kubernetes NetworkPolicy가 없음",
+        "description": "Kubernetes workload manifest는 있으나 네트워크 격리 정책이 확인되지 않았습니다.",
+        "recommendation": "NetworkPolicy를 추가하거나 다른 네트워크 격리 계층을 사용한다는 근거를 문서화하세요.",
+    },
+    "prevention.security-headers-guide-missing": {
+        "title": "보안 헤더 기준 문서가 없음",
+        "description": "웹 프로젝트로 보이나 CSP, HSTS, nosniff, Referrer-Policy 같은 기본 헤더 기준이 없습니다.",
+        "recommendation": "SECURITY_HEADERS.md에 서비스별 보안 헤더 baseline과 예외를 정리하세요.",
+    },
+    "prevention.container-hardening-guide-missing": {
+        "title": "컨테이너 하드닝 기준 문서가 없음",
+        "description": "컨테이너 배포 파일이 있으나 non-root, capability drop, seccomp, resource limit 기준이 문서화되어 있지 않습니다.",
+        "recommendation": "CONTAINER_HARDENING.md에 Docker/Compose/Kubernetes 하드닝 기준을 기록하세요.",
+    },
+    "prevention.cloud-iac-security-plan-missing": {
+        "title": "Cloud/IaC 보안 계획이 없음",
+        "description": "클라우드 또는 IaC 파일이 있으나 노출, IAM, 암호화, 상태 파일 관리 기준이 문서화되어 있지 않습니다.",
+        "recommendation": "CLOUD_IAC_SECURITY.md에 public ingress, IAM 최소권한, 암호화, Terraform state 보호 기준을 작성하세요.",
+    },
     "secret.private-key": {
         "title": "개인 키 자료",
         "description": "개인 키로 보이는 값이 로컬 프로젝트 파일에 포함되어 있습니다.",
@@ -492,6 +557,11 @@ RULE_TRANSLATIONS_KO = {
         "description": "host PID namespace는 호스트 프로세스 가시성을 넓혀 격리를 약화시킵니다.",
         "recommendation": "host PID 접근이 꼭 필요한 경우가 아니면 기본 PID namespace를 사용하세요.",
     },
+    "config.compose-secret-in-environment": {
+        "title": "Compose 환경값에 비밀값이 직접 포함됨",
+        "description": "Compose 파일의 환경 변수 값은 저장소와 컨테이너 메타데이터를 통해 노출될 수 있습니다.",
+        "recommendation": "민감값은 secret manager 또는 런타임 주입으로 옮기고 compose에는 placeholder만 남기세요.",
+    },
     "config.k8s-privileged-container": {
         "title": "Kubernetes 컨테이너가 privileged 모드를 사용함",
         "description": "privileged 컨테이너는 호스트 수준 접근 권한을 얻을 수 있습니다.",
@@ -527,6 +597,16 @@ RULE_TRANSLATIONS_KO = {
         "description": "latest 또는 태그 없는 이미지는 검토 없이 내용이 바뀔 수 있습니다.",
         "recommendation": "검토된 버전 태그 또는 immutable digest로 이미지를 고정하세요.",
     },
+    "config.k8s-seccomp-unconfined": {
+        "title": "Kubernetes seccomp가 unconfined로 설정됨",
+        "description": "unconfined seccomp는 커널 syscall 경계를 약화합니다.",
+        "recommendation": "검토된 예외가 없다면 RuntimeDefault seccomp profile을 사용하세요.",
+    },
+    "config.k8s-dangerous-capability": {
+        "title": "Kubernetes workload에 광범위한 capability가 추가됨",
+        "description": "SYS_ADMIN, NET_ADMIN 같은 capability는 Pod 격리를 크게 약화할 수 있습니다.",
+        "recommendation": "기본적으로 capability를 모두 drop하고 필요한 최소 capability만 검토 후 추가하세요.",
+    },
     "config.terraform-public-storage": {
         "title": "Terraform 저장소 ACL이 public으로 설정됨",
         "description": "공개 저장소 설정은 데이터 노출로 이어질 수 있습니다.",
@@ -551,6 +631,21 @@ RULE_TRANSLATIONS_KO = {
         "title": "Terraform IAM 정책이 wildcard principal을 허용함",
         "description": "wildcard principal은 의도하지 않은 주체에게 접근을 허용할 수 있습니다.",
         "recommendation": "승인된 계정, 역할, 서비스 주체로 principal을 제한하세요.",
+    },
+    "config.terraform-public-ingress": {
+        "title": "Terraform 보안그룹이 public ingress를 허용함",
+        "description": "0.0.0.0/0 ingress는 관리자 포트가 아니어도 노출 범위 검토가 필요합니다.",
+        "recommendation": "소스 CIDR을 의도한 클라이언트로 제한하거나 승인된 edge/load balancer 통제로 앞단을 제한하세요.",
+    },
+    "config.terraform-unencrypted-storage": {
+        "title": "Terraform 저장소 암호화가 꺼져 있음",
+        "description": "저장소 암호화를 끄면 디스크, 버킷, 스냅샷, 백업 접근 시 데이터가 노출될 수 있습니다.",
+        "recommendation": "저장 시 암호화를 활성화하고 서비스별 예외는 문서화하세요.",
+    },
+    "config.terraform-sensitive-output": {
+        "title": "Terraform output이 민감값을 노출할 수 있음",
+        "description": "Terraform output은 state, 로그, CI 산출물에 남을 수 있습니다.",
+        "recommendation": "민감 output에는 sensitive = true를 설정하고 원시 자격증명 출력을 피하세요.",
     },
     "config.github-pull-request-target": {
         "title": "GitHub Actions가 pull_request_target을 사용함",
@@ -696,6 +791,46 @@ RULE_TRANSLATIONS_KO = {
         "title": "안전하지 않은 쿠키 설정",
         "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다.",
         "recommendation": "세션 쿠키에 Secure, HttpOnly, 적절한 SameSite 속성을 설정하고 로컬 개발 외에는 약화하지 마세요.",
+    },
+    "code.jwt-verification-disabled": {
+        "title": "JWT 서명 검증이 비활성화된 것으로 보임",
+        "description": "JWT decode 또는 검증 설정에서 서명 검증이 꺼져 있을 수 있습니다.",
+        "recommendation": "모든 JWT에 대해 서명, issuer, audience, 만료, 알고리즘 검증을 강제하세요.",
+    },
+    "code.jwt-none-algorithm": {
+        "title": "JWT none 알고리즘 허용 의심",
+        "description": "JWT 설정이 서명 없는 none 알고리즘을 허용할 수 있습니다.",
+        "recommendation": "승인된 서명 알고리즘 allowlist만 허용하고 unsigned token은 거부하세요.",
+    },
+    "code.session-long-expiry": {
+        "title": "세션 또는 토큰 만료 시간이 과도함",
+        "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다.",
+        "recommendation": "짧은 access token, 회전되는 refresh token, 장기 세션 예외 문서를 사용하세요.",
+    },
+    "code.api-route-missing-auth": {
+        "title": "민감 API 라우트에 인증 가드가 보이지 않음",
+        "description": "관리자, 사용자, 계정, 결제 등 민감 API 라우트가 명시적 인증/인가 가드 없이 선언된 것으로 보입니다.",
+        "recommendation": "민감 API handler 실행 전에 라우트 수준 인증과 객체/기능 권한 검사를 강제하세요.",
+    },
+    "code.api-mass-assignment": {
+        "title": "API 요청 body의 mass assignment 의심",
+        "description": "요청 body가 모델 생성/수정/저장 호출에 직접 전달되는 패턴입니다.",
+        "recommendation": "허용 필드만 명시적으로 매핑하고 예상하지 않은 속성은 저장 전에 거부하세요.",
+    },
+    "code.api-missing-rate-limit": {
+        "title": "API rate limit 기준이 보이지 않음",
+        "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다.",
+        "recommendation": "로그인, 가입, 비밀번호 재설정, 검색, export, 고비용 API에 rate limit과 남용 방지 통제를 추가하세요.",
+    },
+    "code.external-api-no-timeout": {
+        "title": "외부 API 호출에 timeout이 보이지 않음",
+        "description": "외부 API 호출에 명시적 timeout 또는 abort signal이 없어 장애 전파와 리소스 고갈 위험이 있습니다.",
+        "recommendation": "외부 API 호출에 timeout, backoff 재시도, 목적지 allowlist를 적용하세요.",
+    },
+    "code.pii-logging": {
+        "title": "개인정보 로깅 의심",
+        "description": "로그 또는 콘솔 출력에 이메일, 전화번호, 주소, 주민번호 등 개인정보 필드가 포함될 수 있습니다.",
+        "recommendation": "개인정보는 로그에서 제거하거나 마스킹하고 보관 기간과 접근 권한을 문서화하세요.",
     },
     "code.directory-listing-enabled": {
         "title": "디렉터리 리스팅 활성화 의심",

@@ -1101,6 +1101,12 @@ final class NativeSecurityScanner {
                 if lowered == "automountserviceaccounttoken: true" {
                     findings.append(finding("config.k8s-service-account-token", "low", "configuration", "Kubernetes service account token 자동 마운트", displayPath, index + 1, line, "Kubernetes API 접근이 필요하지 않다면 automountServiceAccountToken: false를 설정하세요."))
                 }
+                if lowered == "seccompprofile: unconfined" || lowered == "type: unconfined" {
+                    findings.append(finding("config.k8s-seccomp-unconfined", "medium", "configuration", "Kubernetes seccomp가 unconfined로 설정됨", displayPath, index + 1, line, "검토된 예외가 없다면 RuntimeDefault seccomp profile을 사용하세요."))
+                }
+                if matches(#"(?i)^\s*-\s*(SYS_ADMIN|NET_ADMIN)\s*$"#, line) || matches(#"(?i)\badd\s*:\s*\[.*(SYS_ADMIN|NET_ADMIN)"#, line) {
+                    findings.append(finding("config.k8s-dangerous-capability", "medium", "configuration", "Kubernetes workload에 광범위한 capability가 추가됨", displayPath, index + 1, line, "기본적으로 capability를 모두 drop하고 필요한 최소 capability만 검토 후 추가하세요."))
+                }
                 if matches(#"(?i)^-?\s*image:"#, lowered) && (lowered.contains(":latest") || matches(#"(?i)^-?\s*image:\s*[^:@\s]+$"#, lowered)) {
                     findings.append(finding("config.k8s-unpinned-image", "medium", "configuration", "Kubernetes 이미지가 고정되지 않음", displayPath, index + 1, line, "검토된 버전 태그나 immutable digest로 이미지를 고정하세요."))
                 }
@@ -1115,11 +1121,20 @@ final class NativeSecurityScanner {
                 if lowered.contains("0.0.0.0/0") && nearbyAdminPort(lines: lines, index: index) {
                     findings.append(finding("config.terraform-open-admin-port", "high", "configuration", "Terraform 보안그룹이 관리자 포트를 인터넷에 공개함", displayPath, index + 1, line, "관리자 포트는 VPN, bastion, 승인된 CIDR로 제한하세요."))
                 }
+                if lowered.contains("0.0.0.0/0") && !nearbyAdminPort(lines: lines, index: index) {
+                    findings.append(finding("config.terraform-public-ingress", "medium", "configuration", "Terraform 보안그룹이 public ingress를 허용함", displayPath, index + 1, line, "소스 CIDR을 의도한 클라이언트로 제한하거나 승인된 edge/load balancer 통제로 앞단을 제한하세요."))
+                }
                 if matches(#"(?i)\b(actions?|not_actions?)\s*=\s*(\[\s*)?"\*""#, line) {
                     findings.append(finding("config.terraform-wildcard-iam-action", "medium", "configuration", "Terraform IAM 정책이 wildcard action을 허용함", displayPath, index + 1, line, "필요한 최소 action만 명시하세요."))
                 }
                 if matches(#"(?i)\b(principals?|identifiers?|principal|identifier)\s*=\s*(\[\s*)?"\*""#, line) {
                     findings.append(finding("config.terraform-wildcard-principal", "high", "configuration", "Terraform IAM 정책이 wildcard principal을 허용함", displayPath, index + 1, line, "승인된 계정, 역할, 서비스 주체로 principal을 제한하세요."))
+                }
+                if matches(#"(?i)\b(encrypted|enable_server_side_encryption|storage_encrypted)\s*=\s*false\b"#, line) {
+                    findings.append(finding("config.terraform-unencrypted-storage", "medium", "configuration", "Terraform 저장소 암호화가 꺼져 있음", displayPath, index + 1, line, "저장 시 암호화를 활성화하고 서비스별 예외는 문서화하세요."))
+                }
+                if matches(#"(?i)\boutput\s+"[^"]*(secret|password|token|key)[^"]*""#, line) || matches(#"(?i)\bsensitive\s*=\s*false\b"#, line) {
+                    findings.append(finding("config.terraform-sensitive-output", "medium", "configuration", "Terraform output이 민감값을 노출할 수 있음", displayPath, index + 1, line, "민감 output에는 sensitive = true를 설정하고 원시 자격증명 출력을 피하세요."))
                 }
             }
             if looksLikeGitHubWorkflow(file) {
@@ -1144,6 +1159,9 @@ final class NativeSecurityScanner {
             }
             if isComposeFile(name) && matches(#"(?i)^\s*pid\s*:\s*host\s*$"#, line) {
                 findings.append(finding("config.compose-host-pid", "medium", "configuration", "Compose 서비스가 host PID namespace를 사용함", displayPath, index + 1, line, "host PID 접근이 꼭 필요한 경우가 아니면 기본 PID namespace를 사용하세요."))
+            }
+            if isComposeFile(name) && matches(#"(?i)\b[A-Z0-9_]*(PASSWORD|TOKEN|SECRET|API_KEY|ACCESS_KEY)[A-Z0-9_]*\s*="#, line) {
+                findings.append(finding("config.compose-secret-in-environment", "medium", "configuration", "Compose 환경값에 비밀값이 직접 포함됨", displayPath, index + 1, line, "민감값은 secret manager 또는 런타임 주입으로 옮기고 compose에는 placeholder만 남기세요."))
             }
             if name == "Dockerfile" {
                 if matches(#"(?i)^USER\s+"#, line) {
@@ -1314,6 +1332,30 @@ final class NativeSecurityScanner {
             if matches(#"(?i)(secure\s*:\s*false|httpOnly\s*:\s*false|SameSite\s*=\s*None)"#, line) {
                 findings.append(finding("code.insecure-cookie-settings", "medium", "code", "쿠키/세션 보안 설정 약화", displayPath, lineNumber, line, "Secure, HttpOnly, SameSite 속성을 적절히 설정하세요."))
             }
+            if matches(#"(?i)(verify_signature\s*[:=]\s*False|verify\s*[:=]\s*false|jwt\.decode.*(verify\s*=\s*False|verify_signature.*False))"#, line) {
+                findings.append(finding("code.jwt-verification-disabled", "high", "code", "JWT 서명 검증이 비활성화된 것으로 보임", displayPath, lineNumber, line, "모든 JWT에 대해 서명, issuer, audience, 만료, 알고리즘 검증을 강제하세요."))
+            }
+            if matches(#"(?i)(algorithms?\s*[:=]\s*\[[^\]]*["']none["']|alg\s*[:=]\s*["']none["'])"#, line) {
+                findings.append(finding("code.jwt-none-algorithm", "high", "code", "JWT none 알고리즘 허용 의심", displayPath, lineNumber, line, "승인된 서명 알고리즘 allowlist만 허용하고 unsigned token은 거부하세요."))
+            }
+            if matches(#"(?i)(SESSION_COOKIE_AGE\s*=\s*([7-9]\d{5,}|[1-9]\d{6,})|maxAge\s*[:=]\s*([7-9]\d{8,}|[1-9]\d{9,})|expiresIn\s*[:=]\s*["'](365d|[2-9]\d{2,}d|[1-9]\d+y)["'])"#, line) {
+                findings.append(finding("code.session-long-expiry", "low", "code", "세션 또는 토큰 만료 시간이 과도함", displayPath, lineNumber, line, "짧은 access token, 회전되는 refresh token, 장기 세션 예외 문서를 사용하세요."))
+            }
+            if matches(#"(?i)((app|router|server)\.(get|post|put|patch|delete)\s*\(["'][^"']*/api/[^"']*(admin|user|account|payment|order|profile|secret|token)[^"']*["'][^\n]*\(?\s*(req|request|ctx)\s*\)?\s*=>)"#, line) {
+                findings.append(finding("code.api-route-missing-auth", "medium", "code", "민감 API 라우트에 인증 가드가 보이지 않음", displayPath, lineNumber, line, "민감 API handler 실행 전에 라우트 수준 인증과 객체/기능 권한 검사를 강제하세요."))
+            }
+            if matches(#"(?i)(\b(create|update|assign|save|insert|merge)\s*\([^\n]*(req\.body|request\.body|body|params)|\.\.\.\s*(req\.body|request\.body|body))"#, line) {
+                findings.append(finding("code.api-mass-assignment", "medium", "code", "API 요청 body의 mass assignment 의심", displayPath, lineNumber, line, "허용 필드만 명시적으로 매핑하고 예상하지 않은 속성은 저장 전에 거부하세요."))
+            }
+            if matches(#"(?i)(express\s*\(\)|FastAPI\s*\(|new\s+Koa\s*\(|SpringApplication\.run)"#, line) {
+                findings.append(finding("code.api-missing-rate-limit", "low", "code", "API rate limit 기준이 보이지 않음", displayPath, lineNumber, line, "로그인, 가입, 검색, export, 고비용 API에 rate limit과 남용 방지 통제를 추가하세요."))
+            }
+            if matches(#"(?i)\b(requests\.(get|post|put|patch|delete)|httpx\.(get|post|put|patch|delete)|axios\.(get|post|put|patch|delete)|fetch)\s*\([^\n]*(https?://|url|endpoint)"#, line) && !matches(#"(?i)(timeout|signal|AbortController)"#, line) {
+                findings.append(finding("code.external-api-no-timeout", "low", "code", "외부 API 호출에 timeout이 보이지 않음", displayPath, lineNumber, line, "외부 API 호출에 timeout, backoff 재시도, 목적지 allowlist를 적용하세요."))
+            }
+            if matches(#"(?i)(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))\s*\(.*(email|phone|mobile|address|birth|dob|ssn|resident|rrn|jumin|주민|전화|주소|생년|card[_-]?number)"#, line) {
+                findings.append(finding("code.pii-logging", "medium", "code", "개인정보 로깅 의심", displayPath, lineNumber, line, "개인정보는 로그에서 제거하거나 마스킹하고 보관 기간과 접근 권한을 문서화하세요."))
+            }
             if matches(#"(?i)Options\s+Indexes"#, line) {
                 findings.append(finding("code.directory-listing-enabled", "medium", "code", "디렉터리 리스팅 활성화", displayPath, lineNumber, line, "디렉터리 인덱싱을 비활성화하세요."))
             }
@@ -1368,6 +1410,14 @@ final class NativeSecurityScanner {
         let mobileSecurityPaths: Set<String> = ["docs/security/mobile_security.md", "docs/security/mobile-security.md"]
         let nistCSFProfilePaths: Set<String> = ["docs/security/nist_csf_2_profile.md", "docs/security/nist-csf-2-profile.md"]
         let cisaAttestationPaths: Set<String> = ["docs/security/cisa_secure_software_attestation.md", "docs/security/cisa-attestation.md"]
+        let apiSecurityPaths: Set<String> = ["docs/security/api_security.md", "docs/security/api-security.md"]
+        let scvsPlanPaths: Set<String> = ["docs/security/scvs_plan.md", "docs/security/owasp_scvs.md", "docs/security/software_component_verification.md"]
+        let privacyDataMapPaths: Set<String> = ["docs/security/privacy_data_map.md", "docs/security/privacy-data-map.md", "docs/security/data_inventory.md"]
+        let securityRoadmapPaths: Set<String> = ["docs/security/security_roadmap.md", "docs/security/security-roadmap.md"]
+        let evidenceRegisterPaths: Set<String> = ["docs/security/evidence_register.md", "docs/security/security_evidence.md"]
+        let securityHeadersPaths: Set<String> = ["docs/security/security_headers.md", "docs/security/security-headers.md"]
+        let containerHardeningPaths: Set<String> = ["docs/security/container_hardening.md", "docs/security/container-hardening.md"]
+        let cloudIACSecurityPaths: Set<String> = ["docs/security/cloud_iac_security.md", "docs/security/cloud-iac-security.md"]
         let releaseProvenanceWorkflowPaths: Set<String> = [".github/workflows/koda-release-provenance.yml", ".github/workflows/koda-release-provenance.yaml"]
         let envExampleNames: Set<String> = [".env.example", ".env.sample", ".env.template", ".env.local.example", ".env.development.example", ".env.production.example"]
         let hasDependencyManifest = !dependencyManifestNames.intersection(basenames).isEmpty
@@ -1381,9 +1431,13 @@ final class NativeSecurityScanner {
         let workflowTexts = workflowFiles.compactMap { readTextLines($0)?.joined(separator: "\n").lowercased() }
         let workflowText = workflowTexts.joined(separator: "\n")
         let hasAILLMCode = projectTextContains(files: files, keywords: ["openai", "anthropic", "langchain", "llamaindex", "chat.completions", "responses.create", "generatecontent", "tool_choice", "function_call"])
+        let hasAPICode = projectTextContains(files: files, keywords: ["app.get(", "app.post(", "router.get(", "router.post(", "fastapi(", "@getmapping", "@postmapping", "/api/"])
         let hasMobileProject = looksLikeMobileProject(files: files, basenames: basenames, lowerRelPaths: lowerRelPaths)
+        let hasCloudIAC = looksLikeCloudIAC(files: files, basenames: basenames, lowerRelPaths: lowerRelPaths)
+        let k8sFiles = files.filter { looksLikeKubernetesManifest($0) }
 
         var findings: [NativeFinding] = []
+        findings.append(contentsOf: ignoreFileFindings(root: root, files: files))
         if (hasSourceCode || hasDependencyManifest) && securityPolicyPaths.intersection(relPaths).isEmpty {
             findings.append(finding("prevention.security-policy-missing", "info", "prevention", "보안 정책 문서가 없음", ".", nil, "SECURITY.md 없음", "SECURITY.md에 신고 연락처, 지원 범위, 취약점 공개 기대사항을 작성하세요."))
         }
@@ -1436,11 +1490,38 @@ final class NativeSecurityScanner {
         if hasAILLMCode && aiLLMSecurityPaths.intersection(lowerRelPaths).isEmpty {
             findings.append(finding("prevention.ai-llm-security-plan-missing", "info", "prevention", "AI/LLM 보안 계획이 없음", ".", nil, "AI/LLM 사용 흔적은 있으나 보안 계획 없음", "프롬프트 인젝션 통제, 도구 경계, 민감정보 처리, 모델/제공자 목록, 적대적 테스트를 문서화하세요."))
         }
+        if hasAPICode && apiSecurityPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.api-security-plan-missing", "info", "prevention", "API 보안 계획이 없음", ".", nil, "API 라우트 또는 핸들러 감지", "API 목록, 객체/기능 권한, schema 검증, rate limit, 외부 API timeout/allowlist 기준을 문서화하세요."))
+        }
         if hasMobileProject && mobileSecurityPaths.intersection(lowerRelPaths).isEmpty {
             findings.append(finding("prevention.mobile-security-plan-missing", "info", "prevention", "모바일 보안 계획이 없음", ".", nil, "모바일 프로젝트 파일은 있으나 보안 계획 없음", "MASVS 범위, 플랫폼 설정, 저장소, 네트워크, 릴리스 서명, 기기 테스트 요구사항을 문서화하세요."))
         }
+        if hasCloudIAC && cloudIACSecurityPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.cloud-iac-security-plan-missing", "info", "prevention", "Cloud/IaC 보안 계획이 없음", ".", nil, "Cloud/IaC 파일 감지", "네트워크 노출, IAM 경계, 암호화, 컨테이너 runtime 하드닝, 배포 검토 기준을 문서화하세요."))
+        }
+        if !k8sFiles.isEmpty && !hasKubernetesNetworkPolicy(files: files) {
+            findings.append(finding("prevention.k8s-network-policy-missing", "info", "prevention", "Kubernetes NetworkPolicy가 없음", ".", nil, "Kubernetes workload는 있으나 NetworkPolicy 없음", "NetworkPolicy를 추가하거나 다른 네트워크 격리 계층을 사용한다는 근거를 문서화하세요."))
+        }
         if (hasSourceCode || hasDependencyManifest) && nistCSFProfilePaths.intersection(lowerRelPaths).isEmpty {
             findings.append(finding("prevention.nist-csf-profile-missing", "info", "prevention", "NIST CSF 2.0 프로파일이 없음", ".", nil, "NIST CSF 2.0 프로파일 없음", "Govern, Identify, Protect, Detect, Respond, Recover 활동을 프로젝트 증적과 소유자에 매핑하세요."))
+        }
+        if hasDependencyManifest && scvsPlanPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.scvs-plan-missing", "info", "prevention", "OWASP SCVS 구성요소 검증 계획이 없음", ".", nil, "의존성 매니페스트는 있으나 SCVS 계획 없음", "구성요소 인벤토리, SBOM, 빌드 환경, 패키지 관리, 분석, provenance 통제를 문서화하세요."))
+        }
+        if (hasSourceCode || !envFiles.isEmpty) && privacyDataMapPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.privacy-data-map-missing", "info", "prevention", "개인정보 데이터 맵이 없음", ".", nil, "개인정보 data map 없음", "개인정보 항목, 목적, 저장 위치, 보관 기간, 공유, 로깅 제한을 기록하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && securityRoadmapPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.security-roadmap-missing", "info", "prevention", "보안 로드맵이 없음", ".", nil, "보안 roadmap 없음", "보안 backlog, 담당자, 기한, 위험 수용 항목, 목표 성숙도를 한 곳에서 추적하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && evidenceRegisterPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.evidence-register-missing", "info", "prevention", "보안 증적 보관대장이 없음", ".", nil, "증적 register 없음", "점검 리포트, SBOM, VEX, DAST, 위협모델, 승인 기록 위치와 담당자를 기록하세요."))
+        }
+        if looksLikeWebProject(files: files, basenames: basenames) && securityHeadersPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.security-headers-guide-missing", "info", "prevention", "보안 헤더 기준 문서가 없음", ".", nil, "security headers baseline 없음", "CSP, HSTS, nosniff, Referrer-Policy, Permissions-Policy 기준과 예외를 정리하세요."))
+        }
+        if (!dockerfiles.isEmpty || !k8sFiles.isEmpty || basenames.contains("docker-compose.yml") || basenames.contains("docker-compose.yaml") || basenames.contains("compose.yml") || basenames.contains("compose.yaml")) && containerHardeningPaths.intersection(lowerRelPaths).isEmpty {
+            findings.append(finding("prevention.container-hardening-guide-missing", "info", "prevention", "컨테이너 하드닝 기준 문서가 없음", ".", nil, "컨테이너 배포 파일은 있으나 하드닝 기준 없음", "non-root, read-only filesystem, capability drop, image pinning, resource limit, runtime profile 기준을 문서화하세요."))
         }
         if (hasSourceCode || hasDependencyManifest) && cisaAttestationPaths.intersection(lowerRelPaths).isEmpty {
             findings.append(finding("prevention.cisa-attestation-missing", "info", "prevention", "CISA 보안 소프트웨어 개발 확인서 증적이 없음", ".", nil, "CISA 확인서 증적 체크리스트 없음", "SSDF 기반 개발, 의존성, 검증, 취약점 대응 증적을 확인서 제출 전 기록하세요."))
@@ -1517,6 +1598,92 @@ final class NativeSecurityScanner {
             }
         }
         return false
+    }
+
+    private func looksLikeCloudIAC(files: [URL], basenames: Set<String>, lowerRelPaths: Set<String>) -> Bool {
+        if !Set(["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]).intersection(basenames).isEmpty {
+            return true
+        }
+        if files.contains(where: { $0.lastPathComponent == "Dockerfile" || $0.lastPathComponent.hasPrefix("Dockerfile.") || ["tf", "tfvars"].contains($0.pathExtension.lowercased()) }) {
+            return true
+        }
+        return lowerRelPaths.contains { rel in
+            rel.contains("/k8s/") || rel.contains("/kubernetes/") || rel.contains("/helm/") || rel.contains("/terraform/") || rel.contains("/infra/")
+        }
+    }
+
+    private func hasKubernetesNetworkPolicy(files: [URL]) -> Bool {
+        for file in files where ["yaml", "yml"].contains(file.pathExtension.lowercased()) {
+            if file.lastPathComponent.lowercased().contains("networkpolicy") {
+                return true
+            }
+            let text = readTextLines(file)?.joined(separator: "\n").lowercased() ?? ""
+            if text.contains("kind: networkpolicy") {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func ignoreFileFindings(root: URL, files: [URL]) -> [NativeFinding] {
+        var findings: [NativeFinding] = []
+        for file in files where ["koda-ignore.yml", ".koda-ignore.yml"].contains(file.lastPathComponent) {
+            guard let lines = readTextLines(file) else { continue }
+            findings.append(contentsOf: inspectIgnoreFile(file, lines: lines, displayPath: relativePath(file, root: root)))
+        }
+        return findings
+    }
+
+    private func inspectIgnoreFile(_ file: URL, lines: [String], displayPath: String) -> [NativeFinding] {
+        var findings: [NativeFinding] = []
+        var current: [String: (String, Int)] = [:]
+        let today = Calendar.current.startOfDay(for: Date())
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        func flush() {
+            guard !current.isEmpty else { return }
+            let line = current.values.map(\.1).min()
+            let rule = current["rule"]?.0 ?? current["rule_id"]?.0 ?? "*"
+            let path = current["path"]?.0 ?? "*"
+            let evidence = "rule=\(rule), path=\(path)"
+            if (current["reason"]?.0 ?? "").isEmpty {
+                findings.append(finding("prevention.exception-reason-missing", "low", "prevention", "예외 항목에 사유가 없음", displayPath, line, evidence, "각 예외에 구체적인 reason을 기록하세요."))
+            }
+            if (current["owner"]?.0 ?? "").isEmpty {
+                findings.append(finding("prevention.exception-owner-missing", "low", "prevention", "예외 항목에 담당자가 없음", displayPath, line, evidence, "각 예외에 담당 팀, 담당자, 또는 티켓 큐를 owner로 기록하세요."))
+            }
+            let until = current["until"]?.0 ?? ""
+            if until.isEmpty {
+                findings.append(finding("prevention.exception-expiry-missing", "medium", "prevention", "예외 항목에 만료일이 없음", displayPath, line, evidence, "until을 YYYY-MM-DD 형식으로 추가하고 만료 전에 재검토하세요."))
+            } else if let expiry = formatter.date(from: until) {
+                if expiry < today {
+                    findings.append(finding("prevention.exception-expired", "medium", "prevention", "예외 항목이 만료됨", displayPath, current["until"]?.1, "\(evidence), until=\(until)", "근본 원인을 수정하거나 새 승인 사유와 만료일로 예외를 갱신하세요."))
+                }
+            } else {
+                findings.append(finding("prevention.exception-expiry-missing", "medium", "prevention", "예외 항목 만료일 형식이 잘못됨", displayPath, current["until"]?.1, "\(evidence), until=\(until)", "until을 2099-12-31 같은 ISO 날짜 형식으로 작성하세요."))
+            }
+        }
+
+        for (index, rawLine) in lines.enumerated() {
+            var stripped = rawLine.components(separatedBy: "#").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if stripped.isEmpty || stripped == "ignore:" {
+                continue
+            }
+            if stripped.hasPrefix("- ") {
+                flush()
+                current = [:]
+                stripped = String(stripped.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+            }
+            guard let separator = stripped.firstIndex(of: ":") else { continue }
+            let key = String(stripped[..<separator]).trimmingCharacters(in: .whitespaces)
+            let value = stripped[stripped.index(after: separator)...]
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            current[key] = (String(value), index + 1)
+        }
+        flush()
+        return findings
     }
 
     private func hasPreCommitHook(root: URL) -> Bool {
@@ -2299,6 +2466,19 @@ private extension NativeSecurityScanner {
         case "prevention.mobile-security-plan-missing": return "Mobile security plan is not documented"
         case "prevention.nist-csf-profile-missing": return "NIST CSF 2.0 profile is not documented"
         case "prevention.cisa-attestation-missing": return "CISA secure software attestation evidence is not documented"
+        case "prevention.api-security-plan-missing": return "API security plan is not documented"
+        case "prevention.scvs-plan-missing": return "OWASP SCVS component verification plan is not documented"
+        case "prevention.privacy-data-map-missing": return "Privacy data map is not documented"
+        case "prevention.security-roadmap-missing": return "Security roadmap is not documented"
+        case "prevention.evidence-register-missing": return "Security evidence register is not documented"
+        case "prevention.exception-reason-missing": return "KODA exception lacks a reason"
+        case "prevention.exception-owner-missing": return "KODA exception lacks an owner"
+        case "prevention.exception-expiry-missing": return "KODA exception lacks a valid expiry"
+        case "prevention.exception-expired": return "KODA exception is expired"
+        case "prevention.k8s-network-policy-missing": return "Kubernetes NetworkPolicy is not present"
+        case "prevention.security-headers-guide-missing": return "Security headers baseline is not documented"
+        case "prevention.container-hardening-guide-missing": return "Container hardening guide is not documented"
+        case "prevention.cloud-iac-security-plan-missing": return "Cloud/IaC security baseline is not documented"
         case "dependency.package-json-invalid": return "Invalid package.json"
         case "dependency.node-insecure-url": return "Node dependency fetched over insecure HTTP"
         case "dependency.python-unpinned-requirement": return "Unpinned Python dependency"
@@ -2321,6 +2501,7 @@ private extension NativeSecurityScanner {
         case "config.compose-docker-sock": return "Compose service mounts the Docker socket"
         case "config.compose-dangerous-capability": return "Compose service grants broad Linux capabilities"
         case "config.compose-host-pid": return "Compose service uses the host PID namespace"
+        case "config.compose-secret-in-environment": return "Compose environment appears to inline a secret"
         case "config.k8s-privileged-container": return "Kubernetes container enables privileged mode"
         case "config.k8s-allow-privilege-escalation": return "Kubernetes container allows privilege escalation"
         case "config.k8s-host-network": return "Kubernetes workload uses host networking"
@@ -2328,11 +2509,16 @@ private extension NativeSecurityScanner {
         case "config.k8s-run-as-root": return "Kubernetes workload allows root execution"
         case "config.k8s-service-account-token": return "Kubernetes service account token is auto-mounted"
         case "config.k8s-unpinned-image": return "Kubernetes image is not pinned"
+        case "config.k8s-seccomp-unconfined": return "Kubernetes workload disables seccomp confinement"
+        case "config.k8s-dangerous-capability": return "Kubernetes workload adds broad Linux capabilities"
         case "config.terraform-public-storage": return "Terraform storage ACL is public"
         case "config.terraform-public-access-block-disabled": return "Terraform public access block is disabled"
         case "config.terraform-open-admin-port": return "Terraform security group opens admin access to the internet"
         case "config.terraform-wildcard-iam-action": return "Terraform IAM policy allows wildcard actions"
         case "config.terraform-wildcard-principal": return "Terraform IAM policy allows wildcard principals"
+        case "config.terraform-public-ingress": return "Terraform security group allows public ingress"
+        case "config.terraform-unencrypted-storage": return "Terraform storage encryption appears disabled"
+        case "config.terraform-sensitive-output": return "Terraform output may expose sensitive values"
         case "config.github-pull-request-target": return "GitHub Actions uses pull_request_target"
         case "config.github-untrusted-event-in-run": return "GitHub Actions run step interpolates untrusted event data"
         case "config.android-debuggable": return "Android app is debuggable"
@@ -2363,6 +2549,14 @@ private extension NativeSecurityScanner {
         case "code.public-bind-all-interfaces": return "Binds to all network interfaces"
         case "code.weak-hash": return "Weak hash algorithm"
         case "code.insecure-cookie-settings": return "Weak cookie/session security settings"
+        case "code.jwt-verification-disabled": return "JWT signature verification appears disabled"
+        case "code.jwt-none-algorithm": return "JWT none algorithm appears allowed"
+        case "code.session-long-expiry": return "Session or token expiry appears excessive"
+        case "code.api-route-missing-auth": return "Sensitive API route appears to lack an auth guard"
+        case "code.api-mass-assignment": return "API handler appears to mass-assign request body data"
+        case "code.api-missing-rate-limit": return "API server appears to lack rate limiting"
+        case "code.external-api-no-timeout": return "External API call appears to omit a timeout"
+        case "code.pii-logging": return "Personal data may be written to logs"
         case "code.directory-listing-enabled": return "Directory listing enabled"
         case "code.webdav-enabled": return "WebDAV enabled"
         case "code.legacy-board-software": return "Legacy bulletin-board software marker"
@@ -2445,6 +2639,32 @@ private extension NativeSecurityScanner {
             return "Map Govern, Identify, Protect, Detect, Respond, and Recover activities to project evidence and owners."
         case "prevention.cisa-attestation-missing":
             return "Record SSDF-aligned development, dependency, verification, and vulnerability-response evidence before attesting."
+        case "prevention.api-security-plan-missing":
+            return "Document API inventory, object/function authorization, schema validation, rate limits, and external API controls."
+        case "prevention.scvs-plan-missing":
+            return "Document component inventory, SBOM, build environment, package management, component analysis, and provenance controls."
+        case "prevention.privacy-data-map-missing":
+            return "Record personal data fields, purposes, storage, retention, sharing, and logging restrictions."
+        case "prevention.security-roadmap-missing":
+            return "Track security backlog, owners, due dates, accepted risks, and target control maturity in one roadmap."
+        case "prevention.evidence-register-missing":
+            return "Keep links to scan reports, SBOM, VEX, DAST, threat models, attestations, and approvals for audit or release review."
+        case "prevention.exception-reason-missing":
+            return "Add a specific reason explaining why the finding is accepted or considered false positive."
+        case "prevention.exception-owner-missing":
+            return "Add an accountable owner for each exception."
+        case "prevention.exception-expiry-missing":
+            return "Add an ISO expiry date such as 2099-12-31 and review before extending it."
+        case "prevention.exception-expired":
+            return "Remove the exception, fix the underlying issue, or renew it with a fresh approval and reason."
+        case "prevention.k8s-network-policy-missing":
+            return "Add NetworkPolicies or document the alternative network isolation layer."
+        case "prevention.security-headers-guide-missing":
+            return "Document expected CSP, HSTS, X-Content-Type-Options, Referrer-Policy, and Permissions-Policy settings."
+        case "prevention.container-hardening-guide-missing":
+            return "Document non-root users, read-only filesystems, dropped capabilities, image pinning, resource limits, and runtime profiles."
+        case "prevention.cloud-iac-security-plan-missing":
+            return "Document network exposure, IAM boundaries, encryption, Terraform state handling, and deployment review requirements."
         case "dependency.package-json-invalid":
             return "Fix package.json syntax so dependency tooling can inspect it reliably."
         case "dependency.node-insecure-url":
@@ -2489,6 +2709,8 @@ private extension NativeSecurityScanner {
             return "Remove broad capabilities such as SYS_ADMIN or NET_ADMIN and grant only what is required."
         case "config.compose-host-pid":
             return "Use the default PID namespace unless host PID access is explicitly required."
+        case "config.compose-secret-in-environment":
+            return "Move sensitive values to a secret manager or runtime-only environment injection and keep only placeholders in compose files."
         case "config.k8s-privileged-container":
             return "Remove privileged mode and grant only the specific Linux capabilities that are required."
         case "config.k8s-allow-privilege-escalation":
@@ -2503,6 +2725,10 @@ private extension NativeSecurityScanner {
             return "Set automountServiceAccountToken: false when the workload does not need Kubernetes API access."
         case "config.k8s-unpinned-image":
             return "Pin images to reviewed version tags or immutable digests."
+        case "config.k8s-seccomp-unconfined":
+            return "Use RuntimeDefault seccomp profiles unless a reviewed workload exception exists."
+        case "config.k8s-dangerous-capability":
+            return "Drop all capabilities by default and add only the minimum reviewed capability needed."
         case "config.terraform-public-storage":
             return "Use private ACLs and explicit, reviewed public access policies only when required."
         case "config.terraform-public-access-block-disabled":
@@ -2513,6 +2739,12 @@ private extension NativeSecurityScanner {
             return "List only the minimum IAM actions required and document any exception."
         case "config.terraform-wildcard-principal":
             return "Limit principals to approved accounts, roles, or service principals."
+        case "config.terraform-public-ingress":
+            return "Restrict source CIDRs to intended clients or front traffic through an approved load balancer or edge control."
+        case "config.terraform-unencrypted-storage":
+            return "Enable encryption at rest and document any service-specific exception."
+        case "config.terraform-sensitive-output":
+            return "Mark sensitive outputs with sensitive = true and avoid outputting raw credentials."
         case "config.github-pull-request-target":
             return "Use pull_request for untrusted code or strictly separate checkout/build steps from privileged operations."
         case "config.github-untrusted-event-in-run":
@@ -2573,6 +2805,22 @@ private extension NativeSecurityScanner {
             return "Use SHA-256 or stronger; for passwords use bcrypt or argon2."
         case "code.insecure-cookie-settings":
             return "Set Secure, HttpOnly, and SameSite attributes appropriately."
+        case "code.jwt-verification-disabled":
+            return "Require signature, issuer, audience, expiry, and algorithm validation for every trusted JWT."
+        case "code.jwt-none-algorithm":
+            return "Use an explicit allowlist of approved signing algorithms and reject unsigned tokens."
+        case "code.session-long-expiry":
+            return "Use short-lived access tokens, rotate refresh tokens, and document any long-lived session exception."
+        case "code.api-route-missing-auth":
+            return "Require explicit route-level authentication and object/function authorization before sensitive API handlers run."
+        case "code.api-mass-assignment":
+            return "Map only allowed fields explicitly and reject unexpected object properties before persistence."
+        case "code.api-missing-rate-limit":
+            return "Add rate limits, request quotas, and abuse controls for login, signup, password reset, search, export, and high-cost API routes."
+        case "code.external-api-no-timeout":
+            return "Set conservative timeouts, retries with backoff, and allowlisted destinations for outbound API integrations."
+        case "code.pii-logging":
+            return "Redact personal data in logs, use event IDs instead of raw identifiers, and document retention limits."
         case "code.directory-listing-enabled":
             return "Disable directory indexing."
         case "code.webdav-enabled":

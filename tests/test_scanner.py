@@ -527,6 +527,13 @@ class ScannerTests(unittest.TestCase):
             (docs / "SECRET_ROTATION.md").write_text("# Secret Rotation\n", encoding="utf-8")
             (docs / "NIST_CSF_2_PROFILE.md").write_text("# NIST CSF\n", encoding="utf-8")
             (docs / "CISA_SECURE_SOFTWARE_ATTESTATION.md").write_text("# CISA Attestation\n", encoding="utf-8")
+            (docs / "SCVS_PLAN.md").write_text("# SCVS\n", encoding="utf-8")
+            (docs / "PRIVACY_DATA_MAP.md").write_text("# Privacy Data Map\n", encoding="utf-8")
+            (docs / "SECURITY_ROADMAP.md").write_text("# Security Roadmap\n", encoding="utf-8")
+            (docs / "EVIDENCE_REGISTER.md").write_text("# Evidence Register\n", encoding="utf-8")
+            (docs / "SECURITY_HEADERS.md").write_text("# Security Headers\n", encoding="utf-8")
+            (docs / "CONTAINER_HARDENING.md").write_text("# Container Hardening\n", encoding="utf-8")
+            (docs / "CLOUD_IAC_SECURITY.md").write_text("# Cloud IaC Security\n", encoding="utf-8")
             (workflows / "security.yml").write_text(
                 "name: security\n"
                 "permissions:\n"
@@ -1238,6 +1245,109 @@ GEM
 
             rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
             self.assertEqual(rule_ids, {"code.unversioned-api-route"})
+
+    def test_detects_api_auth_privacy_and_cloud_iac_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api.js").write_text(
+                "const app = express()\n"
+                "app.post('/api/admin/users', (req) => User.update(req.body))\n"
+                "axios.get(endpoint)\n"
+                "console.log('email', user.email)\n"
+                "jwt.decode(token, options={verify_signature: False})\n"
+                "const algorithms = ['none']\n",
+                encoding="utf-8",
+            )
+            (root / "main.tf").write_text(
+                'cidr_blocks = ["0.0.0.0/0"]\n'
+                'encrypted = false\n'
+                'output "db_password" {\n'
+                '  sensitive = false\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (root / "docker-compose.yml").write_text(
+                "services:\n  app:\n    environment:\n      DB_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            k8s = root / "k8s"
+            k8s.mkdir()
+            (k8s / "deployment.yaml").write_text(
+                "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n      - image: nginx\n        securityContext:\n          seccompProfile: unconfined\n          capabilities:\n            add: [SYS_ADMIN]\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("configuration", "code"))
+            rule_ids = {finding.rule_id for finding in findings}
+
+            for rule_id in {
+                "code.api-route-missing-auth",
+                "code.api-mass-assignment",
+                "code.api-missing-rate-limit",
+                "code.external-api-no-timeout",
+                "code.pii-logging",
+                "code.jwt-verification-disabled",
+                "code.jwt-none-algorithm",
+                "config.terraform-public-ingress",
+                "config.terraform-unencrypted-storage",
+                "config.terraform-sensitive-output",
+                "config.compose-secret-in-environment",
+                "config.k8s-seccomp-unconfined",
+                "config.k8s-dangerous-capability",
+            }:
+                self.assertIn(rule_id, rule_ids)
+
+    def test_prevention_checks_exception_governance_and_super_app_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "1.3.0"}}), encoding="utf-8")
+            (root / "api.py").write_text("app = FastAPI()\n@app.get('/api/users')\ndef users(): pass\n", encoding="utf-8")
+            (root / "main.tf").write_text('cidr_blocks = ["0.0.0.0/0"]\n', encoding="utf-8")
+            k8s = root / "k8s"
+            k8s.mkdir()
+            (k8s / "deployment.yaml").write_text("kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n      - image: nginx\n", encoding="utf-8")
+            (root / "koda-ignore.yml").write_text(
+                "ignore:\n"
+                "  - rule: code.xss-dom-sink\n"
+                "    path: web.js\n"
+                "    until: 2000-01-01\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("prevention",))
+            rule_ids = {finding.rule_id for finding in findings}
+
+            for rule_id in {
+                "prevention.api-security-plan-missing",
+                "prevention.scvs-plan-missing",
+                "prevention.privacy-data-map-missing",
+                "prevention.security-roadmap-missing",
+                "prevention.evidence-register-missing",
+                "prevention.exception-reason-missing",
+                "prevention.exception-owner-missing",
+                "prevention.exception-expired",
+                "prevention.k8s-network-policy-missing",
+                "prevention.security-headers-guide-missing",
+                "prevention.container-hardening-guide-missing",
+                "prevention.cloud-iac-security-plan-missing",
+            }:
+                self.assertIn(rule_id, rule_ids)
+
+    def test_owasp_scvs_standard_profile_maps_supply_chain_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("requests\n", encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                discover_projects=False,
+                min_severity="info",
+                standard="owasp-scvs",
+                standard_category="v2-sbom",
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertEqual(rule_ids, {"prevention.sbom-missing", "prevention.dependency-track-integration-missing"})
 
     def test_sw_security_time_state_and_encapsulation_profiles_run_code_rules(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

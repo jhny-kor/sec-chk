@@ -342,6 +342,9 @@ enum AppLanguage: String, Hashable {
                 "AI/LLM 보안 계획: OWASP LLM Top 10 기준으로 프롬프트 인젝션, 민감정보 전달, 도구 권한, 모델/SDK 공급망, 적대적 테스트를 정리합니다.",
                 "모바일 보안 계획: OWASP MASVS 기준으로 Android Manifest, iOS plist, 저장소, 통신, 플랫폼 상호작용, 릴리스 서명, 기기 테스트 항목을 기록합니다.",
                 "NIST CSF 2.0 프로파일과 CISA 확인서 체크리스트: 조직 위험관리와 보안 소프트웨어 개발 확인에 필요한 증적 위치, 담당자, 검토 항목을 정리합니다.",
+                "API/SCVS/개인정보/Cloud-IaC 보안 계획: API 인벤토리와 권한, 공급망 구성요소 검증, 개인정보 데이터 맵, 클라우드 노출·IAM·암호화 기준을 문서화합니다.",
+                "보안 로드맵과 증적 보관대장: 개선 backlog, 위험 수용, 점검 리포트, SBOM, VEX, DAST, 승인 기록을 한 곳에서 추적합니다.",
+                "보안 헤더와 컨테이너 하드닝 기준: CSP/HSTS 같은 웹 헤더와 non-root, capability drop, seccomp, NetworkPolicy 같은 배포 기본값을 정리합니다.",
                 "보안 점수 추적: 점검 때마다 위험점수와 발견 항목 수를 저장해 시간 흐름에 따른 개선/악화를 봅니다. 특정 수정이 실제로 위험점수를 낮췄는지 확인할 때 유용합니다.",
                 "현재 대상을 프로파일로 저장 / 프로젝트 프로파일: 자주 점검하는 여러 폴더와 파일 묶음을 이름 붙여 저장하고 다시 불러옵니다. 반복 점검 대상이 많은 경우 매번 폴더를 다시 선택하지 않아도 됩니다.",
                 "보안 예방 키트 파일로 저장: 실제 파일을 프로젝트에 쓰지 않고, 예방 키트 전체 내용을 하나의 Markdown 문서로 내보냅니다. 팀 공유, 리뷰, 사전 검토가 필요할 때 사용합니다.",
@@ -370,6 +373,9 @@ enum AppLanguage: String, Hashable {
                 "AI/LLM Security Plan: records OWASP LLM Top 10 controls for prompt injection, sensitive-data flow, tool authority, model/SDK supply chain, and adversarial tests.",
                 "Mobile Security Plan: records OWASP MASVS work for Android manifests, iOS plists, storage, network, platform interaction, release signing, and device tests.",
                 "NIST CSF 2.0 Profile and CISA Attestation Checklist: organize evidence locations, owners, and review items for organizational risk management and secure software development attestation.",
+                "API/SCVS/Privacy/Cloud-IaC Plans: document API inventory and authorization, software component verification, privacy data maps, and cloud exposure/IAM/encryption baselines.",
+                "Security Roadmap and Evidence Register: track improvement backlog, risk acceptance, scan reports, SBOM, VEX, DAST, and approval evidence in one place.",
+                "Security Headers and Container Hardening: record web headers such as CSP/HSTS plus deployment defaults such as non-root users, capability drops, seccomp, and NetworkPolicies.",
                 "Security Score History: stores risk score and finding count after scans so you can see improvement or regression over time. It helps verify whether a remediation actually lowered risk.",
                 "Save Current Targets as Profile / Project Profiles: save frequently scanned folder and file sets by name and load them later. This avoids repeatedly selecting the same targets for recurring reviews.",
                 "Save Security Prevention Kit: exports the full prevention kit as one Markdown document without writing files into the project. Use it for team sharing, review, or pre-approval.",
@@ -1481,6 +1487,12 @@ private enum SecurityStandardLocalization {
             scope: "SSDF-based secure development attestation evidence",
             coverage: "Evidence review required"
         ),
+        "owasp-scvs": StandardText(
+            title: "OWASP Software Component Verification Standard",
+            subtitle: "Checks component inventory, SBOM, build environment, package management, component analysis, and provenance evidence.",
+            scope: "Software supply-chain component assurance",
+            coverage: "Evidence review required"
+        ),
         "owasp-dependency-check": StandardText(
             title: "OWASP Dependency-Check Baseline",
             subtitle: "Dependency hygiene baseline for identifying known vulnerable components.",
@@ -2456,7 +2468,15 @@ enum SecurityStandardCatalog {
                 category("dependencies", "의존성", "고정되지 않은 버전, 락파일 누락, 안전하지 않은 소스를 확인합니다."),
                 category("configuration", "설정", ".env, debug, 권한 상승 컨테이너 설정을 확인합니다."),
                 category("code", "코드 패턴", "XSS, SQL injection, command injection, path traversal 등을 확인합니다."),
-                category("prevention", "예방 가드레일", "SECURITY.md, 의존성 자동 업데이트, CI 보안 점검, SBOM 준비성을 확인합니다.")
+                category("prevention", "예방 가드레일", "SECURITY.md, 의존성 자동 업데이트, CI 보안 점검, SBOM 준비성을 확인합니다."),
+                category("api-security", "API 보안", "API 인증, 객체/기능 권한, mass assignment, rate limit, 외부 API timeout을 확인합니다."),
+                category("auth-session", "인증 및 세션", "JWT 검증, none 알고리즘, 긴 세션 만료, 쿠키/CSRF 설정을 확인합니다."),
+                category("cloud-iac", "Cloud/IaC", "Docker/Compose, Kubernetes, Terraform 노출, 암호화, runtime 하드닝을 확인합니다."),
+                category("privacy", "개인정보 및 PII", "개인정보 로그, 민감 데이터 프롬프트, 백업/파일 공유, 데이터 맵 준비성을 확인합니다."),
+                category("component-verification", "구성요소 검증", "OWASP SCVS 관점의 의존성, SBOM, VEX, 출처 증명 준비성을 확인합니다."),
+                category("exception-governance", "예외 거버넌스", "koda-ignore 예외의 사유, 담당자, 만료일과 만료 상태를 확인합니다."),
+                category("roadmap-evidence", "로드맵 및 증적", "보안 로드맵과 릴리스·점검·승인 증적 보관 대장을 확인합니다."),
+                category("headers-container-hardening", "헤더 및 컨테이너 하드닝", "보안 헤더 기준, directory listing/WebDAV, 컨테이너 capability와 runtime 기준을 확인합니다.")
             ],
             references: [
                 reference("KODA GitHub", "https://github.com/jhny-kor/sec-chk")
@@ -2886,6 +2906,28 @@ enum SecurityStandardCatalog {
             references: [
                 reference("CISA Secure Software Development Attestation", "https://www.cisa.gov/secure-software-attestation-form"),
                 reference("NIST SSDF SP 800-218", "https://csrc.nist.gov/publications/detail/sp/800-218/final")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "owasp-scvs",
+            title: "OWASP SCVS",
+            subtitle: "소프트웨어 구성요소 인벤토리, SBOM, 빌드 환경, 패키지 관리, 구성요소 분석, 출처 증명을 공급망 관점으로 확인합니다.",
+            scope: "소프트웨어 공급망 구성요소 보증",
+            coverage: "증적 확인 필요",
+            badge: "공급망",
+            icon: "shippingbox.and.arrow.backward",
+            accent: .orange,
+            categories: [
+                category("v1-inventory", "V1 Inventory", "의존성 매니페스트와 구성요소 인벤토리 준비성을 확인합니다."),
+                category("v2-sbom", "V2 SBOM", "SBOM 산출물과 SBOM 분석 backend 연동 준비성을 확인합니다."),
+                category("v3-build", "V3 Build Environment", "CI token 권한, 고정된 Actions, 릴리스 provenance 준비성을 확인합니다."),
+                category("v4-package", "V4 Package Management", "lockfile, 버전 고정, 안전한 패키지 소스를 확인합니다."),
+                category("v5-analysis", "V5 Component Analysis", "OSV/CVE, VEX, Dependency-Track 인수인계 준비성을 확인합니다."),
+                category("v6-provenance", "V6 Pedigree and Provenance", "SLSA/Sigstore, 체크섬, 서명, binary artifact 관리 상태를 확인합니다.")
+            ],
+            references: [
+                reference("OWASP SCVS", "https://owasp.org/www-project-software-component-verification-standard/"),
+                reference("SCVS Control Families", "https://scvs.owasp.org/scvs/using-scvs/")
             ]
         ),
         AppSecurityStandard(

@@ -328,6 +328,62 @@ struct ContentView: View {
                 .disabled(scanner.isRunning)
 
                 Button {
+                    scanner.exportAPISecurityPlan(language: language)
+                } label: {
+                    Label(language == .ko ? "API 보안 계획" : "API Security Plan", systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportSCVSPlan(language: language)
+                } label: {
+                    Label(language == .ko ? "OWASP SCVS 계획" : "OWASP SCVS Plan", systemImage: "shippingbox.and.arrow.backward")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportPrivacyDataMap(language: language)
+                } label: {
+                    Label(language == .ko ? "개인정보 데이터 맵" : "Privacy Data Map", systemImage: "person.text.rectangle")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportSecurityRoadmap(language: language)
+                } label: {
+                    Label(language == .ko ? "보안 로드맵" : "Security Roadmap", systemImage: "map")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportEvidenceRegister(language: language)
+                } label: {
+                    Label(language == .ko ? "보안 증적 보관대장" : "Evidence Register", systemImage: "archivebox")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportSecurityHeadersBaseline(language: language)
+                } label: {
+                    Label(language == .ko ? "보안 헤더 기준" : "Security Headers", systemImage: "rectangle.and.text.magnifyingglass")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportContainerHardeningBaseline(language: language)
+                } label: {
+                    Label(language == .ko ? "컨테이너 하드닝 기준" : "Container Hardening", systemImage: "shippingbox")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportCloudIACSecurityPlan(language: language)
+                } label: {
+                    Label(language == .ko ? "Cloud/IaC 보안 계획" : "Cloud/IaC Security", systemImage: "cloud")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
                     showScoreHistory = true
                 } label: {
                     Label(language.scoreHistoryTitle, systemImage: "chart.line.uptrend.xyaxis")

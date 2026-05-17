@@ -45,6 +45,7 @@ CONFIGURATION_RULE_IDS = (
     "config.compose-docker-sock",
     "config.compose-dangerous-capability",
     "config.compose-host-pid",
+    "config.compose-secret-in-environment",
     "config.k8s-privileged-container",
     "config.k8s-allow-privilege-escalation",
     "config.k8s-host-network",
@@ -52,11 +53,16 @@ CONFIGURATION_RULE_IDS = (
     "config.k8s-run-as-root",
     "config.k8s-service-account-token",
     "config.k8s-unpinned-image",
+    "config.k8s-seccomp-unconfined",
+    "config.k8s-dangerous-capability",
     "config.terraform-public-storage",
     "config.terraform-public-access-block-disabled",
     "config.terraform-open-admin-port",
     "config.terraform-wildcard-iam-action",
     "config.terraform-wildcard-principal",
+    "config.terraform-public-ingress",
+    "config.terraform-unencrypted-storage",
+    "config.terraform-sensitive-output",
     "config.github-pull-request-target",
     "config.github-untrusted-event-in-run",
     "config.android-debuggable",
@@ -89,6 +95,14 @@ CODE_PATTERN_RULE_IDS = (
     "code.wildcard-cors",
     "code.public-bind-all-interfaces",
     "code.insecure-cookie-settings",
+    "code.jwt-verification-disabled",
+    "code.jwt-none-algorithm",
+    "code.session-long-expiry",
+    "code.api-route-missing-auth",
+    "code.api-mass-assignment",
+    "code.api-missing-rate-limit",
+    "code.external-api-no-timeout",
+    "code.pii-logging",
     "code.directory-listing-enabled",
     "code.webdav-enabled",
     "code.legacy-board-software",
@@ -128,14 +142,32 @@ PREVENTION_RULE_IDS = (
     "prevention.mobile-security-plan-missing",
     "prevention.nist-csf-profile-missing",
     "prevention.cisa-attestation-missing",
+    "prevention.api-security-plan-missing",
+    "prevention.scvs-plan-missing",
+    "prevention.privacy-data-map-missing",
+    "prevention.security-roadmap-missing",
+    "prevention.evidence-register-missing",
+    "prevention.exception-reason-missing",
+    "prevention.exception-owner-missing",
+    "prevention.exception-expiry-missing",
+    "prevention.exception-expired",
+    "prevention.k8s-network-policy-missing",
+    "prevention.security-headers-guide-missing",
+    "prevention.container-hardening-guide-missing",
+    "prevention.cloud-iac-security-plan-missing",
 )
 
 ACCESS_CONTROL_RULE_IDS = (
     "code.auth-disabled-endpoint",
+    "code.api-route-missing-auth",
+    "code.api-mass-assignment",
 )
 
 AUTHENTICATION_RULE_IDS = (
     "code.auth-disabled-endpoint",
+    "code.jwt-verification-disabled",
+    "code.jwt-none-algorithm",
+    "code.session-long-expiry",
 )
 
 INJECTION_RULE_IDS = (
@@ -160,6 +192,9 @@ INSECURE_DESIGN_RULE_IDS = (
     "code.csrf-disabled",
     "code.auth-disabled-endpoint",
     "code.unbounded-request-body",
+    "code.api-missing-rate-limit",
+    "prevention.threat-model-missing",
+    "prevention.api-security-plan-missing",
 )
 
 MEMORY_SAFETY_RULE_IDS = (
@@ -170,6 +205,7 @@ SENSITIVE_DATA_RULE_IDS = SECRET_RULE_IDS + (
     "config.env-file-present",
     "config.private-key-like-file",
     "code.logging-sensitive-data",
+    "code.pii-logging",
 )
 
 INSECURE_TRANSPORT_RULE_IDS = (
@@ -210,6 +246,7 @@ LOGGING_MONITORING_RULE_IDS = (
 
 API_INVENTORY_RULE_IDS = (
     "code.unversioned-api-route",
+    "prevention.api-security-plan-missing",
 )
 
 TIME_STATE_RULE_IDS = (
@@ -231,6 +268,9 @@ MISCONFIGURATION_RULE_IDS = CONFIGURATION_RULE_IDS + (
 SESSION_MANAGEMENT_RULE_IDS = (
     "code.insecure-cookie-settings",
     "code.csrf-disabled",
+    "code.jwt-verification-disabled",
+    "code.jwt-none-algorithm",
+    "code.session-long-expiry",
 )
 
 CRYPTOGRAPHY_RULE_IDS = SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS + (
@@ -240,6 +280,77 @@ CRYPTOGRAPHY_RULE_IDS = SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS + 
 WEB_FILE_HANDLING_RULE_IDS = (
     "code.path-traversal",
     "code.unrestricted-file-upload",
+)
+
+API_SECURITY_RULE_IDS = ACCESS_CONTROL_RULE_IDS + AUTHENTICATION_RULE_IDS + (
+    "code.unbounded-request-body",
+    "code.api-missing-rate-limit",
+    "code.ssrf-user-url",
+    "code.wildcard-cors",
+    "code.external-api-no-timeout",
+    "code.unversioned-api-route",
+    "prevention.api-security-plan-missing",
+)
+
+CLOUD_IAC_RULE_IDS = (
+    "config.compose-privileged",
+    "config.compose-host-network",
+    "config.compose-docker-sock",
+    "config.compose-dangerous-capability",
+    "config.compose-host-pid",
+    "config.compose-secret-in-environment",
+    "config.k8s-privileged-container",
+    "config.k8s-allow-privilege-escalation",
+    "config.k8s-host-network",
+    "config.k8s-hostpath-volume",
+    "config.k8s-run-as-root",
+    "config.k8s-service-account-token",
+    "config.k8s-unpinned-image",
+    "config.k8s-seccomp-unconfined",
+    "config.k8s-dangerous-capability",
+    "config.terraform-public-storage",
+    "config.terraform-public-access-block-disabled",
+    "config.terraform-open-admin-port",
+    "config.terraform-wildcard-iam-action",
+    "config.terraform-wildcard-principal",
+    "config.terraform-public-ingress",
+    "config.terraform-unencrypted-storage",
+    "config.terraform-sensitive-output",
+    "prevention.k8s-network-policy-missing",
+    "prevention.container-hardening-guide-missing",
+    "prevention.cloud-iac-security-plan-missing",
+)
+
+PRIVACY_RULE_IDS = SENSITIVE_DATA_RULE_IDS + (
+    "code.pii-logging",
+    "code.llm-sensitive-data-in-prompt",
+    "config.android-allow-backup",
+    "config.ios-file-sharing-enabled",
+    "prevention.privacy-data-map-missing",
+)
+
+EXCEPTION_GOVERNANCE_RULE_IDS = (
+    "prevention.exception-reason-missing",
+    "prevention.exception-owner-missing",
+    "prevention.exception-expiry-missing",
+    "prevention.exception-expired",
+)
+
+SECURITY_GOVERNANCE_RULE_IDS = (
+    "prevention.security-roadmap-missing",
+    "prevention.evidence-register-missing",
+) + EXCEPTION_GOVERNANCE_RULE_IDS
+
+SCVS_RULE_IDS = DEPENDENCY_RULE_IDS + (
+    "prevention.scvs-plan-missing",
+    "prevention.sbom-missing",
+    "prevention.vex-missing",
+    "prevention.dependency-update-automation-missing",
+    "prevention.dependency-track-integration-missing",
+    "prevention.slsa-sigstore-missing",
+    "prevention.release-provenance-automation-missing",
+    "prevention.github-actions-unpinned",
+    "prevention.github-token-permissions-not-readonly",
 )
 
 MOBILE_CONFIGURATION_RULE_IDS = (
@@ -373,6 +484,64 @@ LOCAL_STANDARD = SecurityStandard(
             {"en": "Prevention Guardrails", "ko": "예방 가드레일"},
             scanner_categories=("prevention",),
             rule_ids=PREVENTION_RULE_IDS,
+        ),
+        StandardCategory(
+            "api-security",
+            {"en": "API Security", "ko": "API 보안"},
+            scanner_categories=("code", "prevention"),
+            rule_ids=API_SECURITY_RULE_IDS,
+        ),
+        StandardCategory(
+            "auth-session",
+            {"en": "Authentication and Session", "ko": "인증 및 세션"},
+            scanner_categories=("code",),
+            rule_ids=AUTHENTICATION_RULE_IDS + SESSION_MANAGEMENT_RULE_IDS,
+        ),
+        StandardCategory(
+            "cloud-iac",
+            {"en": "Cloud and IaC", "ko": "Cloud/IaC"},
+            scanner_categories=("configuration", "prevention"),
+            rule_ids=CLOUD_IAC_RULE_IDS,
+        ),
+        StandardCategory(
+            "privacy",
+            {"en": "Privacy and PII", "ko": "개인정보 및 PII"},
+            scanner_categories=("secrets", "configuration", "code", "prevention"),
+            rule_ids=PRIVACY_RULE_IDS,
+        ),
+        StandardCategory(
+            "component-verification",
+            {"en": "Component Verification", "ko": "구성요소 검증"},
+            scanner_categories=("dependencies", "prevention"),
+            rule_ids=SCVS_RULE_IDS,
+        ),
+        StandardCategory(
+            "exception-governance",
+            {"en": "Exception Governance", "ko": "예외 거버넌스"},
+            scanner_categories=("prevention",),
+            rule_ids=EXCEPTION_GOVERNANCE_RULE_IDS,
+        ),
+        StandardCategory(
+            "roadmap-evidence",
+            {"en": "Roadmap and Evidence", "ko": "로드맵 및 증적"},
+            scanner_categories=("prevention",),
+            rule_ids=SECURITY_GOVERNANCE_RULE_IDS,
+        ),
+        StandardCategory(
+            "headers-container-hardening",
+            {"en": "Headers and Container Hardening", "ko": "헤더 및 컨테이너 하드닝"},
+            scanner_categories=("configuration", "code", "prevention"),
+            rule_ids=(
+                "code.directory-listing-enabled",
+                "code.webdav-enabled",
+                "config.compose-privileged",
+                "config.compose-host-network",
+                "config.compose-dangerous-capability",
+                "config.k8s-seccomp-unconfined",
+                "config.k8s-dangerous-capability",
+                "prevention.security-headers-guide-missing",
+                "prevention.container-hardening-guide-missing",
+            ),
         ),
     ),
     description=_text(
@@ -691,7 +860,7 @@ _OWASP_API_2023_CATEGORIES = (
         "api4-unrestricted-resource-consumption",
         {"en": "API4 Unrestricted Resource Consumption", "ko": "API4 제한 없는 리소스 사용"},
         scanner_categories=("code",),
-        rule_ids=("code.unbounded-request-body",),
+        rule_ids=("code.unbounded-request-body", "code.api-missing-rate-limit"),
     ),
     StandardCategory(
         "api5-broken-function-level-authorization",
@@ -702,8 +871,8 @@ _OWASP_API_2023_CATEGORIES = (
     StandardCategory(
         "api6-unrestricted-access-sensitive-business-flows",
         {"en": "API6 Unrestricted Access to Sensitive Business Flows", "ko": "API6 민감 비즈니스 흐름 접근 제한 미흡"},
-        scanner_categories=("code",),
-        rule_ids=ACCESS_CONTROL_RULE_IDS + ("code.unbounded-request-body",),
+        scanner_categories=("code", "prevention"),
+        rule_ids=ACCESS_CONTROL_RULE_IDS + ("code.unbounded-request-body", "code.api-missing-rate-limit", "prevention.api-security-plan-missing"),
     ),
     StandardCategory(
         "api7-server-side-request-forgery",
@@ -727,7 +896,7 @@ _OWASP_API_2023_CATEGORIES = (
         "api10-unsafe-consumption-of-apis",
         {"en": "API10 Unsafe Consumption of APIs", "ko": "API10 안전하지 않은 API 사용"},
         scanner_categories=("dependencies", "configuration", "code"),
-        rule_ids=INSECURE_TRANSPORT_RULE_IDS + REMOTE_EXECUTION_RULE_IDS + ("code.ssrf-user-url",),
+        rule_ids=INSECURE_TRANSPORT_RULE_IDS + REMOTE_EXECUTION_RULE_IDS + ("code.ssrf-user-url", "code.external-api-no-timeout"),
     ),
 )
 
@@ -1807,6 +1976,37 @@ CISA_SECURE_SOFTWARE_ATTESTATION = SecurityStandard(
     coverage_level="evidence",
 )
 
+_OWASP_SCVS_CATEGORIES = (
+    StandardCategory("v1-inventory", {"en": "V1 Inventory", "ko": "V1 인벤토리"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + ("prevention.scvs-plan-missing",)),
+    StandardCategory("v2-sbom", {"en": "V2 SBOM", "ko": "V2 SBOM"}, scanner_categories=("prevention",), rule_ids=("prevention.sbom-missing", "prevention.dependency-track-integration-missing")),
+    StandardCategory("v3-build-environment", {"en": "V3 Build Environment", "ko": "V3 빌드 환경"}, scanner_categories=("configuration", "prevention"), rule_ids=("prevention.github-token-permissions-not-readonly", "prevention.github-actions-unpinned", "prevention.ci-security-scan-missing", "prevention.release-provenance-automation-missing")),
+    StandardCategory("v4-package-management", {"en": "V4 Package Management", "ko": "V4 패키지 관리"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + ("prevention.dependency-update-automation-missing",)),
+    StandardCategory("v5-component-analysis", {"en": "V5 Component Analysis", "ko": "V5 구성요소 분석"}, scanner_categories=("dependencies", "prevention"), rule_ids=("dependency.osv-known-vulnerability", "prevention.vex-missing", "prevention.dependency-track-integration-missing")),
+    StandardCategory("v6-pedigree-provenance", {"en": "V6 Pedigree and Provenance", "ko": "V6 출처 및 계보"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing", "prevention.release-provenance-automation-missing", "prevention.binary-artifact-committed")),
+)
+
+OWASP_SCVS = SecurityStandard(
+    "owasp-scvs",
+    {"en": "OWASP SCVS", "ko": "OWASP SCVS"},
+    (
+        _all_category(_OWASP_SCVS_CATEGORIES, {"en": "All mapped SCVS checks", "ko": "매핑된 SCVS 항목 전체"}),
+        *_OWASP_SCVS_CATEGORIES,
+    ),
+    description=_text(
+        "OWASP Software Component Verification Standard controls mapped to dependency inventory, SBOM, build environment, package management, component analysis, and provenance evidence.",
+        "OWASP Software Component Verification Standard 통제를 의존성 인벤토리, SBOM, 빌드 환경, 패키지 관리, 구성요소 분석, 출처 증거에 매핑한 프로파일입니다.",
+    ),
+    coverage=_text(
+        "Automatic local and evidence checks. Procurement and organizational risk-acceptance evidence still require human confirmation.",
+        "자동 로컬 점검과 증적 확인을 함께 수행합니다. 조달 및 조직 위험 수용 증거는 사람이 최종 확인해야 합니다.",
+    ),
+    references=(
+        _reference("OWASP Software Component Verification Standard", "OWASP SCVS", "https://owasp.org/www-project-software-component-verification-standard/"),
+        _reference("SCVS control families", "SCVS control families", "https://scvs.owasp.org/scvs/using-scvs/"),
+    ),
+    coverage_level="evidence",
+)
+
 
 SECURITY_STANDARDS = (
     LOCAL_STANDARD,
@@ -1835,6 +2035,7 @@ SECURITY_STANDARDS = (
     CISA_SECURE_BY_DESIGN,
     NIST_CSF_2,
     CISA_SECURE_SOFTWARE_ATTESTATION,
+    OWASP_SCVS,
     CISA_KEV_EPSS_PRIORITY,
     SLSA_SIGSTORE_BASELINE,
 )

@@ -34,6 +34,14 @@ def security_template_files(project_name: str = "KODA Project") -> dict[str, str
         "docs/security/MOBILE_SECURITY.md": render_mobile_security_plan(clean_name),
         "docs/security/NIST_CSF_2_PROFILE.md": render_nist_csf_profile(clean_name),
         "docs/security/CISA_SECURE_SOFTWARE_ATTESTATION.md": render_cisa_attestation_checklist(clean_name),
+        "docs/security/API_SECURITY.md": render_api_security_plan(clean_name),
+        "docs/security/SCVS_PLAN.md": render_scvs_plan(clean_name),
+        "docs/security/PRIVACY_DATA_MAP.md": render_privacy_data_map(clean_name),
+        "docs/security/SECURITY_ROADMAP.md": render_security_roadmap(clean_name),
+        "docs/security/EVIDENCE_REGISTER.md": render_evidence_register(clean_name),
+        "docs/security/SECURITY_HEADERS.md": render_security_headers_baseline(clean_name),
+        "docs/security/CONTAINER_HARDENING.md": render_container_hardening_baseline(clean_name),
+        "docs/security/CLOUD_IAC_SECURITY.md": render_cloud_iac_security_plan(clean_name),
     }
 
 
@@ -436,6 +444,191 @@ This checklist helps collect evidence before a responsible producer signs or sub
 - [ ] Responsible owner:
 - [ ] Review date:
 - [ ] Known limitations or compensating controls:
+"""
+
+
+def render_api_security_plan(project_name: str = "KODA Project") -> str:
+    return f"""# API Security Plan
+
+Project: {project_name}
+
+Use this checklist with OWASP API Security Top 10:2023.
+
+## Inventory
+
+| API | Version | Auth Required | Data Class | Owner |
+| --- | --- | --- | --- | --- |
+| TBD | /api/v1 | yes | TBD | TBD |
+
+## Controls
+
+- [ ] Object-level authorization is checked for every user-controlled object ID.
+- [ ] Function-level authorization is explicit for admin, payment, account, and profile routes.
+- [ ] Request body schemas reject unknown properties to prevent mass assignment.
+- [ ] Rate limits and quotas cover login, signup, password reset, search, export, and high-cost APIs.
+- [ ] Outbound API calls use allowlisted destinations, timeouts, retry limits, and SSRF protections.
+- [ ] API versions, deprecation dates, and owners are documented.
+"""
+
+
+def render_scvs_plan(project_name: str = "KODA Project") -> str:
+    return f"""# OWASP SCVS Plan
+
+Project: {project_name}
+
+## V1 Inventory
+
+- [ ] Source, package, container, plugin, model, and generated components are inventoried.
+- [ ] Each component has owner, source, version, license, and business purpose.
+
+## V2 SBOM
+
+- [ ] CycloneDX or SPDX SBOM is generated for release builds.
+- [ ] SBOM files are retained with release packages and uploaded to the selected analysis backend.
+
+## V3 Build Environment
+
+- [ ] CI runners are least-privilege and build from protected refs.
+- [ ] GitHub Actions or equivalent build steps use pinned actions and minimal tokens.
+
+## V4 Package Management
+
+- [ ] Lockfiles are committed for package ecosystems that support them.
+- [ ] Package registries are approved and HTTP package sources are blocked.
+
+## V5 Component Analysis
+
+- [ ] OSV/CVE, KEV/EPSS, and dependency scan results are triaged before release.
+- [ ] VEX records explain not-affected, fixed, or accepted dependency decisions.
+
+## V6 Pedigree And Provenance
+
+- [ ] Release artifacts are built in CI, checksummed, signed, and linked to provenance.
+- [ ] Third-party or vendored components have review notes and update owners.
+"""
+
+
+def render_privacy_data_map(project_name: str = "KODA Project") -> str:
+    return f"""# Privacy Data Map
+
+Project: {project_name}
+
+## Data Inventory
+
+| Field | Category | Purpose | Storage | Retention | Sharing | Owner |
+| --- | --- | --- | --- | --- | --- | --- |
+| email | personal data | account/contact | TBD | TBD | TBD | TBD |
+
+## Handling Rules
+
+- [ ] Personal data is not logged in raw form.
+- [ ] Test fixtures and demo data avoid real personal data.
+- [ ] Retention and deletion behavior is documented.
+- [ ] Analytics, AI/LLM prompts, crash reports, and support exports are reviewed for personal data.
+- [ ] Access to production personal data is approved, logged, and time-bound.
+"""
+
+
+def render_security_roadmap(project_name: str = "KODA Project") -> str:
+    return f"""# Security Roadmap
+
+Project: {project_name}
+
+| Priority | Work Item | Standard | Owner | Due Date | Status | Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| P1 | Remove critical/high KODA findings | Local / OWASP | TBD | TBD | planned | reports/ |
+| P1 | Complete threat model and API inventory | OWASP API / ASVS | TBD | TBD | planned | docs/security/ |
+| P2 | Complete SCVS supply-chain evidence | OWASP SCVS | TBD | TBD | planned | release package |
+
+## Cadence
+
+- [ ] Review this roadmap before each release.
+- [ ] Convert accepted risks into `koda-ignore.yml` entries with owner, reason, and expiry.
+- [ ] Re-run KODA after remediation and compare score history.
+"""
+
+
+def render_evidence_register(project_name: str = "KODA Project") -> str:
+    return f"""# Security Evidence Register
+
+Project: {project_name}
+
+| Evidence | Standard | Location | Owner | Review Date | Notes |
+| --- | --- | --- | --- | --- | --- |
+| KODA scan report | Local / OWASP / CWE | reports/security-dashboard.html | TBD | TBD | TBD |
+| SBOM | SCVS / SSDF | reports/sbom.cdx.json | TBD | TBD | TBD |
+| VEX | SCVS / vulnerability response | reports/vex.cdx.json | TBD | TBD | TBD |
+| Threat model | ASVS / API / Secure by Design | docs/security/THREAT_MODEL.md | TBD | TBD | TBD |
+| Release package | SLSA / CISA | release-security/ | TBD | TBD | TBD |
+"""
+
+
+def render_security_headers_baseline(project_name: str = "KODA Project") -> str:
+    return f"""# Security Headers Baseline
+
+Project: {project_name}
+
+Apply these headers at the edge, reverse proxy, or application layer where appropriate.
+
+| Header | Baseline |
+| --- | --- |
+| Content-Security-Policy | default-src 'self'; frame-ancestors 'none'; object-src 'none' |
+| Strict-Transport-Security | max-age=31536000; includeSubDomains |
+| X-Content-Type-Options | nosniff |
+| Referrer-Policy | no-referrer or strict-origin-when-cross-origin |
+| Permissions-Policy | disable unused browser capabilities |
+| Cache-Control | no-store for sensitive authenticated responses |
+
+- [ ] Document exceptions for embedded third-party content.
+- [ ] Test with browser developer tools or an approved header scanner.
+"""
+
+
+def render_container_hardening_baseline(project_name: str = "KODA Project") -> str:
+    return f"""# Container Hardening Baseline
+
+Project: {project_name}
+
+## Docker / Compose
+
+- [ ] Runtime image uses a non-root user.
+- [ ] Images are pinned to reviewed tags or digests.
+- [ ] Docker socket is not mounted into application containers.
+- [ ] Secrets are injected at runtime and not committed in compose files.
+- [ ] Filesystem is read-only where practical and writable paths are explicit.
+
+## Kubernetes
+
+- [ ] `runAsNonRoot: true` and `allowPrivilegeEscalation: false` are set.
+- [ ] `seccompProfile.type: RuntimeDefault` is used.
+- [ ] Linux capabilities are dropped by default.
+- [ ] Resource requests/limits and NetworkPolicies are defined.
+- [ ] Service account token auto-mounting is disabled unless required.
+"""
+
+
+def render_cloud_iac_security_plan(project_name: str = "KODA Project") -> str:
+    return f"""# Cloud and IaC Security Plan
+
+Project: {project_name}
+
+## Exposure
+
+- [ ] Public ingress is limited to intended ports and source ranges.
+- [ ] Admin access uses VPN, bastion, device posture, or approved management plane controls.
+- [ ] Storage buckets, databases, and queues are private by default.
+
+## Identity
+
+- [ ] IAM policies avoid wildcard actions and principals.
+- [ ] Service identities are scoped by workload and environment.
+- [ ] Break-glass and admin roles have owners, MFA, logging, and review cadence.
+
+## Data Protection
+
+- [ ] Storage encryption is enabled.
+- [ ] Terraform outputs avoid raw secrets and use `sensitive = true` when needed.
+- [ ] State files are encrypted, access-controlled, and excluded from source control.
 """
 
 

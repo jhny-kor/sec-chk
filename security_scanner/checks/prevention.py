@@ -74,6 +74,7 @@ DAST_WORKFLOW_KEYWORDS = ("zap-baseline", "zaproxy", "owasp/zap", "ghcr.io/zapro
 DEPENDENCY_TRACK_KEYWORDS = ("dependency-track", "/api/v1/bom")
 SLSA_SIGSTORE_KEYWORDS = ("slsa", "sigstore", "cosign", "provenance", "attestation", "attest")
 AI_LLM_KEYWORDS = ("openai", "anthropic", "langchain", "llamaindex", "chat.completions", "responses.create", "generatecontent", "tool_choice", "function_call")
+API_KEYWORDS = ("app.get(", "app.post(", "router.get(", "router.post(", "fastapi(", "@getmapping", "@postmapping", "/api/")
 VEX_NAMES = {"vex.json", "vex.cdx.json", "cyclonedx-vex.json", "openvex.json"}
 VEX_SUFFIXES = {".json"}
 PRE_COMMIT_GUIDE_PATHS = {"docs/security/pre_commit.md", "docs/security/pre-commit.md"}
@@ -87,6 +88,14 @@ AI_LLM_SECURITY_PATHS = {"docs/security/ai_llm_security.md", "docs/security/llm_
 MOBILE_SECURITY_PATHS = {"docs/security/mobile_security.md", "docs/security/mobile-security.md"}
 NIST_CSF_PROFILE_PATHS = {"docs/security/nist_csf_2_profile.md", "docs/security/nist-csf-2-profile.md"}
 CISA_ATTESTATION_PATHS = {"docs/security/cisa_secure_software_attestation.md", "docs/security/cisa-attestation.md"}
+API_SECURITY_PATHS = {"docs/security/api_security.md", "docs/security/api-security.md"}
+SCVS_PLAN_PATHS = {"docs/security/scvs_plan.md", "docs/security/owasp_scvs.md", "docs/security/software_component_verification.md"}
+PRIVACY_DATA_MAP_PATHS = {"docs/security/privacy_data_map.md", "docs/security/privacy-data-map.md", "docs/security/data_inventory.md"}
+SECURITY_ROADMAP_PATHS = {"docs/security/security_roadmap.md", "docs/security/security-roadmap.md"}
+EVIDENCE_REGISTER_PATHS = {"docs/security/evidence_register.md", "docs/security/security_evidence.md"}
+SECURITY_HEADERS_PATHS = {"docs/security/security_headers.md", "docs/security/security-headers.md"}
+CONTAINER_HARDENING_PATHS = {"docs/security/container_hardening.md", "docs/security/container-hardening.md"}
+CLOUD_IAC_SECURITY_PATHS = {"docs/security/cloud_iac_security.md", "docs/security/cloud-iac-security.md"}
 RELEASE_PROVENANCE_WORKFLOW_PATHS = {".github/workflows/koda-release-provenance.yml", ".github/workflows/koda-release-provenance.yaml"}
 RELEASE_PROVENANCE_KEYWORDS = (
     "slsa-framework",
@@ -139,8 +148,11 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
     has_dependency_manifest = bool(DEPENDENCY_MANIFEST_NAMES & basenames)
     has_source_code = any(path.suffix.lower() in {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rb", ".php", ".cs", ".swift", ".rs"} for path in file_list)
     has_ai_llm_code = _project_text_contains(file_list, target, AI_LLM_KEYWORDS)
+    has_api_code = _project_text_contains(file_list, target, API_KEYWORDS)
     has_mobile_project = _looks_like_mobile_project(file_list, basenames, lower_rel_paths, target)
+    has_cloud_iac = _looks_like_cloud_iac(file_list, basenames, lower_rel_paths)
     dockerfiles = [path for path in file_list if path.name == "Dockerfile" or path.name.startswith("Dockerfile.")]
+    k8s_files = [path for path in file_list if _looks_like_kubernetes_manifest(path)]
     env_files = [
         path
         for path in file_list
@@ -149,6 +161,7 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
     workflow_files = [path for path in file_list if normalized_relpath(path, root).startswith(".github/workflows/")]
     workflow_texts = _workflow_texts(workflow_files, target)
     combined_workflow_text = "\n".join(workflow_texts)
+    findings.extend(_ignore_file_findings(root, file_list, target))
 
     if (has_source_code or has_dependency_manifest) and not (SECURITY_POLICY_PATHS & rel_paths):
         findings.append(
@@ -324,6 +337,19 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
             )
         )
 
+    if has_api_code and not (API_SECURITY_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.api-security-plan-missing",
+                "info",
+                root,
+                "API security plan is not documented",
+                "docs/security/API_SECURITY.md",
+                "API routes or handlers detected without an API security checklist",
+                "Document API inventory, authn/authz, rate limits, object authorization, schema validation, and unsafe external API consumption controls.",
+            )
+        )
+
     if has_mobile_project and not (MOBILE_SECURITY_PATHS & lower_rel_paths):
         findings.append(
             _finding(
@@ -337,6 +363,32 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
             )
         )
 
+    if has_cloud_iac and not (CLOUD_IAC_SECURITY_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.cloud-iac-security-plan-missing",
+                "info",
+                root,
+                "Cloud/IaC security baseline is not documented",
+                "docs/security/CLOUD_IAC_SECURITY.md",
+                "Cloud, Terraform, Kubernetes, or Compose files detected without an IaC security plan",
+                "Document network exposure, IAM boundaries, encryption, container runtime hardening, and deployment review requirements.",
+            )
+        )
+
+    if k8s_files and not _has_kubernetes_network_policy(file_list):
+        findings.append(
+            _finding(
+                "prevention.k8s-network-policy-missing",
+                "info",
+                root,
+                "Kubernetes NetworkPolicy is not present",
+                "Kubernetes NetworkPolicy",
+                "Kubernetes workload manifests exist but no NetworkPolicy was found",
+                "Add NetworkPolicies or document why the namespace relies on another network isolation layer.",
+            )
+        )
+
     if (has_source_code or has_dependency_manifest) and not (NIST_CSF_PROFILE_PATHS & lower_rel_paths):
         findings.append(
             _finding(
@@ -347,6 +399,84 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
                 "docs/security/NIST_CSF_2_PROFILE.md",
                 "No NIST CSF profile found",
                 "Map Govern, Identify, Protect, Detect, Respond, and Recover activities to project evidence and owners.",
+            )
+        )
+
+    if has_dependency_manifest and not (SCVS_PLAN_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.scvs-plan-missing",
+                "info",
+                root,
+                "OWASP SCVS component verification plan is not documented",
+                "docs/security/SCVS_PLAN.md",
+                "Dependency manifests exist without a software component verification plan",
+                "Document component inventory, SBOM, build environment, package management, component analysis, and provenance controls.",
+            )
+        )
+
+    if (has_source_code or env_files) and not (PRIVACY_DATA_MAP_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.privacy-data-map-missing",
+                "info",
+                root,
+                "Privacy data map is not documented",
+                "docs/security/PRIVACY_DATA_MAP.md",
+                "No data inventory or privacy map found",
+                "Record personal data fields, purposes, storage locations, retention, sharing, and logging restrictions.",
+            )
+        )
+
+    if (has_source_code or has_dependency_manifest) and not (SECURITY_ROADMAP_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.security-roadmap-missing",
+                "info",
+                root,
+                "Security roadmap is not documented",
+                "docs/security/SECURITY_ROADMAP.md",
+                "No security roadmap found",
+                "Track security backlog, owners, due dates, accepted risks, and target control maturity in one project roadmap.",
+            )
+        )
+
+    if (has_source_code or has_dependency_manifest) and not (EVIDENCE_REGISTER_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.evidence-register-missing",
+                "info",
+                root,
+                "Security evidence register is not documented",
+                "docs/security/EVIDENCE_REGISTER.md",
+                "No security evidence register found",
+                "Keep links to scan reports, SBOM, VEX, DAST, review decisions, attestations, and approvals for audit/release review.",
+            )
+        )
+
+    if _looks_like_web_project(file_list, basenames) and not (SECURITY_HEADERS_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.security-headers-guide-missing",
+                "info",
+                root,
+                "Security headers baseline is not documented",
+                "docs/security/SECURITY_HEADERS.md",
+                "Web project detected without a security headers guide",
+                "Document expected CSP, HSTS, X-Content-Type-Options, Referrer-Policy, and Permissions-Policy settings.",
+            )
+        )
+
+    if (dockerfiles or k8s_files or any(path.name in {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"} for path in file_list)) and not (CONTAINER_HARDENING_PATHS & lower_rel_paths):
+        findings.append(
+            _finding(
+                "prevention.container-hardening-guide-missing",
+                "info",
+                root,
+                "Container hardening guide is not documented",
+                "docs/security/CONTAINER_HARDENING.md",
+                "Container deployment files exist without a hardening baseline",
+                "Document non-root users, read-only filesystems, dropped capabilities, image pinning, resource limits, and runtime profiles.",
             )
         )
 
@@ -597,6 +727,153 @@ def _looks_like_mobile_project(files: Iterable[Path], basenames: set[str], lower
         if "com.android.application" in text or "com.android.library" in text:
             return True
     return False
+
+
+def _looks_like_cloud_iac(files: Iterable[Path], basenames: set[str], lower_rel_paths: set[str]) -> bool:
+    if {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"} & basenames:
+        return True
+    if any(path.name == "Dockerfile" or path.name.startswith("Dockerfile.") or path.suffix.lower() in {".tf", ".tfvars"} for path in files):
+        return True
+    return any(any(part in rel_path for part in ("/k8s/", "/kubernetes/", "/helm/", "/terraform/", "/infra/")) for rel_path in lower_rel_paths)
+
+
+def _looks_like_kubernetes_manifest(path: Path) -> bool:
+    lower_name = path.name.lower()
+    if lower_name in {"deployment.yml", "deployment.yaml", "pod.yml", "pod.yaml", "daemonset.yml", "daemonset.yaml", "statefulset.yml", "statefulset.yaml", "networkpolicy.yml", "networkpolicy.yaml"}:
+        return True
+    if path.suffix.lower() not in {".yaml", ".yml"}:
+        return False
+    lowered_parts = {part.lower() for part in path.parts}
+    return bool({"k8s", "kubernetes", "manifests", "helm"} & lowered_parts)
+
+
+def _has_kubernetes_network_policy(files: Iterable[Path]) -> bool:
+    for path in files:
+        if path.suffix.lower() not in {".yaml", ".yml"}:
+            continue
+        if "networkpolicy" in path.name.lower():
+            return True
+        lines = read_text_lines(path, 524288)
+        if not lines:
+            continue
+        if "kind: networkpolicy" in "\n".join(lines).lower():
+            return True
+    return False
+
+
+def _ignore_file_findings(root: Path, files: Iterable[Path], target: TargetConfig) -> list[Finding]:
+    findings: list[Finding] = []
+    for path in files:
+        if path.name not in {"koda-ignore.yml", ".koda-ignore.yml"}:
+            continue
+        lines = read_text_lines(path, target.max_file_size_bytes)
+        if not lines:
+            continue
+        findings.extend(_inspect_ignore_file(root, path, lines))
+    return findings
+
+
+def _inspect_ignore_file(root: Path, path: Path, lines: list[str]) -> list[Finding]:
+    from datetime import date
+
+    findings: list[Finding] = []
+    current: dict[str, tuple[str, int]] = {}
+
+    def flush() -> None:
+        if not current:
+            return
+        line = min((line_number for _, line_number in current.values()), default=None)
+        rule = current.get("rule", ("*", line or 1))[0]
+        evidence = f"rule={rule}, path={current.get('path', ('*', 0))[0]}"
+        if not current.get("reason", ("", 0))[0]:
+            findings.append(
+                Finding(
+                    rule_id="prevention.exception-reason-missing",
+                    category="prevention",
+                    severity="low",
+                    title="KODA exception lacks a reason",
+                    path=path,
+                    line=line,
+                    evidence=evidence,
+                    description="Finding exceptions without a clear reason are hard to review and can hide real risk.",
+                    recommendation="Add a specific reason describing why the finding is accepted or considered false positive.",
+                )
+            )
+        if not current.get("owner", ("", 0))[0]:
+            findings.append(
+                Finding(
+                    rule_id="prevention.exception-owner-missing",
+                    category="prevention",
+                    severity="low",
+                    title="KODA exception lacks an owner",
+                    path=path,
+                    line=line,
+                    evidence=evidence,
+                    description="Finding exceptions need an accountable owner for review and renewal decisions.",
+                    recommendation="Add owner with the accountable person, team, or ticket queue.",
+                )
+            )
+        until = current.get("until", ("", 0))[0]
+        if not until:
+            findings.append(
+                Finding(
+                    rule_id="prevention.exception-expiry-missing",
+                    category="prevention",
+                    severity="medium",
+                    title="KODA exception lacks an expiry date",
+                    path=path,
+                    line=line,
+                    evidence=evidence,
+                    description="Open-ended exceptions tend to become permanent risk acceptance.",
+                    recommendation="Add until in YYYY-MM-DD format and review the exception before extending it.",
+                )
+            )
+        else:
+            try:
+                if date.fromisoformat(until) < date.today():
+                    findings.append(
+                        Finding(
+                            rule_id="prevention.exception-expired",
+                            category="prevention",
+                            severity="medium",
+                            title="KODA exception is expired",
+                            path=path,
+                            line=current.get("until", ("", line or 1))[1],
+                            evidence=f"{evidence}, until={until}",
+                            description="Expired exceptions no longer suppress findings and should be reviewed or removed.",
+                            recommendation="Remove the exception, fix the underlying issue, or renew it with a fresh approval and reason.",
+                        )
+                    )
+            except ValueError:
+                findings.append(
+                    Finding(
+                        rule_id="prevention.exception-expiry-missing",
+                        category="prevention",
+                        severity="medium",
+                        title="KODA exception expiry is invalid",
+                        path=path,
+                        line=current.get("until", ("", line or 1))[1],
+                        evidence=f"{evidence}, until={until}",
+                        description="Exception expiry could not be parsed as YYYY-MM-DD.",
+                        recommendation="Use an ISO date such as 2099-12-31 for the until field.",
+                    )
+                )
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        stripped = raw_line.split("#", 1)[0].strip()
+        if not stripped or stripped == "ignore:":
+            continue
+        if stripped.startswith("- "):
+            flush()
+            current = {}
+            stripped = stripped[2:].strip()
+        if ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        current[key.strip()] = (value.strip().strip("'\""), line_number)
+    flush()
+    del root
+    return findings
 
 
 def _is_git_repo(root: Path) -> bool:

@@ -273,6 +273,20 @@ def _check_compose(path: Path, target: TargetConfig) -> list[Finding]:
                     recommendation="Use the default container PID namespace unless host PID access is explicitly required and reviewed.",
                 )
             )
+        if re.search(r"\b[A-Z0-9_]*(PASSWORD|TOKEN|SECRET|API_KEY|ACCESS_KEY)[A-Z0-9_]*\s*=", line, re.IGNORECASE):
+            findings.append(
+                Finding(
+                    rule_id="config.compose-secret-in-environment",
+                    category="configuration",
+                    severity="medium",
+                    title="Compose environment appears to inline a secret",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Compose environment values can be committed or exposed through container metadata.",
+                    recommendation="Move sensitive values to a secret manager or runtime-only environment injection and keep only placeholder names in compose files.",
+                )
+            )
     return findings
 
 
@@ -379,6 +393,34 @@ def _check_kubernetes_manifest(path: Path, target: TargetConfig) -> list[Finding
                     recommendation="Set automountServiceAccountToken: false unless the workload needs Kubernetes API access.",
                 )
             )
+        if lowered in {"seccompprofile: unconfined", "type: unconfined"}:
+            findings.append(
+                Finding(
+                    rule_id="config.k8s-seccomp-unconfined",
+                    category="configuration",
+                    severity="medium",
+                    title="Kubernetes workload disables seccomp confinement",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Unconfined seccomp profiles remove an important kernel syscall boundary.",
+                    recommendation="Use RuntimeDefault seccomp profiles unless a reviewed workload exception exists.",
+                )
+            )
+        if lowered in {"- sys_admin", "- net_admin", "add: [sys_admin]", "add: [net_admin]"} or re.search(r"\badd:\s*\[.*(sys_admin|net_admin)", lowered):
+            findings.append(
+                Finding(
+                    rule_id="config.k8s-dangerous-capability",
+                    category="configuration",
+                    severity="medium",
+                    title="Kubernetes workload adds broad Linux capabilities",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Capabilities such as SYS_ADMIN and NET_ADMIN can materially weaken pod isolation.",
+                    recommendation="Drop all capabilities by default and add only the minimum reviewed capability needed.",
+                )
+            )
         if re.match(r"^-?\s*image:", lowered) and (":latest" in lowered or re.match(r"^-?\s*image:\s*[^:@\s]+$", lowered)):
             findings.append(
                 Finding(
@@ -473,6 +515,48 @@ def _check_terraform(path: Path, target: TargetConfig) -> list[Finding]:
                     evidence=line,
                     description="Wildcard principals can expose resources to unintended identities.",
                     recommendation="Scope principals to approved accounts, roles, services, or federated identities.",
+                )
+            )
+        if "0.0.0.0/0" in lowered and not _nearby_admin_port(lines, line_number):
+            findings.append(
+                Finding(
+                    rule_id="config.terraform-public-ingress",
+                    category="configuration",
+                    severity="medium",
+                    title="Terraform security group allows public ingress",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Broad public ingress should be reviewed even when it is not an admin port.",
+                    recommendation="Restrict source CIDRs to intended clients or front traffic through an approved load balancer or edge control.",
+                )
+            )
+        if re.search(r"\b(encrypted|enable_server_side_encryption|storage_encrypted)\s*=\s*false\b", lowered):
+            findings.append(
+                Finding(
+                    rule_id="config.terraform-unencrypted-storage",
+                    category="configuration",
+                    severity="medium",
+                    title="Terraform storage encryption appears disabled",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Disabling storage encryption can expose data if disks, buckets, snapshots, or backups are accessed.",
+                    recommendation="Enable encryption at rest and document any service-specific exception.",
+                )
+            )
+        if re.search(r'\b(output)\s+"[^"]*(secret|password|token|key)[^"]*"', lowered) or re.search(r"\bsensitive\s*=\s*false\b", lowered):
+            findings.append(
+                Finding(
+                    rule_id="config.terraform-sensitive-output",
+                    category="configuration",
+                    severity="medium",
+                    title="Terraform output may expose sensitive values",
+                    path=path,
+                    line=line_number,
+                    evidence=line,
+                    description="Terraform outputs can leak secrets into state, logs, and CI artifacts when not marked sensitive.",
+                    recommendation="Mark sensitive outputs with sensitive = true and avoid outputting raw credentials.",
                 )
             )
     return findings

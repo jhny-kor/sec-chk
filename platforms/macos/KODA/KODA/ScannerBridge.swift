@@ -835,6 +835,102 @@ final class ScannerBridge: ObservableObject {
         )
     }
 
+    func exportAPISecurityPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-api-security-plan.md",
+            panelMessageKO: "API 보안 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the API security plan.",
+            successKO: "API 보안 계획 저장 완료",
+            successEN: "API security plan saved",
+            content: SecurityPreventionToolkit.apiSecurityPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
+    func exportSCVSPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-owasp-scvs-plan.md",
+            panelMessageKO: "OWASP SCVS 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the OWASP SCVS plan.",
+            successKO: "OWASP SCVS 계획 저장 완료",
+            successEN: "OWASP SCVS plan saved",
+            content: SecurityPreventionToolkit.scvsPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
+    func exportPrivacyDataMap(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-privacy-data-map.md",
+            panelMessageKO: "개인정보 데이터 맵을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the privacy data map.",
+            successKO: "개인정보 데이터 맵 저장 완료",
+            successEN: "Privacy data map saved",
+            content: SecurityPreventionToolkit.privacyDataMap(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
+    func exportSecurityRoadmap(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-security-roadmap.md",
+            panelMessageKO: "보안 로드맵을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the security roadmap.",
+            successKO: "보안 로드맵 저장 완료",
+            successEN: "Security roadmap saved",
+            content: SecurityPreventionToolkit.securityRoadmap(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
+    func exportEvidenceRegister(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-evidence-register.md",
+            panelMessageKO: "보안 증적 보관대장을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the security evidence register.",
+            successKO: "보안 증적 보관대장 저장 완료",
+            successEN: "Security evidence register saved",
+            content: SecurityPreventionToolkit.evidenceRegister(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
+    func exportSecurityHeadersBaseline(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-security-headers.md",
+            panelMessageKO: "보안 헤더 기준을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the security headers baseline.",
+            successKO: "보안 헤더 기준 저장 완료",
+            successEN: "Security headers baseline saved",
+            content: SecurityPreventionToolkit.securityHeadersBaseline(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
+    func exportContainerHardeningBaseline(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-container-hardening.md",
+            panelMessageKO: "컨테이너 하드닝 기준을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the container hardening baseline.",
+            successKO: "컨테이너 하드닝 기준 저장 완료",
+            successEN: "Container hardening baseline saved",
+            content: SecurityPreventionToolkit.containerHardeningBaseline(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
+    func exportCloudIACSecurityPlan(language: AppLanguage) {
+        exportGeneratedMarkdown(
+            defaultFileName: "KODA-cloud-iac-security.md",
+            panelMessageKO: "Cloud/IaC 보안 계획을 저장할 위치를 선택하세요.",
+            panelMessageEN: "Choose where to save the Cloud/IaC security plan.",
+            successKO: "Cloud/IaC 보안 계획 저장 완료",
+            successEN: "Cloud/IaC security plan saved",
+            content: SecurityPreventionToolkit.cloudIACSecurityPlan(projectName: selectedTargets.first?.lastPathComponent ?? "KODA Project"),
+            language: language
+        )
+    }
+
     func applySecurityToolkit(language: AppLanguage) {
         var targets = selectedTargets.filter { Self.isDirectoryURL($0) }
 
@@ -1903,6 +1999,19 @@ final class ScannerBridge: ObservableObject {
                 || finding.ruleID == "prevention.ci-security-scan-missing"
                 || finding.ruleID == "prevention.vex-missing"
                 || finding.ruleID == "prevention.dependency-track-integration-missing"
+        case "owasp-scvs":
+            return finding.category == "dependencies"
+                || finding.ruleID.contains("dependency")
+                || finding.ruleID == "prevention.scvs-plan-missing"
+                || finding.ruleID == "prevention.sbom-missing"
+                || finding.ruleID == "prevention.vex-missing"
+                || finding.ruleID == "prevention.dependency-update-automation-missing"
+                || finding.ruleID == "prevention.dependency-track-integration-missing"
+                || finding.ruleID == "prevention.slsa-sigstore-missing"
+                || finding.ruleID == "prevention.release-provenance-automation-missing"
+                || finding.ruleID == "prevention.github-actions-unpinned"
+                || finding.ruleID == "prevention.github-token-permissions-not-readonly"
+                || finding.ruleID == "prevention.binary-artifact-committed"
         case "openssf-scorecard-baseline":
             return finding.category == "prevention"
                 || finding.ruleID.contains("dependency")
@@ -3914,6 +4023,14 @@ private enum SecurityPreventionToolkit {
             ("docs/security/MOBILE_SECURITY.md", mobileSecurityPlan(projectName: projectName)),
             ("docs/security/NIST_CSF_2_PROFILE.md", nistCSFProfile(projectName: projectName)),
             ("docs/security/CISA_SECURE_SOFTWARE_ATTESTATION.md", cisaAttestationChecklist(projectName: projectName)),
+            ("docs/security/API_SECURITY.md", apiSecurityPlan(projectName: projectName)),
+            ("docs/security/SCVS_PLAN.md", scvsPlan(projectName: projectName)),
+            ("docs/security/PRIVACY_DATA_MAP.md", privacyDataMap(projectName: projectName)),
+            ("docs/security/SECURITY_ROADMAP.md", securityRoadmap(projectName: projectName)),
+            ("docs/security/EVIDENCE_REGISTER.md", evidenceRegister(projectName: projectName)),
+            ("docs/security/SECURITY_HEADERS.md", securityHeadersBaseline(projectName: projectName)),
+            ("docs/security/CONTAINER_HARDENING.md", containerHardeningBaseline(projectName: projectName)),
+            ("docs/security/CLOUD_IAC_SECURITY.md", cloudIACSecurityPlan(projectName: projectName)),
         ]
     }
 
@@ -4437,6 +4554,136 @@ private enum SecurityPreventionToolkit {
         - [ ] SAST, dependency, secret, and configuration checks are run before release.
         - [ ] DAST or penetration testing is scheduled when runtime behavior matters.
         - [ ] Vulnerability reporting, remediation, and release-note/advisory processes are documented.
+        """
+    }
+
+    fileprivate static func apiSecurityPlan(projectName: String) -> String {
+        """
+        # API Security Plan
+
+        Project: \(projectName)
+
+        ## Inventory
+
+        | API | Version | Auth Required | Data Class | Owner |
+        | --- | --- | --- | --- | --- |
+        | TBD | /api/v1 | yes | TBD | TBD |
+
+        ## Controls
+
+        - [ ] Object-level authorization is checked for every user-controlled object ID.
+        - [ ] Function-level authorization is explicit for admin, payment, account, and profile routes.
+        - [ ] Request body schemas reject unknown properties to prevent mass assignment.
+        - [ ] Rate limits and quotas cover login, signup, password reset, search, export, and high-cost APIs.
+        - [ ] Outbound API calls use allowlisted destinations, timeouts, retry limits, and SSRF protections.
+        - [ ] API versions, deprecation dates, and owners are documented.
+        """
+    }
+
+    fileprivate static func scvsPlan(projectName: String) -> String {
+        """
+        # OWASP SCVS Plan
+
+        Project: \(projectName)
+
+        - [ ] V1 Inventory: source, package, container, plugin, model, and generated components are inventoried.
+        - [ ] V2 SBOM: CycloneDX or SPDX SBOM is generated and retained for release builds.
+        - [ ] V3 Build Environment: CI runners are least-privilege and build from protected refs.
+        - [ ] V4 Package Management: lockfiles are committed and approved registries are used.
+        - [ ] V5 Component Analysis: OSV/CVE, KEV/EPSS, and dependency scan results are triaged.
+        - [ ] V6 Pedigree and Provenance: release artifacts are built in CI, checksummed, signed, and linked to provenance.
+        """
+    }
+
+    fileprivate static func privacyDataMap(projectName: String) -> String {
+        """
+        # Privacy Data Map
+
+        Project: \(projectName)
+
+        | Field | Category | Purpose | Storage | Retention | Sharing | Owner |
+        | --- | --- | --- | --- | --- | --- | --- |
+        | email | personal data | account/contact | TBD | TBD | TBD | TBD |
+
+        - [ ] Personal data is not logged in raw form.
+        - [ ] Test fixtures and demo data avoid real personal data.
+        - [ ] Retention and deletion behavior is documented.
+        - [ ] Analytics, AI/LLM prompts, crash reports, and support exports are reviewed for personal data.
+        """
+    }
+
+    fileprivate static func securityRoadmap(projectName: String) -> String {
+        """
+        # Security Roadmap
+
+        Project: \(projectName)
+
+        | Priority | Work Item | Standard | Owner | Due Date | Status | Evidence |
+        | --- | --- | --- | --- | --- | --- | --- |
+        | P1 | Remove critical/high KODA findings | Local / OWASP | TBD | TBD | planned | reports/ |
+        | P1 | Complete threat model and API inventory | OWASP API / ASVS | TBD | TBD | planned | docs/security/ |
+        | P2 | Complete SCVS supply-chain evidence | OWASP SCVS | TBD | TBD | planned | release package |
+        """
+    }
+
+    fileprivate static func evidenceRegister(projectName: String) -> String {
+        """
+        # Security Evidence Register
+
+        Project: \(projectName)
+
+        | Evidence | Standard | Location | Owner | Review Date | Notes |
+        | --- | --- | --- | --- | --- | --- |
+        | KODA scan report | Local / OWASP / CWE | reports/security-dashboard.html | TBD | TBD | TBD |
+        | SBOM | SCVS / SSDF | reports/sbom.cdx.json | TBD | TBD | TBD |
+        | VEX | SCVS / vulnerability response | reports/vex.cdx.json | TBD | TBD | TBD |
+        | Threat model | ASVS / API / Secure by Design | docs/security/THREAT_MODEL.md | TBD | TBD | TBD |
+        """
+    }
+
+    fileprivate static func securityHeadersBaseline(projectName: String) -> String {
+        """
+        # Security Headers Baseline
+
+        Project: \(projectName)
+
+        | Header | Baseline |
+        | --- | --- |
+        | Content-Security-Policy | default-src 'self'; frame-ancestors 'none'; object-src 'none' |
+        | Strict-Transport-Security | max-age=31536000; includeSubDomains |
+        | X-Content-Type-Options | nosniff |
+        | Referrer-Policy | strict-origin-when-cross-origin |
+        | Permissions-Policy | disable unused browser capabilities |
+        | Cache-Control | no-store for sensitive authenticated responses |
+        """
+    }
+
+    fileprivate static func containerHardeningBaseline(projectName: String) -> String {
+        """
+        # Container Hardening Baseline
+
+        Project: \(projectName)
+
+        - [ ] Runtime image uses a non-root user.
+        - [ ] Images are pinned to reviewed tags or digests.
+        - [ ] Docker socket is not mounted into application containers.
+        - [ ] Secrets are injected at runtime and not committed in compose files.
+        - [ ] Kubernetes uses runAsNonRoot, allowPrivilegeEscalation: false, RuntimeDefault seccomp, dropped capabilities, resource limits, and NetworkPolicies.
+        """
+    }
+
+    fileprivate static func cloudIACSecurityPlan(projectName: String) -> String {
+        """
+        # Cloud and IaC Security Plan
+
+        Project: \(projectName)
+
+        - [ ] Public ingress is limited to intended ports and source ranges.
+        - [ ] Admin access uses VPN, bastion, or an approved management plane.
+        - [ ] Storage buckets, databases, and queues are private and encrypted by default.
+        - [ ] IAM policies avoid wildcard actions and principals.
+        - [ ] Terraform outputs avoid raw secrets and use sensitive = true when needed.
+        - [ ] State files are encrypted, access-controlled, and excluded from source control.
         """
     }
 
