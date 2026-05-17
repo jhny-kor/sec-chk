@@ -90,7 +90,7 @@ def scan_directory_payload(
         discover_projects=discover_projects,
         discovery_depth=discovery_depth,
     )
-    config = ScannerConfig(targets=(target,), enable_osv=enable_osv)
+    config = ScannerConfig(targets=(target,), enable_osv=enable_osv, enable_vuln_intel=enable_osv)
     scanner = SecurityScanner(config)
     findings = filter_findings_by_standard(scanner.scan(), standard_selection)
     findings = filter_by_min_severity(findings, min_severity)

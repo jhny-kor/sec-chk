@@ -11,18 +11,28 @@ from .models import DependencyComponent, TargetConfig
 
 
 PYTHON_EXACT_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*==\s*([A-Za-z0-9][^\s;#]*)")
+POETRY_LOCK_KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$")
+PNPM_PACKAGE_KEY_RE = re.compile(r"^\s*['\"]?/(.+?)['\"]?:\s*$")
 NODE_RANGE_PREFIXES = ("^", "~", ">", "<", "=", "*")
 
 
 def components_from_file(path: Path, target: TargetConfig) -> list[DependencyComponent]:
-    if path.name == "package-lock.json":
+    if path.name in {"package-lock.json", "npm-shrinkwrap.json"}:
         return _components_from_package_lock(path, target)
     if path.name == "package.json":
         return _components_from_package_json(path, target)
+    if path.name == "yarn.lock":
+        return _components_from_yarn_lock(path, target)
+    if path.name == "pnpm-lock.yaml":
+        return _components_from_pnpm_lock(path, target)
     if path.name in {"requirements.txt", "requirements.in"} or path.name.endswith("-requirements.txt"):
         return _components_from_requirements(path, target)
     if path.name == "pyproject.toml":
         return _components_from_pyproject(path, target)
+    if path.name == "poetry.lock":
+        return _components_from_poetry_lock(path, target)
+    if path.name == "Pipfile.lock":
+        return _components_from_pipfile_lock(path, target)
     if path.name == "Dockerfile" or path.name.startswith("Dockerfile."):
         return _components_from_dockerfile(path, target)
     return []
@@ -138,6 +148,86 @@ def _components_from_package_lock(path: Path, target: TargetConfig) -> list[Depe
     return components
 
 
+def _components_from_yarn_lock(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    components: list[DependencyComponent] = []
+    pending_names: tuple[str, ...] = ()
+    pending_line: int | None = None
+    for line_number, raw_line in enumerate(lines, start=1):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not raw_line.startswith((" ", "\t")) and stripped.endswith(":"):
+            pending_names = _yarn_descriptor_names(stripped[:-1])
+            pending_line = line_number
+            continue
+        if not pending_names:
+            continue
+        if stripped.startswith("version "):
+            version = _strip_quotes(stripped.removeprefix("version").strip())
+        elif stripped.startswith("version:"):
+            version = _strip_quotes(stripped.removeprefix("version:").strip())
+        else:
+            continue
+        if not version:
+            continue
+        for name in pending_names:
+            components.append(
+                _component(
+                    name=name,
+                    ecosystem="npm",
+                    version=version,
+                    path=path,
+                    target=target,
+                    line=pending_line,
+                    source="yarn.lock",
+                )
+            )
+        pending_names = ()
+        pending_line = None
+    return components
+
+
+def _components_from_pnpm_lock(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    components: list[DependencyComponent] = []
+    in_packages = False
+    for line_number, raw_line in enumerate(lines, start=1):
+        stripped = raw_line.strip()
+        if stripped == "packages:":
+            in_packages = True
+            continue
+        if in_packages and raw_line and not raw_line.startswith((" ", "\t")):
+            in_packages = False
+        if not in_packages:
+            continue
+        match = PNPM_PACKAGE_KEY_RE.match(raw_line)
+        if not match:
+            continue
+        parsed = _pnpm_name_version(match.group(1))
+        if parsed is None:
+            continue
+        name, version = parsed
+        components.append(
+            _component(
+                name=name,
+                ecosystem="npm",
+                version=version,
+                path=path,
+                target=target,
+                line=line_number,
+                source="pnpm-lock",
+            )
+        )
+    return components
+
+
 def _collect_lock_dependencies(
     dependencies: dict[str, Any],
     path: Path,
@@ -241,6 +331,93 @@ def _components_from_pyproject(path: Path, target: TargetConfig) -> list[Depende
     return components
 
 
+def _components_from_poetry_lock(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+
+    components: list[DependencyComponent] = []
+    current: dict[str, str] = {}
+    current_line: int | None = None
+
+    def flush() -> None:
+        name = current.get("name", "").strip()
+        version = current.get("version", "").strip()
+        if not name or not version:
+            return
+        groups = current.get("groups", "")
+        category = current.get("category", "")
+        scope = "excluded" if "dev" in groups.lower() or category.lower() == "dev" else "required"
+        components.append(
+            _component(
+                name=name,
+                ecosystem="PyPI",
+                version=version,
+                path=path,
+                target=target,
+                line=current_line,
+                scope=scope,
+                source="poetry.lock",
+            )
+        )
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        stripped = raw_line.strip()
+        if stripped == "[[package]]":
+            flush()
+            current = {}
+            current_line = line_number
+            continue
+        match = POETRY_LOCK_KEY_VALUE_RE.match(raw_line)
+        if not match or current_line is None:
+            continue
+        key, raw_value = match.groups()
+        if key in {"name", "version", "category", "groups"}:
+            current[key] = _strip_toml_value(raw_value)
+    flush()
+    return components
+
+
+def _components_from_pipfile_lock(path: Path, target: TargetConfig) -> list[DependencyComponent]:
+    lines = read_text_lines(path, target.max_file_size_bytes)
+    if lines is None:
+        return []
+    try:
+        data = json.loads("\n".join(lines))
+    except json.JSONDecodeError:
+        return []
+
+    components: list[DependencyComponent] = []
+    for section, scope in (("default", "required"), ("develop", "excluded")):
+        deps = data.get(section, {})
+        if not isinstance(deps, dict):
+            continue
+        for name, payload in deps.items():
+            if not isinstance(name, str) or not isinstance(payload, dict):
+                continue
+            raw_version = payload.get("version")
+            if not isinstance(raw_version, str):
+                continue
+            version = raw_version.strip()
+            if version.startswith("=="):
+                version = version[2:].strip()
+            if not version:
+                continue
+            components.append(
+                _component(
+                    name=name,
+                    ecosystem="PyPI",
+                    version=version,
+                    path=path,
+                    target=target,
+                    line=find_line_containing(lines, f'"{name}"'),
+                    scope=scope,
+                    source="Pipfile.lock",
+                )
+            )
+    return components
+
+
 def _components_from_dockerfile(path: Path, target: TargetConfig) -> list[DependencyComponent]:
     lines = read_text_lines(path, target.max_file_size_bytes)
     if lines is None:
@@ -302,6 +479,54 @@ def _dependency_strings(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list | tuple):
         return ()
     return tuple(item for item in value if isinstance(item, str))
+
+
+def _yarn_descriptor_names(value: str) -> tuple[str, ...]:
+    names: list[str] = []
+    for descriptor in value.split(","):
+        descriptor = _strip_quotes(descriptor.strip())
+        if not descriptor or descriptor == "__metadata":
+            continue
+        name = _yarn_name_from_descriptor(descriptor)
+        if name and name not in names:
+            names.append(name)
+    return tuple(names)
+
+
+def _yarn_name_from_descriptor(descriptor: str) -> str:
+    if descriptor.startswith("@"):
+        slash = descriptor.find("/")
+        if slash == -1:
+            return ""
+        marker = descriptor.find("@", slash + 1)
+        return descriptor[:marker] if marker != -1 else descriptor
+    marker = descriptor.find("@")
+    return descriptor[:marker] if marker != -1 else descriptor
+
+
+def _pnpm_name_version(value: str) -> tuple[str, str] | None:
+    cleaned = value.split("(", maxsplit=1)[0].strip()
+    if "/" in cleaned and "@" not in cleaned:
+        name, version = cleaned.rsplit("/", maxsplit=1)
+    elif "@" in cleaned:
+        name, version = cleaned.rsplit("@", maxsplit=1)
+    else:
+        return None
+    version = version.split("_", maxsplit=1)[0].strip()
+    if not name or not version:
+        return None
+    return name, version
+
+
+def _strip_quotes(value: str) -> str:
+    return value.strip().strip("\"'")
+
+
+def _strip_toml_value(value: str) -> str:
+    stripped = value.split("#", maxsplit=1)[0].strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return stripped.strip("[]")
+    return _strip_quotes(stripped)
 
 
 def _component(

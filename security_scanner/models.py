@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-CATEGORIES = ("secrets", "dependencies", "configuration", "code")
+CATEGORIES = ("secrets", "dependencies", "configuration", "code", "prevention")
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 SEVERITY_RANK = {severity: index for index, severity in enumerate(SEVERITIES)}
 
@@ -72,3 +72,4 @@ class ScannerConfig:
     targets: tuple[TargetConfig, ...]
     report: ReportConfig = ReportConfig()
     enable_osv: bool = False
+    enable_vuln_intel: bool = False

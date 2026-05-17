@@ -43,6 +43,15 @@ CONFIGURATION_RULE_IDS = (
     "config.compose-privileged",
     "config.compose-host-network",
     "config.compose-docker-sock",
+    "config.k8s-privileged-container",
+    "config.k8s-allow-privilege-escalation",
+    "config.k8s-host-network",
+    "config.k8s-hostpath-volume",
+    "config.terraform-public-storage",
+    "config.terraform-public-access-block-disabled",
+    "config.terraform-open-admin-port",
+    "config.github-pull-request-target",
+    "config.github-untrusted-event-in-run",
 )
 
 CODE_PATTERN_RULE_IDS = (
@@ -71,6 +80,25 @@ CODE_PATTERN_RULE_IDS = (
     "code.legacy-board-software",
     "code.weak-hash",
     "code.xml-external-entity",
+)
+
+PREVENTION_RULE_IDS = (
+    "prevention.security-policy-missing",
+    "prevention.dependency-update-automation-missing",
+    "prevention.ci-security-scan-missing",
+    "prevention.env-not-gitignored",
+    "prevention.env-example-missing",
+    "prevention.dockerignore-missing",
+    "prevention.sbom-missing",
+    "prevention.sast-workflow-missing",
+    "prevention.openssf-scorecard-missing",
+    "prevention.github-token-permissions-not-readonly",
+    "prevention.github-actions-unpinned",
+    "prevention.slsa-sigstore-missing",
+    "prevention.zap-baseline-missing",
+    "prevention.dependency-track-integration-missing",
+    "prevention.vex-missing",
+    "prevention.binary-artifact-committed",
 )
 
 ACCESS_CONTROL_RULE_IDS = (
@@ -217,7 +245,7 @@ class SecurityStandard:
     description: dict[str, str] = field(default_factory=dict)
     coverage: dict[str, str] = field(default_factory=dict)
     references: tuple[StandardReference, ...] = ()
-    coverage_level: str = "partial"
+    coverage_level: str = "evidence"
 
 
 @dataclass(frozen=True)
@@ -283,10 +311,16 @@ LOCAL_STANDARD = SecurityStandard(
             {"en": "Code Patterns", "ko": "코드 패턴"},
             scanner_categories=("code",),
         ),
+        StandardCategory(
+            "prevention",
+            {"en": "Prevention Guardrails", "ko": "예방 가드레일"},
+            scanner_categories=("prevention",),
+            rule_ids=PREVENTION_RULE_IDS,
+        ),
     ),
     description=_text(
-        "SecChk native rule categories for local file, dependency, configuration, and code-pattern checks.",
-        "로컬 파일, 의존성, 설정, 코드 패턴을 점검하는 SecChk 기본 룰 묶음입니다.",
+        "SecChk native rule categories for local file, dependency, configuration, code-pattern, and prevention guardrail checks.",
+        "로컬 파일, 의존성, 설정, 코드 패턴, 예방 가드레일을 점검하는 SecChk 기본 룰 묶음입니다.",
     ),
     coverage=_text(
         "Runs the local heuristic rules directly. It is not a replacement for full SAST, DAST, or CVE intelligence.",
@@ -399,8 +433,8 @@ OWASP_TOP_10_2021 = SecurityStandard(
         "OWASP의 웹 애플리케이션 주요 위험 범주를 로컬 파일 기반 근거를 만들 수 있는 룰에 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Business-logic and runtime-only risks still require review or dynamic testing.",
-        "부분 자동 지원입니다. 비즈니스 로직과 실행 시점 위험은 별도 검토 또는 동적 점검이 필요합니다.",
+        "Automatic file-based checks. Business-logic and runtime-only risks still require dynamic testing for final validation.",
+        "자동 점검을 실행합니다. 비즈니스 로직과 실행 시점 위험은 동적 점검으로 최종 확인해야 합니다.",
     ),
     references=(
         _reference("OWASP Top Ten Project", "OWASP Top Ten 프로젝트", "https://owasp.org/www-project-top-ten/"),
@@ -481,8 +515,8 @@ SW_DEV_SECURITY_49 = SecurityStandard(
         "국내 소프트웨어 개발보안 보안약점을 7가지 시큐어코딩 유형으로 묶은 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage through local source, configuration, secret, and dependency checks.",
-        "소스, 설정, 비밀값, 의존성 로컬 점검으로 부분 자동 지원합니다.",
+        "Automatic file-based checks through local source, configuration, secret, and dependency checks.",
+        "소스, 설정, 비밀값, 의존성 로컬 점검을 자동으로 실행합니다.",
     ),
     references=(
         _reference("KISA Software Development Security", "KISA 소프트웨어 개발보안", "https://www.kisa.or.kr/1051202"),
@@ -568,8 +602,8 @@ OWASP_TOP_10_2025 = SecurityStandard(
         "프로젝트에 포함된 OWASP Top 10:2025 카테고리 집합을 로컬 룰에 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Validate against the official OWASP project before using it as formal evidence.",
-        "부분 자동 지원입니다. 공식 증적으로 쓰기 전 OWASP 공식 프로젝트 기준과 대조가 필요합니다.",
+        "Automatic file-based checks. Validate against the official OWASP project before using it as formal evidence.",
+        "자동 점검을 실행합니다. 공식 증적으로 쓰기 전 OWASP 공식 프로젝트 기준과 대조하세요.",
     ),
     references=(
         _reference("OWASP Top Ten Project", "OWASP Top Ten 프로젝트", "https://owasp.org/www-project-top-ten/"),
@@ -655,8 +689,8 @@ OWASP_API_SECURITY_2023 = SecurityStandard(
         "OWASP API Security Top 10:2023 위험을 API 라우트, 인가, SSRF, 리소스, 설정 로컬 점검에 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Object-level authorization and business-flow abuse require design and runtime testing.",
-        "부분 자동 지원입니다. 객체 수준 인가와 비즈니스 흐름 남용은 설계 검토와 실행 점검이 필요합니다.",
+        "Automatic file-based checks. Object-level authorization and business-flow abuse require design and runtime testing for final validation.",
+        "자동 점검을 실행합니다. 객체 수준 인가와 비즈니스 흐름 남용은 설계 검토와 실행 점검으로 최종 확인해야 합니다.",
     ),
     references=(
         _reference("OWASP API Security Project", "OWASP API Security 프로젝트", "https://owasp.org/API-Security/"),
@@ -737,8 +771,8 @@ OWASP_MOBILE_TOP_10_2024 = SecurityStandard(
         "모바일 앱 위험 범주 중 소스와 설정 근거가 있는 항목을 로컬 룰에 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Binary protection, platform behavior, and device-state checks need mobile-specific tooling.",
-        "부분 자동 지원입니다. 바이너리 보호, 플랫폼 동작, 기기 상태 점검은 모바일 전용 도구가 필요합니다.",
+        "External integration required for complete mobile validation. Local source and configuration checks still run automatically.",
+        "완전한 모바일 검증에는 외부 연동이 필요합니다. 로컬 소스와 설정 점검은 자동으로 실행합니다.",
     ),
     references=(
         _reference("OWASP Mobile Application Security", "OWASP Mobile Application Security", "https://owasp.org/www-project-mobile-top-10/"),
@@ -910,8 +944,8 @@ CWE_TOP_25_2025 = SecurityStandard(
         "MITRE CWE Top 25:2025 약점 중 경량 로컬 근거를 만들 수 있는 항목을 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Deep memory lifetime and null-dereference analysis remains unsupported.",
-        "부분 자동 지원입니다. 메모리 수명과 NULL 역참조의 깊은 분석은 아직 지원하지 않습니다.",
+        "Automatic file-based checks. Deep memory lifetime and null-dereference analysis remains unsupported.",
+        "자동 점검을 실행합니다. 메모리 수명과 NULL 역참조의 깊은 분석은 아직 지원하지 않습니다.",
     ),
     references=(
         _reference("MITRE CWE Top 25:2025", "MITRE CWE Top 25:2025", "https://cwe.mitre.org/top25/archive/2025/2025_cwe_top25.html"),
@@ -979,8 +1013,8 @@ ISMS_P_DEVELOPMENT_SECURITY = SecurityStandard(
         "ISMS-P 개발보안 통제 영역을 보안 요구사항, 시험, 시험 데이터, 소스 관리, 운영 이관 위생의 로컬 근거에 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Certification evidence also requires process documents, approvals, and operating records.",
-        "부분 자동 지원입니다. 인증 증적에는 프로세스 문서, 승인, 운영 기록도 필요합니다.",
+        "Evidence review required. Certification evidence also requires process documents, approvals, and operating records.",
+        "증적 확인이 필요합니다. 인증 증적에는 프로세스 문서, 승인, 운영 기록도 필요합니다.",
     ),
     references=(
         _reference("KISA ISMS-P", "KISA ISMS-P", "https://isms.kisa.or.kr/"),
@@ -1070,8 +1104,8 @@ CWE_GENERAL = SecurityStandard(
         "연간 Top 25를 넘어 로컬 약점 점검을 CWE 관점으로 묶은 범용 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage based on local rules; it does not enumerate every CWE entry.",
-        "로컬 룰 기반 부분 자동 지원입니다. 모든 CWE 항목을 열거하지는 않습니다.",
+        "Automatic file-based checks based on local rules; it does not enumerate every CWE entry.",
+        "로컬 룰 기반 자동 점검을 실행합니다. 모든 CWE 항목을 열거하지는 않습니다.",
     ),
     references=(
         _reference("MITRE CWE", "MITRE CWE", "https://cwe.mitre.org/"),
@@ -1185,8 +1219,8 @@ NCSC_WEB_8 = SecurityStandard(
         "공공 웹 점검에서 자주 참조되는 국가사이버안전센터 홈페이지 8대 취약점 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Active web probing and legacy product version validation still require DAST or manual testing.",
-        "부분 자동 지원입니다. 실제 웹 요청 기반 점검과 레거시 제품 버전 확인은 DAST 또는 수동 점검이 필요합니다.",
+        "External integration required for complete validation. Active web probing and legacy product version validation need DAST or manual testing.",
+        "완전한 검증에는 외부 연동이 필요합니다. 실제 웹 요청 기반 점검과 레거시 제품 버전 확인은 DAST 또는 수동 점검이 필요합니다.",
     ),
     references=(
         _reference("NCSC", "국가사이버안보센터", "https://www.ncsc.go.kr/"),
@@ -1260,8 +1294,8 @@ ELECTRONIC_FINANCIAL_SUPERVISION_8 = SecurityStandard(
         "전자금융감독규정 및 관련 세칙에서 언급되는 공개용 웹서버 해킹 대응 항목을 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. Formal compliance requires infrastructure, web runtime, and operational evidence beyond source files.",
-        "부분 자동 지원입니다. 공식 준수에는 소스 파일 외 인프라, 웹 런타임, 운영 증적이 필요합니다.",
+        "External integration and evidence review required. Formal compliance requires infrastructure, web runtime, and operational evidence beyond source files.",
+        "외부 연동과 증적 확인이 필요합니다. 공식 준수에는 소스 파일 외 인프라, 웹 런타임, 운영 증적이 필요합니다.",
     ),
     references=(
         _reference("Korean Law Information Center", "국가법령정보센터", "https://www.law.go.kr/LSW/admRulInfoP.do?admRulSeq=2100000274812&chrClsCd=010201"),
@@ -1293,8 +1327,8 @@ OWASP_ASVS_5 = SecurityStandard(
         "OWASP Application Security Verification Standard 요구사항 중 로컬로 점검 가능한 통제 영역을 묶은 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. ASVS is a verification standard and many requirements need design review, tests, and runtime evidence.",
-        "부분 자동 지원입니다. ASVS는 검증 표준이므로 다수 요구사항은 설계 검토, 테스트, 런타임 증적이 필요합니다.",
+        "Evidence review required. ASVS is a verification standard and many requirements need design review, tests, and runtime evidence.",
+        "증적 확인이 필요합니다. ASVS는 검증 표준이므로 다수 요구사항은 설계 검토, 테스트, 런타임 증적이 필요합니다.",
     ),
     references=(
         _reference("OWASP ASVS", "OWASP ASVS", "https://owasp.org/www-project-application-security-verification-standard/"),
@@ -1325,8 +1359,8 @@ OWASP_WSTG = SecurityStandard(
         "OWASP Web Security Testing Guide 영역 중 정적 로컬 스캔으로 근거를 수집할 수 있는 항목을 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. WSTG is primarily a web testing methodology and needs live-target testing for full coverage.",
-        "부분 자동 지원입니다. WSTG는 웹 테스트 방법론이므로 전체 지원에는 실제 대상 웹 점검이 필요합니다.",
+        "External integration required. WSTG is primarily a web testing methodology and needs live-target testing for full coverage.",
+        "외부 연동이 필요합니다. WSTG는 웹 테스트 방법론이므로 전체 지원에는 실제 대상 웹 점검이 필요합니다.",
     ),
     references=(
         _reference("OWASP WSTG", "OWASP WSTG", "https://owasp.org/www-project-web-security-testing-guide/"),
@@ -1335,10 +1369,10 @@ OWASP_WSTG = SecurityStandard(
 
 
 _NIST_SSDF_CATEGORIES = (
-    StandardCategory("protect-software", {"en": "Protect the Software", "ko": "소프트웨어 보호"}, scanner_categories=("secrets", "dependencies", "configuration"), rule_ids=SENSITIVE_DATA_RULE_IDS + INTEGRITY_RULE_IDS),
-    StandardCategory("produce-well-secured-software", {"en": "Produce Well-Secured Software", "ko": "안전한 소프트웨어 생산"}, scanner_categories=("configuration", "code"), rule_ids=CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS),
-    StandardCategory("verify-security", {"en": "Verify Security", "ko": "보안 검증"}, scanner_categories=CATEGORIES, rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS),
-    StandardCategory("respond-vulnerabilities", {"en": "Respond to Vulnerabilities", "ko": "취약점 대응"}, scanner_categories=("dependencies",), rule_ids=DEPENDENCY_RULE_IDS),
+    StandardCategory("protect-software", {"en": "Protect the Software", "ko": "소프트웨어 보호"}, scanner_categories=("secrets", "dependencies", "configuration", "prevention"), rule_ids=SENSITIVE_DATA_RULE_IDS + INTEGRITY_RULE_IDS + PREVENTION_RULE_IDS),
+    StandardCategory("produce-well-secured-software", {"en": "Produce Well-Secured Software", "ko": "안전한 소프트웨어 생산"}, scanner_categories=("configuration", "code", "prevention"), rule_ids=CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS),
+    StandardCategory("verify-security", {"en": "Verify Security", "ko": "보안 검증"}, scanner_categories=CATEGORIES, rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS),
+    StandardCategory("respond-vulnerabilities", {"en": "Respond to Vulnerabilities", "ko": "취약점 대응"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + ("prevention.security-policy-missing", "prevention.dependency-update-automation-missing", "prevention.sbom-missing")),
 )
 
 NIST_SSDF = SecurityStandard(
@@ -1353,8 +1387,8 @@ NIST_SSDF = SecurityStandard(
         "NIST Secure Software Development Framework 실천항목을 안전한 개발과 취약점 대응의 로컬 근거에 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. SSDF also needs organizational process evidence, attestations, and supplier management records.",
-        "부분 자동 지원입니다. SSDF는 조직 프로세스 증적, 증명, 공급자 관리 기록도 필요합니다.",
+        "Evidence review required. SSDF also needs organizational process evidence, attestations, and supplier management records.",
+        "증적 확인이 필요합니다. SSDF는 조직 프로세스 증적, 증명, 공급자 관리 기록도 필요합니다.",
     ),
     references=(
         _reference("NIST SP 800-218", "NIST SP 800-218", "https://csrc.nist.gov/pubs/sp/800/218/final"),
@@ -1367,13 +1401,13 @@ _OWASP_SAMM_CATEGORIES = (
         "design-security-requirements",
         {"en": "Design: Security Requirements", "ko": "설계: 보안 요구사항"},
         scanner_categories=CATEGORIES,
-        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS,
+        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS,
     ),
     StandardCategory(
         "implementation-secure-build",
         {"en": "Implementation: Secure Build", "ko": "구현: 안전한 빌드"},
-        scanner_categories=("dependencies", "configuration", "code"),
-        rule_ids=SUPPLY_CHAIN_RULE_IDS + INTEGRITY_RULE_IDS + MISCONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS,
+        scanner_categories=("dependencies", "configuration", "code", "prevention"),
+        rule_ids=SUPPLY_CHAIN_RULE_IDS + INTEGRITY_RULE_IDS + MISCONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS,
     ),
     StandardCategory(
         "implementation-defect-management",
@@ -1385,13 +1419,13 @@ _OWASP_SAMM_CATEGORIES = (
         "verification-security-testing",
         {"en": "Verification: Security Testing", "ko": "검증: 보안 테스트"},
         scanner_categories=CATEGORIES,
-        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS,
+        rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS,
     ),
     StandardCategory(
         "operations-environment-management",
         {"en": "Operations: Environment Management", "ko": "운영: 환경 관리"},
-        scanner_categories=("configuration", "dependencies", "code"),
-        rule_ids=MISCONFIGURATION_RULE_IDS + INTEGRITY_RULE_IDS + ERROR_HANDLING_RULE_IDS,
+        scanner_categories=("configuration", "dependencies", "code", "prevention"),
+        rule_ids=MISCONFIGURATION_RULE_IDS + INTEGRITY_RULE_IDS + ERROR_HANDLING_RULE_IDS + ("prevention.ci-security-scan-missing", "prevention.dockerignore-missing", "prevention.sbom-missing"),
     ),
 )
 
@@ -1407,8 +1441,8 @@ OWASP_SAMM_2 = SecurityStandard(
         "OWASP Software Assurance Maturity Model 실천항목을 보안 설계, 구현, 검증, 운영의 로컬 근거에 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage. SAMM maturity assessment also requires process, people, governance, and program evidence.",
-        "부분 자동 지원입니다. SAMM 성숙도 평가는 프로세스, 인력, 거버넌스, 프로그램 증적도 필요합니다.",
+        "Evidence review required. SAMM maturity assessment also requires process, people, governance, and program evidence.",
+        "증적 확인이 필요합니다. SAMM 성숙도 평가는 프로세스, 인력, 거버넌스, 프로그램 증적도 필요합니다.",
     ),
     references=(
         _reference("OWASP SAMM", "OWASP SAMM", "https://owasp.org/www-project-samm/"),
@@ -1421,6 +1455,7 @@ _OWASP_DEPENDENCY_CHECK_CATEGORIES = (
     StandardCategory("manifest-health", {"en": "Manifest and Lockfile Health", "ko": "매니페스트 및 락파일 위생"}, scanner_categories=("dependencies",), rule_ids=("dependency.package-json-invalid", "dependency.node-missing-lockfile")),
     StandardCategory("version-hygiene", {"en": "Version Pinning Hygiene", "ko": "버전 고정 위생"}, scanner_categories=("dependencies",), rule_ids=("dependency.node-unbounded-version", "dependency.python-unpinned-requirement", "dependency.python-wildcard-version", "dependency.docker-unpinned-base")),
     StandardCategory("insecure-sources", {"en": "Insecure Dependency Sources", "ko": "안전하지 않은 의존성 소스"}, scanner_categories=("dependencies", "configuration"), rule_ids=INSECURE_TRANSPORT_RULE_IDS + REMOTE_EXECUTION_RULE_IDS),
+    StandardCategory("automation-readiness", {"en": "Automation and SBOM Readiness", "ko": "자동화 및 SBOM 준비성"}, scanner_categories=("prevention",), rule_ids=("prevention.dependency-update-automation-missing", "prevention.ci-security-scan-missing", "prevention.sbom-missing")),
 )
 
 OWASP_DEPENDENCY_CHECK_BASELINE = SecurityStandard(
@@ -1435,8 +1470,8 @@ OWASP_DEPENDENCY_CHECK_BASELINE = SecurityStandard(
         "알려진 취약 컴포넌트 식별이라는 OWASP Dependency-Check 목적에 맞춘 로컬 의존성 위생 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage only. Actual CVE matching requires Dependency-Check, OSV, NVD, or another vulnerability feed.",
-        "부분 자동 지원입니다. 실제 CVE 대조에는 Dependency-Check, OSV, NVD 같은 취약점 피드 연동이 필요합니다.",
+        "External integration required. Actual CVE matching requires Dependency-Check, OSV, NVD, or another vulnerability feed.",
+        "외부 연동이 필요합니다. 실제 CVE 대조에는 Dependency-Check, OSV, NVD 같은 취약점 피드 연동이 필요합니다.",
     ),
     references=(
         _reference("OWASP Dependency-Check", "OWASP Dependency-Check", "https://owasp.org/www-project-dependency-check/"),
@@ -1456,12 +1491,102 @@ OWASP_DEPENDENCY_TRACK_BASELINE = SecurityStandard(
         "향후 Dependency-Track에 SBOM을 연동할 프로젝트를 위한 로컬 공급망 준비성 프로파일입니다.",
     ),
     coverage=_text(
-        "Partial automatic coverage only. Portfolio tracking, SBOM ingestion, VEX, EPSS, and policy workflows require Dependency-Track integration.",
-        "부분 자동 지원입니다. 포트폴리오 추적, SBOM 수집, VEX, EPSS, 정책 워크플로는 Dependency-Track 연동이 필요합니다.",
+        "External integration required. Portfolio tracking, SBOM ingestion, VEX, EPSS, and policy workflows require Dependency-Track integration.",
+        "외부 연동이 필요합니다. 포트폴리오 추적, SBOM 수집, VEX, EPSS, 정책 워크플로는 Dependency-Track 연동이 필요합니다.",
     ),
     references=(
         _reference("OWASP Dependency-Track", "OWASP Dependency-Track", "https://owasp.org/www-project-dependency-track/"),
         _reference("CycloneDX", "CycloneDX", "https://cyclonedx.org/"),
+    ),
+)
+
+
+_OPENSSF_SCORECARD_CATEGORIES = (
+    StandardCategory("security-policy", {"en": "Security Policy", "ko": "보안 정책"}, scanner_categories=("prevention",), rule_ids=("prevention.security-policy-missing",)),
+    StandardCategory("dependency-update-tool", {"en": "Dependency Update Tool", "ko": "의존성 업데이트 자동화"}, scanner_categories=("prevention",), rule_ids=("prevention.dependency-update-automation-missing",)),
+    StandardCategory("sast", {"en": "SAST", "ko": "정적 분석"}, scanner_categories=("prevention",), rule_ids=("prevention.sast-workflow-missing", "prevention.ci-security-scan-missing")),
+    StandardCategory("token-permissions", {"en": "Token Permissions", "ko": "토큰 권한"}, scanner_categories=("prevention",), rule_ids=("prevention.github-token-permissions-not-readonly",)),
+    StandardCategory("pinned-dependencies", {"en": "Pinned Dependencies and Actions", "ko": "고정된 의존성 및 액션"}, scanner_categories=("dependencies", "prevention"), rule_ids=("dependency.node-unbounded-version", "dependency.python-unpinned-requirement", "dependency.python-wildcard-version", "dependency.docker-unpinned-base", "prevention.github-actions-unpinned")),
+    StandardCategory("signed-releases", {"en": "Signed Releases", "ko": "서명된 릴리스"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing",)),
+    StandardCategory("binary-artifacts", {"en": "Binary Artifacts", "ko": "바이너리 아티팩트"}, scanner_categories=("prevention",), rule_ids=("prevention.binary-artifact-committed",)),
+    StandardCategory("vulnerabilities", {"en": "Known Vulnerabilities", "ko": "알려진 취약점"}, scanner_categories=("dependencies",), rule_ids=("dependency.osv-known-vulnerability",)),
+)
+
+OPENSSF_SCORECARD_BASELINE = SecurityStandard(
+    "openssf-scorecard-baseline",
+    {"en": "OpenSSF Scorecard Baseline", "ko": "OpenSSF Scorecard 기준"},
+    (
+        _all_category(_OPENSSF_SCORECARD_CATEGORIES, {"en": "All mapped Scorecard checks", "ko": "매핑된 Scorecard 항목 전체"}),
+        *_OPENSSF_SCORECARD_CATEGORIES,
+    ),
+    description=_text(
+        "A local approximation of OpenSSF Scorecard supply-chain posture checks that can be inferred from repository files.",
+        "저장소 파일에서 추론 가능한 OpenSSF Scorecard 공급망 보안 상태를 로컬 기준으로 점검하는 프로파일입니다.",
+    ),
+    coverage=_text(
+        "External integration required. Branch protection, maintainer 2FA, repository metadata, and live vulnerability status still require GitHub or Scorecard service access.",
+        "외부 연동이 필요합니다. 브랜치 보호, 유지관리자 2FA, 저장소 메타데이터, 실시간 취약점 상태는 GitHub 또는 Scorecard 서비스 접근이 필요합니다.",
+    ),
+    references=(
+        _reference("OpenSSF Scorecard", "OpenSSF Scorecard", "https://scorecard.dev/"),
+        _reference("OpenSSF Scorecard GitHub", "OpenSSF Scorecard GitHub", "https://github.com/ossf/scorecard"),
+    ),
+)
+
+
+_CISA_KEV_EPSS_CATEGORIES = (
+    StandardCategory("known-exploited", {"en": "Known Exploited Vulnerabilities", "ko": "실제 악용 취약점"}, scanner_categories=("dependencies",), rule_ids=("dependency.osv-known-vulnerability",)),
+    StandardCategory("exploit-probability", {"en": "Exploit Probability", "ko": "악용 가능성"}, scanner_categories=("dependencies",), rule_ids=("dependency.osv-known-vulnerability",)),
+    StandardCategory("vex-response", {"en": "VEX Response Tracking", "ko": "VEX 대응 추적"}, scanner_categories=("prevention",), rule_ids=("prevention.vex-missing",)),
+    StandardCategory("sbom-tracking", {"en": "SBOM Tracking", "ko": "SBOM 추적"}, scanner_categories=("prevention",), rule_ids=("prevention.sbom-missing", "prevention.dependency-track-integration-missing")),
+)
+
+CISA_KEV_EPSS_PRIORITY = SecurityStandard(
+    "cisa-kev-epss-priority",
+    {"en": "CISA KEV / FIRST EPSS Priority", "ko": "CISA KEV / FIRST EPSS 우선순위"},
+    (
+        _all_category(_CISA_KEV_EPSS_CATEGORIES, {"en": "All mapped exploit-priority checks", "ko": "매핑된 악용 우선순위 항목 전체"}),
+        *_CISA_KEV_EPSS_CATEGORIES,
+    ),
+    description=_text(
+        "Prioritizes known vulnerable dependencies using CISA Known Exploited Vulnerabilities and FIRST EPSS exploit probability when OSV lookup is enabled.",
+        "OSV 조회를 켰을 때 CISA Known Exploited Vulnerabilities와 FIRST EPSS 악용 확률을 사용해 취약 의존성 우선순위를 높이는 프로파일입니다.",
+    ),
+    coverage=_text(
+        "External integration required. It depends on exact dependency versions and live external intelligence feeds.",
+        "외부 연동이 필요합니다. 정확한 의존성 버전과 외부 인텔리전스 피드 조회에 의존합니다.",
+    ),
+    references=(
+        _reference("CISA Known Exploited Vulnerabilities Catalog", "CISA 알려진 악용 취약점 카탈로그", "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"),
+        _reference("FIRST EPSS", "FIRST EPSS", "https://www.first.org/epss/"),
+    ),
+)
+
+
+_SLSA_SIGSTORE_CATEGORIES = (
+    StandardCategory("provenance", {"en": "Build Provenance", "ko": "빌드 출처 증명"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing",)),
+    StandardCategory("signed-artifacts", {"en": "Signed Artifacts", "ko": "서명된 산출물"}, scanner_categories=("prevention",), rule_ids=("prevention.slsa-sigstore-missing", "prevention.binary-artifact-committed")),
+    StandardCategory("pinned-actions", {"en": "Pinned Actions", "ko": "고정된 액션"}, scanner_categories=("prevention",), rule_ids=("prevention.github-actions-unpinned", "prevention.github-token-permissions-not-readonly")),
+)
+
+SLSA_SIGSTORE_BASELINE = SecurityStandard(
+    "slsa-sigstore-baseline",
+    {"en": "SLSA / Sigstore Baseline", "ko": "SLSA / Sigstore 기준"},
+    (
+        _all_category(_SLSA_SIGSTORE_CATEGORIES, {"en": "All mapped signing and provenance checks", "ko": "매핑된 서명 및 출처 증명 항목 전체"}),
+        *_SLSA_SIGSTORE_CATEGORIES,
+    ),
+    description=_text(
+        "Checks whether release workflows are prepared for signed artifacts, provenance, and tighter GitHub Actions supply-chain controls.",
+        "릴리스 workflow가 산출물 서명, 출처 증명, GitHub Actions 공급망 통제에 준비되어 있는지 확인하는 프로파일입니다.",
+    ),
+    coverage=_text(
+        "External integration required. Real signing verification requires release artifacts, identities, certificate transparency logs, and CI metadata.",
+        "외부 연동이 필요합니다. 실제 서명 검증에는 릴리스 산출물, 신원, 인증서 투명성 로그, CI 메타데이터가 필요합니다.",
+    ),
+    references=(
+        _reference("SLSA", "SLSA", "https://slsa.dev/"),
+        _reference("Sigstore Cosign", "Sigstore Cosign", "https://docs.sigstore.dev/cosign/"),
     ),
 )
 
@@ -1487,8 +1612,43 @@ SECURITY_STANDARDS = (
     OWASP_SAMM_2,
     OWASP_DEPENDENCY_CHECK_BASELINE,
     OWASP_DEPENDENCY_TRACK_BASELINE,
+    OPENSSF_SCORECARD_BASELINE,
+    CISA_KEV_EPSS_PRIORITY,
+    SLSA_SIGSTORE_BASELINE,
 )
 SECURITY_STANDARD_IDS = tuple(standard.id for standard in SECURITY_STANDARDS)
+
+AUTOMATIC_COVERAGE_STANDARD_IDS = {
+    DEFAULT_STANDARD,
+    "owasp-top-10-2025",
+    "owasp-top-10-2021",
+    "cwe-top-25-2025",
+    "cwe-sans-top-25-2025",
+    "cwe",
+    "owasp-api-security-2023",
+    "sw-dev-security-49",
+    "sw-dev-security-7-types",
+    "kisa-secure-coding-guide",
+}
+EXTERNAL_COVERAGE_STANDARD_IDS = {
+    "owasp-mobile-top-10-2024",
+    "ncsc-web-8",
+    "electronic-financial-supervision-8",
+    "owasp-wstg",
+    "owasp-dependency-check-baseline",
+    "owasp-dependency-track-baseline",
+    "openssf-scorecard-baseline",
+    "cisa-kev-epss-priority",
+    "slsa-sigstore-baseline",
+}
+
+
+def _effective_coverage_level(standard: SecurityStandard) -> str:
+    if standard.id in AUTOMATIC_COVERAGE_STANDARD_IDS:
+        return "local"
+    if standard.id in EXTERNAL_COVERAGE_STANDARD_IDS:
+        return "external"
+    return standard.coverage_level
 
 
 def standards_payload() -> list[dict[str, object]]:
@@ -1498,7 +1658,7 @@ def standards_payload() -> list[dict[str, object]]:
             "labels": standard.labels,
             "description": standard.description,
             "coverage": standard.coverage,
-            "coverage_level": standard.coverage_level,
+            "coverage_level": _effective_coverage_level(standard),
             "references": [
                 {
                     "labels": reference.labels,

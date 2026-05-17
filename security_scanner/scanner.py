@@ -6,10 +6,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
-from .checks import code_patterns, configuration, dependencies, secrets
+from .checks import code_patterns, configuration, dependencies, prevention, secrets
 from .checks.common import clear_read_text_cache, normalized_relpath
 from .dependency_inventory import components_from_file, queryable_osv_components, unique_components
 from .discovery import discover_projects
+from .ignore import filter_ignored_findings
 from .models import DependencyComponent, Finding, ScannerConfig, TargetConfig
 from .osv_vulnerabilities import query_osv_findings
 
@@ -19,6 +20,7 @@ DEFAULT_EXCLUDE_DIRS = {
     ".hg",
     ".svn",
     ".cache",
+    ".build",
     ".mypy_cache",
     ".next",
     ".omx",
@@ -40,6 +42,7 @@ DEFAULT_EXCLUDE_DIRS = {
 
 DEFAULT_EXCLUDE_GLOBS = (
     "**/.git/**",
+    "**/.build/**",
     "**/node_modules/**",
     "**/.venv/**",
     "**/venv/**",
@@ -56,6 +59,7 @@ CHECKS: dict[str, Callable[[Path, TargetConfig], list[Finding]]] = {
     "dependencies": dependencies.check_file,
     "configuration": configuration.check_file,
     "code": code_patterns.check_file,
+    "prevention": prevention.check_file,
 }
 
 
@@ -110,16 +114,29 @@ class SecurityScanner:
             components = self._components_from_file(target.path, target)
             findings = self._scan_file(target.path, target)
             findings.extend(self._osv_findings(components))
-            return findings, components
+            filtered, ignored = filter_ignored_findings(findings, target.path.parent)
+            if ignored:
+                self.warnings.append(f"Ignored {ignored} finding(s) using KODA ignore rules for: {target.path.parent}")
+            return filtered, components
 
         findings: list[Finding] = []
         components: list[DependencyComponent] = []
+        scanned_files: list[Path] = []
         for file_path in self._iter_files(target):
+            scanned_files.append(file_path)
             file_components = self._components_from_file(file_path, target)
             components.extend(file_components)
             findings.extend(self._scan_file(file_path, target))
+        if "prevention" in target.categories:
+            findings.extend(
+                replace(finding, target=target.name) if not finding.target else finding
+                for finding in prevention.check_project(target.path, scanned_files, target)
+            )
         findings.extend(self._osv_findings(components))
-        return findings, components
+        filtered, ignored = filter_ignored_findings(findings, target.path)
+        if ignored:
+            self.warnings.append(f"Ignored {ignored} finding(s) using KODA ignore rules for: {target.path}")
+        return filtered, components
 
     def _scan_file(self, path: Path, target: TargetConfig) -> list[Finding]:
         findings: list[Finding] = []
@@ -137,12 +154,12 @@ class SecurityScanner:
         return components_from_file(path, target)
 
     def _osv_findings(self, components: list[DependencyComponent]) -> list[Finding]:
-        if not self.config.enable_osv:
+        if not (self.config.enable_osv or self.config.enable_vuln_intel):
             return []
         queryable_components = queryable_osv_components(tuple(components))
         if not queryable_components:
             return []
-        findings, warnings = query_osv_findings(queryable_components)
+        findings, warnings = query_osv_findings(queryable_components, enable_vuln_intel=self.config.enable_vuln_intel)
         self.warnings.extend(warnings)
         return findings
 

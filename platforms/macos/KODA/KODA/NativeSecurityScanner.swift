@@ -3,7 +3,7 @@ import AppKit
 import CoreText
 import Foundation
 
-struct NativeFinding {
+struct NativeFinding: Hashable {
     let ruleID: String
     let severity: String
     let category: String
@@ -58,6 +58,101 @@ enum NativeScanError: Error, LocalizedError {
     }
 }
 
+private struct NativeIgnoreRule {
+    let rule: String
+    let path: String
+    let until: String
+
+    func matches(_ finding: NativeFinding, targetName: String) -> Bool {
+        if isExpired {
+            return false
+        }
+        if rule != "*" && rule != finding.ruleID && rule != finding.category {
+            return false
+        }
+        let relativePath = finding.path.hasPrefix("\(targetName)/")
+            ? String(finding.path.dropFirst(targetName.count + 1))
+            : finding.path
+        return globMatches(path, relativePath) || globMatches(path, URL(fileURLWithPath: relativePath).lastPathComponent)
+    }
+
+    private var isExpired: Bool {
+        guard !until.isEmpty else { return false }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let expiry = formatter.date(from: until) else {
+            return false
+        }
+        return expiry < Calendar.current.startOfDay(for: Date())
+    }
+
+    private func globMatches(_ pattern: String, _ value: String) -> Bool {
+        let regex = "^" + NSRegularExpression.escapedPattern(for: pattern)
+            .replacingOccurrences(of: "\\*\\*", with: ".*")
+            .replacingOccurrences(of: "\\*", with: "[^/]*")
+            .replacingOccurrences(of: "\\?", with: ".") + "$"
+        return value.range(of: regex, options: .regularExpression) != nil
+    }
+}
+
+private enum NativeIgnoreRules {
+    static func load(from root: URL) -> [NativeIgnoreRule] {
+        for filename in ["koda-ignore.yml", ".koda-ignore.yml"] {
+            let file = root.appendingPathComponent(filename)
+            if let text = try? String(contentsOf: file, encoding: .utf8) {
+                return parse(text)
+            }
+        }
+        return []
+    }
+
+    private static func parse(_ text: String) -> [NativeIgnoreRule] {
+        var rules: [NativeIgnoreRule] = []
+        var current: [String: String] = [:]
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            let stripped = rawLine.components(separatedBy: "#").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if stripped.isEmpty || stripped == "ignore:" {
+                continue
+            }
+            if stripped.hasPrefix("- ") {
+                appendRule(current, to: &rules)
+                current = [:]
+                let rest = String(stripped.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                assign(rest, to: &current)
+            } else {
+                assign(stripped, to: &current)
+            }
+        }
+        appendRule(current, to: &rules)
+        return rules
+    }
+
+    private static func assign(_ line: String, to current: inout [String: String]) {
+        guard let separator = line.firstIndex(of: ":") else {
+            return
+        }
+        let key = line[..<separator].trimmingCharacters(in: .whitespaces)
+        let value = line[line.index(after: separator)...]
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        current[key] = value
+    }
+
+    private static func appendRule(_ current: [String: String], to rules: inout [NativeIgnoreRule]) {
+        guard !current.isEmpty else {
+            return
+        }
+        rules.append(
+            NativeIgnoreRule(
+                rule: current["rule"] ?? current["rule_id"] ?? "*",
+                path: current["path"] ?? "*",
+                until: current["until"] ?? ""
+            )
+        )
+    }
+}
+
 final class NativeSecurityScanner {
     private let fileManager: FileManager
     private let maxFileSize = 524_288
@@ -65,6 +160,7 @@ final class NativeSecurityScanner {
         ".git",
         ".hg",
         ".svn",
+        ".build",
         ".cache",
         ".mypy_cache",
         ".next",
@@ -108,32 +204,43 @@ final class NativeSecurityScanner {
             }
 
             let targetName = resolvedTarget.lastPathComponent.isEmpty ? resolvedTarget.path : resolvedTarget.lastPathComponent
+            let findingStartIndex = findings.count
             if isArchive(resolvedTarget) {
                 do {
                     let extractedRoot = try extractArchive(resolvedTarget, under: temporaryRoot)
+                    var scannedFileURLs: [URL] = []
                     scanDirectory(
                         extractedRoot,
                         targetName: targetName,
                         originalRoot: extractedRoot,
                         findings: &findings,
                         warnings: &warnings,
-                        scannedFileCount: &scannedFileCount
+                        scannedFileCount: &scannedFileCount,
+                        scannedFileURLs: &scannedFileURLs
                     )
+                    appendFindings(checkPrevention(root: extractedRoot, files: scannedFileURLs), targetName: targetName, findings: &findings)
                 } catch {
                     warnings.append(error.localizedDescription)
+                }
+                let ignored = applyIgnoreRules(to: &findings, startingAt: findingStartIndex, root: resolvedTarget.deletingLastPathComponent(), targetName: targetName)
+                if ignored > 0 {
+                    warnings.append("예외 파일(koda-ignore.yml)로 \(ignored)건 제외: \(targetName)")
                 }
                 continue
             }
 
             if isDirectory(resolvedTarget) {
+                var scannedFileURLs: [URL] = []
                 scanDirectory(
                     resolvedTarget,
                     targetName: targetName,
                     originalRoot: resolvedTarget,
                     findings: &findings,
                     warnings: &warnings,
-                    scannedFileCount: &scannedFileCount
+                    scannedFileCount: &scannedFileCount,
+                    scannedFileURLs: &scannedFileURLs
                 )
+                appendFindings(checkPrevention(root: resolvedTarget, files: scannedFileURLs), targetName: targetName, findings: &findings)
             } else {
                 scanFile(
                     resolvedTarget,
@@ -142,6 +249,11 @@ final class NativeSecurityScanner {
                     findings: &findings,
                     scannedFileCount: &scannedFileCount
                 )
+            }
+            let ignoreRoot = isDirectory(resolvedTarget) ? resolvedTarget : resolvedTarget.deletingLastPathComponent()
+            let ignored = applyIgnoreRules(to: &findings, startingAt: findingStartIndex, root: ignoreRoot, targetName: targetName)
+            if ignored > 0 {
+                warnings.append("예외 파일(koda-ignore.yml)로 \(ignored)건 제외: \(targetName)")
             }
         }
 
@@ -168,6 +280,10 @@ final class NativeSecurityScanner {
         try renderMarkdown(result, language: language).write(to: output, atomically: true, encoding: .utf8)
     }
 
+    func markdownReport(_ result: NativeScanResult, language: AppLanguage = .ko) -> String {
+        renderMarkdown(result, language: language)
+    }
+
     func writePDFReport(_ result: NativeScanResult, to output: URL, language: AppLanguage = .ko) throws {
         let pageRect = CGRect(x: 0, y: 0, width: 595, height: 842)
         let data = NSMutableData()
@@ -180,12 +296,7 @@ final class NativeSecurityScanner {
         context.beginPDFPage(nil)
         drawPDFSummaryPage(result, language: language, context: context, pageRect: pageRect)
         context.endPDFPage()
-        drawPDFFindingPages(
-            renderPlainText(result, language: language),
-            title: reportLabel("findings", language: language),
-            context: context,
-            pageRect: pageRect
-        )
+        drawPDFFindingTablePages(result, language: language, context: context, pageRect: pageRect)
 
         context.closePDF()
         try data.write(to: output, options: .atomic)
@@ -306,48 +417,87 @@ final class NativeSecurityScanner {
         }
     }
 
-    private func drawPDFFindingPages(
-        _ text: String,
-        title: String,
+    private func drawPDFFindingTablePages(
+        _ result: NativeScanResult,
+        language: AppLanguage,
         context: CGContext,
         pageRect: CGRect
     ) {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 4
-        paragraph.lineBreakMode = .byWordWrapping
-        let attributed = NSAttributedString(
-            string: text,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 10, weight: .regular),
-                .foregroundColor: pdfColor(17, 24, 39),
-                .paragraphStyle: paragraph,
-            ]
-        )
-        let framesetter = CTFramesetterCreateWithAttributedString(attributed)
-        var range = CFRange(location: 0, length: 0)
+        let marginX = CGFloat(42)
+        let tableWidth = pageRect.width - marginX * 2
+        let columns: [(String, CGFloat)] = [
+            (reportLabel("severity", language: language), 72),
+            (reportLabel("finding", language: language), 158),
+            (reportLabel("path", language: language), 132),
+            (reportLabel("evidenceAction", language: language), tableWidth - 72 - 158 - 132),
+        ]
+        let headerHeight = CGFloat(30)
+        let footerY = pageRect.height - 46
+        var y = CGFloat(0)
 
-        repeat {
+        func beginTablePage() {
             context.beginPDFPage(nil)
-            context.setFillColor(pdfColor(255, 255, 255).cgColor)
+            context.setFillColor(pdfColor(245, 247, 251).cgColor)
             context.fill(pageRect)
             drawPDFText(
-                title,
+                reportLabel("findings", language: language),
                 in: topRect(x: 42, y: 34, width: pageRect.width - 84, height: 24, pageRect: pageRect),
                 context: context,
                 font: .systemFont(ofSize: 16, weight: .bold),
                 color: pdfColor(17, 24, 39)
             )
-            let textRect = pageRect.insetBy(dx: 42, dy: 74)
-            let path = CGPath(rect: textRect, transform: nil)
-            let frame = CTFramesetterCreateFrame(framesetter, range, path, nil)
-            context.saveGState()
-            context.textMatrix = .identity
-            CTFrameDraw(frame, context)
-            context.restoreGState()
-            let visible = CTFrameGetVisibleStringRange(frame)
-            range.location += max(visible.length, 1)
+            drawPDFText(
+                "\(reportLabel("findings", language: language)) \(result.findings.count) | \(reportLabel("riskScore", language: language)) \(result.riskScore)",
+                in: topRect(x: 42, y: 60, width: pageRect.width - 84, height: 18, pageRect: pageRect),
+                context: context,
+                font: .systemFont(ofSize: 9.5, weight: .regular),
+                color: pdfColor(102, 112, 133)
+            )
+            y = 92
+            drawPDFTableHeader(columns: columns, x: marginX, y: y, width: tableWidth, height: headerHeight, context: context, pageRect: pageRect)
+            y += headerHeight
+        }
+
+        beginTablePage()
+
+        if result.findings.isEmpty {
+            let rowRect = topRect(x: marginX, y: y, width: tableWidth, height: 52, pageRect: pageRect)
+            drawPDFRoundedRect(rowRect, fill: .white, stroke: pdfColor(216, 222, 233), context: context, cornerRadius: 0)
+            drawPDFTableCell(
+                reportLabel("noFindings", language: language),
+                x: marginX,
+                y: y,
+                width: tableWidth,
+                height: 52,
+                context: context,
+                pageRect: pageRect,
+                font: .systemFont(ofSize: 10, weight: .regular),
+                color: pdfColor(17, 24, 39)
+            )
             context.endPDFPage()
-        } while range.location < max(attributed.length, 1)
+            return
+        }
+
+        for (index, finding) in result.findings.enumerated() {
+            let rowHeight = pdfFindingRowHeight(finding, language: language, columns: columns)
+            if y + rowHeight > footerY {
+                context.endPDFPage()
+                beginTablePage()
+            }
+            drawPDFFindingRow(
+                finding,
+                rowIndex: index,
+                columns: columns,
+                x: marginX,
+                y: y,
+                height: rowHeight,
+                language: language,
+                context: context,
+                pageRect: pageRect
+            )
+            y += rowHeight
+        }
+        context.endPDFPage()
     }
 
     private func renderPDFFindingText(_ result: NativeScanResult, language: AppLanguage) -> String {
@@ -370,6 +520,196 @@ final class NativeSecurityScanner {
             }.joined(separator: "\n\n")
 
         return "\(warnings)\(findings)"
+    }
+
+    private func drawPDFTableHeader(
+        columns: [(String, CGFloat)],
+        x: CGFloat,
+        y: CGFloat,
+        width: CGFloat,
+        height: CGFloat,
+        context: CGContext,
+        pageRect: CGRect
+    ) {
+        drawPDFRoundedRect(
+            topRect(x: x, y: y, width: width, height: height, pageRect: pageRect),
+            fill: pdfColor(248, 250, 252),
+            stroke: pdfColor(216, 222, 233),
+            context: context,
+            cornerRadius: 0
+        )
+        var currentX = x
+        for column in columns {
+            drawPDFTableCell(
+                column.0,
+                x: currentX,
+                y: y,
+                width: column.1,
+                height: height,
+                context: context,
+                pageRect: pageRect,
+                font: .systemFont(ofSize: 8.8, weight: .bold),
+                color: pdfColor(102, 112, 133),
+                drawBorder: true
+            )
+            currentX += column.1
+        }
+    }
+
+    private func drawPDFFindingRow(
+        _ finding: NativeFinding,
+        rowIndex: Int,
+        columns: [(String, CGFloat)],
+        x: CGFloat,
+        y: CGFloat,
+        height: CGFloat,
+        language: AppLanguage,
+        context: CGContext,
+        pageRect: CGRect
+    ) {
+        let rowFill = rowIndex.isMultiple(of: 2) ? NSColor.white : pdfColor(250, 252, 255)
+        let rowWidth = columns.reduce(CGFloat(0)) { partial, column in partial + column.1 }
+        drawPDFRoundedRect(topRect(x: x, y: y, width: rowWidth, height: height, pageRect: pageRect), fill: rowFill, stroke: pdfColor(216, 222, 233), context: context, cornerRadius: 0)
+
+        var currentX = x
+        let severityRect = topRect(x: currentX + 8, y: y + 12, width: columns[0].1 - 16, height: 21, pageRect: pageRect)
+        drawPDFRoundedRect(severityRect, fill: pdfSeverityColor(finding.severity), stroke: pdfSeverityColor(finding.severity), context: context, cornerRadius: 10.5)
+        drawPDFText(
+            severityLabel(finding.severity, language: language),
+            in: severityRect.insetBy(dx: 4, dy: 4),
+            context: context,
+            font: .systemFont(ofSize: 7.8, weight: .heavy),
+            color: .white,
+            lineSpacing: 1
+        )
+        drawPDFCellBorder(x: currentX, y: y, width: columns[0].1, height: height, context: context, pageRect: pageRect)
+        currentX += columns[0].1
+
+        drawPDFTableCell(
+            pdfTrimmed(
+                """
+                \(findingTitle(finding, language: language))
+                \(finding.ruleID)
+                \(categoryLabel(finding.category, language: language))
+                """,
+                limit: 220
+            ),
+            x: currentX,
+            y: y,
+            width: columns[1].1,
+            height: height,
+            context: context,
+            pageRect: pageRect,
+            font: .systemFont(ofSize: 8.7, weight: .regular),
+            color: pdfColor(17, 24, 39),
+            drawBorder: true
+        )
+        currentX += columns[1].1
+
+        let location = "\(finding.path)\(finding.line.map { ":\($0)" } ?? "")"
+        drawPDFTableCell(
+            pdfTrimmed(location, limit: 180),
+            x: currentX,
+            y: y,
+            width: columns[2].1,
+            height: height,
+            context: context,
+            pageRect: pageRect,
+            font: .monospacedSystemFont(ofSize: 8.2, weight: .regular),
+            color: pdfColor(71, 84, 103),
+            drawBorder: true
+        )
+        currentX += columns[2].1
+
+        drawPDFTableCell(
+            pdfTrimmed(
+                """
+                \(reportLabel("evidence", language: language)): \(finding.evidence)
+                \(reportLabel("recommendation", language: language)): \(findingRecommendation(finding, language: language))
+                """,
+                limit: 300
+            ),
+            x: currentX,
+            y: y,
+            width: columns[3].1,
+            height: height,
+            context: context,
+            pageRect: pageRect,
+            font: .systemFont(ofSize: 8.2, weight: .regular),
+            color: pdfColor(17, 24, 39),
+            drawBorder: true
+        )
+    }
+
+    private func drawPDFTableCell(
+        _ text: String,
+        x: CGFloat,
+        y: CGFloat,
+        width: CGFloat,
+        height: CGFloat,
+        context: CGContext,
+        pageRect: CGRect,
+        font: NSFont,
+        color: NSColor,
+        drawBorder: Bool = false
+    ) {
+        if drawBorder {
+            drawPDFCellBorder(x: x, y: y, width: width, height: height, context: context, pageRect: pageRect)
+        }
+        drawPDFText(
+            text,
+            in: topRect(x: x + 7, y: y + 7, width: max(1, width - 14), height: max(1, height - 14), pageRect: pageRect),
+            context: context,
+            font: font,
+            color: color,
+            lineSpacing: 2.4
+        )
+    }
+
+    private func drawPDFCellBorder(
+        x: CGFloat,
+        y: CGFloat,
+        width: CGFloat,
+        height: CGFloat,
+        context: CGContext,
+        pageRect: CGRect
+    ) {
+        let rect = topRect(x: x, y: y, width: width, height: height, pageRect: pageRect)
+        context.setStrokeColor(pdfColor(216, 222, 233).cgColor)
+        context.setLineWidth(0.7)
+        context.stroke(rect)
+    }
+
+    private func pdfFindingRowHeight(
+        _ finding: NativeFinding,
+        language: AppLanguage,
+        columns: [(String, CGFloat)]
+    ) -> CGFloat {
+        let titleLines = pdfEstimatedLineCount("\(findingTitle(finding, language: language)) \(finding.ruleID) \(categoryLabel(finding.category, language: language))", width: columns[1].1 - 14)
+        let locationLines = pdfEstimatedLineCount("\(finding.path)\(finding.line.map { ":\($0)" } ?? "")", width: columns[2].1 - 14, averageCharacterWidth: 4.8)
+        let actionLines = pdfEstimatedLineCount("\(finding.evidence) \(findingRecommendation(finding, language: language))", width: columns[3].1 - 14)
+        let lineCount = max(titleLines, locationLines, actionLines)
+        return min(132, max(72, CGFloat(lineCount) * 11 + 22))
+    }
+
+    private func pdfEstimatedLineCount(_ text: String, width: CGFloat, averageCharacterWidth: CGFloat = 5.2) -> Int {
+        let usableCharacters = max(10, Int(width / averageCharacterWidth))
+        let lines = text.components(separatedBy: .newlines).reduce(0) { partial, line in
+            partial + max(1, Int(ceil(Double(line.count) / Double(usableCharacters))))
+        }
+        return max(lines, 1)
+    }
+
+    private func pdfTrimmed(_ text: String, limit: Int) -> String {
+        let normalized = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        guard normalized.count > limit else {
+            return normalized
+        }
+        return String(normalized.prefix(max(0, limit - 1))) + "..."
     }
 
     private func drawPDFSeverityBars(
@@ -481,7 +821,8 @@ final class NativeSecurityScanner {
         originalRoot: URL,
         findings: inout [NativeFinding],
         warnings: inout [String],
-        scannedFileCount: inout Int
+        scannedFileCount: inout Int,
+        scannedFileURLs: inout [URL]
     ) {
         guard let enumerator = fileManager.enumerator(
             at: root,
@@ -509,7 +850,8 @@ final class NativeSecurityScanner {
                         originalRoot: extractedRoot,
                         findings: &findings,
                         warnings: &warnings,
-                        scannedFileCount: &scannedFileCount
+                        scannedFileCount: &scannedFileCount,
+                        scannedFileURLs: &scannedFileURLs
                     )
                     try? fileManager.removeItem(at: extractedRoot)
                 } catch {
@@ -518,6 +860,7 @@ final class NativeSecurityScanner {
                 continue
             }
 
+            scannedFileURLs.append(item)
             scanFile(
                 item,
                 targetName: targetName,
@@ -535,15 +878,25 @@ final class NativeSecurityScanner {
         findings: inout [NativeFinding],
         scannedFileCount: inout Int
     ) {
-        guard let lines = readTextLines(file) else { return }
-        scannedFileCount += 1
         let displayPath = relativePath(file, root: root)
-        let localFindings =
+        var localFindings = checkFileMetadata(file: file, displayPath: displayPath)
+
+        guard let lines = readTextLines(file) else {
+            appendFindings(localFindings, targetName: targetName, findings: &findings)
+            return
+        }
+
+        scannedFileCount += 1
+        localFindings +=
             checkSecrets(lines: lines, file: file, displayPath: displayPath)
             + checkDependencies(lines: lines, file: file, root: root, displayPath: displayPath)
             + checkConfiguration(lines: lines, file: file, displayPath: displayPath)
             + checkCode(lines: lines, file: file, displayPath: displayPath)
 
+        appendFindings(localFindings, targetName: targetName, findings: &findings)
+    }
+
+    private func appendFindings(_ localFindings: [NativeFinding], targetName: String, findings: inout [NativeFinding]) {
         findings.append(contentsOf: localFindings.map { finding in
             NativeFinding(
                 ruleID: finding.ruleID,
@@ -558,6 +911,47 @@ final class NativeSecurityScanner {
         })
     }
 
+    private func applyIgnoreRules(to findings: inout [NativeFinding], startingAt startIndex: Int, root: URL, targetName: String) -> Int {
+        let rules = NativeIgnoreRules.load(from: root)
+        guard !rules.isEmpty, startIndex < findings.count else {
+            return 0
+        }
+
+        let prefix = Array(findings[..<startIndex])
+        let scoped = Array(findings[startIndex...])
+        let kept = scoped.filter { finding in
+            !rules.contains { rule in
+                rule.matches(finding, targetName: targetName)
+            }
+        }
+        findings = prefix + kept
+        return scoped.count - kept.count
+    }
+
+    private func checkFileMetadata(file: URL, displayPath: String) -> [NativeFinding] {
+        let name = file.lastPathComponent
+        let suffix = file.pathExtension.lowercased()
+        let privateKeyNames: Set<String> = ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]
+        let privateKeySuffixes: Set<String> = ["pem", "p12", "pfx", "key"]
+
+        if privateKeyNames.contains(name) || privateKeySuffixes.contains(suffix) {
+            return [
+                finding(
+                    "config.private-key-like-file",
+                    "high",
+                    "configuration",
+                    "개인 키로 보이는 파일이 프로젝트에 포함됨",
+                    displayPath,
+                    nil,
+                    name,
+                    "개인 키 파일은 비밀 저장소로 이동하고 실제 키였다면 즉시 교체하세요."
+                )
+            ]
+        }
+
+        return []
+    }
+
     private func checkSecrets(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
         var findings: [NativeFinding] = []
         for (index, line) in lines.enumerated() {
@@ -565,8 +959,17 @@ final class NativeSecurityScanner {
             if line.contains("-----BEGIN") && line.contains("PRIVATE KEY-----") {
                 findings.append(finding("secret.private-key", "critical", "secrets", "개인 키가 파일에 포함됨", displayPath, lineNumber, line, "개인 키를 즉시 폐기하고 안전한 비밀 관리 저장소로 이동하세요."))
             }
+            if matches(#"\b(?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16}\b"#, line) {
+                findings.append(finding("secret.aws-access-key", "high", "secrets", "AWS Access Key로 보이는 값 발견", displayPath, lineNumber, redact(line), "키를 폐기하고 IAM 권한 범위와 사용 이력을 확인하세요."))
+            }
+            if matches(#"\bgh[pousr]_[A-Za-z0-9_]{20,255}\b"#, line) {
+                findings.append(finding("secret.github-token", "high", "secrets", "GitHub 토큰으로 보이는 값 발견", displayPath, lineNumber, redact(line), "토큰을 폐기하고 GitHub secret 저장소 또는 OS 비밀 저장소를 사용하세요."))
+            }
             if matches(#"sk-[A-Za-z0-9_\-]{20,}"#, line) {
                 findings.append(finding("secret.openai-key", "high", "secrets", "API 키로 보이는 값 발견", displayPath, lineNumber, redact(line), "키를 폐기하고 환경변수 또는 비밀 관리 저장소를 사용하세요."))
+            }
+            if matches(#"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"#, line) {
+                findings.append(finding("secret.slack-token", "high", "secrets", "Slack 토큰으로 보이는 값 발견", displayPath, lineNumber, redact(line), "토큰을 폐기하고 Slack 앱 권한과 사용 이력을 확인하세요."))
             }
             if matches(#"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-./+=]{12,}"#, line),
                !matches(#"(?i)(getenv|process\.env|os\.environ|config\.get|placeholder|example)"#, line) {
@@ -585,6 +988,9 @@ final class NativeSecurityScanner {
                 if line.isEmpty || line.hasPrefix("#") || line.contains("==") || line.contains("@") {
                     continue
                 }
+                if line.hasPrefix("http://") || line.contains(" http://") {
+                    findings.append(finding("dependency.python-insecure-url", "high", "dependencies", "Python 의존성이 안전하지 않은 HTTP에서 내려받아짐", displayPath, index + 1, line, "HTTPS 또는 신뢰할 수 있는 패키지 저장소를 사용하세요."))
+                }
                 if matches(#"^[A-Za-z0-9_.\-]+([<>=!~]=?)?.*"#, line) {
                     findings.append(finding("dependency.python-unpinned-requirement", "low", "dependencies", "고정되지 않은 Python 의존성", displayPath, index + 1, line, "정확한 버전을 고정하고 정기적으로 취약점 조회를 수행하세요."))
                 }
@@ -593,12 +999,54 @@ final class NativeSecurityScanner {
 
         if name == "package.json" {
             let lockfiles = ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"]
-            if !lockfiles.contains(where: { fileManager.fileExists(atPath: file.deletingLastPathComponent().appendingPathComponent($0).path) }) {
-                findings.append(finding("dependency.node-missing-lockfile", "medium", "dependencies", "Node lockfile 누락", displayPath, nil, "package.json", "lockfile을 커밋해 재현 가능한 설치를 보장하세요."))
+            let text = lines.joined(separator: "\n")
+            if let data = text.data(using: .utf8) {
+                do {
+                    let object = try JSONSerialization.jsonObject(with: data)
+                    if let package = object as? [String: Any] {
+                        let dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
+                        let hasDependencies = dependencySections.contains { section in
+                            guard let dependencies = package[section] as? [String: Any] else { return false }
+                            return !dependencies.isEmpty
+                        }
+
+                        if hasDependencies, !lockfiles.contains(where: { fileManager.fileExists(atPath: file.deletingLastPathComponent().appendingPathComponent($0).path) }) {
+                            findings.append(finding("dependency.node-missing-lockfile", "medium", "dependencies", "Node lockfile 누락", displayPath, nil, "package.json", "lockfile을 커밋해 재현 가능한 설치를 보장하세요."))
+                        }
+
+                        for section in dependencySections {
+                            guard let dependencies = package[section] as? [String: Any] else { continue }
+                            for (packageName, rawVersion) in dependencies {
+                                guard let version = rawVersion as? String else { continue }
+                                let lineNumber = lineNumberContaining(packageName, in: lines)
+                                if ["*", "latest", "x"].contains(version.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) || version.hasPrefix(">=") {
+                                    findings.append(finding("dependency.node-unbounded-version", "medium", "dependencies", "제한 없는 Node 의존성 버전", displayPath, lineNumber, "\(packageName): \(version)", "검증된 버전 범위나 lockfile을 사용하세요."))
+                                }
+                                if version.hasPrefix("http://") || version.contains(" http://") {
+                                    findings.append(finding("dependency.node-insecure-url", "high", "dependencies", "Node 의존성이 안전하지 않은 HTTP에서 내려받아짐", displayPath, lineNumber, "\(packageName): \(version)", "HTTPS 또는 신뢰할 수 있는 패키지 저장소를 사용하세요."))
+                                }
+                            }
+                        }
+
+                        if let scripts = package["scripts"] as? [String: Any] {
+                            for (scriptName, rawCommand) in scripts {
+                                guard let command = rawCommand as? String else { continue }
+                                if matches(#"(?i)\b(curl|wget)\b.+\|\s*(sh|bash|zsh|python|ruby|node)\b"#, command) {
+                                    findings.append(finding("dependency.remote-shell-script", "high", "dependencies", "패키지 스크립트가 원격 콘텐츠를 즉시 실행함", displayPath, lineNumberContaining(scriptName, in: lines), "\(scriptName): \(command)", "설치 스크립트를 vendoring하거나 체크섬/서명을 검증하세요."))
+                                }
+                            }
+                        }
+                    }
+                } catch {
+                    findings.append(finding("dependency.package-json-invalid", "medium", "dependencies", "package.json 문법 오류", displayPath, nil, String(describing: error), "의존성 도구가 안정적으로 검사할 수 있도록 package.json 문법을 수정하세요."))
+                }
             }
+        }
+
+        if name == "pyproject.toml" {
             for (index, line) in lines.enumerated() {
-                if matches(#"(?i)\"[^\"]+\"\s*:\s*\"(\*|latest|x|>=)"#, line) {
-                    findings.append(finding("dependency.node-unbounded-version", "medium", "dependencies", "제한 없는 Node 의존성 버전", displayPath, index + 1, line, "검증된 버전 범위나 lockfile을 사용하세요."))
+                if matches(#"=\s*['"]\*['"]"#, line) {
+                    findings.append(finding("dependency.python-wildcard-version", "medium", "dependencies", "Python 의존성 wildcard 버전", displayPath, index + 1, line, "검증된 버전 범위나 lockfile을 사용하세요."))
                 }
             }
         }
@@ -606,10 +1054,10 @@ final class NativeSecurityScanner {
         if name == "Dockerfile" {
             for (index, line) in lines.enumerated() {
                 if matches(#"(?i)(curl|wget).*\|\s*(sh|bash)"#, line) {
-                    findings.append(finding("dependency.remote-shell-install", "high", "dependencies", "원격 스크립트 즉시 실행", displayPath, index + 1, line, "다운로드 검증과 체크섬 확인 후 실행하세요."))
+                    findings.append(finding("dependency.docker-remote-shell", "high", "dependencies", "Docker 빌드가 원격 스크립트를 즉시 실행함", displayPath, index + 1, line, "다운로드 검증과 체크섬 확인 후 실행하세요."))
                 }
-                if matches(#"(?i)FROM\s+\S+:latest\b"#, line) {
-                    findings.append(finding("dependency.container-latest-tag", "medium", "dependencies", "latest 컨테이너 태그 사용", displayPath, index + 1, line, "불변 태그나 digest를 사용하세요."))
+                if matches(#"(?i)^FROM\s+\S+:latest\b"#, line) || matches(#"(?i)^FROM\s+[^:@\s]+(?:\s+AS\s+\S+)?$"#, line) {
+                    findings.append(finding("dependency.docker-unpinned-base", "medium", "dependencies", "Docker base image가 고정되지 않음", displayPath, index + 1, line, "검토된 태그나 digest로 base image를 고정하세요."))
                 }
             }
         }
@@ -621,19 +1069,129 @@ final class NativeSecurityScanner {
     private func checkConfiguration(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
         var findings: [NativeFinding] = []
         let name = file.lastPathComponent
-        if name == ".env" || name.hasPrefix(".env.") {
+        if isRealEnvironmentFile(name) {
             findings.append(finding("config.env-file-present", "medium", "configuration", "환경 파일이 프로젝트에 포함됨", displayPath, nil, name, "비밀값 포함 여부를 확인하고 저장소에서 제외하세요."))
         }
 
+        var dockerHasUserDirective = false
         for (index, line) in lines.enumerated() {
+            let lowered = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if matches(#"(?i)\bDEBUG\s*[:=]\s*(true|1|yes)\b"#, line) {
                 findings.append(finding("config.debug-enabled", "medium", "configuration", "디버그 설정 활성화", displayPath, index + 1, line, "운영 빌드에서 디버그 설정을 비활성화하세요."))
             }
-            if matches(#"(?i)\bprivileged\s*:\s*true\b"#, line) {
+            if shouldCheckDevelopmentEnvironment(file) && matches(#"(?i)\b(NODE_ENV|FLASK_ENV|APP_ENV)\b\s*[:=]\s*['"]?development['"]?"#, line) {
+                findings.append(finding("config.development-environment", "low", "configuration", "개발 환경 플래그가 설정됨", displayPath, index + 1, line, "배포 설정과 로컬 개발 설정을 분리하세요."))
+            }
+            if looksLikeKubernetesManifest(file) {
+                if lowered == "privileged: true" {
+                    findings.append(finding("config.k8s-privileged-container", "high", "configuration", "Kubernetes 컨테이너가 privileged 모드를 사용함", displayPath, index + 1, line, "privileged 모드를 제거하고 필요한 capability만 명시하세요."))
+                }
+                if lowered == "allowprivilegeescalation: true" {
+                    findings.append(finding("config.k8s-allow-privilege-escalation", "medium", "configuration", "Kubernetes 컨테이너가 권한 상승을 허용함", displayPath, index + 1, line, "필요하지 않다면 allowPrivilegeEscalation: false를 설정하세요."))
+                }
+                if lowered == "hostnetwork: true" {
+                    findings.append(finding("config.k8s-host-network", "medium", "configuration", "Kubernetes workload가 host network를 사용함", displayPath, index + 1, line, "Pod 네트워크와 Service/NetworkPolicy를 우선 사용하세요."))
+                }
+                if lowered == "hostpath:" || lowered.hasSuffix(" hostpath:") || lowered.hasSuffix("- hostpath:") {
+                    findings.append(finding("config.k8s-hostpath-volume", "medium", "configuration", "Kubernetes workload가 hostPath 볼륨을 마운트함", displayPath, index + 1, line, "가능하면 PersistentVolume으로 대체하고 예외 사유를 문서화하세요."))
+                }
+            }
+            if ["tf", "tfvars"].contains(file.pathExtension.lowercased()) {
+                if matches(#"(?i)\bacl\s*=\s*"(public-read|public-read-write|website)""#, line) {
+                    findings.append(finding("config.terraform-public-storage", "high", "configuration", "Terraform 저장소 ACL이 public으로 설정됨", displayPath, index + 1, line, "private ACL을 기본값으로 두고 공개 정책은 별도 검토하세요."))
+                }
+                if matches(#"(?i)\b(block_public_acls|block_public_policy|ignore_public_acls|restrict_public_buckets)\s*=\s*false\b"#, line) {
+                    findings.append(finding("config.terraform-public-access-block-disabled", "medium", "configuration", "Terraform public access block이 비활성화됨", displayPath, index + 1, line, "public access block 통제를 유지하세요."))
+                }
+                if lowered.contains("0.0.0.0/0") && nearbyAdminPort(lines: lines, index: index) {
+                    findings.append(finding("config.terraform-open-admin-port", "high", "configuration", "Terraform 보안그룹이 관리자 포트를 인터넷에 공개함", displayPath, index + 1, line, "관리자 포트는 VPN, bastion, 승인된 CIDR로 제한하세요."))
+                }
+            }
+            if looksLikeGitHubWorkflow(file) {
+                if lowered.hasPrefix("pull_request_target:") {
+                    findings.append(finding("config.github-pull-request-target", "medium", "configuration", "GitHub Actions가 pull_request_target을 사용함", displayPath, index + 1, line, "비신뢰 PR 코드는 pull_request에서 실행하고 권한 작업과 분리하세요."))
+                }
+                if (lowered.hasPrefix("run:") || lowered.hasPrefix("- run:")) && lowered.contains("${{ github.event.") {
+                    findings.append(finding("config.github-untrusted-event-in-run", "medium", "configuration", "GitHub Actions run 단계에 이벤트 데이터가 직접 삽입됨", displayPath, index + 1, line, "이벤트 값은 환경변수로 전달하고 셸 사용 전에 검증하세요."))
+                }
+            }
+            if isComposeFile(name) && matches(#"(?i)\bprivileged\s*:\s*true\b"#, line) {
                 findings.append(finding("config.compose-privileged", "high", "configuration", "권한 상승 컨테이너 설정", displayPath, index + 1, line, "컨테이너 privileged 모드를 제거하고 필요한 capability만 부여하세요."))
             }
+            if isComposeFile(name) && matches(#"(?i)^\s*network_mode\s*:\s*host\s*$"#, line) {
+                findings.append(finding("config.compose-host-network", "medium", "configuration", "Compose 서비스가 host network를 사용함", displayPath, index + 1, line, "필요한 포트만 명시적으로 매핑하세요."))
+            }
+            if isComposeFile(name) && line.lowercased().contains("/var/run/docker.sock") {
+                findings.append(finding("config.compose-docker-sock", "high", "configuration", "Compose 서비스가 Docker socket을 마운트함", displayPath, index + 1, line, "Docker socket 마운트를 피하거나 제한된 프록시를 사용하세요."))
+            }
+            if name == "Dockerfile" {
+                if matches(#"(?i)^USER\s+"#, line) {
+                    dockerHasUserDirective = true
+                    if matches(#"(?i)^USER\s+(0|root)\s*$"#, line) {
+                        findings.append(finding("config.docker-root-user", "medium", "configuration", "Docker image가 root로 실행됨", displayPath, index + 1, line, "런타임 단계에서 최소 권한 사용자로 실행하세요."))
+                    }
+                }
+                if matches(#"(?i)^ADD\s+http://"#, line) {
+                    findings.append(finding("config.docker-add-http", "medium", "configuration", "Dockerfile ADD가 HTTP를 사용함", displayPath, index + 1, line, "HTTPS와 체크섬 검증을 사용하세요."))
+                }
+            }
+        }
+
+        if name == "Dockerfile", !dockerHasUserDirective {
+            findings.append(finding("config.docker-no-user", "low", "configuration", "Dockerfile에 비root USER가 없음", displayPath, nil, name, "런타임 단계에 비root USER를 추가하세요."))
         }
         return findings
+    }
+
+    private func isComposeFile(_ name: String) -> Bool {
+        ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"].contains(name)
+    }
+
+    private func looksLikeKubernetesManifest(_ file: URL) -> Bool {
+        let lowerName = file.lastPathComponent.lowercased()
+        if ["deployment.yml", "deployment.yaml", "pod.yml", "pod.yaml", "daemonset.yml", "daemonset.yaml", "statefulset.yml", "statefulset.yaml"].contains(lowerName) {
+            return true
+        }
+        guard ["yaml", "yml"].contains(file.pathExtension.lowercased()) else {
+            return false
+        }
+        let lowerPath = file.path.lowercased()
+        return lowerPath.contains("/k8s/") || lowerPath.contains("/kubernetes/") || lowerPath.contains("/manifests/") || lowerPath.contains("/helm/")
+    }
+
+    private func looksLikeGitHubWorkflow(_ file: URL) -> Bool {
+        let lowerPath = file.path.lowercased()
+        return lowerPath.contains("/.github/workflows/") && ["yml", "yaml"].contains(file.pathExtension.lowercased())
+    }
+
+    private func nearbyAdminPort(lines: [String], index: Int) -> Bool {
+        let lower = max(0, index - 7)
+        let upper = min(lines.count, index + 8)
+        let window = lines[lower..<upper].joined(separator: "\n").lowercased()
+        return matches(#"\b(from_port|to_port|port)\s*=\s*(22|3389)\b"#, window)
+    }
+
+    private func isRealEnvironmentFile(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        if lower.hasSuffix(".example") || lower.hasSuffix(".sample") || lower.hasSuffix(".template") {
+            return false
+        }
+        return lower == ".env" || lower.hasPrefix(".env.")
+    }
+
+    private func shouldCheckDevelopmentEnvironment(_ file: URL) -> Bool {
+        let name = file.lastPathComponent
+        let lower = name.lowercased()
+        if lower.hasSuffix(".example") || lower.hasSuffix(".sample") || lower.hasSuffix(".template") {
+            return false
+        }
+        if lower.hasPrefix(".env") {
+            return true
+        }
+        if ["Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"].contains(name) {
+            return true
+        }
+        return [".cfg", ".conf", ".config", ".env", ".ini", ".json", ".properties", ".toml", ".yaml", ".yml"].contains(file.pathExtension.isEmpty ? "" : ".\(file.pathExtension.lowercased())")
     }
 
     private func checkCode(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
@@ -641,7 +1199,7 @@ final class NativeSecurityScanner {
         for (index, line) in lines.enumerated() {
             let lineNumber = index + 1
             if matches(#"(?i)\.innerHTML\s*=.*(location|document\.URL|request|params)"#, line) {
-                findings.append(finding("code.xss-dom-sink", "medium", "code", "DOM XSS 위험 sink", displayPath, lineNumber, line, "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."))
+                findings.append(finding("code.xss-dom-sink", "high", "code", "DOM XSS 위험 sink", displayPath, lineNumber, line, "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."))
             }
             if matches(#"(?i)(execute|query)\s*\(.*(SELECT|INSERT|UPDATE|DELETE).*(\+|f"|%\s)"#, line) {
                 findings.append(finding("code.sql-dynamic-query", "high", "code", "동적 SQL 쿼리 구성", displayPath, lineNumber, line, "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."))
@@ -650,10 +1208,43 @@ final class NativeSecurityScanner {
                 findings.append(finding("code.command-injection", "high", "code", "명령어 삽입 위험", displayPath, lineNumber, line, "쉘 실행을 피하고 인자를 배열로 전달하며 입력을 allowlist로 검증하세요."))
             }
             if matches(#"(?i)(send_file|sendfile|readFile|createReadStream).*(request|req\.|params|query)"#, line) {
-                findings.append(finding("code.path-traversal", "high", "code", "경로 조작 위험", displayPath, lineNumber, line, "사용자 입력 경로를 정규화하고 허용된 루트 내부인지 검증하세요."))
+                findings.append(finding("code.path-traversal", "medium", "code", "경로 조작 위험", displayPath, lineNumber, line, "사용자 입력 경로를 정규화하고 허용된 루트 내부인지 검증하세요."))
+            }
+            if matches(#"(?i)(@csrf_exempt|csrf\s*:\s*false|csrf\.disable|verify_csrf_token.*false|skip_before_action\s+:verify_authenticity_token|protect_from_forgery\s+except:)"#, line) {
+                findings.append(finding("code.csrf-disabled", "medium", "code", "CSRF 보호가 비활성화된 것으로 보임", displayPath, lineNumber, line, "브라우저 인증 기반 상태 변경 요청에는 CSRF 보호를 유지하세요."))
+            }
+            if matches(#"(?i)(@AllowAnonymous|@Public\(\)|permitAll\(\)|auth\s*:\s*false|AllowAny|permission_classes\s*=\s*\[\s*\]|skip_before_action\s+:authenticate)"#, line) {
+                findings.append(finding("code.auth-disabled-endpoint", "medium", "code", "인증 또는 인가가 우회된 엔드포인트", displayPath, lineNumber, line, "공개 의도가 명확한지 확인하고 민감 기능에는 권한 검사를 적용하세요."))
+            }
+            if matches(#"(?i)\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\(.*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
+                findings.append(finding("code.eval-user-input", "high", "code", "eval 계열 API에 사용자 입력이 연결됨", displayPath, lineNumber, line, "동적 코드 실행을 제거하고 허용목록 기반 분기 처리로 대체하세요."))
             }
             if matches(#"(?i)(pickle\.loads|yaml\.load|ObjectInputStream|unserialize\()"#, line) {
                 findings.append(finding("code.unsafe-deserialization", "high", "code", "위험한 역직렬화 사용", displayPath, lineNumber, line, "신뢰할 수 없는 입력의 역직렬화를 금지하고 안전 로더를 사용하세요."))
+            }
+            if matches(#"(?i)\b(requests|httpx|urllib\.request|axios|fetch|http\.get|https\.get|RestTemplate|WebClient).*(get|post|open|request|\().*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
+                findings.append(finding("code.ssrf-user-url", "high", "code", "사용자 입력 URL 요청으로 인한 SSRF 위험", displayPath, lineNumber, line, "허용된 호스트만 요청하고 사설망 대역 접근을 차단하세요."))
+            }
+            if matches(#"(?i)(move_uploaded_file\s*\(\s*\$_FILES|\.save\s*\(.*(filename|originalname|req\.file)|multer\s*\(\s*\{\s*dest\s*:)"#, line) {
+                findings.append(finding("code.unrestricted-file-upload", "medium", "code", "파일 업로드 제한이 부족할 수 있음", displayPath, lineNumber, line, "확장자와 콘텐츠 유형을 검증하고 서버측 파일명을 생성하세요."))
+            }
+            if matches(#"(?i)\b(gets|strcpy|strcat|sprintf|vsprintf)\s*\("#, line) {
+                findings.append(finding("code.dangerous-c-buffer-api", "medium", "code", "위험한 C/C++ 버퍼 API 사용", displayPath, lineNumber, line, "버퍼 크기를 검증하고 bounded API로 대체하세요."))
+            }
+            if matches(#"(?i)\b(express\.json|bodyParser\.json|express\.urlencoded|bodyParser\.urlencoded)\s*\(\s*\)"#, line) {
+                findings.append(finding("code.unbounded-request-body", "low", "code", "요청 본문 크기 제한이 명시되지 않음", displayPath, lineNumber, line, "요청 본문 크기 제한을 설정하고 과대 요청을 조기에 거부하세요."))
+            }
+            if matches(#"(?i)(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))\s*\(.*(password|pwd|secret|token|api[_-]?key|authorization|credential|session|cookie)"#, line) {
+                findings.append(finding("code.logging-sensitive-data", "medium", "code", "민감정보가 로그에 기록될 수 있음", displayPath, lineNumber, line, "로그에서 민감값을 제거하거나 마스킹된 식별자만 기록하세요."))
+            }
+            if matches(#"(?i)(\bexcept\b[^:\n]*:\s*pass\b|\bcatch\s*(\([^)]*\))?\s*\{\s*\})"#, line) {
+                findings.append(finding("code.empty-exception-handler", "low", "code", "예외가 조용히 무시되는 것으로 보임", displayPath, lineNumber, line, "예상 예외를 명시적으로 처리하고 필요한 경우 보안 관련 실패를 기록하세요."))
+            }
+            if matches(#"(?i)\b(printStackTrace|traceback\.print_exc|console\.trace|logger\.exception)\s*\("#, line) {
+                findings.append(finding("code.stack-trace-exposure", "low", "code", "스택 트레이스 출력이 내부 정보를 노출할 수 있음", displayPath, lineNumber, line, "중앙 오류 처리로 전달하고 사용자 노출 경로에서는 원본 스택을 숨기세요."))
+            }
+            if matches(#"(?i)(@\w+\.route|(?:app|router|routes|server)\.(?:get|post|put|patch|delete|use)|Route|path)\s*\(.*['"]/api/(?!v\d+(?:/|$))[^'"]+['"]"#, line) {
+                findings.append(finding("code.unversioned-api-route", "low", "code", "API 라우트에 버전이 명시되지 않음", displayPath, lineNumber, line, "공개 API에는 /api/v1 같은 명시적 버전 경로를 사용하세요."))
             }
             if matches(#"(?i)mktemp\s*\("#, line) {
                 findings.append(finding("code.insecure-temp-file", "medium", "code", "불안전한 임시 파일 생성", displayPath, lineNumber, line, "경쟁 조건을 피하기 위해 안전한 임시 파일 API를 사용하세요."))
@@ -676,8 +1267,201 @@ final class NativeSecurityScanner {
             if matches(#"(?i)WebDAV(Module| enabled| true)"#, line) {
                 findings.append(finding("code.webdav-enabled", "medium", "code", "WebDAV 활성화 흔적", displayPath, lineNumber, line, "필요하지 않은 WebDAV 기능을 비활성화하세요."))
             }
+            if matches(#"(?i)\b(technote|zeroboard)\b"#, line) {
+                findings.append(finding("code.legacy-board-software", "medium", "code", "레거시 게시판 소프트웨어 흔적", displayPath, lineNumber, line, "컴포넌트 사용 여부를 확인하고 최신 버전으로 교체하거나 제거하세요."))
+            }
+            if matches(#"(?i)(resolve_entities\s*=\s*True|load_dtd\s*=\s*True|DocumentBuilderFactory|SAXParserFactory|XmlReaderSettings|XmlDocument)"#, line) {
+                findings.append(finding("code.xml-external-entity", "high", "code", "XML 외부 엔티티 처리가 허용될 수 있음", displayPath, lineNumber, line, "DTD와 외부 엔티티 해석을 비활성화한 안전한 XML parser 설정을 사용하세요."))
+            }
         }
         return findings
+    }
+
+    private func checkPrevention(root: URL, files: [URL]) -> [NativeFinding] {
+        let relPaths = Set(files.map { relativePath($0, root: root) })
+        let lowerRelPaths = Set(relPaths.map { $0.lowercased() })
+        let basenames = Set(files.map(\.lastPathComponent))
+        let lowerBasenames = Set(basenames.map { $0.lowercased() })
+        let dependencyManifestNames: Set<String> = [
+            "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+            "requirements.txt", "requirements.in", "pyproject.toml", "poetry.lock",
+            "Pipfile", "Pipfile.lock", "Gemfile", "Gemfile.lock", "go.mod", "go.sum",
+            "Cargo.toml", "Cargo.lock", "composer.json", "composer.lock", "pom.xml",
+            "build.gradle", "build.gradle.kts",
+        ]
+        let sourceExtensions: Set<String> = ["py", "js", "ts", "tsx", "jsx", "java", "go", "rb", "php", "cs", "swift", "rs"]
+        let securityPolicyPaths: Set<String> = ["SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md"]
+        let dependencyAutomationPaths: Set<String> = [
+            ".github/dependabot.yml", ".github/dependabot.yaml", "dependabot.yml", "dependabot.yaml",
+            "renovate.json", ".renovaterc", ".renovaterc.json", ".github/renovate.json",
+        ]
+        let envExampleNames: Set<String> = [".env.example", ".env.sample", ".env.template", ".env.local.example", ".env.development.example", ".env.production.example"]
+        let hasDependencyManifest = !dependencyManifestNames.intersection(basenames).isEmpty
+        let hasSourceCode = files.contains { sourceExtensions.contains($0.pathExtension.lowercased()) }
+        let dockerfiles = files.filter { $0.lastPathComponent == "Dockerfile" || $0.lastPathComponent.hasPrefix("Dockerfile.") }
+        let envFiles = files.filter { file in
+            let name = file.lastPathComponent
+            return name == ".env" || (name.hasPrefix(".env.") && !name.hasSuffix(".example") && !name.hasSuffix(".sample") && !name.hasSuffix(".template"))
+        }
+        let workflowFiles = files.filter { relativePath($0, root: root).hasPrefix(".github/workflows/") }
+        let workflowTexts = workflowFiles.compactMap { readTextLines($0)?.joined(separator: "\n").lowercased() }
+        let workflowText = workflowTexts.joined(separator: "\n")
+
+        var findings: [NativeFinding] = []
+        if (hasSourceCode || hasDependencyManifest) && securityPolicyPaths.intersection(relPaths).isEmpty {
+            findings.append(finding("prevention.security-policy-missing", "info", "prevention", "보안 정책 문서가 없음", ".", nil, "SECURITY.md 없음", "SECURITY.md에 신고 연락처, 지원 범위, 취약점 공개 기대사항을 작성하세요."))
+        }
+        if hasDependencyManifest && dependencyAutomationPaths.intersection(relPaths).isEmpty {
+            findings.append(finding("prevention.dependency-update-automation-missing", "low", "prevention", "의존성 업데이트 자동화가 없음", ".", nil, "Dependabot/Renovate 설정 없음", "Dependabot 또는 Renovate를 추가해 의존성 업데이트와 취약점 알림을 자동화하세요."))
+        }
+        if (hasDependencyManifest || hasSourceCode) && !hasSecurityWorkflow(workflowFiles) {
+            findings.append(finding("prevention.ci-security-scan-missing", "info", "prevention", "CI 보안 점검 워크플로가 없음", ".", nil, "보안 점검 workflow 없음", "KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline 같은 보안 점검을 CI에 추가하세요."))
+        }
+        if !envFiles.isEmpty && !gitignoreIgnoresEnv(root: root) {
+            findings.append(finding("prevention.env-not-gitignored", "low", "prevention", ".env 파일이 gitignore로 제외되지 않음", ".", nil, ".env 제외 패턴 없음", ".gitignore에 .env, .env.* 또는 동등한 제외 패턴을 추가하세요."))
+        }
+        if !envFiles.isEmpty && envExampleNames.intersection(basenames).isEmpty {
+            findings.append(finding("prevention.env-example-missing", "low", "prevention", "정제된 환경 예시 파일이 없음", ".", nil, ".env.example 없음", "실제 값은 저장소 밖에 두고 필요한 키만 담은 .env.example 또는 .env.sample을 커밋하세요."))
+        }
+        if !dockerfiles.isEmpty && !basenames.contains(".dockerignore") {
+            findings.append(finding("prevention.dockerignore-missing", "low", "prevention", ".dockerignore가 없음", ".", nil, "Dockerfile은 있으나 .dockerignore 없음", ".dockerignore를 추가해 비밀값, VCS 메타데이터, 빌드 산출물, 로컬 파일이 이미지 빌드에 포함되지 않게 하세요."))
+        }
+        if hasDependencyManifest && !hasSBOM(lowerRelPaths: lowerRelPaths, lowerBasenames: lowerBasenames) {
+            findings.append(finding("prevention.sbom-missing", "info", "prevention", "SBOM 산출물이 없음", ".", nil, "의존성 매니페스트는 있으나 SBOM 없음", "릴리스 또는 CI 단계에서 CycloneDX나 SPDX SBOM을 생성하고 보관하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && !containsAny(workflowText, ["codeql", "semgrep", "sonar", "bandit", "brakeman", "gosec"]) {
+            findings.append(finding("prevention.sast-workflow-missing", "info", "prevention", "SAST 워크플로가 없음", ".", nil, "CodeQL/Semgrep workflow 없음", "Pull request에서 코드 수준 보안 점검이 실행되도록 CodeQL 또는 Semgrep 같은 SAST workflow를 추가하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && !containsAny(workflowText, ["scorecard-action", "openssf/scorecard", "scorecard"]) {
+            findings.append(finding("prevention.openssf-scorecard-missing", "info", "prevention", "OpenSSF Scorecard 워크플로가 없음", ".", nil, "OpenSSF Scorecard workflow 없음", "토큰 권한, 고정된 액션, SAST, 의존성 업데이트 자동화 상태를 추적하도록 OpenSSF Scorecard를 CI에 추가하세요."))
+        }
+        if !workflowFiles.isEmpty && !hasReadOnlyTokenPermissions(workflowText) {
+            findings.append(finding("prevention.github-token-permissions-not-readonly", "low", "prevention", "GitHub Actions 토큰 권한이 읽기 전용으로 제한되지 않음", ".", nil, "permissions: contents: read 없음", "workflow 최상단에 permissions: contents: read를 설정하고 쓰기 권한은 필요한 job에만 별도로 부여하세요."))
+        }
+        let floatingActions = floatingGitHubActions(workflowTexts)
+        if !floatingActions.isEmpty {
+            findings.append(finding("prevention.github-actions-unpinned", "medium", "prevention", "GitHub Actions 참조가 mutable ref를 사용함", ".", nil, floatingActions.prefix(5).joined(separator: ", "), "외부 GitHub Actions는 검토한 버전 태그나 immutable commit SHA로 고정하세요."))
+        }
+        if (hasSourceCode || hasDependencyManifest) && !containsAny(workflowText, ["slsa", "sigstore", "cosign", "provenance", "attestation", "attest"]) && !lowerRelPaths.contains("docs/security/slsa_sigstore.md") {
+            findings.append(finding("prevention.slsa-sigstore-missing", "info", "prevention", "릴리스 서명 또는 출처 증명이 없음", ".", nil, "SLSA/Sigstore workflow 없음", "릴리스 산출물에 Sigstore/cosign 서명 또는 SLSA provenance 생성을 추가하세요."))
+        }
+        if looksLikeWebProject(files: files, basenames: basenames) && !containsAny(workflowText, ["zap-baseline", "zaproxy", "owasp/zap", "ghcr.io/zaproxy"]) && !lowerRelPaths.contains("docs/security/zap_baseline.md") {
+            findings.append(finding("prevention.zap-baseline-missing", "info", "prevention", "DAST baseline이 설정되지 않음", ".", nil, "OWASP ZAP workflow 없음", "권한이 있는 staging URL에 대해 OWASP ZAP baseline 점검 또는 DAST 인수인계 절차를 추가하세요."))
+        }
+        if hasDependencyManifest && !containsAny(workflowText, ["dependency-track", "/api/v1/bom"]) && !lowerRelPaths.contains("docs/security/dependency_track.md") {
+            findings.append(finding("prevention.dependency-track-integration-missing", "info", "prevention", "Dependency-Track SBOM 업로드가 설정되지 않음", ".", nil, "Dependency-Track workflow 없음", "릴리스 SBOM을 Dependency-Track 또는 동등한 SBOM 분석 backend에 업로드하도록 자동화하세요."))
+        }
+        if hasDependencyManifest && !hasVEX(lowerRelPaths: lowerRelPaths, lowerBasenames: lowerBasenames) {
+            findings.append(finding("prevention.vex-missing", "info", "prevention", "VEX 문서가 없음", ".", nil, "VEX 산출물 없음", "검토된 의존성 취약점에 대해 exploitable, fixed, not_affected 같은 VEX 결정을 문서화하세요."))
+        }
+        let binaries = binaryArtifacts(files: files, root: root)
+        if !binaries.isEmpty {
+            findings.append(finding("prevention.binary-artifact-committed", "low", "prevention", "바이너리 릴리스 산출물이 저장소에 포함됨", ".", nil, binaries.prefix(5).joined(separator: ", "), "의도적으로 vendoring한 파일이 아니라면 제거하고 필요한 경우 출처 증명, 체크섬, 서명을 함께 관리하세요."))
+        }
+        return findings
+    }
+
+    private func hasSecurityWorkflow(_ workflowFiles: [URL]) -> Bool {
+        let keywords = [
+            "sec-chk", "koda", "osv", "dependency-check", "dependency-track", "trivy",
+            "grype", "snyk", "semgrep", "codeql", "gitleaks", "trufflehog", "zap",
+            "bandit", "safety", "pip-audit", "npm audit",
+        ]
+        return workflowFiles.contains { file in
+            guard let lines = readTextLines(file) else { return false }
+            let text = lines.joined(separator: "\n").lowercased()
+            return keywords.contains { text.contains($0) }
+        }
+    }
+
+    private func gitignoreIgnoresEnv(root: URL) -> Bool {
+        guard let lines = readTextLines(root.appendingPathComponent(".gitignore")) else { return false }
+        let patterns = Set(lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty && !$0.hasPrefix("#") })
+        let envPatterns: Set<String> = [".env", ".env*", ".env.*", "*.env", "**/.env", "**/.env.*"]
+        return !patterns.intersection(envPatterns).isEmpty
+    }
+
+    private func hasSBOM(lowerRelPaths: Set<String>, lowerBasenames: Set<String>) -> Bool {
+        let knownNames: Set<String> = ["sbom.cdx.json", "bom.json", "bom.xml", "cyclonedx.json", "cyclonedx.xml", "spdx.json", "spdx.xml"]
+        if !knownNames.intersection(lowerBasenames).isEmpty {
+            return true
+        }
+        return lowerRelPaths.contains { rel in
+            (rel.contains("sbom") && (rel.hasSuffix(".json") || rel.hasSuffix(".xml")))
+        }
+    }
+
+    private func hasVEX(lowerRelPaths: Set<String>, lowerBasenames: Set<String>) -> Bool {
+        let knownNames: Set<String> = ["vex.json", "vex.cdx.json", "cyclonedx-vex.json", "openvex.json"]
+        if !knownNames.intersection(lowerBasenames).isEmpty {
+            return true
+        }
+        return lowerRelPaths.contains { rel in
+            rel.contains("vex") && rel.hasSuffix(".json")
+        }
+    }
+
+    private func containsAny(_ text: String, _ keywords: [String]) -> Bool {
+        keywords.contains { text.contains($0) }
+    }
+
+    private func hasReadOnlyTokenPermissions(_ workflowText: String) -> Bool {
+        if workflowText.contains("permissions: read-all") {
+            return true
+        }
+        guard workflowText.contains("permissions:") else {
+            return false
+        }
+        return workflowText.contains("contents: read") && !workflowText.contains("write-all")
+    }
+
+    private func floatingGitHubActions(_ workflowTexts: [String]) -> [String] {
+        var floating: Set<String> = []
+        for text in workflowTexts {
+            for line in text.components(separatedBy: .newlines) {
+                let stripped = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                let reference: String
+                if stripped.hasPrefix("- uses:") {
+                    reference = String(stripped.dropFirst("- uses:".count)).trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
+                } else if stripped.hasPrefix("uses:") {
+                    reference = String(stripped.dropFirst("uses:".count)).trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
+                } else {
+                    continue
+                }
+                if isFloatingActionReference(reference) {
+                    floating.insert(reference)
+                }
+            }
+        }
+        return floating.sorted()
+    }
+
+    private func isFloatingActionReference(_ reference: String) -> Bool {
+        if reference.hasPrefix("./") {
+            return false
+        }
+        guard let marker = reference.lastIndex(of: "@") else {
+            return true
+        }
+        let ref = reference[reference.index(after: marker)...].lowercased()
+        return ["main", "master", "latest", "head"].contains(ref)
+    }
+
+    private func looksLikeWebProject(files: [URL], basenames: Set<String>) -> Bool {
+        if !Set(["package.json", "vite.config.js", "next.config.js", "next.config.mjs"]).intersection(basenames).isEmpty {
+            return true
+        }
+        let webExtensions: Set<String> = ["html", "jsx", "tsx", "php", "vue", "svelte"]
+        let webConfigNames: Set<String> = ["nginx.conf", "httpd.conf", "apache2.conf", "web.config"]
+        return files.contains { webExtensions.contains($0.pathExtension.lowercased()) || webConfigNames.contains($0.lastPathComponent.lowercased()) }
+    }
+
+    private func binaryArtifacts(files: [URL], root: URL) -> [String] {
+        let suffixes: Set<String> = ["app", "apk", "dmg", "dll", "dylib", "ear", "exe", "msi", "pkg", "so", "war"]
+        return files
+            .filter { suffixes.contains($0.pathExtension.lowercased()) }
+            .map { relativePath($0, root: root) }
+            .sorted()
     }
 
     private func readTextLines(_ file: URL) -> [String]? {
@@ -703,6 +1487,7 @@ final class NativeSecurityScanner {
             ".env.local",
             ".env.production",
             ".env.development",
+            ".gitignore",
             ".htaccess",
             ".npmrc",
             "Dockerfile",
@@ -714,9 +1499,9 @@ final class NativeSecurityScanner {
         }
         let textExtensions: Set<String> = [
             "bash", "c", "cc", "cfg", "conf", "config", "cpp", "cs", "css", "cxx", "env", "go",
-            "h", "hpp", "html", "ini", "java", "js", "json", "jsx", "kt", "m", "md", "php",
-            "plist", "properties", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "tsx",
-            "txt", "vue", "xml", "yaml", "yml", "zsh",
+            "h", "hcl", "hpp", "html", "ini", "java", "js", "json", "jsx", "kt", "m", "md", "php",
+            "inc", "plist", "properties", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "tsx",
+            "tf", "tfvars", "txt", "vue", "xml", "yaml", "yml", "zsh",
         ]
         return textExtensions.contains(file.pathExtension.lowercased())
     }
@@ -950,16 +1735,53 @@ final class NativeSecurityScanner {
         default: return 1
         }
     }
+
+    private func lineNumberContaining(_ needle: String, in lines: [String]) -> Int? {
+        lines.firstIndex { $0.contains(needle) }.map { $0 + 1 }
+    }
 }
 
 private func matches(_ pattern: String, _ text: String) -> Bool {
-    guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
-    let range = NSRange(text.startIndex..<text.endIndex, in: text)
-    return regex.firstMatch(in: text, range: range) != nil
+    NativeRegexCache.shared.matches(pattern, text)
+}
+
+private final class NativeRegexCache {
+    static let shared = NativeRegexCache()
+
+    private var cache: [String: NSRegularExpression] = [:]
+    private let lock = NSLock()
+
+    func matches(_ pattern: String, _ text: String) -> Bool {
+        guard let regex = regex(for: pattern) else { return false }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.firstMatch(in: text, range: range) != nil
+    }
+
+    private func regex(for pattern: String) -> NSRegularExpression? {
+        lock.lock()
+        if let cached = cache[pattern] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        guard let compiled = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+
+        lock.lock()
+        cache[pattern] = compiled
+        lock.unlock()
+        return compiled
+    }
 }
 
 private func redact(_ line: String) -> String {
-    line.replacingOccurrences(of: #"sk-[A-Za-z0-9_\-]{8,}"#, with: "sk-[redacted]", options: .regularExpression)
+    line
+        .replacingOccurrences(of: #"(?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{12,}"#, with: "aws-[redacted]", options: .regularExpression)
+        .replacingOccurrences(of: #"gh[pousr]_[A-Za-z0-9_]{8,}"#, with: "gh-[redacted]", options: .regularExpression)
+        .replacingOccurrences(of: #"sk-[A-Za-z0-9_\-]{8,}"#, with: "sk-[redacted]", options: .regularExpression)
+        .replacingOccurrences(of: #"xox[baprs]-[A-Za-z0-9-]{8,}"#, with: "xox-[redacted]", options: .regularExpression)
 }
 
 private func tarString(_ data: Data, offset: Int, length: Int) -> String {
@@ -1272,12 +2094,17 @@ private extension NativeSecurityScanner {
     }
 
     func categoryLabel(_ category: String, language: AppLanguage) -> String {
-        guard language == .en else { return category }
-        switch category {
-        case "secrets": return "Secrets"
-        case "dependencies": return "Dependencies"
-        case "configuration": return "Configuration"
-        case "code": return "Code Pattern"
+        switch (language, category) {
+        case (.ko, "secrets"): return "비밀값"
+        case (.ko, "dependencies"): return "의존성"
+        case (.ko, "configuration"): return "설정"
+        case (.ko, "code"): return "코드 패턴"
+        case (.ko, "prevention"): return "예방 가드레일"
+        case (.en, "secrets"): return "Secrets"
+        case (.en, "dependencies"): return "Dependencies"
+        case (.en, "configuration"): return "Configuration"
+        case (.en, "code"): return "Code Pattern"
+        case (.en, "prevention"): return "Prevention Guardrails"
         default: return category
         }
     }
@@ -1286,21 +2113,72 @@ private extension NativeSecurityScanner {
         guard language == .en else { return finding.title }
         switch finding.ruleID {
         case "secret.private-key": return "Private key embedded in a file"
+        case "secret.aws-access-key": return "Possible AWS access key found"
+        case "secret.github-token": return "Possible GitHub token found"
         case "secret.openai-key": return "Possible API key found"
+        case "secret.slack-token": return "Possible Slack token found"
         case "secret.generic-assignment": return "Possible hard-coded secret assignment"
+        case "prevention.security-policy-missing": return "Security policy is not documented"
+        case "prevention.dependency-update-automation-missing": return "Dependency update automation is not configured"
+        case "prevention.ci-security-scan-missing": return "CI security scan is not configured"
+        case "prevention.env-not-gitignored": return ".env files are not ignored"
+        case "prevention.env-example-missing": return "Sanitized environment example is missing"
+        case "prevention.dockerignore-missing": return ".dockerignore is missing"
+        case "prevention.sbom-missing": return "SBOM artifact is not present"
+        case "prevention.sast-workflow-missing": return "SAST workflow is not configured"
+        case "prevention.openssf-scorecard-missing": return "OpenSSF Scorecard workflow is not configured"
+        case "prevention.github-token-permissions-not-readonly": return "GitHub Actions token permissions are not read-only"
+        case "prevention.github-actions-unpinned": return "GitHub Actions references are not tightly pinned"
+        case "prevention.slsa-sigstore-missing": return "Release signing or provenance is not configured"
+        case "prevention.zap-baseline-missing": return "DAST baseline is not configured"
+        case "prevention.dependency-track-integration-missing": return "Dependency-Track SBOM upload is not configured"
+        case "prevention.vex-missing": return "VEX document is not present"
+        case "prevention.binary-artifact-committed": return "Binary release artifact is committed"
+        case "dependency.package-json-invalid": return "Invalid package.json"
+        case "dependency.node-insecure-url": return "Node dependency fetched over insecure HTTP"
         case "dependency.python-unpinned-requirement": return "Unpinned Python dependency"
+        case "dependency.python-insecure-url": return "Python dependency fetched over insecure HTTP"
+        case "dependency.python-wildcard-version": return "Wildcard Python dependency version"
         case "dependency.node-missing-lockfile": return "Node lockfile missing"
         case "dependency.node-unbounded-version": return "Unbounded Node dependency version"
-        case "dependency.remote-shell-install": return "Remote install script executed immediately"
-        case "dependency.container-latest-tag": return "Container image uses latest tag"
+        case "dependency.remote-shell-script": return "Package script executes remote content"
+        case "dependency.docker-remote-shell": return "Docker build executes remote content"
+        case "dependency.docker-unpinned-base": return "Docker base image is not pinned"
         case "config.env-file-present": return "Environment file present in project"
+        case "config.private-key-like-file": return "Private-key-like file present"
         case "config.debug-enabled": return "Debug setting enabled"
+        case "config.development-environment": return "Development environment flag present"
+        case "config.docker-root-user": return "Docker image explicitly runs as root"
+        case "config.docker-add-http": return "Dockerfile ADD fetches over HTTP"
+        case "config.docker-no-user": return "Dockerfile does not set a non-root user"
         case "config.compose-privileged": return "Privileged container configuration"
+        case "config.compose-host-network": return "Compose service uses host networking"
+        case "config.compose-docker-sock": return "Compose service mounts the Docker socket"
+        case "config.k8s-privileged-container": return "Kubernetes container enables privileged mode"
+        case "config.k8s-allow-privilege-escalation": return "Kubernetes container allows privilege escalation"
+        case "config.k8s-host-network": return "Kubernetes workload uses host networking"
+        case "config.k8s-hostpath-volume": return "Kubernetes workload mounts a hostPath volume"
+        case "config.terraform-public-storage": return "Terraform storage ACL is public"
+        case "config.terraform-public-access-block-disabled": return "Terraform public access block is disabled"
+        case "config.terraform-open-admin-port": return "Terraform security group opens admin access to the internet"
+        case "config.github-pull-request-target": return "GitHub Actions uses pull_request_target"
+        case "config.github-untrusted-event-in-run": return "GitHub Actions run step interpolates untrusted event data"
         case "code.xss-dom-sink": return "DOM XSS sink risk"
         case "code.sql-dynamic-query": return "Dynamic SQL query construction"
         case "code.command-injection": return "Command injection risk"
         case "code.path-traversal": return "Path traversal risk"
+        case "code.csrf-disabled": return "CSRF protection appears disabled"
+        case "code.auth-disabled-endpoint": return "Authentication or authorization appears disabled"
+        case "code.eval-user-input": return "Eval-like API receives user input"
         case "code.unsafe-deserialization": return "Unsafe deserialization"
+        case "code.ssrf-user-url": return "User-controlled URL fetch may cause SSRF"
+        case "code.unrestricted-file-upload": return "File upload may be unrestricted"
+        case "code.dangerous-c-buffer-api": return "Dangerous C/C++ buffer API"
+        case "code.unbounded-request-body": return "Request body parser has no obvious size limit"
+        case "code.logging-sensitive-data": return "Sensitive data may be written to logs"
+        case "code.empty-exception-handler": return "Exception appears to be silently ignored"
+        case "code.stack-trace-exposure": return "Stack trace output may expose internals"
+        case "code.unversioned-api-route": return "API route appears to be unversioned"
         case "code.insecure-temp-file": return "Insecure temporary file creation"
         case "code.wildcard-cors": return "Wildcard CORS configuration"
         case "code.public-bind-all-interfaces": return "Binds to all network interfaces"
@@ -1308,6 +2186,8 @@ private extension NativeSecurityScanner {
         case "code.insecure-cookie-settings": return "Weak cookie/session security settings"
         case "code.directory-listing-enabled": return "Directory listing enabled"
         case "code.webdav-enabled": return "WebDAV enabled"
+        case "code.legacy-board-software": return "Legacy bulletin-board software marker"
+        case "code.xml-external-entity": return "XML parser may allow external entities"
         default: return finding.title
         }
     }
@@ -1317,26 +2197,106 @@ private extension NativeSecurityScanner {
         switch finding.ruleID {
         case "secret.private-key":
             return "Revoke the private key immediately and move it to a secure secrets manager."
+        case "secret.aws-access-key":
+            return "Revoke the key and review IAM permissions and recent usage."
+        case "secret.github-token":
+            return "Revoke the token and store it in GitHub secrets or an OS secret store."
         case "secret.openai-key":
             return "Revoke the key and use environment variables or a secrets manager."
+        case "secret.slack-token":
+            return "Revoke the token and review Slack app permissions and usage."
         case "secret.generic-assignment":
             return "Do not keep secret values in source code; inject them at runtime."
+        case "prevention.security-policy-missing":
+            return "Add SECURITY.md with supported versions, vulnerability reporting contact, and disclosure expectations."
+        case "prevention.dependency-update-automation-missing":
+            return "Add Dependabot or Renovate so vulnerable and outdated dependencies are surfaced continuously."
+        case "prevention.ci-security-scan-missing":
+            return "Add a CI job for KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline, or a similar security scanner."
+        case "prevention.env-not-gitignored":
+            return "Add .env, .env.*, or an equivalent pattern to .gitignore before committing real environment files."
+        case "prevention.env-example-missing":
+            return "Commit a sanitized .env.example or .env.sample and keep real values outside the repository."
+        case "prevention.dockerignore-missing":
+            return "Add .dockerignore to keep secrets, VCS metadata, build output, and local files out of Docker build contexts."
+        case "prevention.sbom-missing":
+            return "Generate and retain a CycloneDX or SPDX SBOM for release builds or CI artifacts."
+        case "prevention.sast-workflow-missing":
+            return "Add a SAST workflow such as CodeQL or Semgrep so code-level security checks run on pull requests."
+        case "prevention.openssf-scorecard-missing":
+            return "Run OpenSSF Scorecard in CI to monitor token permissions, pinned actions, SAST, and dependency-update automation."
+        case "prevention.github-token-permissions-not-readonly":
+            return "Set top-level workflow permissions to contents: read and grant write permissions only to jobs that need them."
+        case "prevention.github-actions-unpinned":
+            return "Pin third-party GitHub Actions to immutable commit SHAs or reviewed version tags."
+        case "prevention.slsa-sigstore-missing":
+            return "Add Sigstore/cosign signing or SLSA provenance generation for release artifacts."
+        case "prevention.zap-baseline-missing":
+            return "For authorized staging URLs, add an OWASP ZAP baseline check or document the DAST handoff process."
+        case "prevention.dependency-track-integration-missing":
+            return "Upload release SBOMs to Dependency-Track or another SBOM analysis backend."
+        case "prevention.vex-missing":
+            return "Generate a VEX document for reviewed dependency vulnerabilities so exploitable, fixed, and not-affected decisions are traceable."
+        case "prevention.binary-artifact-committed":
+            return "Keep build artifacts out of source control unless they are intentionally vendored and covered by provenance, checksums, or signatures."
+        case "dependency.package-json-invalid":
+            return "Fix package.json syntax so dependency tooling can inspect it reliably."
+        case "dependency.node-insecure-url":
+            return "Use HTTPS or a trusted package registry source."
         case "dependency.python-unpinned-requirement":
             return "Pin exact versions and run dependency vulnerability checks regularly."
+        case "dependency.python-insecure-url":
+            return "Use HTTPS or a trusted Python package index."
+        case "dependency.python-wildcard-version":
+            return "Use a reviewed version range or lockfile."
         case "dependency.node-missing-lockfile":
             return "Commit a lockfile to keep dependency installation reproducible."
         case "dependency.node-unbounded-version":
             return "Use verified version ranges or a lockfile."
-        case "dependency.remote-shell-install":
-            return "Verify downloads and checksums before execution."
-        case "dependency.container-latest-tag":
-            return "Use immutable image tags or digests."
+        case "dependency.remote-shell-script":
+            return "Vendor the installer or verify checksums and signatures before execution."
+        case "dependency.docker-remote-shell":
+            return "Verify downloaded artifacts and checksums before running them in builds."
+        case "dependency.docker-unpinned-base":
+            return "Pin to a reviewed tag or digest."
         case "config.env-file-present":
             return "Check for secrets and exclude this file from the repository."
+        case "config.private-key-like-file":
+            return "Move private keys to a secret store and rotate them if they were real."
         case "config.debug-enabled":
             return "Disable debug settings for production builds."
+        case "config.development-environment":
+            return "Separate local development configuration from deployment configuration."
+        case "config.docker-root-user":
+            return "Run runtime stages as a least-privileged user."
+        case "config.docker-add-http":
+            return "Use HTTPS and verify artifact checksums."
+        case "config.docker-no-user":
+            return "Add a non-root USER for runtime stages when possible."
         case "config.compose-privileged":
             return "Remove privileged mode and grant only required capabilities."
+        case "config.compose-host-network":
+            return "Use explicit port mappings unless host networking is required."
+        case "config.compose-docker-sock":
+            return "Avoid mounting the Docker socket or isolate it behind a purpose-built proxy."
+        case "config.k8s-privileged-container":
+            return "Remove privileged mode and grant only the specific Linux capabilities that are required."
+        case "config.k8s-allow-privilege-escalation":
+            return "Set allowPrivilegeEscalation: false unless a documented workload requirement exists."
+        case "config.k8s-host-network":
+            return "Use pod networking and explicit Services or NetworkPolicies unless host networking is required."
+        case "config.k8s-hostpath-volume":
+            return "Replace hostPath with scoped PersistentVolumes or document why host access is unavoidable."
+        case "config.terraform-public-storage":
+            return "Use private ACLs and explicit, reviewed public access policies only when required."
+        case "config.terraform-public-access-block-disabled":
+            return "Keep public access block controls enabled unless a documented public bucket design exists."
+        case "config.terraform-open-admin-port":
+            return "Restrict admin ports to VPN, bastion, or approved source CIDRs."
+        case "config.github-pull-request-target":
+            return "Use pull_request for untrusted code or strictly separate checkout/build steps from privileged operations."
+        case "config.github-untrusted-event-in-run":
+            return "Pass event values through environment variables and quote/validate them before shell use."
         case "code.xss-dom-sink":
             return "Do not inject untrusted input as HTML; escape it or use textContent."
         case "code.sql-dynamic-query":
@@ -1345,8 +2305,30 @@ private extension NativeSecurityScanner {
             return "Avoid shell execution, pass arguments as arrays, and validate input with allowlists."
         case "code.path-traversal":
             return "Normalize user paths and verify they stay inside an allowed root."
+        case "code.csrf-disabled":
+            return "Keep CSRF protection enabled for browser-authenticated state-changing requests."
+        case "code.auth-disabled-endpoint":
+            return "Confirm the route is intentionally public and enforce authorization on sensitive operations."
+        case "code.eval-user-input":
+            return "Remove dynamic code execution or replace it with an allowlisted dispatch table."
         case "code.unsafe-deserialization":
             return "Do not deserialize untrusted input; use safe loaders."
+        case "code.ssrf-user-url":
+            return "Fetch only allowlisted hosts and block private network ranges."
+        case "code.unrestricted-file-upload":
+            return "Validate content type and extension, generate server-side filenames, and store uploads outside executable paths."
+        case "code.dangerous-c-buffer-api":
+            return "Use bounded alternatives and verify destination buffer sizes."
+        case "code.unbounded-request-body":
+            return "Set conservative request body limits and reject oversized requests early."
+        case "code.logging-sensitive-data":
+            return "Remove sensitive values from logs or record only redacted identifiers."
+        case "code.empty-exception-handler":
+            return "Handle expected exceptions explicitly and log security-relevant failures with sanitized context."
+        case "code.stack-trace-exposure":
+            return "Route exceptions through centralized error handling and avoid exposing raw stack traces."
+        case "code.unversioned-api-route":
+            return "Prefer explicit versioned routes such as /api/v1 for public APIs."
         case "code.insecure-temp-file":
             return "Use safe temporary-file APIs to avoid race conditions."
         case "code.wildcard-cors":
@@ -1361,6 +2343,10 @@ private extension NativeSecurityScanner {
             return "Disable directory indexing."
         case "code.webdav-enabled":
             return "Disable WebDAV unless it is explicitly required."
+        case "code.legacy-board-software":
+            return "Confirm the component is still used, then update, isolate, or remove it."
+        case "code.xml-external-entity":
+            return "Disable DTD and external entity resolution in XML parser configuration."
         default:
             return finding.recommendation
         }

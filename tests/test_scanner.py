@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -7,19 +8,29 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from security_scanner.app import _create_available_server, run_app
 from security_scanner.cli import main as cli_main
 from security_scanner.config import expand_path
+from security_scanner.dast import findings_from_zap_json, run_zap_baseline
 from security_scanner.dependency_inventory import queryable_osv_components
+from security_scanner.diffing import diff_reports, render_diff_markdown
 from security_scanner.discovery import discover_projects
-from security_scanner.models import Finding, ScannerConfig, TargetConfig
+from security_scanner.evidence import render_evidence_checklist
+from security_scanner.integrations import upload_sbom_to_dependency_track
+from security_scanner.models import DependencyComponent, Finding, ScannerConfig, TargetConfig
+from security_scanner.osv_vulnerabilities import _finding_from_vulnerability
+from security_scanner.release import build_release_security_package
 from security_scanner.reporting import render_html, render_json, render_report, render_sarif
 from security_scanner.scanner import SecurityScanner
 from security_scanner.server import _select_directory_macos, allowed_cors_origin, scan_directory_payload, select_directory
 from security_scanner.standards import standards_payload
+from security_scanner.toolkit import write_security_template_files
+from security_scanner.vex import render_cyclonedx_vex
+from security_scanner.vuln_intel import VulnerabilityIntel
 
 
 class ScannerTests(unittest.TestCase):
@@ -40,6 +51,18 @@ class ScannerTests(unittest.TestCase):
             (root / "settings.py").write_text(
                 "api_key = os.getenv('OKX_API_KEY')\n"
                 "access_token = config.get('access_token')\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("secrets",))
+
+            self.assertEqual(findings, [])
+
+    def test_ignores_argument_secret_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cli.py").write_text(
+                "api_key = args.api_key or api_key_from_env(args.api_key_env)\n",
                 encoding="utf-8",
             )
 
@@ -85,6 +108,76 @@ class ScannerTests(unittest.TestCase):
 
             self.assertTrue(any(finding.rule_id == "config.compose-privileged" for finding in findings))
 
+    def test_development_environment_flags_config_not_templates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text("APP_ENV=development\n", encoding="utf-8")
+            (root / ".env.example").write_text("APP_ENV=development\n", encoding="utf-8")
+            (root / "templates.py").write_text('"APP_ENV=development"\n', encoding="utf-8")
+
+            findings = _scan(root, categories=("configuration",))
+            matching_paths = {finding.path.name for finding in findings if finding.rule_id == "config.development-environment"}
+
+            self.assertEqual(matching_paths, {".env"})
+
+    def test_detects_kubernetes_terraform_and_github_workflow_risks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            k8s_dir = root / "k8s"
+            workflow_dir = root / ".github" / "workflows"
+            k8s_dir.mkdir()
+            workflow_dir.mkdir(parents=True)
+            (k8s_dir / "deployment.yaml").write_text(
+                "apiVersion: apps/v1\n"
+                "kind: Deployment\n"
+                "spec:\n"
+                "  template:\n"
+                "    spec:\n"
+                "      hostNetwork: true\n"
+                "      volumes:\n"
+                "        - hostPath:\n"
+                "            path: /var/run\n"
+                "      containers:\n"
+                "        - securityContext:\n"
+                "            privileged: true\n"
+                "            allowPrivilegeEscalation: true\n",
+                encoding="utf-8",
+            )
+            (root / "main.tf").write_text(
+                'resource "aws_security_group_rule" "ssh" {\n'
+                '  from_port = 22\n'
+                '  to_port = 22\n'
+                '  cidr_blocks = ["0.0.0.0/0"]\n'
+                '}\n'
+                'resource "aws_s3_bucket" "public" {\n'
+                '  acl = "public-read"\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            (workflow_dir / "ci.yml").write_text(
+                "on:\n"
+                "  pull_request_target:\n"
+                "jobs:\n"
+                "  test:\n"
+                "    steps:\n"
+                "      - run: echo ${{ github.event.pull_request.title }}\n",
+                encoding="utf-8",
+            )
+
+            rule_ids = {finding.rule_id for finding in _scan(root, categories=("configuration",))}
+
+            for rule_id in {
+                "config.k8s-privileged-container",
+                "config.k8s-allow-privilege-escalation",
+                "config.k8s-host-network",
+                "config.k8s-hostpath-volume",
+                "config.terraform-open-admin-port",
+                "config.terraform-public-storage",
+                "config.github-pull-request-target",
+                "config.github-untrusted-event-in-run",
+            }:
+                self.assertIn(rule_id, rule_ids)
+
     def test_excludes_configured_globs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -104,6 +197,17 @@ class ScannerTests(unittest.TestCase):
                 )
             )
             findings = SecurityScanner(config).scan()
+
+            self.assertEqual(findings, [])
+
+    def test_excludes_build_cache_directories_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build_cache = root / ".build"
+            build_cache.mkdir()
+            (build_cache / ".env").write_text("OPENAI_API_KEY=sk-1234567890abcdefghijklmnop\n", encoding="utf-8")
+
+            findings = _scan(root, categories=("secrets",))
 
             self.assertEqual(findings, [])
 
@@ -244,6 +348,9 @@ class ScannerTests(unittest.TestCase):
             "owasp-samm-2",
             "owasp-dependency-check-baseline",
             "owasp-dependency-track-baseline",
+            "openssf-scorecard-baseline",
+            "cisa-kev-epss-priority",
+            "slsa-sigstore-baseline",
         ):
             self.assertIn(standard_id, standards)
             self.assertTrue(standards[standard_id]["description"]["ko"])
@@ -255,8 +362,8 @@ class ScannerTests(unittest.TestCase):
             standards["ncsc-web-8"]["references"][0]["url"],
             "https://www.ncsc.go.kr/",
         )
-        self.assertEqual(standards["owasp-asvs-5"]["coverage_level"], "partial")
-        self.assertEqual(standards["owasp-wstg"]["coverage_level"], "partial")
+        self.assertEqual(standards["owasp-asvs-5"]["coverage_level"], "evidence")
+        self.assertEqual(standards["owasp-wstg"]["coverage_level"], "external")
 
     def test_dashboard_payload_can_scan_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -283,6 +390,162 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(payload["sbom"]["specVersion"], "1.6")
             self.assertEqual(payload["sbom"]["components"][0]["purl"], "pkg:pypi/jinja2@2.4.1")
 
+    def test_prevention_guardrails_detect_missing_project_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (root / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "1.3.0"}}), encoding="utf-8")
+            (root / ".env").write_text("TOKEN=placeholder\n", encoding="utf-8")
+            (root / ".gitignore").write_text("dist/\n", encoding="utf-8")
+            (root / "Dockerfile").write_text("FROM python:3.12\n", encoding="utf-8")
+            (workflows / "build.yml").write_text("name: build\non: [push]\n", encoding="utf-8")
+
+            findings = _scan(root, categories=("prevention",))
+            rule_ids = {finding.rule_id for finding in findings}
+
+            self.assertIn("prevention.security-policy-missing", rule_ids)
+            self.assertIn("prevention.dependency-update-automation-missing", rule_ids)
+            self.assertIn("prevention.ci-security-scan-missing", rule_ids)
+            self.assertIn("prevention.env-not-gitignored", rule_ids)
+            self.assertIn("prevention.env-example-missing", rule_ids)
+            self.assertIn("prevention.dockerignore-missing", rule_ids)
+            self.assertIn("prevention.sbom-missing", rule_ids)
+
+    def test_prevention_guardrails_accept_configured_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflows = root / ".github" / "workflows"
+            dependabot = root / ".github"
+            workflows.mkdir(parents=True)
+            (root / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "1.3.0"}}), encoding="utf-8")
+            (root / "SECURITY.md").write_text("# Security\n", encoding="utf-8")
+            (root / ".env").write_text("TOKEN=placeholder\n", encoding="utf-8")
+            (root / ".env.example").write_text("TOKEN=\n", encoding="utf-8")
+            (root / ".gitignore").write_text(".env\n.env.*\n", encoding="utf-8")
+            (root / "Dockerfile").write_text("FROM python:3.12\n", encoding="utf-8")
+            (root / ".dockerignore").write_text(".env\n.git\n", encoding="utf-8")
+            (root / "sbom.cdx.json").write_text("{}", encoding="utf-8")
+            (root / "vex.cdx.json").write_text("{}", encoding="utf-8")
+            (dependabot / "dependabot.yml").write_text("version: 2\nupdates: []\n", encoding="utf-8")
+            (workflows / "security.yml").write_text(
+                "name: security\n"
+                "permissions:\n"
+                "  contents: read\n"
+                "jobs:\n"
+                "  security:\n"
+                "    steps:\n"
+                "      - run: koda scan\n"
+                "      - run: semgrep ci\n"
+                "      - run: scorecard\n"
+                "      - run: cosign sign artifact\n"
+                "      - run: zap-baseline.py -t https://example.com\n"
+                "      - run: curl https://dependency-track.example.com/api/v1/bom\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("prevention",))
+
+            self.assertEqual(findings, [])
+
+    def test_koda_ignore_file_suppresses_matching_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text("OPENAI_API_KEY=sk-1234567890abcdefghijklmnop\n", encoding="utf-8")
+            (root / "koda-ignore.yml").write_text(
+                """
+ignore:
+  - rule: secret.openai-key
+    path: .env
+    reason: local development placeholder
+    until: 2099-12-31
+""",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("secrets",))
+
+            self.assertEqual(findings, [])
+
+    def test_zap_dry_run_and_json_parser(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = run_zap_baseline("https://example.com", output_dir=root / "zap", dry_run=True)
+
+            self.assertIn("zap-baseline.py", result.command)
+            self.assertEqual(result.exit_code, 0)
+
+            zap_json = root / "zap-baseline.json"
+            zap_json.write_text(
+                json.dumps(
+                    {
+                        "site": [
+                            {
+                                "alerts": [
+                                    {
+                                        "pluginid": "10020",
+                                        "riskdesc": "Low (Medium)",
+                                        "name": "Missing header",
+                                        "desc": "<p>header missing</p>",
+                                        "solution": "Set the header",
+                                        "instances": [{"uri": "https://example.com/"}],
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            findings = findings_from_zap_json(zap_json, target_url="https://example.com")
+
+            self.assertEqual(findings[0].rule_id, "dast.zap.10020")
+            self.assertEqual(findings[0].severity, "low")
+
+    def test_evidence_checklist_contains_evidence_review_items(self) -> None:
+        checklist = render_evidence_checklist(project_name="demo", language="ko")
+
+        self.assertIn("KODA 수동 증적 체크리스트", checklist)
+        self.assertIn("OWASP ASVS", checklist)
+        self.assertIn("ISMS-P", checklist)
+
+    def test_diff_reports_identifies_added_and_resolved_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            baseline = root / "baseline.json"
+            current = root / "current.json"
+            baseline.write_text(
+                json.dumps({"findings": [{"rule_id": "a", "target": "t", "path": "old.py", "line": 1}]}),
+                encoding="utf-8",
+            )
+            current.write_text(
+                json.dumps({"findings": [{"rule_id": "b", "target": "t", "path": "new.py", "line": 2}]}),
+                encoding="utf-8",
+            )
+
+            diff = diff_reports(baseline, current)
+            markdown = render_diff_markdown(diff, language="ko")
+
+            self.assertEqual(diff["summary"]["added"], 1)
+            self.assertEqual(diff["summary"]["resolved"], 1)
+            self.assertIn("새로 발생", markdown)
+
+    def test_release_security_package_contains_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "project"
+            output = Path(tmp) / "release"
+            root.mkdir()
+            (root / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
+
+            manifest = build_release_security_package(target=root, output_dir=output, project_name="demo")
+
+            self.assertEqual(manifest["project"], "demo")
+            self.assertTrue((output / "koda-sbom.cdx.json").exists())
+            self.assertTrue((output / "koda-vex.cdx.json").exists())
+            self.assertTrue((output / "manual-evidence-checklist.md").exists())
+            self.assertTrue((output / "checksums.txt").exists())
+
     def test_cyclonedx_report_uses_collected_dependency_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -300,6 +563,80 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(component["name"], "lodash")
             self.assertEqual(component["version"], "4.17.21")
             self.assertEqual(component["purl"], "pkg:npm/lodash@4.17.21")
+
+    def test_dependency_inventory_reads_common_lockfiles_for_osv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pyproject.toml").write_text(
+                """
+[project]
+dependencies = ["requests==2.31.0"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+click = "8.1.7"
+""",
+                encoding="utf-8",
+            )
+            (root / "poetry.lock").write_text(
+                """
+[[package]]
+name = "django"
+version = "4.2.11"
+category = "main"
+
+[[package]]
+name = "pytest"
+version = "8.2.0"
+category = "dev"
+""",
+                encoding="utf-8",
+            )
+            (root / "Pipfile.lock").write_text(
+                json.dumps(
+                    {
+                        "default": {"flask": {"version": "==3.0.2"}},
+                        "develop": {"black": {"version": "==24.4.2"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "yarn.lock").write_text(
+                """
+left-pad@^1.3.0:
+  version "1.3.0"
+"@scope/pkg@npm:^2.0.0":
+  version: 2.0.1
+""",
+                encoding="utf-8",
+            )
+            (root / "pnpm-lock.yaml").write_text(
+                """
+lockfileVersion: '9.0'
+packages:
+  /lodash@4.17.21:
+    resolution: {integrity: sha512-test}
+  /@scope/thing@1.2.3:
+    resolution: {integrity: sha512-test}
+""",
+                encoding="utf-8",
+            )
+
+            scanner = SecurityScanner(ScannerConfig(targets=(TargetConfig(name="tmp", path=root, categories=("dependencies",)),)))
+            scanner.scan()
+            components = queryable_osv_components(scanner.components)
+            names = {(component.ecosystem, component.name, component.version, component.source, component.scope) for component in components}
+
+            self.assertIn(("PyPI", "requests", "2.31.0", "project.dependencies", "required"), names)
+            self.assertIn(("PyPI", "click", "8.1.7", "tool.poetry.dependencies", "required"), names)
+            self.assertIn(("PyPI", "django", "4.2.11", "poetry.lock", "required"), names)
+            self.assertIn(("PyPI", "pytest", "8.2.0", "poetry.lock", "excluded"), names)
+            self.assertIn(("PyPI", "flask", "3.0.2", "Pipfile.lock", "required"), names)
+            self.assertIn(("PyPI", "black", "24.4.2", "Pipfile.lock", "excluded"), names)
+            self.assertIn(("npm", "left-pad", "1.3.0", "yarn.lock", "required"), names)
+            self.assertIn(("npm", "@scope/pkg", "2.0.1", "yarn.lock", "required"), names)
+            self.assertIn(("npm", "lodash", "4.17.21", "pnpm-lock", "required"), names)
+            self.assertIn(("npm", "@scope/thing", "1.2.3", "pnpm-lock", "required"), names)
 
     def test_scan_command_accepts_multiple_files_and_zip_archives(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -343,7 +680,7 @@ class ScannerTests(unittest.TestCase):
             requirements = root / "requirements.txt"
             requirements.write_text("jinja2==2.4.1\nrequests\n", encoding="utf-8")
 
-            def fake_query(components):
+            def fake_query(components, **kwargs):
                 self.assertEqual([component.name for component in components], ["jinja2"])
                 return (
                     [
@@ -372,6 +709,178 @@ class ScannerTests(unittest.TestCase):
             self.assertTrue(query.called)
             self.assertIn("dependency.osv-known-vulnerability", {finding.rule_id for finding in findings})
             self.assertEqual([component.name for component in queryable_osv_components(scanner.components)], ["jinja2"])
+
+    def test_osv_vulnerability_details_preserve_severity_and_aliases(self) -> None:
+        dependency = DependencyComponent("jinja2", "PyPI", "2.4.1", Path("requirements.txt"), target="tmp", line=1)
+
+        finding = _finding_from_vulnerability(
+            dependency,
+            {
+                "id": "GHSA-test",
+                "summary": "Template sandbox escape",
+                "aliases": ["CVE-2026-0001"],
+                "database_specific": {"severity": "CRITICAL"},
+                "published": "2026-01-02T00:00:00Z",
+                "modified": "2026-01-03T00:00:00Z",
+            },
+        )
+
+        self.assertEqual(finding.severity, "critical")
+        self.assertEqual(finding.title, "Template sandbox escape")
+        self.assertIn("CVE-2026-0001", finding.evidence)
+        self.assertIn("published 2026-01-02", finding.description)
+
+    def test_osv_finding_can_include_kev_epss_priority(self) -> None:
+        dependency = DependencyComponent("jinja2", "PyPI", "2.4.1", Path("requirements.txt"), target="tmp", line=1)
+
+        finding = _finding_from_vulnerability(
+            dependency,
+            {
+                "id": "GHSA-test",
+                "summary": "Template sandbox escape",
+                "aliases": ["CVE-2026-0002"],
+                "database_specific": {"severity": "LOW"},
+            },
+            intel={
+                "CVE-2026-0002": VulnerabilityIntel(
+                    cve="CVE-2026-0002",
+                    kev=True,
+                    kev_due_date="2026-06-01",
+                    epss=0.91,
+                    percentile=0.99,
+                )
+            },
+            cve_ids=("CVE-2026-0002",),
+        )
+
+        self.assertEqual(finding.severity, "critical")
+        self.assertIn("CISA KEV", finding.evidence)
+        self.assertIn("Prioritize", finding.recommendation)
+
+    def test_cyclonedx_vex_report_uses_osv_findings(self) -> None:
+        finding = Finding(
+            rule_id="dependency.osv-known-vulnerability",
+            category="dependencies",
+            severity="high",
+            title="Known vulnerable dependency",
+            path=Path("requirements.txt"),
+            target="tmp",
+            evidence="PyPI jinja2@2.4.1: GHSA-test (CVE-2026-0003)",
+        )
+
+        payload = json.loads(render_cyclonedx_vex([finding]))
+
+        self.assertEqual(payload["bomFormat"], "CycloneDX")
+        self.assertEqual(payload["vulnerabilities"][0]["id"], "CVE-2026-0003")
+        self.assertEqual(payload["vulnerabilities"][0]["analysis"]["state"], "in_triage")
+
+    def test_security_toolkit_writes_templates_without_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "SECURITY.md").write_text("custom\n", encoding="utf-8")
+
+            results = write_security_template_files(root, project_name="Example")
+            resolved_root = root.resolve()
+            statuses = {result.path.relative_to(resolved_root).as_posix(): result.status for result in results}
+
+            self.assertEqual(statuses["SECURITY.md"], "skipped")
+            self.assertEqual(statuses[".github/dependabot.yml"], "written")
+            self.assertEqual(statuses[".github/workflows/koda-security.yml"], "written")
+            self.assertEqual(statuses["docs/security/VEX.md"], "written")
+            self.assertEqual(statuses["docs/security/SLSA_SIGSTORE.md"], "written")
+            self.assertEqual((root / "SECURITY.md").read_text(encoding="utf-8"), "custom\n")
+
+    def test_cli_prints_external_security_integration_commands(self) -> None:
+        zap_output = io.StringIO()
+        with redirect_stdout(zap_output):
+            zap_code = cli_main(["zap-command", "--url", "https://example.com", "--output-dir", "reports/zap"])
+
+        dependency_track_output = io.StringIO()
+        with redirect_stdout(dependency_track_output):
+            dependency_track_code = cli_main(
+                [
+                    "dependency-track-command",
+                    "--server-url",
+                    "https://dependency-track.example.com",
+                    "--project-name",
+                    "Example",
+                    "--project-version",
+                    "main",
+                    "--sbom",
+                    "reports/sbom.cdx.json",
+                ]
+            )
+
+        self.assertEqual(zap_code, 0)
+        self.assertIn("ghcr.io/zaproxy/zaproxy:stable", zap_output.getvalue())
+        self.assertIn("zap-baseline.py", zap_output.getvalue())
+        self.assertEqual(dependency_track_code, 0)
+        self.assertIn("/api/v1/bom", dependency_track_output.getvalue())
+        self.assertIn("projectName=Example", dependency_track_output.getvalue())
+
+    def test_prevention_checks_supply_chain_super_app_guardrails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(json.dumps({"dependencies": {"left-pad": "1.3.0"}}), encoding="utf-8")
+            workflow = root / ".github" / "workflows"
+            workflow.mkdir(parents=True)
+            (workflow / "build.yml").write_text(
+                "name: build\non: [push]\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@main\n",
+                encoding="utf-8",
+            )
+
+            findings = _scan(root, categories=("prevention",))
+            rule_ids = {finding.rule_id for finding in findings}
+
+            self.assertIn("prevention.openssf-scorecard-missing", rule_ids)
+            self.assertIn("prevention.github-token-permissions-not-readonly", rule_ids)
+            self.assertIn("prevention.github-actions-unpinned", rule_ids)
+            self.assertIn("prevention.slsa-sigstore-missing", rule_ids)
+            self.assertIn("prevention.dependency-track-integration-missing", rule_ids)
+            self.assertIn("prevention.vex-missing", rule_ids)
+
+    def test_dependency_track_upload_posts_multipart_sbom(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sbom = root / "sbom.cdx.json"
+            sbom.write_text('{"bomFormat":"CycloneDX"}', encoding="utf-8")
+            received: dict[str, object] = {}
+
+            class FakeResponse:
+                status = 200
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def read(self) -> bytes:
+                    return b'{"token":"processing-token"}'
+
+            def fake_urlopen(request, timeout=0):
+                received["url"] = request.full_url
+                received["api_key"] = request.headers.get("X-api-key")
+                received["content_type"] = request.headers.get("Content-type")
+                received["body"] = request.data
+                received["timeout"] = timeout
+                return FakeResponse()
+
+            with patch("security_scanner.integrations.urllib.request.urlopen", side_effect=fake_urlopen):
+                payload = upload_sbom_to_dependency_track(
+                    server_url="https://dependency-track.example.com",
+                    api_key="secret",
+                    project_name="Example",
+                    project_version="main",
+                    sbom_path=sbom,
+                )
+
+            self.assertEqual(payload["token"], "processing-token")
+            self.assertEqual(received["url"], "https://dependency-track.example.com/api/v1/bom")
+            self.assertEqual(received["api_key"], "secret")
+            self.assertIn("multipart/form-data", str(received["content_type"]))
+            self.assertIn(b'projectName', received["body"])  # type: ignore[operator]
+            self.assertIn(b'CycloneDX', received["body"])  # type: ignore[operator]
 
     def test_dashboard_payload_can_scan_standard_category(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -807,6 +1316,7 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("platforms/macos/KODA/KODA.xcodeproj", mac_xcode_builder.read_text(encoding="utf-8"))
         self.assertIn("dist/macos", mac_xcode_builder.read_text(encoding="utf-8"))
         self.assertIn("com.apple.security.app-sandbox", mac_entitlements.read_text(encoding="utf-8"))
+        self.assertIn("com.apple.security.files.user-selected.read-write", mac_entitlements.read_text(encoding="utf-8"))
         self.assertEqual(mac_icon.read_bytes()[:4], b"icns")
         self.assertIn("KODA macOS App Store Packaging", mac_packaging_readme.read_text(encoding="utf-8"))
         self.assertIn("productType = \"com.apple.product-type.application\"", koda_project.read_text(encoding="utf-8"))
@@ -827,6 +1337,33 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("reportItems", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("buildReportItems", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("ReportExportFormat", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("exportSecurityToolkit", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("applySecurityToolkit", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("buildSecurityFixPlans", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("applySecurityFixPlans", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("exportSBOM", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("runOSVLookup", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("createIgnoreTemplate", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("scoreHistory", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("SecurityAutoFixer", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("SecurityScoreStore", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("KODAIgnoreTemplateWriter", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("NativeDependencyInventory", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("NativeOSVClient", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("NativeVulnerabilityIntelClient", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("NativeVEXDocument", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("koda-ignore.yml", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("pyprojectComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("poetryLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("pipfileLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("yarnLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("pnpmLockComponents", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("poetry.lock", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("Pipfile.lock", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("yarn.lock", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("pnpm-lock.yaml", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("SecurityPreventionTemplateWrite", koda_bridge.read_text(encoding="utf-8"))
+        self.assertIn("SecurityPreventionToolkit", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("NSSavePanel", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("allowedContentTypes", koda_bridge.read_text(encoding="utf-8"))
         self.assertIn("GeneratedReportFiles", koda_bridge.read_text(encoding="utf-8"))
@@ -839,11 +1376,42 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("@Environment(\\.colorScheme)", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("webView.appearance", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("LanguageToggle(language: $language)", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportSecurityToolkit", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.applySecurityToolkit", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.buildSecurityFixPlans", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.applySecurityFixPlans", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportSBOM", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.runOSVLookup", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportVEX", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportZAPBaselinePlan", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.runZAPBaseline", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportEvidenceChecklist", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportReleaseSecurityPackage", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.exportScoreDiff", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("scanner.createIgnoreTemplate", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("SecurityFixWizardSheet", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("SecurityScoreHistorySheet", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("shield.lefthalf.filled", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("folder.badge.gearshape", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("wand.and.sparkles", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("shippingbox", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("chart.line.uptrend.xyaxis", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("scanner.export", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("square.and.arrow.down", koda_content_view.read_text(encoding="utf-8"))
         self.assertNotIn("scanner.openReport", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("showMainHelp", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("MainHelpScreen", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("HelpSummaryBlock", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("preventionKitUsageItems", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("GeometryReader", koda_content_view.read_text(encoding="utf-8"))
-        self.assertIn("VSplitView", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn('@AppStorage("koda.dashboard.topFraction.v2")', koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("dashboardTopFraction = 0.25", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("minTopHeight: CGFloat = 160", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("@State private var liveTopFraction", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("DashboardSplitView", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("DragGesture", koda_content_view.read_text(encoding="utf-8"))
+        self.assertIn("return min(140", koda_content_view.read_text(encoding="utf-8"))
+        self.assertNotIn("VSplitView", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("removeTarget(target)", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("ScanResultsGroupedView", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("ScanReportDetailScreen", koda_content_view.read_text(encoding="utf-8"))
@@ -862,6 +1430,25 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("HelpGuideScreen", koda_standards_view.read_text(encoding="utf-8"))
         self.assertNotIn("DetailHelpPanel", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("LanguageToggle", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("KODAScreenTopBar", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("자동 점검", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("외부 연동 필요", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("증적 확인 필요", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("예방 키트", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("보안 예방 키트 파일로 저장", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("선택 폴더에 예방 설정 적용", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("자동 수정 마법사", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("SBOM 생성", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("OSV/CVE + KEV/EPSS 조회", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("VEX 문서 생성", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("ZAP DAST 계획 생성", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("ZAP DAST 실행", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("수동 증적 체크리스트", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("릴리스 보안 패키지 생성", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("점검 변경 리포트", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("예외 파일 생성", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("보안 점수 추적", koda_standards_view.read_text(encoding="utf-8"))
+        self.assertIn("파일 기반 정적 점검", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("KO", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("EN", koda_standards_view.read_text(encoding="utf-8"))
         self.assertIn("Local Project Security Scan", koda_standards_view.read_text(encoding="utf-8"))
@@ -881,6 +1468,8 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("KODA_SCAN_OUTPUT_MARKDOWN", koda_app.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_OUTPUT_PDF", koda_app.read_text(encoding="utf-8"))
         self.assertIn("KODA_SCAN_LANGUAGE", koda_app.read_text(encoding="utf-8"))
+        self.assertIn("koda-ignore.yml", koda_native_scanner.read_text(encoding="utf-8"))
+        self.assertIn("NativeIgnoreRules", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("extractZip", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("gunzip", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("writeMarkdownReport", koda_native_scanner.read_text(encoding="utf-8"))
@@ -890,9 +1479,70 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("위험군별 분포", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("drawPDFSummaryPage", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("drawPDFSeverityBars", koda_native_scanner.read_text(encoding="utf-8"))
-        self.assertIn("renderPlainText(result, language: language)", koda_native_scanner.read_text(encoding="utf-8"))
+        self.assertIn("drawPDFFindingTablePages", koda_native_scanner.read_text(encoding="utf-8"))
+        self.assertIn("drawPDFTableHeader", koda_native_scanner.read_text(encoding="utf-8"))
+        self.assertIn("drawPDFTableCell", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("color-scheme: light dark", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn("prefers-color-scheme: dark", koda_native_scanner.read_text(encoding="utf-8"))
+        self.assertIn("NativeRegexCache", koda_native_scanner.read_text(encoding="utf-8"))
+        for rule_id in (
+            "secret.aws-access-key",
+            "secret.github-token",
+            "secret.slack-token",
+            "dependency.package-json-invalid",
+            "dependency.node-insecure-url",
+            "dependency.remote-shell-script",
+            "dependency.python-insecure-url",
+            "dependency.python-wildcard-version",
+            "dependency.docker-unpinned-base",
+            "dependency.docker-remote-shell",
+            "config.private-key-like-file",
+            "config.development-environment",
+            "config.docker-root-user",
+            "config.docker-add-http",
+            "config.docker-no-user",
+            "config.compose-host-network",
+            "config.compose-docker-sock",
+            "config.k8s-privileged-container",
+            "config.k8s-allow-privilege-escalation",
+            "config.k8s-host-network",
+            "config.k8s-hostpath-volume",
+            "config.terraform-public-storage",
+            "config.terraform-public-access-block-disabled",
+            "config.terraform-open-admin-port",
+            "config.github-pull-request-target",
+            "config.github-untrusted-event-in-run",
+            "code.csrf-disabled",
+            "code.auth-disabled-endpoint",
+            "code.eval-user-input",
+            "code.ssrf-user-url",
+            "code.unrestricted-file-upload",
+            "code.dangerous-c-buffer-api",
+            "code.unbounded-request-body",
+            "code.logging-sensitive-data",
+            "code.empty-exception-handler",
+            "code.stack-trace-exposure",
+            "code.unversioned-api-route",
+            "code.legacy-board-software",
+            "code.xml-external-entity",
+            "prevention.security-policy-missing",
+            "prevention.dependency-update-automation-missing",
+            "prevention.ci-security-scan-missing",
+            "prevention.env-not-gitignored",
+            "prevention.env-example-missing",
+            "prevention.dockerignore-missing",
+            "prevention.sbom-missing",
+            "prevention.sast-workflow-missing",
+            "prevention.openssf-scorecard-missing",
+            "prevention.github-token-permissions-not-readonly",
+            "prevention.github-actions-unpinned",
+            "prevention.slsa-sigstore-missing",
+            "prevention.zap-baseline-missing",
+            "prevention.dependency-track-integration-missing",
+            "prevention.vex-missing",
+            "prevention.binary-artifact-committed",
+        ):
+            self.assertIn(rule_id, koda_native_scanner.read_text(encoding="utf-8"))
         self.assertNotIn("scaleBy(x: 1, y: -1)", koda_native_scanner.read_text(encoding="utf-8"))
         self.assertIn(".msixupload", (root / "packaging" / "windows" / "README.md").read_text(encoding="utf-8"))
         self.assertIn("Microsoft Store", store_release_notes.read_text(encoding="utf-8"))
@@ -903,7 +1553,18 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("scripts/install-macos.command", readme)
         self.assertIn("scripts/install-windows.bat", readme)
         self.assertIn("KODA", readme)
+        self.assertIn("auto-fix wizard", readme)
+        self.assertIn("koda-ignore.yml", readme)
+        self.assertIn("score history", readme)
+        self.assertIn("자동 수정 마법사", readme)
+        self.assertIn("poetry.lock", readme)
+        self.assertIn("Pipfile.lock", readme)
+        self.assertIn("yarn.lock", readme)
+        self.assertIn("pnpm-lock.yaml", readme)
         self.assertIn("MSIX", readme)
+        self.assertIn("init-security", readme)
+        self.assertIn("zap-command", readme)
+        self.assertIn("upload-sbom", readme)
 
     def test_html_report_contains_scan_controls(self) -> None:
         html = render_html([], language="ko")
@@ -926,9 +1587,10 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("폴더 선택", html)
         self.assertIn("보안 기준", html)
         self.assertIn("기준 카테고리", html)
-        self.assertIn("OSV/CVE 조회", html)
+        self.assertIn("OSV/CVE + KEV/EPSS 조회", html)
         self.assertIn("SBOM 다운로드", html)
         self.assertIn("커버리지 매트릭스", html)
+        self.assertIn("예방 가드레일", html)
         self.assertIn("치명 100점", html)
         self.assertIn('id="risk-score-note"', html)
         self.assertIn("OWASP Top 10:2025", html)

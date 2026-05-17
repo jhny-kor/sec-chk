@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import json
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -65,6 +67,155 @@ def main(argv: list[str] | None = None) -> int:
             print(f"App error: {exc}", file=sys.stderr)
             return 2
 
+    if args.command == "init-security":
+        from .toolkit import write_security_template_files
+
+        try:
+            target = expand_path(args.target, Path.cwd())
+            if args.dry_run:
+                from .toolkit import security_template_files
+
+                for relative_path in security_template_files(args.project_name or target.name):
+                    print(target / relative_path)
+                return 0
+            results = write_security_template_files(target, project_name=args.project_name, force=bool(args.force))
+        except (OSError, ValueError) as exc:
+            print(f"Template error: {exc}", file=sys.stderr)
+            return 2
+        for result in results:
+            print(f"{result.status}\t{result.path}")
+        return 0
+
+    if args.command == "zap-command":
+        from .integrations import zap_baseline_command
+
+        try:
+            print(zap_baseline_command(args.url, output_dir=args.output_dir, minutes=args.minutes))
+        except ValueError as exc:
+            print(f"ZAP command error: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    if args.command == "zap-run":
+        from .dast import render_zap_findings_json, run_zap_baseline
+
+        try:
+            result = run_zap_baseline(
+                args.url,
+                output_dir=expand_path(args.output_dir, Path.cwd()),
+                minutes=args.minutes,
+                dry_run=args.dry_run,
+                timeout_seconds=args.timeout,
+            )
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            print(f"ZAP run error: {exc}", file=sys.stderr)
+            return 2
+        if args.dry_run:
+            print(result.command)
+            return 0
+        findings_path = result.output_dir / "koda-zap-findings.json"
+        findings_path.write_text(render_zap_findings_json(result.findings), encoding="utf-8")
+        print(
+            json_dumps(
+                {
+                    "exit_code": result.exit_code,
+                    "output_dir": str(result.output_dir),
+                    "finding_count": len(result.findings),
+                    "findings": str(findings_path),
+                    "command": result.command,
+                }
+            )
+        )
+        if result.exit_code not in {0, 1, 2}:
+            return result.exit_code
+        if args.fail_on_alerts and result.findings:
+            return 1
+        return 0
+
+    if args.command == "evidence-checklist":
+        from .evidence import write_evidence_checklist
+
+        output = expand_path(args.output, Path.cwd())
+        try:
+            write_evidence_checklist(
+                output,
+                project_name=args.project_name or Path(args.target).expanduser().name or "project",
+                language=args.language,
+                json_format=args.format == "json",
+            )
+        except OSError as exc:
+            print(f"Evidence checklist error: {exc}", file=sys.stderr)
+            return 2
+        print(output)
+        return 0
+
+    if args.command == "diff-reports":
+        from .diffing import diff_reports, render_diff_json, render_diff_markdown
+
+        try:
+            diff = diff_reports(expand_path(args.baseline, Path.cwd()), expand_path(args.current, Path.cwd()))
+            content = render_diff_json(diff) if args.format == "json" else render_diff_markdown(diff, language=args.language)
+            write_report(content, expand_path(str(args.output), Path.cwd()) if args.output else None)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(f"Diff report error: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    if args.command == "release-package":
+        from .release import build_release_security_package
+
+        try:
+            manifest = build_release_security_package(
+                target=expand_path(args.target, Path.cwd()),
+                output_dir=expand_path(args.output_dir, Path.cwd()),
+                project_name=args.project_name,
+                language=args.language,
+                enable_vuln_intel=args.enable_vuln_intel,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Release package error: {exc}", file=sys.stderr)
+            return 2
+        print(json_dumps(manifest))
+        return 0
+
+    if args.command == "dependency-track-command":
+        from .integrations import dependency_track_upload_command
+
+        try:
+            print(
+                dependency_track_upload_command(
+                    server_url=args.server_url,
+                    project_name=args.project_name,
+                    project_version=args.project_version,
+                    sbom_path=args.sbom,
+                    api_key_env=args.api_key_env,
+                    auto_create=args.auto_create,
+                )
+            )
+        except ValueError as exc:
+            print(f"Dependency-Track command error: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    if args.command == "upload-sbom":
+        from .integrations import api_key_from_env, upload_sbom_to_dependency_track
+
+        try:
+            api_key = args.api_key or api_key_from_env(args.api_key_env)
+            payload = upload_sbom_to_dependency_track(
+                server_url=args.server_url,
+                api_key=api_key,
+                project_name=args.project_name,
+                project_version=args.project_version,
+                sbom_path=expand_path(args.sbom, Path.cwd()),
+                auto_create=args.auto_create,
+            )
+        except (RuntimeError, ValueError, OSError) as exc:
+            print(f"Dependency-Track upload error: {exc}", file=sys.stderr)
+            return 2
+        print(json_dumps(payload))
+        return 0
+
     if args.command in {None, "scan"}:
         try:
             with _build_scan_config_context(args) as config:
@@ -123,7 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=CATEGORIES,
         help="category to run; can be passed multiple times",
     )
-    scan.add_argument("--format", choices=("markdown", "json", "html", "sarif", "cyclonedx"), help="report format")
+    scan.add_argument("--format", choices=("markdown", "json", "html", "sarif", "cyclonedx", "cyclonedx-vex"), help="report format")
     scan.add_argument("--output", type=Path, help="report output path")
     scan.add_argument("--language", choices=("en", "ko"), help="report display language")
     scan.add_argument("--min-severity", choices=SEVERITIES, help="minimum severity to include")
@@ -132,6 +283,11 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--discover-projects", action="store_true", help="discover project roots under target folders")
     scan.add_argument("--discovery-depth", type=int, help="maximum discovery depth below each target")
     scan.add_argument("--enable-osv", action="store_true", help="query OSV.dev for exact-version dependency vulnerabilities")
+    scan.add_argument(
+        "--enable-vuln-intel",
+        action="store_true",
+        help="enrich OSV CVEs with CISA KEV and FIRST EPSS exploit intelligence; implies --enable-osv",
+    )
 
     discover = subparsers.add_parser("discover", help="list project roots under a folder")
     discover.add_argument("--target", default=".", help="folder to inspect")
@@ -147,6 +303,63 @@ def build_parser() -> argparse.ArgumentParser:
     app.add_argument("--port", type=int, default=8765, help="first port to try")
     app.add_argument("--language", choices=("en", "ko"), default="ko", help="initial dashboard language")
     app.add_argument("--no-browser", action="store_true", help="do not open the default browser automatically")
+
+    init_security = subparsers.add_parser("init-security", help="write preventive security templates into a project")
+    init_security.add_argument("--target", default=".", help="project folder to initialize")
+    init_security.add_argument("--project-name", default="", help="project name to include in templates")
+    init_security.add_argument("--force", action="store_true", help="overwrite existing template files")
+    init_security.add_argument("--dry-run", action="store_true", help="print files that would be created")
+
+    zap_command = subparsers.add_parser("zap-command", help="print an OWASP ZAP baseline Docker command")
+    zap_command.add_argument("--url", required=True, help="authorized http(s) URL to check")
+    zap_command.add_argument("--output-dir", default="reports/zap", help="folder for ZAP reports")
+    zap_command.add_argument("--minutes", type=int, default=1, help="spider duration in minutes")
+
+    zap_run = subparsers.add_parser("zap-run", help="run OWASP ZAP baseline against an authorized URL")
+    zap_run.add_argument("--url", required=True, help="authorized http(s) URL to check")
+    zap_run.add_argument("--output-dir", default="reports/zap", help="folder for ZAP reports")
+    zap_run.add_argument("--minutes", type=int, default=1, help="spider duration in minutes")
+    zap_run.add_argument("--timeout", type=int, default=900, help="maximum runtime in seconds")
+    zap_run.add_argument("--dry-run", action="store_true", help="print the Docker command without running ZAP")
+    zap_run.add_argument("--fail-on-alerts", action="store_true", help="exit 1 when ZAP reports any finding")
+
+    evidence = subparsers.add_parser("evidence-checklist", help="write a manual evidence checklist for standards that require evidence review")
+    evidence.add_argument("--target", default=".", help="project folder name used for the checklist")
+    evidence.add_argument("--project-name", default="", help="project name to include in the checklist")
+    evidence.add_argument("--output", default="manual-evidence-checklist.md", help="checklist output path")
+    evidence.add_argument("--language", choices=("en", "ko"), default="ko", help="checklist language")
+    evidence.add_argument("--format", choices=("markdown", "json"), default="markdown", help="checklist format")
+
+    diff_reports = subparsers.add_parser("diff-reports", help="compare two JSON scan reports")
+    diff_reports.add_argument("--baseline", required=True, help="older JSON scan report")
+    diff_reports.add_argument("--current", required=True, help="newer JSON scan report")
+    diff_reports.add_argument("--output", type=Path, help="diff report output path")
+    diff_reports.add_argument("--format", choices=("markdown", "json"), default="markdown", help="diff report format")
+    diff_reports.add_argument("--language", choices=("en", "ko"), default="ko", help="diff report language")
+
+    release_package = subparsers.add_parser("release-package", help="create a release security package with SBOM, VEX, checklist, findings, and checksums")
+    release_package.add_argument("--target", default=".", help="project folder to package")
+    release_package.add_argument("--output-dir", default="KODA-release-security-package", help="output folder")
+    release_package.add_argument("--project-name", default="", help="project name")
+    release_package.add_argument("--language", choices=("en", "ko"), default="ko", help="package language")
+    release_package.add_argument("--enable-vuln-intel", action="store_true", help="query OSV/CVE and KEV/EPSS while building package")
+
+    dependency_track_command = subparsers.add_parser("dependency-track-command", help="print a Dependency-Track SBOM upload curl command")
+    dependency_track_command.add_argument("--server-url", required=True, help="Dependency-Track backend URL")
+    dependency_track_command.add_argument("--project-name", required=True, help="Dependency-Track project name")
+    dependency_track_command.add_argument("--project-version", default="main", help="Dependency-Track project version")
+    dependency_track_command.add_argument("--sbom", default="reports/sbom.cdx.json", help="CycloneDX SBOM path")
+    dependency_track_command.add_argument("--api-key-env", default="DEPENDENCY_TRACK_API_KEY", help="environment variable used in the generated command")
+    dependency_track_command.add_argument("--auto-create", action=argparse.BooleanOptionalAction, default=True, help="allow project auto-creation")
+
+    upload_sbom = subparsers.add_parser("upload-sbom", help="upload a CycloneDX SBOM to Dependency-Track")
+    upload_sbom.add_argument("--server-url", required=True, help="Dependency-Track backend URL")
+    upload_sbom.add_argument("--project-name", required=True, help="Dependency-Track project name")
+    upload_sbom.add_argument("--project-version", default="main", help="Dependency-Track project version")
+    upload_sbom.add_argument("--sbom", required=True, help="CycloneDX SBOM path")
+    upload_sbom.add_argument("--api-key", default="", help="Dependency-Track API key; prefer --api-key-env for shell history safety")
+    upload_sbom.add_argument("--api-key-env", default="DEPENDENCY_TRACK_API_KEY", help="environment variable containing the API key")
+    upload_sbom.add_argument("--auto-create", action=argparse.BooleanOptionalAction, default=True, help="allow project auto-creation")
 
     subparsers.add_parser("list-categories", help="show available check categories")
     return parser
@@ -194,7 +407,8 @@ def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | N
         min_severity=args.min_severity or "low",
         language=args.language or "en",
     )
-    return ScannerConfig(targets=targets, report=report, enable_osv=bool(args.enable_osv))
+    enable_vuln_intel = bool(getattr(args, "enable_vuln_intel", False))
+    return ScannerConfig(targets=targets, report=report, enable_osv=bool(args.enable_osv) or enable_vuln_intel, enable_vuln_intel=enable_vuln_intel)
 
 
 def _apply_overrides(
@@ -227,7 +441,13 @@ def _apply_overrides(
         min_severity=args.min_severity or config.report.min_severity,
         language=args.language or config.report.language,
     )
-    return ScannerConfig(targets=targets, report=report, enable_osv=bool(args.enable_osv) or config.enable_osv)
+    enable_vuln_intel = bool(getattr(args, "enable_vuln_intel", False)) or config.enable_vuln_intel
+    return ScannerConfig(
+        targets=targets,
+        report=report,
+        enable_osv=bool(args.enable_osv) or config.enable_osv or enable_vuln_intel,
+        enable_vuln_intel=enable_vuln_intel,
+    )
 
 
 def _prepare_input_target(path: Path, archive_extract_root: Path | None) -> Path:
@@ -314,3 +534,7 @@ def _has_failure(findings, fail_on: str) -> bool:
 
     threshold = SEVERITY_RANK[fail_on]
     return any(SEVERITY_RANK[finding.severity] >= threshold for finding in findings)
+
+
+def json_dumps(payload: object) -> str:
+    return json.dumps(payload, indent=2, ensure_ascii=False)

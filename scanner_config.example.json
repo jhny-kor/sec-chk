@@ -3,7 +3,7 @@
     {
       "name": "security-workspace",
       "path": ".",
-      "categories": ["secrets", "dependencies", "configuration", "code"],
+      "categories": ["secrets", "dependencies", "configuration", "code", "prevention"],
       "exclude_globs": [
         "**/.git/**",
         "**/node_modules/**",
@@ -21,6 +21,7 @@
     }
   ],
   "enable_osv": false,
+  "enable_vuln_intel": false,
   "report": {
     "format": "html",
     "output": "reports/security-dashboard.html",

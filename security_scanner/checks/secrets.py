@@ -15,7 +15,7 @@ PLACEHOLDER_RE = re.compile(
 )
 SAFE_SECRET_REFERENCE_RE = re.compile(
     r"(?i)\b(os\.getenv|os\.environ|process\.env|getenv|config\.get|settings\.|"
-    r"decouple\.config|argparse|required\s*=\s*true)\b"
+    r"decouple\.config|argparse|args\.|argv\.|required\s*=\s*true)\b"
 )
 
 
@@ -127,7 +127,7 @@ def _looks_like_secret_reference(line: str, value: str) -> bool:
     lowered = stripped.lower()
     if "(" in stripped or ")" in stripped:
         return True
-    return lowered.startswith(("os.", "process.", "config.", "settings.", "self."))
+    return lowered.startswith(("os.", "process.", "config.", "settings.", "self.", "args.", "argv."))
 
 
 def _redact_line(line: str, secret_value: str) -> str:

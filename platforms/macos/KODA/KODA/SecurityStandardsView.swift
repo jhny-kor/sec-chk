@@ -18,6 +18,13 @@ enum AppLanguage: String, Hashable {
         }
     }
 
+    var remediationGuideTitle: String {
+        switch self {
+        case .ko: return "조치 가이드"
+        case .en: return "Remediation Guide"
+        }
+    }
+
     var findingsTitle: String {
         switch self {
         case .ko: return "발견 항목"
@@ -118,15 +125,22 @@ enum AppLanguage: String, Hashable {
 
     var localCheckBadge: String {
         switch self {
-        case .ko: return "로컬 점검"
-        case .en: return "Local"
+        case .ko: return "자동 점검"
+        case .en: return "Automatic"
         }
     }
 
-    var partialCheckBadge: String {
+    var evidenceRequiredBadge: String {
         switch self {
-        case .ko: return "부분 자동"
-        case .en: return "Partial"
+        case .ko: return "증적 확인 필요"
+        case .en: return "Evidence required"
+        }
+    }
+
+    var externalIntegrationBadge: String {
+        switch self {
+        case .ko: return "외부 연동 필요"
+        case .en: return "External integration"
         }
     }
 
@@ -168,8 +182,8 @@ enum AppLanguage: String, Hashable {
 
     var guideUsageDescription: String {
         switch self {
-        case .ko: return "로컬 정적 점검으로 확인 가능한 항목은 자동으로 표시됩니다. 런타임 테스트, 조직 정책, 운영 증적이 필요한 항목은 부분 자동 항목으로 분류되며 별도 검토가 필요합니다."
-        case .en: return "Locally mappable static checks are shown automatically. Runtime tests, organizational policy checks, and operational evidence are marked as partial and require separate review."
+        case .ko: return "파일 기반 정적 점검으로 확인 가능한 항목은 자동 점검으로 표시됩니다. 실행 대상, 외부 취약점 피드, 저장소 메타데이터가 필요한 항목은 외부 연동 필요로, 조직 정책과 운영 기록이 필요한 항목은 증적 확인 필요로 표시됩니다."
+        case .en: return "Locally mappable static checks are marked automatic. Live targets, vulnerability feeds, and repository metadata are marked as external integration; organizational policy and operating records are marked as evidence required."
         }
     }
 
@@ -212,6 +226,330 @@ enum AppLanguage: String, Hashable {
         switch self {
         case .ko: return "선택 초기화"
         case .en: return "Clear Selection"
+        }
+    }
+
+    var preventionToolkitTitle: String {
+        switch self {
+        case .ko: return "예방 키트"
+        case .en: return "Prevention Kit"
+        }
+    }
+
+    var mainHelpTitle: String {
+        switch self {
+        case .ko: return "도움말"
+        case .en: return "Help"
+        }
+    }
+
+    var mainHelpSubtitle: String {
+        switch self {
+        case .ko: return "KODA는 폴더나 파일을 선택해 로컬 보안 위험을 점검하고, 예방 키트로 보안 가드레일과 릴리스 산출물을 준비하는 앱입니다. 아래 순서대로 진행하면 처음 사용하는 경우에도 점검부터 결과 다운로드까지 이어갈 수 있습니다."
+        case .en: return "KODA scans selected folders or files for local security risks and uses the Prevention Kit to prepare security guardrails and release artifacts. Follow the steps below to move from the first scan to downloadable results."
+        }
+    }
+
+    var firstRunGuideTitle: String {
+        switch self {
+        case .ko: return "처음 사용하는 순서"
+        case .en: return "First Run"
+        }
+    }
+
+    var firstRunGuideItems: [String] {
+        switch self {
+        case .ko:
+            return [
+                "메인 화면에서 폴더 선택을 눌러 프로젝트 폴더를 추가합니다. 단일 파일, 여러 파일, 압축 파일을 점검하려면 파일 업로드를 사용합니다.",
+                "보안 점검 실행을 누르면 KODA가 비밀값, 의존성, 설정, 코드 패턴, 예방 가드레일을 로컬에서 점검합니다.",
+                "점검 결과 조회에서 전체 결과를 보거나, OWASP, CWE, ISMS-P 같은 보안 기준별 결과 카드로 들어가 상세 항목을 확인합니다.",
+                "각 상세 화면의 도움말 버튼을 누르면 해당 기준에서 어떤 항목을 확인하는지와 자동 점검, 외부 연동 필요, 증적 확인 필요 상태를 볼 수 있습니다.",
+            ]
+        case .en:
+            return [
+                "On the main screen, choose folders to add project directories. Use file upload when you want to scan single files, multiple files, or archives.",
+                "Run Security Scan to check secrets, dependencies, configuration, code patterns, and prevention guardrails locally.",
+                "Use Scan Results to view all findings, or open standard-specific cards such as OWASP, CWE, and ISMS-P for detailed results.",
+                "Use the Help button on each detail screen to see what the standard checks and whether it is automatic, external integration required, or evidence review required.",
+            ]
+        }
+    }
+
+    var preventionKitAboutTitle: String {
+        switch self {
+        case .ko: return "예방 키트란?"
+        case .en: return "What It Does"
+        }
+    }
+
+    var preventionKitUsageTitle: String {
+        switch self {
+        case .ko: return "사용법"
+        case .en: return "How To Use"
+        }
+    }
+
+    var preventionKitAboutItems: [String] {
+        switch self {
+        case .ko:
+            return [
+                "예방 키트는 취약점을 찾은 뒤 고치는 것에 그치지 않고, 프로젝트에 기본 보안 장치를 미리 갖추도록 돕는 기능 묶음입니다.",
+                "자동 수정 마법사는 SECURITY.md, Dependabot 설정, CI 보안 점검 workflow, .dockerignore, .env.example 같은 파일을 만들거나 부족한 줄을 추가합니다.",
+                "기존 파일을 무작정 덮어쓰지 않고, 적용 전에 변경 후보를 보여주므로 필요한 항목만 선택해서 적용할 수 있습니다.",
+                "팀이나 릴리스 과정에서 필요한 SBOM, VEX, 증적 체크리스트, 릴리스 보안 패키지도 같은 메뉴에서 생성합니다.",
+            ]
+        case .en:
+            return [
+                "The Prevention Kit is a set of actions that helps you prepare baseline security controls, not just find issues after they happen.",
+                "The Auto-Fix Wizard creates or updates files such as SECURITY.md, Dependabot configuration, CI security workflows, .dockerignore, and .env.example.",
+                "It previews candidate changes before applying them, so you can select only the guardrails you want instead of overwriting files blindly.",
+                "The same menu can also generate SBOM, VEX, evidence checklists, and release security packages for team and release workflows.",
+            ]
+        }
+    }
+
+    var preventionKitUsageItems: [String] {
+        switch self {
+        case .ko:
+            return [
+                "점검 대상을 선택한 뒤 예방 키트 메뉴를 열고 자동 수정 마법사를 실행합니다. 마법사는 선택 폴더에서 빠진 보안 가드레일을 계산합니다.",
+                "목록에서 적용할 항목을 확인합니다. 새 파일을 만들 항목과 기존 파일에 줄을 추가할 항목을 구분해서 볼 수 있습니다.",
+                "선택 항목 적용을 누르면 KODA가 선택된 폴더에 필요한 파일만 생성하거나, 기존 파일에는 필요한 줄만 보수적으로 추가합니다.",
+                "외부 서비스가 필요한 작업은 별도로 실행합니다. OSV/CVE 조회는 인터넷 취약점 피드를 사용하고, ZAP DAST 실행은 Docker와 허가된 URL이 필요합니다.",
+            ]
+        case .en:
+            return [
+                "After selecting targets, open the Prevention Kit menu and run the Auto-Fix Wizard. It calculates missing guardrails for the selected folders.",
+                "Review the list before applying. The wizard separates new files from conservative line additions to existing files.",
+                "Apply Selected writes only the chosen items: missing files are created and existing files receive only the needed lines.",
+                "Run external actions separately. OSV/CVE lookup uses online vulnerability feeds, and ZAP DAST execution requires Docker plus an authorized URL.",
+            ]
+        }
+    }
+
+    var resultDownloadGuideTitle: String {
+        switch self {
+        case .ko: return "결과 다운로드와 활용"
+        case .en: return "Download And Use Results"
+        }
+    }
+
+    var resultDownloadGuideItems: [String] {
+        switch self {
+        case .ko:
+            return [
+                "상세 결과 화면의 다운로드 메뉴에서 HTML, PDF, Markdown 리포트를 저장할 수 있습니다.",
+                "SBOM 생성은 의존성 목록을 CycloneDX 형식으로 내보내며, VEX 문서는 취약점 검토 상태를 릴리스 산출물로 남기는 데 사용합니다.",
+                "릴리스 보안 패키지는 SBOM, VEX, 점검 결과, 증적 체크리스트, 체크섬을 한 폴더에 모아 배포 전 검토 자료로 사용할 수 있게 합니다.",
+                "점검 변경 리포트는 최근 두 번의 점검 결과를 비교해 새로 생긴 위험과 해결된 위험을 확인할 때 사용합니다.",
+            ]
+        case .en:
+            return [
+                "Use the download menu in detail views to save HTML, PDF, and Markdown reports.",
+                "Generate SBOM exports dependencies in CycloneDX format, while VEX records vulnerability review status for release artifacts.",
+                "Create Release Security Package bundles SBOM, VEX, scan results, evidence checklists, and checksums into one review folder.",
+                "Scan Change Report compares the latest two scans so you can see newly introduced and resolved risks.",
+            ]
+        }
+    }
+
+    var safetyGuideTitle: String {
+        switch self {
+        case .ko: return "주의할 점"
+        case .en: return "Important Notes"
+        }
+    }
+
+    var safetyGuideItems: [String] {
+        switch self {
+        case .ko:
+            return [
+                "기본 보안 점검은 로컬 파일을 읽어 분석합니다. 예방 설정 적용과 자동 수정 마법사는 사용자가 선택한 항목만 실제 파일로 작성합니다.",
+                "ZAP DAST는 실행 중인 웹 서비스를 점검하므로, 반드시 소유하거나 명시적으로 허가받은 URL에만 실행해야 합니다.",
+                "자동 점검은 빠른 예방과 위험 발견을 돕지만, 운영 정책, 승인 기록, 인증 증적이 필요한 기준은 증적 확인 필요 상태로 표시됩니다.",
+            ]
+        case .en:
+            return [
+                "The default security scan reads local files. Applying guardrails and using the Auto-Fix Wizard writes only the selected items.",
+                "ZAP DAST tests a running web service, so run it only against URLs you own or are explicitly authorized to test.",
+                "Automatic checks help prevent and find risks quickly, but standards requiring policies, approvals, and certification evidence are marked as evidence review required.",
+            ]
+        }
+    }
+
+    var exportPreventionToolkitTitle: String {
+        switch self {
+        case .ko: return "보안 예방 키트 파일로 저장"
+        case .en: return "Save Security Prevention Kit"
+        }
+    }
+
+    var applyPreventionToolkitTitle: String {
+        switch self {
+        case .ko: return "선택 폴더에 예방 설정 적용"
+        case .en: return "Apply Guardrails to Folders"
+        }
+    }
+
+    var autoFixWizardTitle: String {
+        switch self {
+        case .ko: return "자동 수정 마법사"
+        case .en: return "Auto-Fix Wizard"
+        }
+    }
+
+    var autoFixWizardSubtitle: String {
+        switch self {
+        case .ko: return "선택한 폴더에 적용할 보안 예방 수정사항을 미리 보고 원하는 항목만 적용합니다. 기존 파일은 필요한 줄만 추가하거나 없는 파일만 생성합니다."
+        case .en: return "Preview security guardrail changes for selected folders and apply only the items you choose. Existing files are merged conservatively."
+        }
+    }
+
+    var noAutoFixesTitle: String {
+        switch self {
+        case .ko: return "적용할 자동 수정 항목이 없습니다."
+        case .en: return "No auto-fix items available."
+        }
+    }
+
+    var noAutoFixesSubtitle: String {
+        switch self {
+        case .ko: return "먼저 점검 대상 폴더를 선택하거나 이미 기본 예방 설정이 존재하는지 확인하세요."
+        case .en: return "Choose target folders first, or verify that baseline guardrails already exist."
+        }
+    }
+
+    var applySelectedFixesTitle: String {
+        switch self {
+        case .ko: return "선택 항목 적용"
+        case .en: return "Apply Selected"
+        }
+    }
+
+    var cancelTitle: String {
+        switch self {
+        case .ko: return "취소"
+        case .en: return "Cancel"
+        }
+    }
+
+    var closeTitle: String {
+        switch self {
+        case .ko: return "닫기"
+        case .en: return "Close"
+        }
+    }
+
+    var generateSBOMTitle: String {
+        switch self {
+        case .ko: return "SBOM 생성"
+        case .en: return "Generate SBOM"
+        }
+    }
+
+    var runOSVLookupTitle: String {
+        switch self {
+        case .ko: return "OSV/CVE + KEV/EPSS 조회"
+        case .en: return "Run OSV/CVE + KEV/EPSS"
+        }
+    }
+
+    var generateVEXTitle: String {
+        switch self {
+        case .ko: return "VEX 문서 생성"
+        case .en: return "Generate VEX"
+        }
+    }
+
+    var generateZAPPlanTitle: String {
+        switch self {
+        case .ko: return "ZAP DAST 계획 생성"
+        case .en: return "Create ZAP DAST Plan"
+        }
+    }
+
+    var runZAPDASTTitle: String {
+        switch self {
+        case .ko: return "ZAP DAST 실행"
+        case .en: return "Run ZAP DAST"
+        }
+    }
+
+    var evidenceChecklistTitle: String {
+        switch self {
+        case .ko: return "수동 증적 체크리스트"
+        case .en: return "Manual Evidence Checklist"
+        }
+    }
+
+    var releaseSecurityPackageTitle: String {
+        switch self {
+        case .ko: return "릴리스 보안 패키지 생성"
+        case .en: return "Create Release Security Package"
+        }
+    }
+
+    var scoreDiffTitle: String {
+        switch self {
+        case .ko: return "점검 변경 리포트"
+        case .en: return "Scan Change Report"
+        }
+    }
+
+    var createIgnoreFileTitle: String {
+        switch self {
+        case .ko: return "예외 파일 생성"
+        case .en: return "Create Ignore File"
+        }
+    }
+
+    var scoreHistoryTitle: String {
+        switch self {
+        case .ko: return "보안 점수 추적"
+        case .en: return "Security Score History"
+        }
+    }
+
+    var saveProjectProfileTitle: String {
+        switch self {
+        case .ko: return "현재 대상을 프로파일로 저장"
+        case .en: return "Save Current Targets as Profile"
+        }
+    }
+
+    var projectProfilesTitle: String {
+        switch self {
+        case .ko: return "프로젝트 프로파일"
+        case .en: return "Project Profiles"
+        }
+    }
+
+    var scoreHistorySubtitle: String {
+        switch self {
+        case .ko: return "최근 스캔의 위험점수와 발견 항목 수를 기록해 개선 추이를 확인합니다."
+        case .en: return "Track risk score and finding count from recent scans to see security progress."
+        }
+    }
+
+    var noScoreHistoryTitle: String {
+        switch self {
+        case .ko: return "아직 기록된 점수가 없습니다."
+        case .en: return "No score history yet."
+        }
+    }
+
+    var noScoreHistorySubtitle: String {
+        switch self {
+        case .ko: return "보안 점검을 실행하면 자동으로 점수 기록이 저장됩니다."
+        case .en: return "Run a security scan to save the first score snapshot."
+        }
+    }
+
+    var clearHistoryTitle: String {
+        switch self {
+        case .ko: return "기록 지우기"
+        case .en: return "Clear History"
         }
     }
 
@@ -319,6 +657,13 @@ enum AppLanguage: String, Hashable {
         case .en: return "Mapped checks \(mapped)/\(total)"
         }
     }
+
+    func selectedFixCountText(_ selected: Int, total: Int) -> String {
+        switch self {
+        case .ko: return "선택 \(selected)/\(total)"
+        case .en: return "Selected \(selected)/\(total)"
+        }
+    }
 }
 
 struct HelpGuideRoute: Identifiable, Hashable {
@@ -379,6 +724,50 @@ struct LanguageToggle: View {
     }
 }
 
+struct KODAScreenTopBar<LeadingContent: View, ActionContent: View>: View {
+    @Binding var language: AppLanguage
+    let onBack: () -> Void
+    private let leadingContent: LeadingContent
+    private let actionContent: ActionContent
+
+    init(
+        language: Binding<AppLanguage>,
+        onBack: @escaping () -> Void,
+        @ViewBuilder leading: () -> LeadingContent,
+        @ViewBuilder actions: () -> ActionContent
+    ) {
+        self._language = language
+        self.onBack = onBack
+        self.leadingContent = leading()
+        self.actionContent = actions()
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button {
+                onBack()
+            } label: {
+                Label(language.backTitle, systemImage: "chevron.left")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.white)
+
+            leadingContent
+                .layoutPriority(1)
+
+            Spacer(minLength: 16)
+
+            actionContent
+
+            LanguageToggle(language: $language)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .center)
+        .background(Color(red: 0.04, green: 0.07, blue: 0.13))
+    }
+}
+
 struct AppSecurityStandard: Identifiable, Hashable {
     let id: String
     let title: String
@@ -435,7 +824,7 @@ struct AppStandardCategory: Identifiable, Hashable {
     func coverage(language: AppLanguage) -> String {
         guard language == .en else { return coverage }
         if !isMapped {
-            return "Partially supported. This area needs manual review, runtime testing, or external evidence."
+            return "Evidence review required. This area needs manual review, runtime testing, or external evidence."
         }
         return SecurityStandardLocalization.categoryCoverageText[coverage]
             ?? "Checks this area using locally available source, configuration, secret, and dependency evidence."
@@ -446,7 +835,18 @@ struct AppStandardCategory: Identifiable, Hashable {
         let koItems: [String]
         let enItems: [String]
 
-        if key.contains("xss") || key.contains("script") || key.contains("스크립") {
+        if key.contains("prevention") || key.contains("guardrail") || key.contains("automation") || key.contains("security.md") || key.contains("예방") || key.contains("자동화") {
+            koItems = [
+                "SECURITY.md, 신고 절차, 지원 버전처럼 보안 운영 기준이 문서화되어 있는지 확인합니다.",
+                "Dependabot/Renovate, CI 보안 점검 workflow, OSV/SARIF 연동 준비 상태를 찾습니다.",
+                ".env 예시/ignore, .dockerignore, SBOM 산출물처럼 릴리스 전 누락되기 쉬운 예방 장치를 표시합니다.",
+            ]
+            enItems = [
+                "Checks whether SECURITY.md, reporting process, and supported-version expectations are documented.",
+                "Finds Dependabot/Renovate, CI security workflows, and OSV/SARIF integration readiness.",
+                "Highlights pre-release guardrails such as .env examples/ignore rules, .dockerignore, and SBOM artifacts.",
+            ]
+        } else if key.contains("xss") || key.contains("script") || key.contains("스크립") {
             koItems = [
                 "HTML 출력, 템플릿 렌더링, DOM sink에 사용자 입력이 직접 연결되는지 확인합니다.",
                 "innerHTML, dangerouslySetInnerHTML, document.write 등 브라우저 실행 경로를 찾습니다.",
@@ -527,12 +927,12 @@ struct AppStandardCategory: Identifiable, Hashable {
             koItems = [
                 "소스코드, 설정 파일, 의존성 파일에서 이 기준과 연결되는 정적 근거를 수집합니다.",
                 "런타임 호출 없이 확인 가능한 위험 패턴과 운영 전 제거해야 할 흔적을 찾습니다.",
-                "조직 정책이나 운영 증적이 필요한 항목은 부분 자동 점검으로 구분해 표시합니다.",
+                "조직 정책이나 운영 증적이 필요한 항목은 증적 확인 필요로 구분해 표시합니다.",
             ]
             enItems = [
                 "Collects static evidence from source code, configuration, and dependency files mapped to this standard.",
                 "Finds risky patterns and release-time leftovers that can be checked without runtime execution.",
-                "Marks items that need organizational policy or operational evidence as partial automation.",
+                "Marks items that need organizational policy or operational evidence as evidence required.",
             ]
         }
 
@@ -551,9 +951,9 @@ struct AppStandardCategory: Identifiable, Hashable {
 
         switch language {
         case .ko:
-            return "로컬 파일로 일부 단서만 확인하며, 실제 취약 여부는 런타임 테스트, 운영 설정, 정책 증적으로 추가 검토해야 합니다."
+            return "로컬 파일에서 확인 가능한 단서를 사용하며, 실제 취약 여부는 런타임 테스트, 운영 설정, 정책 증적으로 추가 검토해야 합니다."
         case .en:
-            return "Uses local files for partial signals only; runtime testing, deployed configuration, and policy evidence are still needed for final validation."
+            return "Uses local files for signals; runtime testing, deployed configuration, and policy evidence are still needed for final validation."
         }
     }
 }
@@ -622,7 +1022,7 @@ private enum SecurityStandardLocalization {
     static let standardText: [String: StandardText] = [
         "local": StandardText(
             title: "Local Security Scan",
-            subtitle: "Default profile for quickly checking secrets, dependencies, configuration, and risky code patterns.",
+            subtitle: "Default profile for quickly checking secrets, dependencies, configuration, risky code patterns, and prevention guardrails.",
             scope: "File-based static checks",
             coverage: "Fully automated local checks"
         ),
@@ -630,115 +1030,133 @@ private enum SecurityStandardLocalization {
             title: "OWASP Top 10:2025",
             subtitle: "Maps major web application risk categories to local rules.",
             scope: "Web application code and configuration",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "owasp-top-10-2021": StandardText(
             title: "OWASP Top 10:2021",
             subtitle: "Checks widely used OWASP Top 10 categories with local evidence.",
             scope: "Web application code and configuration",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "cwe-sans-top-25-2025": StandardText(
             title: "CWE/SANS Top 25:2025",
             subtitle: "Risk profile that groups MITRE CWE Top 25 data from the SANS software-error perspective.",
             scope: "Code weaknesses and security hygiene",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "cwe-top-25-2025": StandardText(
             title: "CWE Top 25:2025",
             subtitle: "Checks the most dangerous CWE weaknesses with file-based static analysis.",
             scope: "Code weaknesses and dependency hygiene",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "cwe-general": StandardText(
             title: "General CWE Weaknesses",
             subtitle: "Classifies common code and configuration weaknesses beyond the Top 25 from the CWE perspective.",
             scope: "Code, configuration, and dependencies",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "owasp-api-security-2023": StandardText(
             title: "OWASP API Security Top 10:2023",
             subtitle: "Checks API route, authorization, resource, SSRF, and configuration risks.",
             scope: "API code and configuration",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "owasp-mobile-top-10-2024": StandardText(
             title: "OWASP Mobile Top 10:2024",
             subtitle: "Checks security risks visible in mobile app source and configuration.",
             scope: "Mobile source and configuration files",
-            coverage: "Partially automated checks"
+            coverage: "External integration required"
         ),
         "sw-dev-security-49": StandardText(
             title: "Korean Software Development Security 49",
             subtitle: "Maps the 49 Korean software-development-security guide criteria to local rules.",
             scope: "Korean secure-coding criteria",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "sw-dev-security-7-types": StandardText(
             title: "Korean Software Development Security 7 Types",
             subtitle: "Groups development-security weaknesses into seven broad Korean guide types.",
             scope: "Korean secure-coding types",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "kisa-secure-coding": StandardText(
             title: "KISA Secure Coding Guide",
             subtitle: "Checks Korean secure-coding recommendations using local code evidence.",
             scope: "Source code and configuration",
-            coverage: "Partially automated checks"
+            coverage: "Automatic file-based checks"
         ),
         "ncsc-web-8": StandardText(
             title: "NCSC Web 8 Security Vulnerabilities",
             subtitle: "Checks eight common public web-service vulnerability families used in Korean security reviews.",
             scope: "Web code and server configuration",
-            coverage: "Partially automated checks"
+            coverage: "External integration required"
         ),
         "electronic-financial-8": StandardText(
             title: "Electronic Financial Supervision 8 Vulnerabilities",
             subtitle: "Maps Korean electronic-finance public web-server review items to local rules.",
             scope: "Financial web-service code and configuration",
-            coverage: "Partially automated checks"
+            coverage: "External integration required"
         ),
         "isms-p-28": StandardText(
             title: "ISMS-P 2.8 Development Security",
             subtitle: "Maps development-security controls to items that can be checked with local evidence.",
             scope: "Development, testing, and production handoff security",
-            coverage: "Partially automated checks"
+            coverage: "Evidence review required"
         ),
         "owasp-asvs-5": StandardText(
             title: "OWASP ASVS 5.0",
             subtitle: "Groups static-checkable areas from application security verification requirements.",
             scope: "Application security verification",
-            coverage: "Partially automated checks"
+            coverage: "Evidence review required"
         ),
         "owasp-wstg": StandardText(
             title: "OWASP WSTG",
             subtitle: "Shows web security testing guide areas where file-based evidence is available.",
             scope: "Web security testing methodology",
-            coverage: "Partially automated checks"
+            coverage: "External integration required"
         ),
         "nist-ssdf": StandardText(
             title: "NIST SSDF SP 800-218",
-            subtitle: "Checks secure software development practices with local evidence.",
+            subtitle: "Checks secure software development practices and prevention-control readiness with local evidence.",
             scope: "Secure development process",
-            coverage: "Partially automated checks"
+            coverage: "Evidence review required"
         ),
         "owasp-samm-2": StandardText(
             title: "OWASP SAMM 2",
             subtitle: "Checks design, implementation, verification, and operations practices in the software assurance maturity model.",
             scope: "Software assurance maturity",
-            coverage: "Partially automated checks"
+            coverage: "Evidence review required"
         ),
         "owasp-dependency-check": StandardText(
             title: "OWASP Dependency-Check Baseline",
             subtitle: "Dependency hygiene baseline for identifying known vulnerable components.",
             scope: "Dependency manifests and lockfiles",
-            coverage: "Partially automated checks"
+            coverage: "External integration required"
         ),
         "owasp-dependency-track": StandardText(
             title: "OWASP Dependency-Track / SBOM Baseline",
-            subtitle: "Checks local evidence for SBOM readiness and dependency tracking.",
+            subtitle: "Checks local evidence for SBOM readiness, dependency tracking, and automation readiness.",
             scope: "SBOM and supply-chain management",
-            coverage: "Partially automated checks"
+            coverage: "External integration required"
+        ),
+        "openssf-scorecard-baseline": StandardText(
+            title: "OpenSSF Scorecard Baseline",
+            subtitle: "Checks repository-file evidence for supply-chain posture from the Scorecard perspective.",
+            scope: "Open source supply-chain posture",
+            coverage: "External integration required"
+        ),
+        "cisa-kev-epss-priority": StandardText(
+            title: "CISA KEV / FIRST EPSS Priority",
+            subtitle: "Reprioritizes OSV results using known exploitation and exploit-probability intelligence.",
+            scope: "Vulnerable dependency prioritization",
+            coverage: "External integration required"
+        ),
+        "slsa-sigstore-baseline": StandardText(
+            title: "SLSA / Sigstore Baseline",
+            subtitle: "Checks release signing, provenance, and CI least-privilege readiness.",
+            scope: "Build and release supply chain",
+            coverage: "External integration required"
         ),
     ]
 
@@ -747,6 +1165,7 @@ private enum SecurityStandardLocalization {
         "의존성": "Dependencies",
         "설정": "Configuration",
         "코드 패턴": "Code Patterns",
+        "예방 가드레일": "Prevention Guardrails",
         "인가 취약점": "Authorization Weaknesses",
         "리소스 제한": "Resource Limits",
         "API 설정": "API Configuration",
@@ -796,6 +1215,19 @@ private enum SecurityStandardLocalization {
         "매니페스트 위생": "Manifest Hygiene",
         "버전 고정": "Version Pinning",
         "의존성 소스": "Dependency Sources",
+        "자동화 준비성": "Automation Readiness",
+        "보안 정책": "Security Policy",
+        "의존성 업데이트 자동화": "Dependency Update Automation",
+        "정적 분석": "Static Analysis",
+        "토큰 권한": "Token Permissions",
+        "고정된 Actions": "Pinned Actions",
+        "서명된 릴리스": "Signed Releases",
+        "실제 악용 취약점": "Known Exploited Vulnerabilities",
+        "악용 가능성": "Exploit Probability",
+        "VEX 대응 추적": "VEX Response Tracking",
+        "SBOM 추적": "SBOM Tracking",
+        "빌드 출처 증명": "Build Provenance",
+        "서명된 산출물": "Signed Artifacts",
         "SBOM 준비성": "SBOM Readiness",
         "버전 위생": "Version Hygiene",
         "CWE-79 XSS": "CWE-79 XSS",
@@ -814,6 +1246,7 @@ private enum SecurityStandardLocalization {
         "고정되지 않은 버전, 락파일 누락, 안전하지 않은 소스를 확인합니다.": "Checks unpinned versions, missing lockfiles, and unsafe dependency sources.",
         ".env, debug, 권한 상승 컨테이너 설정을 확인합니다.": "Checks .env files, debug flags, and privileged container settings.",
         "XSS, SQL injection, command injection, path traversal 등을 확인합니다.": "Checks XSS, SQL injection, command injection, path traversal, and related patterns.",
+        "SECURITY.md, 의존성 자동 업데이트, CI 보안 점검, SBOM 준비성을 확인합니다.": "Checks SECURITY.md, dependency update automation, CI security scans, and SBOM readiness.",
         "인가 우회, 파일 다운로드, 경로 접근 패턴을 확인합니다.": "Checks authorization bypass, file download, and path access patterns.",
         "비밀값, 약한 해시, 평문 전송 흔적을 확인합니다.": "Checks secrets, weak hashes, and cleartext transport traces.",
         "SQL, command, template, path traversal 입력 흐름을 확인합니다.": "Checks SQL, command, template, and path traversal input flows.",
@@ -863,16 +1296,21 @@ private enum SecurityStandardLocalization {
         "파일 접근과 라우트 접근 위험을 확인합니다.": "Checks file and route access risks.",
         "XSS, SQL, command, traversal 패턴을 확인합니다.": "Checks XSS, SQL, command, and traversal patterns.",
         "약한 해시와 비밀값 노출을 확인합니다.": "Checks weak hashes and exposed secrets.",
-        "보안 요구와 위험 설정 흔적을 확인합니다.": "Checks traces of security requirements and risky settings.",
-        "시큐어코딩과 의존성 위생을 확인합니다.": "Checks secure-coding and dependency hygiene.",
-        "정적 점검 근거를 수집합니다.": "Collects local static-check evidence.",
-        "운영 이관 전 debug와 비밀값 잔존을 확인합니다.": "Checks debug and secret remnants before production handoff.",
+        "비밀값, 의존성 위생, 보안 정책 문서화 상태를 확인합니다.": "Checks secrets, dependency hygiene, and security-policy documentation.",
+        "보안 설정, 코드 약점, CI 보안 점검 준비성을 확인합니다.": "Checks security configuration, code weaknesses, and CI security-scan readiness.",
+        "로컬 룰 기반 검증 증거와 자동화 가드레일을 수집합니다.": "Collects local-rule verification evidence and automation guardrails.",
+        "취약 의존성 대응을 위한 매니페스트, SBOM, 업데이트 자동화를 확인합니다.": "Checks manifests, SBOM, and update automation for vulnerable-dependency response.",
+        "보안 요구와 예방 정책 문서화 근거를 확인합니다.": "Checks evidence for security requirements and preventive policy documentation.",
+        "시큐어코딩, 의존성 위생, CI 보안 점검 준비성을 확인합니다.": "Checks secure-coding, dependency hygiene, and CI security-scan readiness.",
+        "정적 점검 근거와 자동화 가드레일을 수집합니다.": "Collects local static-check evidence and automation guardrails.",
+        "운영 이관 전 debug, 비밀값 잔존, SBOM 준비성을 확인합니다.": "Checks debug remnants, secret remnants, and SBOM readiness before production handoff.",
         "package.json, requirements, lockfile 상태를 확인합니다.": "Checks package.json, requirements, and lockfile status.",
         "고정되지 않은 버전과 wildcard를 확인합니다.": "Checks unpinned versions and wildcards.",
         "평문 또는 원격 실행 의존성 소스를 확인합니다.": "Checks cleartext or remote-execution dependency sources.",
-        "매니페스트와 락파일 상태를 확인합니다.": "Checks manifests and lockfile status.",
+        "매니페스트, 락파일, SBOM 산출물 존재 여부를 확인합니다.": "Checks manifests, lockfiles, and whether an SBOM artifact exists.",
         "고정되지 않은 의존성과 wildcard를 확인합니다.": "Checks unpinned dependencies and wildcards.",
         "안전하지 않은 다운로드와 원격 실행 패턴을 확인합니다.": "Checks unsafe download and remote-execution patterns.",
+        "Dependabot/Renovate와 CI 보안 점검 workflow를 확인합니다.": "Checks Dependabot/Renovate and CI security-scan workflows.",
     ]
 }
 
@@ -1194,17 +1632,9 @@ struct SecurityStandardDetailScreen: View {
 
     private func header(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 14) {
-                Button {
-                    onBack()
-                } label: {
-                    Label(language.backTitle, systemImage: "chevron.left")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.white)
-
-                Spacer()
-
+            KODAScreenTopBar(language: $language, onBack: onBack) {
+                EmptyView()
+            } actions: {
                 Button {
                     onHelp()
                 } label: {
@@ -1212,40 +1642,42 @@ struct SecurityStandardDetailScreen: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.white)
-
-                LanguageToggle(language: $language)
             }
 
-            HStack(alignment: .top, spacing: 16) {
-                Image(systemName: standard.icon)
-                    .font(.system(size: scaledIconSize(width), weight: .bold))
-                    .foregroundStyle(standard.accent.color)
-                    .frame(width: scaledIconSize(width) + 12, height: scaledIconSize(width) + 12)
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 16) {
+                    Image(systemName: standard.icon)
+                        .font(.system(size: scaledIconSize(width), weight: .bold))
+                        .foregroundStyle(standard.accent.color)
+                        .frame(width: scaledIconSize(width) + 12, height: scaledIconSize(width) + 12)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(standard.title(language: language))
-                        .font(.system(size: scaledTitleSize(width), weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(standard.title(language: language))
+                            .font(.system(size: scaledTitleSize(width), weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Text(standard.subtitle(language: language))
-                        .font(.title3)
-                        .foregroundStyle(.white.opacity(0.75))
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(standard.subtitle(language: language))
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer()
                 }
 
-                Spacer()
+                Text("\(standard.badge(language: language)) | \(language.mappedItemsText(mapped: standard.supportedCategoryCount, total: standard.categories.count))")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.8))
             }
-
-            Text("\(standard.badge(language: language)) | \(language.mappedItemsText(mapped: standard.supportedCategoryCount, total: standard.categories.count))")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.8))
+            .padding(.horizontal, horizontalPadding(width))
+            .padding(.top, 12)
+            .padding(.bottom, max(28, width * 0.035))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(red: 0.04, green: 0.07, blue: 0.13))
         }
-        .padding(.horizontal, horizontalPadding(width))
-        .padding(.vertical, max(28, width * 0.035))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 0.04, green: 0.07, blue: 0.13))
     }
 
     private func content(width: CGFloat) -> some View {
@@ -1449,22 +1881,12 @@ struct HelpGuideScreen: View {
     }
 
     private func header(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 14) {
-                Button {
-                    onBack()
-                } label: {
-                    Label(language.backTitle, systemImage: "chevron.left")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.white)
-
-                Spacer()
-
-                LanguageToggle(language: $language)
+        VStack(alignment: .leading, spacing: 0) {
+            KODAScreenTopBar(language: $language, onBack: onBack) {
+                EmptyView()
+            } actions: {
+                EmptyView()
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
 
             HStack(alignment: .top, spacing: 16) {
                 Image(systemName: guideStandard?.icon ?? "questionmark.circle")
@@ -1488,9 +1910,10 @@ struct HelpGuideScreen: View {
             .padding(.horizontal, horizontalPadding(width))
             .padding(.top, 12)
             .padding(.bottom, max(28, width * 0.035))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(red: 0.04, green: 0.07, blue: 0.13))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 0.04, green: 0.07, blue: 0.13))
     }
 
     private var message: String {
@@ -1498,7 +1921,7 @@ struct HelpGuideScreen: View {
 
         switch language {
         case .ko:
-            return "\(standardName) 기준의 점검 가이드입니다. 아래 항목은 KODA가 로컬 파일과 설정에서 확인하는 범위이며, 자동 탐지 가능한 항목과 별도 검토가 필요한 부분을 함께 보여줍니다."
+            return "\(standardName) 기준의 점검 가이드입니다. 아래 항목은 KODA가 로컬 파일과 설정에서 확인하는 범위이며, 자동 점검 항목과 별도 검토가 필요한 항목을 함께 보여줍니다."
         case .en:
             return "This guide explains what KODA checks for \(standardName). The items below show what can be inspected from local files and configuration, including locally automated and separately reviewed areas."
         }
@@ -1564,7 +1987,7 @@ private struct HelpCriteriaCard: View {
 
                 Spacer(minLength: 8)
 
-                Text(category.isMapped ? language.localCheckBadge : language.partialCheckBadge)
+                Text(category.isMapped ? language.localCheckBadge : language.evidenceRequiredBadge)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(category.isMapped ? .green : .orange)
             }
@@ -1634,7 +2057,7 @@ private struct StandardCategoryRow: View {
 
                 Spacer()
 
-                Text(category.isMapped ? language.localCheckBadge : language.partialCheckBadge)
+                Text(category.isMapped ? language.localCheckBadge : language.evidenceRequiredBadge)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(category.isMapped ? .green : .orange)
             }
@@ -1660,7 +2083,7 @@ enum SecurityStandardCatalog {
         AppSecurityStandard(
             id: "local",
             title: "로컬 보안 점검",
-            subtitle: "비밀값, 의존성, 설정, 코드 패턴을 빠르게 확인하는 기본 프로파일입니다.",
+            subtitle: "비밀값, 의존성, 설정, 코드 패턴, 예방 가드레일을 빠르게 확인하는 기본 프로파일입니다.",
             scope: "파일 기반 정적 점검",
             coverage: "전체 자동 점검",
             badge: "기본",
@@ -1670,7 +2093,8 @@ enum SecurityStandardCatalog {
                 category("secrets", "비밀값", "API 키, 토큰, 개인키로 보이는 값을 탐지합니다."),
                 category("dependencies", "의존성", "고정되지 않은 버전, 락파일 누락, 안전하지 않은 소스를 확인합니다."),
                 category("configuration", "설정", ".env, debug, 권한 상승 컨테이너 설정을 확인합니다."),
-                category("code", "코드 패턴", "XSS, SQL injection, command injection, path traversal 등을 확인합니다.")
+                category("code", "코드 패턴", "XSS, SQL injection, command injection, path traversal 등을 확인합니다."),
+                category("prevention", "예방 가드레일", "SECURITY.md, 의존성 자동 업데이트, CI 보안 점검, SBOM 준비성을 확인합니다.")
             ],
             references: [
                 reference("KODA GitHub", "https://github.com/jhny-kor/sec-chk")
@@ -1681,7 +2105,7 @@ enum SecurityStandardCatalog {
             title: "OWASP Top 10:2025",
             subtitle: "웹 애플리케이션 주요 위험 범주를 로컬 룰에 매핑한 프로파일입니다.",
             scope: "웹 애플리케이션 코드 및 설정",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국제 기준",
             icon: "shield.lefthalf.filled",
             accent: .cyan,
@@ -1701,7 +2125,7 @@ enum SecurityStandardCatalog {
             title: "OWASP Top 10:2021",
             subtitle: "현재 널리 쓰이는 OWASP Top 10 범주를 로컬 증거 중심으로 점검합니다.",
             scope: "웹 애플리케이션 코드 및 설정",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국제 기준",
             icon: "shield",
             accent: .cyan,
@@ -1721,7 +2145,7 @@ enum SecurityStandardCatalog {
             title: "CWE/SANS Top 25:2025",
             subtitle: "MITRE CWE Top 25 데이터를 SANS 관점으로 묶은 위험 소프트웨어 오류 프로파일입니다.",
             scope: "코드 약점 및 보안 위생",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국제 기준",
             icon: "exclamationmark.shield",
             accent: .orange,
@@ -1736,7 +2160,7 @@ enum SecurityStandardCatalog {
             title: "CWE Top 25:2025",
             subtitle: "가장 위험한 CWE 약점을 파일 기반 정적 점검으로 확인합니다.",
             scope: "코드 약점 및 의존성 위생",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국제 기준",
             icon: "list.number",
             accent: .orange,
@@ -1750,7 +2174,7 @@ enum SecurityStandardCatalog {
             title: "CWE 일반 약점",
             subtitle: "Top 25 외의 일반적인 코드·설정 약점을 CWE 관점으로 분류합니다.",
             scope: "코드, 설정, 의존성",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국제 기준",
             icon: "square.grid.2x2",
             accent: .indigo,
@@ -1769,7 +2193,7 @@ enum SecurityStandardCatalog {
             title: "OWASP API Security Top 10:2023",
             subtitle: "API 라우트, 인가, 리소스, SSRF, 설정 위험을 확인합니다.",
             scope: "API 코드 및 설정",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국제 기준",
             icon: "point.3.connected.trianglepath.dotted",
             accent: .teal,
@@ -1788,7 +2212,7 @@ enum SecurityStandardCatalog {
             title: "OWASP Mobile Top 10:2024",
             subtitle: "모바일 앱 소스와 설정에서 확인 가능한 보안 위험을 점검합니다.",
             scope: "모바일 소스 및 설정 파일",
-            coverage: "부분 자동 점검",
+            coverage: "외부 연동 필요",
             badge: "국제 기준",
             icon: "iphone.gen3",
             accent: .green,
@@ -1807,7 +2231,7 @@ enum SecurityStandardCatalog {
             title: "소프트웨어 개발보안 49",
             subtitle: "국내 소프트웨어 개발보안 가이드 49개 기준을 로컬 룰에 매핑합니다.",
             scope: "국내 시큐어코딩 기준",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국내 기준",
             icon: "doc.text.magnifyingglass",
             accent: .blue,
@@ -1827,7 +2251,7 @@ enum SecurityStandardCatalog {
             title: "소프트웨어 개발보안 7대 유형",
             subtitle: "개발보안 약점을 7가지 큰 유형으로 묶어 점검합니다.",
             scope: "국내 시큐어코딩 유형",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국내 기준",
             icon: "7.circle",
             accent: .blue,
@@ -1847,7 +2271,7 @@ enum SecurityStandardCatalog {
             title: "KISA 시큐어코딩 가이드",
             subtitle: "국내 시큐어코딩 권고를 로컬 코드 증거 중심으로 확인합니다.",
             scope: "소스코드 및 설정",
-            coverage: "부분 자동 점검",
+            coverage: "자동 점검",
             badge: "국내 기준",
             icon: "checkmark.shield",
             accent: .green,
@@ -1866,7 +2290,7 @@ enum SecurityStandardCatalog {
             title: "국정원 웹 8대 보안취약점",
             subtitle: "공개 웹서비스에서 자주 확인하는 8대 취약점 계열을 점검합니다.",
             scope: "웹 코드 및 서버 설정",
-            coverage: "부분 자동 점검",
+            coverage: "외부 연동 필요",
             badge: "국내 기준",
             icon: "building.columns",
             accent: .red,
@@ -1887,7 +2311,7 @@ enum SecurityStandardCatalog {
             title: "전자금융감독규정 8대 취약점",
             subtitle: "전자금융 공개 웹서버 점검 항목을 로컬 룰에 매핑합니다.",
             scope: "금융권 웹서비스 코드 및 설정",
-            coverage: "부분 자동 점검",
+            coverage: "외부 연동 필요",
             badge: "국내 기준",
             icon: "banknote",
             accent: .red,
@@ -1907,7 +2331,7 @@ enum SecurityStandardCatalog {
             title: "ISMS-P 2.8 개발보안",
             subtitle: "개발보안 통제 영역을 로컬 증거로 확인 가능한 항목에 매핑합니다.",
             scope: "개발·시험·운영 이관 보안",
-            coverage: "부분 자동 점검",
+            coverage: "증적 확인 필요",
             badge: "국내 인증",
             icon: "checkmark.seal",
             accent: .green,
@@ -1927,7 +2351,7 @@ enum SecurityStandardCatalog {
             title: "OWASP ASVS 5.0",
             subtitle: "애플리케이션 보안 검증 요구사항 중 정적 점검 가능한 영역을 묶습니다.",
             scope: "애플리케이션 보안 검증",
-            coverage: "부분 자동 점검",
+            coverage: "증적 확인 필요",
             badge: "국제 검증표준",
             icon: "doc.badge.gearshape",
             accent: .indigo,
@@ -1947,7 +2371,7 @@ enum SecurityStandardCatalog {
             title: "OWASP WSTG",
             subtitle: "웹 보안 테스트 가이드 중 파일 기반 증거가 가능한 항목을 표시합니다.",
             scope: "웹 보안 테스트 방법론",
-            coverage: "부분 자동 점검",
+            coverage: "외부 연동 필요",
             badge: "국제 테스트가이드",
             icon: "network",
             accent: .indigo,
@@ -1965,17 +2389,17 @@ enum SecurityStandardCatalog {
         AppSecurityStandard(
             id: "nist-ssdf",
             title: "NIST SSDF SP 800-218",
-            subtitle: "보안 소프트웨어 개발 프레임워크의 실천 항목을 로컬 증거로 확인합니다.",
+            subtitle: "보안 소프트웨어 개발 프레임워크의 실천 항목과 예방 통제 준비성을 로컬 증거로 확인합니다.",
             scope: "보안 개발 프로세스",
-            coverage: "부분 자동 점검",
+            coverage: "증적 확인 필요",
             badge: "국제 프레임워크",
             icon: "gearshape.2",
             accent: .slate,
             categories: [
-                category("protect", "Protect the Software", "비밀값과 의존성 위생을 확인합니다."),
-                category("produce", "Produce Well-Secured Software", "보안 설정과 코드 약점을 확인합니다."),
-                category("verify", "Verify Security", "로컬 룰 기반 검증 증거를 수집합니다."),
-                category("respond", "Respond to Vulnerabilities", "취약 의존성 대응을 위한 매니페스트를 확인합니다.")
+                category("protect", "Protect the Software", "비밀값, 의존성 위생, 보안 정책 문서화 상태를 확인합니다."),
+                category("produce", "Produce Well-Secured Software", "보안 설정, 코드 약점, CI 보안 점검 준비성을 확인합니다."),
+                category("verify", "Verify Security", "로컬 룰 기반 검증 증거와 자동화 가드레일을 수집합니다."),
+                category("respond", "Respond to Vulnerabilities", "취약 의존성 대응을 위한 매니페스트, SBOM, 업데이트 자동화를 확인합니다.")
             ],
             references: [
                 reference("NIST SSDF SP 800-218", "https://csrc.nist.gov/publications/detail/sp/800-218/final")
@@ -1986,15 +2410,15 @@ enum SecurityStandardCatalog {
             title: "OWASP SAMM 2",
             subtitle: "보안 성숙도 모델의 설계·구현·검증·운영 실천 항목을 확인합니다.",
             scope: "소프트웨어 보증 성숙도",
-            coverage: "부분 자동 점검",
+            coverage: "증적 확인 필요",
             badge: "국제 성숙도모델",
             icon: "chart.line.uptrend.xyaxis",
             accent: .teal,
             categories: [
-                category("design", "Design", "보안 요구와 위험 설정 흔적을 확인합니다."),
-                category("implementation", "Implementation", "시큐어코딩과 의존성 위생을 확인합니다."),
-                category("verification", "Verification", "정적 점검 근거를 수집합니다."),
-                category("operations", "Operations", "운영 이관 전 debug와 비밀값 잔존을 확인합니다.")
+                category("design", "Design", "보안 요구와 예방 정책 문서화 근거를 확인합니다."),
+                category("implementation", "Implementation", "시큐어코딩, 의존성 위생, CI 보안 점검 준비성을 확인합니다."),
+                category("verification", "Verification", "정적 점검 근거와 자동화 가드레일을 수집합니다."),
+                category("operations", "Operations", "운영 이관 전 debug, 비밀값 잔존, SBOM 준비성을 확인합니다.")
             ],
             references: [
                 reference("OWASP SAMM", "https://owasp.org/www-project-samm/"),
@@ -2006,7 +2430,7 @@ enum SecurityStandardCatalog {
             title: "OWASP Dependency-Check 기준",
             subtitle: "알려진 취약 컴포넌트 식별을 위한 의존성 위생 기준입니다.",
             scope: "의존성 매니페스트 및 락파일",
-            coverage: "부분 자동 점검",
+            coverage: "외부 연동 필요",
             badge: "공급망",
             icon: "shippingbox",
             accent: .orange,
@@ -2024,17 +2448,79 @@ enum SecurityStandardCatalog {
             title: "OWASP Dependency-Track / SBOM 기준",
             subtitle: "SBOM 준비성과 의존성 추적을 위한 로컬 증거를 확인합니다.",
             scope: "SBOM 및 공급망 관리",
-            coverage: "부분 자동 점검",
+            coverage: "외부 연동 필요",
             badge: "공급망",
             icon: "doc.zipper",
             accent: .orange,
             categories: [
-                category("sbom-readiness", "SBOM 준비성", "매니페스트와 락파일 상태를 확인합니다."),
+                category("sbom-readiness", "SBOM 준비성", "매니페스트, 락파일, SBOM 산출물 존재 여부를 확인합니다."),
                 category("version-hygiene", "버전 위생", "고정되지 않은 의존성과 wildcard를 확인합니다."),
-                category("dependency-source", "의존성 소스", "안전하지 않은 다운로드와 원격 실행 패턴을 확인합니다.")
+                category("dependency-source", "의존성 소스", "안전하지 않은 다운로드와 원격 실행 패턴을 확인합니다."),
+                category("automation", "자동화 준비성", "Dependabot/Renovate와 CI 보안 점검 workflow를 확인합니다.")
             ],
             references: [
                 reference("OWASP Dependency-Track", "https://owasp.org/www-project-dependency-track/")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "openssf-scorecard-baseline",
+            title: "OpenSSF Scorecard 기준",
+            subtitle: "저장소 파일에서 추론 가능한 공급망 보안 상태를 Scorecard 관점으로 확인합니다.",
+            scope: "오픈소스 공급망 보안 상태",
+            coverage: "외부 연동 필요",
+            badge: "공급망",
+            icon: "checklist.checked",
+            accent: .teal,
+            categories: [
+                category("security-policy", "보안 정책", "SECURITY.md와 취약점 신고 기준을 확인합니다."),
+                category("dependency-update-tool", "의존성 업데이트 자동화", "Dependabot/Renovate 준비성을 확인합니다."),
+                category("sast", "정적 분석", "CodeQL/Semgrep 등 SAST workflow를 확인합니다."),
+                category("token-permissions", "토큰 권한", "GitHub Actions token permissions 최소 권한 설정을 확인합니다."),
+                category("pinned-actions", "고정된 Actions", "main/master/latest 또는 major 버전만 참조하는 액션을 확인합니다."),
+                category("signed-releases", "서명된 릴리스", "SLSA/Sigstore/cosign 출처 증명 준비성을 확인합니다.")
+            ],
+            references: [
+                reference("OpenSSF Scorecard", "https://scorecard.dev/"),
+                reference("OpenSSF Scorecard GitHub", "https://github.com/ossf/scorecard")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "cisa-kev-epss-priority",
+            title: "CISA KEV / FIRST EPSS 우선순위",
+            subtitle: "OSV 조회 결과를 실제 악용 여부와 악용 확률로 재우선순위화합니다.",
+            scope: "취약 의존성 우선순위",
+            coverage: "외부 연동 필요",
+            badge: "공급망",
+            icon: "flame",
+            accent: .red,
+            categories: [
+                category("known-exploited", "실제 악용 취약점", "CISA KEV에 등록된 CVE를 최우선으로 표시합니다."),
+                category("exploit-probability", "악용 가능성", "FIRST EPSS 확률과 percentile을 근거로 우선순위를 높입니다."),
+                category("vex-response", "VEX 대응 추적", "검토된 CVE의 VEX 문서화 준비성을 확인합니다."),
+                category("sbom-tracking", "SBOM 추적", "SBOM과 Dependency-Track 연동 준비성을 확인합니다.")
+            ],
+            references: [
+                reference("CISA KEV Catalog", "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"),
+                reference("FIRST EPSS", "https://www.first.org/epss/")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "slsa-sigstore-baseline",
+            title: "SLSA / Sigstore 기준",
+            subtitle: "릴리스 산출물 서명, 출처 증명, CI 최소 권한 준비성을 확인합니다.",
+            scope: "빌드·릴리스 공급망",
+            coverage: "외부 연동 필요",
+            badge: "공급망",
+            icon: "signature",
+            accent: .indigo,
+            categories: [
+                category("provenance", "빌드 출처 증명", "SLSA provenance 또는 attestation workflow를 확인합니다."),
+                category("signed-artifacts", "서명된 산출물", "Sigstore/cosign 또는 서명 정책 준비성을 확인합니다."),
+                category("pinned-actions", "고정된 Actions", "외부 GitHub Actions 참조와 token 권한을 확인합니다.")
+            ],
+            references: [
+                reference("SLSA", "https://slsa.dev/"),
+                reference("Sigstore Cosign", "https://docs.sigstore.dev/cosign/")
             ]
         )
     ]
@@ -2045,7 +2531,7 @@ enum SecurityStandardCatalog {
             category("cwe-89", "CWE-89 SQL Injection", "동적 SQL 조합과 입력 흐름을 확인합니다."),
             category("cwe-78", "CWE-78 OS Command Injection", "shell 명령 조합과 실행 패턴을 확인합니다."),
             category("cwe-22", "CWE-22 Path Traversal", "경로 조작 및 파일 다운로드 위험을 확인합니다."),
-            category("cwe-352", "CWE-352 CSRF", "부분 지원입니다. 정적 코드 근거가 있는 경우만 확인합니다.", isMapped: false),
+            category("cwe-352", "CWE-352 CSRF", "증적 확인이 필요합니다. 정적 코드 근거가 있는 경우만 확인합니다.", isMapped: false),
             category("cwe-798", "CWE-798 Hard-coded Credentials", "하드코딩된 비밀값과 토큰을 확인합니다.")
         ]
     }

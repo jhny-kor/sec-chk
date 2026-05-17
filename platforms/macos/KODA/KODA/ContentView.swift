@@ -5,17 +5,35 @@ struct ContentView: View {
     @StateObject private var scanner = ScannerBridge()
     @State private var activeStandard: AppSecurityStandard?
     @State private var activeReport: ScanReportItem?
+    @State private var activeRemediationReport: ScanReportItem?
     @State private var activeHelpGuide: HelpGuideRoute?
     @State private var language: AppLanguage = .ko
+    @State private var showFixWizard = false
+    @State private var fixPlans: [SecurityFixPlan] = []
+    @State private var showScoreHistory = false
+    @State private var showMainHelp = false
+    @State private var showProjectProfiles = false
+    @AppStorage("koda.dashboard.topFraction.v2") private var dashboardTopFraction = 0.25
 
     var body: some View {
         GeometryReader { proxy in
-            if let activeHelpGuide {
+            if showMainHelp {
+                MainHelpScreen(language: $language) {
+                    showMainHelp = false
+                }
+            } else if let activeHelpGuide {
                 HelpGuideScreen(
                     route: activeHelpGuide,
                     language: $language
                 ) {
                     self.activeHelpGuide = nil
+                }
+            } else if let activeRemediationReport {
+                RemediationGuideScreen(
+                    report: activeRemediationReport,
+                    language: $language
+                ) {
+                    self.activeRemediationReport = nil
                 }
             } else if let activeReport {
                 ScanReportDetailScreen(
@@ -25,6 +43,8 @@ struct ContentView: View {
                     self.activeReport = nil
                 } onHelp: {
                     self.activeHelpGuide = HelpGuideRoute(report: activeReport)
+                } onRemediation: {
+                    self.activeRemediationReport = activeReport
                 } onExport: { format in
                     scanner.export(activeReport, as: format, language: language)
                 }
@@ -42,12 +62,53 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 860, minHeight: 640)
+        .sheet(isPresented: $showFixWizard) {
+            SecurityFixWizardSheet(
+                plans: fixPlans,
+                language: language,
+                onApply: { plans in
+                    scanner.applySecurityFixPlans(plans, language: language)
+                    showFixWizard = false
+                },
+                onCancel: {
+                    showFixWizard = false
+                }
+            )
+        }
+        .sheet(isPresented: $showScoreHistory) {
+            SecurityScoreHistorySheet(
+                snapshots: scanner.scoreHistory,
+                language: language,
+                onClose: {
+                    showScoreHistory = false
+                },
+                onClear: {
+                    scanner.clearScoreHistory(language: language)
+                }
+            )
+        }
+        .sheet(isPresented: $showProjectProfiles) {
+            ProjectProfilesSheet(
+                profiles: scanner.projectProfiles,
+                language: language,
+                onLoad: { profile in
+                    scanner.loadProjectProfile(profile, language: language)
+                    showProjectProfiles = false
+                },
+                onDelete: { profile in
+                    scanner.deleteProjectProfile(profile, language: language)
+                },
+                onClose: {
+                    showProjectProfiles = false
+                }
+            )
+        }
     }
 
     private func homeView(size: CGSize) -> some View {
         let metrics = layoutMetrics(for: size)
 
-        return VSplitView {
+        return DashboardSplitView(topFraction: $dashboardTopFraction) {
             GeometryReader { topProxy in
                 VStack(alignment: .leading, spacing: metrics.verticalSpacing) {
                     header
@@ -56,10 +117,8 @@ struct ContentView: View {
                 .padding(metrics.outerPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(minHeight: 145, idealHeight: max(180, size.height * 0.24))
-
+        } bottom: {
             lowerPane(minimumCardWidth: metrics.minimumCardWidth)
-                .frame(minHeight: 260)
         }
     }
 
@@ -80,6 +139,130 @@ struct ContentView: View {
 
             Spacer()
 
+            Menu {
+                Button {
+                    fixPlans = scanner.buildSecurityFixPlans(language: language)
+                    showFixWizard = true
+                } label: {
+                    Label(language.autoFixWizardTitle, systemImage: "wand.and.sparkles")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.applySecurityToolkit(language: language)
+                } label: {
+                    Label(language.applyPreventionToolkitTitle, systemImage: "folder.badge.gearshape")
+                }
+                .disabled(scanner.isRunning)
+
+                Divider()
+
+                Button {
+                    scanner.exportSBOM(language: language)
+                } label: {
+                    Label(language.generateSBOMTitle, systemImage: "shippingbox")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.runOSVLookup(language: language)
+                } label: {
+                    Label(language.runOSVLookupTitle, systemImage: "network")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportVEX(language: language)
+                } label: {
+                    Label(language.generateVEXTitle, systemImage: "doc.text.magnifyingglass")
+                }
+                .disabled(scanner.isRunning)
+
+                Divider()
+
+                Button {
+                    scanner.exportZAPBaselinePlan(language: language)
+                } label: {
+                    Label(language.generateZAPPlanTitle, systemImage: "bolt.shield")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.runZAPBaseline(language: language)
+                } label: {
+                    Label(language.runZAPDASTTitle, systemImage: "play.shield")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportEvidenceChecklist(language: language)
+                } label: {
+                    Label(language.evidenceChecklistTitle, systemImage: "checklist")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportReleaseSecurityPackage(language: language)
+                } label: {
+                    Label(language.releaseSecurityPackageTitle, systemImage: "archivebox")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    scanner.exportScoreDiff(language: language)
+                } label: {
+                    Label(language.scoreDiffTitle, systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(scanner.isRunning)
+
+                Divider()
+
+                Button {
+                    scanner.createIgnoreTemplate(language: language)
+                } label: {
+                    Label(language.createIgnoreFileTitle, systemImage: "eye.slash")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
+                    showScoreHistory = true
+                } label: {
+                    Label(language.scoreHistoryTitle, systemImage: "chart.line.uptrend.xyaxis")
+                }
+
+                Button {
+                    scanner.saveProjectProfile(language: language)
+                } label: {
+                    Label(language.saveProjectProfileTitle, systemImage: "tray.and.arrow.down")
+                }
+                .disabled(!scanner.hasSelection || scanner.isRunning)
+
+                Button {
+                    showProjectProfiles = true
+                } label: {
+                    Label(language.projectProfilesTitle, systemImage: "folder.badge.person.crop")
+                }
+
+                Divider()
+
+                Button {
+                    scanner.exportSecurityToolkit(language: language)
+                } label: {
+                    Label(language.exportPreventionToolkitTitle, systemImage: "doc.badge.gearshape")
+                }
+                .disabled(scanner.isRunning)
+            } label: {
+                Label(language.preventionToolkitTitle, systemImage: "shield.lefthalf.filled")
+            }
+            .menuStyle(.borderlessButton)
+
+            Button {
+                showMainHelp = true
+            } label: {
+                Label(language.helpTitle, systemImage: "questionmark.circle")
+            }
+            .buttonStyle(.borderless)
+
             LanguageToggle(language: $language)
         }
     }
@@ -95,10 +278,12 @@ struct ContentView: View {
                 Button(language.chooseFolderTitle) {
                     scanner.chooseFolder(language: language)
                 }
+                .disabled(scanner.isRunning)
 
                 Button(language.uploadFilesTitle) {
                     scanner.chooseFiles(language: language)
                 }
+                .disabled(scanner.isRunning)
 
                 Button(language.clearSelectionTitle) {
                     scanner.clearSelection()
@@ -228,7 +413,97 @@ struct ContentView: View {
 
     private func targetListHeight(for size: CGSize, metrics: DashboardLayoutMetrics) -> CGFloat {
         let reservedHeaderAndActions = CGFloat(140)
-        return min(96, max(44, size.height - reservedHeaderAndActions - metrics.outerPadding))
+        return min(140, max(72, size.height - reservedHeaderAndActions - metrics.outerPadding))
+    }
+}
+
+private struct DashboardSplitView<Top: View, Bottom: View>: View {
+    @Binding var topFraction: Double
+    let minTopHeight: CGFloat
+    let minBottomHeight: CGFloat
+    let top: () -> Top
+    let bottom: () -> Bottom
+    @State private var dragStartFraction: Double?
+    @State private var liveTopFraction: Double?
+
+    private let handleHeight = CGFloat(16)
+
+    init(
+        topFraction: Binding<Double>,
+        minTopHeight: CGFloat = 160,
+        minBottomHeight: CGFloat = 260,
+        @ViewBuilder top: @escaping () -> Top,
+        @ViewBuilder bottom: @escaping () -> Bottom
+    ) {
+        self._topFraction = topFraction
+        self.minTopHeight = minTopHeight
+        self.minBottomHeight = minBottomHeight
+        self.top = top
+        self.bottom = bottom
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let availableHeight = max(1, proxy.size.height - handleHeight)
+            let displayedFraction = clamped(liveTopFraction ?? topFraction, availableHeight: availableHeight)
+            let topHeight = availableHeight * CGFloat(displayedFraction)
+            let bottomHeight = availableHeight - topHeight
+
+            VStack(spacing: 0) {
+                top()
+                    .frame(height: topHeight)
+
+                splitHandle(availableHeight: availableHeight, displayedFraction: displayedFraction)
+
+                bottom()
+                    .frame(height: bottomHeight)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func splitHandle(availableHeight: CGFloat, displayedFraction: Double) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(maxWidth: .infinity, maxHeight: 1)
+
+            Capsule()
+                .fill(Color.secondary.opacity(0.65))
+                .frame(width: 48, height: 4)
+        }
+        .frame(height: handleHeight)
+        .frame(maxWidth: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.03))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if dragStartFraction == nil {
+                        dragStartFraction = displayedFraction
+                    }
+                    let start = dragStartFraction ?? displayedFraction
+                    liveTopFraction = clamped(
+                        start + Double(value.translation.height / availableHeight),
+                        availableHeight: availableHeight
+                    )
+                }
+                .onEnded { _ in
+                    let finalFraction = clamped(liveTopFraction ?? topFraction, availableHeight: availableHeight)
+                    topFraction = finalFraction
+                    liveTopFraction = nil
+                    dragStartFraction = nil
+                }
+        )
+        .accessibilityLabel("점검 결과 조회 위치 조절")
+    }
+
+    private func clamped(_ fraction: Double, availableHeight: CGFloat) -> Double {
+        let minimumTop = min(minTopHeight, availableHeight * 0.75)
+        let minimumBottom = min(minBottomHeight, max(0, availableHeight - minimumTop))
+        let lowerBound = min(0.85, max(0.15, Double(minimumTop / availableHeight)))
+        let upperBound = max(lowerBound, min(0.85, Double((availableHeight - minimumBottom) / availableHeight)))
+        return min(max(fraction, lowerBound), upperBound)
     }
 }
 
@@ -238,11 +513,639 @@ private struct DashboardLayoutMetrics {
     let minimumCardWidth: CGFloat
 }
 
+private struct MainHelpScreen: View {
+    @Binding var language: AppLanguage
+    let onBack: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                KODAScreenTopBar(language: $language, onBack: onBack) {
+                    Text(language.mainHelpTitle)
+                        .font(.title.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                } actions: {
+                    EmptyView()
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        HStack(alignment: .top, spacing: 18) {
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 44, weight: .semibold))
+                                .foregroundStyle(.blue)
+                                .frame(width: 54, height: 54)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(language.preventionToolkitTitle)
+                                    .font(.system(size: 36, weight: .bold))
+                                Text(language.mainHelpSubtitle)
+                                    .font(.system(size: 26, weight: .regular))
+                                    .foregroundStyle(.secondary)
+                                    .lineSpacing(5)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: min(520, max(360, proxy.size.width * 0.42))), spacing: 18)], spacing: 18) {
+                            HelpSummaryBlock(
+                                icon: "1.circle",
+                                title: language.firstRunGuideTitle,
+                                items: language.firstRunGuideItems
+                            )
+                            HelpSummaryBlock(
+                                icon: "shield.checkered",
+                                title: language.preventionKitAboutTitle,
+                                items: language.preventionKitAboutItems
+                            )
+                            HelpSummaryBlock(
+                                icon: "list.bullet.rectangle",
+                                title: language.preventionKitUsageTitle,
+                                items: language.preventionKitUsageItems
+                            )
+                            HelpSummaryBlock(
+                                icon: "square.and.arrow.down",
+                                title: language.resultDownloadGuideTitle,
+                                items: language.resultDownloadGuideItems
+                            )
+                            HelpSummaryBlock(
+                                icon: "exclamationmark.shield",
+                                title: language.safetyGuideTitle,
+                                items: language.safetyGuideItems
+                            )
+                        }
+                    }
+                    .padding(.horizontal, min(64, max(28, proxy.size.width * 0.05)))
+                    .padding(.vertical, 34)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct HelpSummaryBlock: View {
+    let icon: String
+    let title: String
+    let items: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label(title, systemImage: icon)
+                .font(.title2.weight(.bold))
+
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.75))
+                            .frame(width: 7, height: 7)
+                            .padding(.top, 11)
+
+                        Text(item)
+                            .font(.system(size: 19, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(KODATheme.insetBackground.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct SecurityFixWizardSheet: View {
+    let plans: [SecurityFixPlan]
+    let language: AppLanguage
+    let onApply: ([SecurityFixPlan]) -> Void
+    let onCancel: () -> Void
+    @State private var selectedIDs: Set<String>
+
+    init(
+        plans: [SecurityFixPlan],
+        language: AppLanguage,
+        onApply: @escaping ([SecurityFixPlan]) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.plans = plans
+        self.language = language
+        self.onApply = onApply
+        self.onCancel = onCancel
+        self._selectedIDs = State(initialValue: Set(plans.map(\.id)))
+    }
+
+    private var selectedPlans: [SecurityFixPlan] {
+        plans.filter { selectedIDs.contains($0.id) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "wand.and.sparkles")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(language.autoFixWizardTitle)
+                        .font(.title2.weight(.bold))
+                    Text(language.autoFixWizardSubtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding(20)
+
+            Divider()
+
+            if plans.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(language.noAutoFixesTitle)
+                        .font(.headline)
+                    Text(language.noAutoFixesSubtitle)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(plans) { plan in
+                            Toggle(isOn: Binding(
+                                get: { selectedIDs.contains(plan.id) },
+                                set: { isSelected in
+                                    if isSelected {
+                                        selectedIDs.insert(plan.id)
+                                    } else {
+                                        selectedIDs.remove(plan.id)
+                                    }
+                                }
+                            )) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(plan.title(language: language))
+                                        .font(.headline)
+                                    Text(plan.detail(language: language))
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(KODATheme.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                    .padding(20)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Text(language.selectedFixCountText(selectedPlans.count, total: plans.count))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button(language.cancelTitle) {
+                    onCancel()
+                }
+
+                Button(language.applySelectedFixesTitle) {
+                    onApply(selectedPlans)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedPlans.isEmpty)
+            }
+            .padding(16)
+        }
+        .frame(width: 660, height: 560)
+    }
+}
+
+private struct ProjectProfilesSheet: View {
+    let profiles: [ProjectProfile]
+    let language: AppLanguage
+    let onLoad: (ProjectProfile) -> Void
+    let onDelete: (ProjectProfile) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "folder.badge.person.crop")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(language.projectProfilesTitle)
+                        .font(.title2.weight(.bold))
+                    Text(subtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding(20)
+
+            Divider()
+
+            if profiles.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(emptyTitle)
+                        .font(.headline)
+                    Text(emptySubtitle)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(profiles) { profile in
+                            profileRow(profile)
+                        }
+                    }
+                    .padding(20)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button(language.closeTitle) {
+                    onClose()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(16)
+        }
+        .frame(width: 720, height: 560)
+    }
+
+    private func profileRow(_ profile: ProjectProfile) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(profile.name)
+                        .font(.headline)
+                    Text("\(profile.formattedDate) · \(targetCountText(profile.targets.count))")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button(loadTitle) {
+                    onLoad(profile)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button(role: .destructive) {
+                    onDelete(profile)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help(deleteTitle)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(profile.targetPaths.prefix(4), id: \.self) { path in
+                    Text(path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                if profile.targetPaths.count > 4 {
+                    Text(moreTargetsText(profile.targetPaths.count - 4))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KODATheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+
+    private var subtitle: String {
+        switch language {
+        case .ko: return "자주 점검하는 폴더와 파일 묶음을 저장해 다음 실행 때 빠르게 불러옵니다."
+        case .en: return "Save frequently scanned folders and files, then reload them quickly on the next run."
+        }
+    }
+
+    private var emptyTitle: String {
+        switch language {
+        case .ko: return "저장된 프로파일이 없습니다."
+        case .en: return "No saved profiles."
+        }
+    }
+
+    private var emptySubtitle: String {
+        switch language {
+        case .ko: return "점검 대상을 선택한 뒤 예방 키트 메뉴에서 현재 대상을 프로파일로 저장하세요."
+        case .en: return "Choose scan targets, then use the Prevention Kit menu to save the current targets as a profile."
+        }
+    }
+
+    private var loadTitle: String {
+        switch language {
+        case .ko: return "불러오기"
+        case .en: return "Load"
+        }
+    }
+
+    private var deleteTitle: String {
+        switch language {
+        case .ko: return "프로파일 삭제"
+        case .en: return "Delete profile"
+        }
+    }
+
+    private func targetCountText(_ count: Int) -> String {
+        switch language {
+        case .ko: return "대상 \(count)개"
+        case .en: return "\(count) target\(count == 1 ? "" : "s")"
+        }
+    }
+
+    private func moreTargetsText(_ count: Int) -> String {
+        switch language {
+        case .ko: return "외 \(count)개 경로"
+        case .en: return "\(count) more path\(count == 1 ? "" : "s")"
+        }
+    }
+}
+
+private struct SecurityScoreHistorySheet: View {
+    let snapshots: [SecurityScoreSnapshot]
+    let language: AppLanguage
+    let onClose: () -> Void
+    let onClear: () -> Void
+
+    private var comparison: (current: SecurityScoreSnapshot, baseline: SecurityScoreSnapshot)? {
+        guard snapshots.count >= 2 else { return nil }
+        return (snapshots[0], snapshots[1])
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.green)
+                    .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(language.scoreHistoryTitle)
+                        .font(.title2.weight(.bold))
+                    Text(language.scoreHistorySubtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .padding(20)
+
+            Divider()
+
+            if snapshots.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(language.noScoreHistoryTitle)
+                        .font(.headline)
+                    Text(language.noScoreHistorySubtitle)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let comparison {
+                            ScoreHistoryComparisonCard(
+                                current: comparison.current,
+                                baseline: comparison.baseline,
+                                language: language
+                            )
+                        }
+
+                        ForEach(snapshots.prefix(30)) { snapshot in
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(snapshot.formattedDate)
+                                        .font(.headline)
+                                    Text(snapshot.targets.joined(separator: ", "))
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .trailing, spacing: 5) {
+                                    Text(language.riskScoreText(snapshot.riskScore))
+                                        .font(.headline)
+                                    Text(language.findingCountText(snapshot.findingCount))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(KODATheme.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                    .padding(20)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Button(language.clearHistoryTitle) {
+                    onClear()
+                }
+                .disabled(snapshots.isEmpty)
+
+                Spacer()
+
+                Button(language.closeTitle) {
+                    onClose()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(16)
+        }
+        .frame(width: 620, height: 520)
+    }
+}
+
+private struct ScoreHistoryComparisonCard: View {
+    let current: SecurityScoreSnapshot
+    let baseline: SecurityScoreSnapshot
+    let language: AppLanguage
+
+    private let severities = ["critical", "high", "medium", "low", "info"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Text(statusText(for: totalRiskDelta))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(deltaColor(totalRiskDelta))
+            }
+
+            HStack(spacing: 10) {
+                deltaTile(title: scoreTitle, delta: totalRiskDelta, suffix: language == .ko ? "점" : " pts")
+                deltaTile(title: findingTitle, delta: findingDelta, suffix: language == .ko ? "건" : "")
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text(severityTitle)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(severities, id: \.self) { severity in
+                    let delta = severityDelta(severity)
+                    HStack(spacing: 8) {
+                        Text(language.severityLabel(severity))
+                            .font(.caption)
+                            .frame(width: 64, alignment: .leading)
+                        Capsule()
+                            .fill(deltaColor(delta).opacity(delta == 0 ? 0.18 : 0.75))
+                            .frame(width: barWidth(for: delta), height: 7)
+                        Spacer(minLength: 6)
+                        Text(signed(delta))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(deltaColor(delta))
+                            .frame(width: 42, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KODATheme.insetBackground.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+
+    private var totalRiskDelta: Int {
+        current.riskScore - baseline.riskScore
+    }
+
+    private var findingDelta: Int {
+        current.findingCount - baseline.findingCount
+    }
+
+    private var title: String {
+        switch language {
+        case .ko: return "최근 점검과 이전 점검 비교"
+        case .en: return "Latest Scan vs Previous Scan"
+        }
+    }
+
+    private var scoreTitle: String {
+        switch language {
+        case .ko: return "위험점수 변화"
+        case .en: return "Risk delta"
+        }
+    }
+
+    private var findingTitle: String {
+        switch language {
+        case .ko: return "발견 항목 변화"
+        case .en: return "Finding delta"
+        }
+    }
+
+    private var severityTitle: String {
+        switch language {
+        case .ko: return "위험군별 변화"
+        case .en: return "Severity deltas"
+        }
+    }
+
+    private func deltaTile(title: String, delta: Int, suffix: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("\(signed(delta))\(suffix)")
+                .font(.title3.weight(.bold).monospacedDigit())
+                .foregroundStyle(deltaColor(delta))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KODATheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func severityDelta(_ severity: String) -> Int {
+        (current.severityCounts[severity] ?? 0) - (baseline.severityCounts[severity] ?? 0)
+    }
+
+    private func signed(_ value: Int) -> String {
+        value > 0 ? "+\(value)" : "\(value)"
+    }
+
+    private func deltaColor(_ value: Int) -> Color {
+        if value < 0 { return .green }
+        if value > 0 { return .red }
+        return .secondary
+    }
+
+    private func statusText(for delta: Int) -> String {
+        if delta < 0 {
+            return language == .ko ? "개선" : "Improved"
+        }
+        if delta > 0 {
+            return language == .ko ? "악화" : "Worsened"
+        }
+        return language == .ko ? "변화 없음" : "No change"
+    }
+
+    private func barWidth(for delta: Int) -> CGFloat {
+        max(18, min(130, CGFloat(abs(delta)) * 14 + 18))
+    }
+}
+
 private struct ScanReportDetailScreen: View {
     let report: ScanReportItem
     @Binding var language: AppLanguage
     let onBack: () -> Void
     let onHelp: () -> Void
+    let onRemediation: () -> Void
     let onExport: (ReportExportFormat) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -257,15 +1160,7 @@ private struct ScanReportDetailScreen: View {
     }
 
     private var detailTopBar: some View {
-        HStack(spacing: 14) {
-            Button {
-                onBack()
-            } label: {
-                Label(language.backTitle, systemImage: "chevron.left")
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.white)
-
+        KODAScreenTopBar(language: $language, onBack: onBack) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(report.title(language: language))
                     .font(.title2.weight(.bold))
@@ -275,9 +1170,7 @@ private struct ScanReportDetailScreen: View {
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.75))
             }
-
-            Spacer()
-
+        } actions: {
             Menu {
                 ForEach(ReportExportFormat.allCases, id: \.self) { format in
                     Button(format.title(language: language)) {
@@ -300,18 +1193,320 @@ private struct ScanReportDetailScreen: View {
             .menuStyle(.borderlessButton)
 
             Button {
+                onRemediation()
+            } label: {
+                Label(language.remediationGuideTitle, systemImage: "wrench.and.screwdriver")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.white)
+
+            Button {
                 onHelp()
             } label: {
                 Label(language.helpTitle, systemImage: "questionmark.circle")
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.white)
-
-            LanguageToggle(language: $language)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .background(Color(red: 0.04, green: 0.07, blue: 0.13))
+    }
+}
+
+private struct RemediationGuideScreen: View {
+    let report: ScanReportItem
+    @Binding var language: AppLanguage
+    let onBack: () -> Void
+
+    private var prioritizedFindings: [NativeFinding] {
+        report.findings.sorted { left, right in
+            let leftScore = NativeScanResult.score(for: left.severity)
+            let rightScore = NativeScanResult.score(for: right.severity)
+            if leftScore != rightScore {
+                return leftScore > rightScore
+            }
+            return left.path < right.path
+        }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                KODAScreenTopBar(language: $language, onBack: onBack) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(language.remediationGuideTitle)
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text(report.title(language: language))
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                    }
+                } actions: {
+                    EmptyView()
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        overviewGrid(width: proxy.size.width)
+
+                        section(title: priorityTitle) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(immediateActions, id: \.self) { item in
+                                    HStack(alignment: .top, spacing: 9) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.green)
+                                            .padding(.top, 2)
+                                        Text(item)
+                                            .font(.callout)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
+                            .padding(16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(KODATheme.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                            }
+                        }
+
+                        section(title: findingGuideTitle) {
+                            if prioritizedFindings.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(noFindingsTitle)
+                                        .font(.headline)
+                                    Text(noFindingsSubtitle)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(KODATheme.cardBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                LazyVGrid(columns: columns(width: proxy.size.width), spacing: 12) {
+                                    ForEach(Array(prioritizedFindings.prefix(18).enumerated()), id: \.offset) { _, finding in
+                                        RemediationFindingCard(finding: finding, language: language)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, min(46, max(22, proxy.size.width * 0.04)))
+                    .padding(.vertical, 24)
+                }
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+    }
+
+    private func overviewGrid(width: CGFloat) -> some View {
+        LazyVGrid(columns: columns(width: width), spacing: 12) {
+            remediationSummaryTile(title: language.findingsTitle, value: "\(report.findingCount)")
+            remediationSummaryTile(title: language.riskScoreTitle, value: "\(report.riskScore)")
+            remediationSummaryTile(title: standardTitle, value: report.badge(language: language))
+        }
+    }
+
+    private func remediationSummaryTile(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.bold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
+        .background(KODATheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+
+    private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.title2.weight(.bold))
+            content()
+        }
+    }
+
+    private func columns(width: CGFloat) -> [GridItem] {
+        [GridItem(.adaptive(minimum: width > 1100 ? 340 : 280), spacing: 12)]
+    }
+
+    private var standardTitle: String {
+        switch language {
+        case .ko: return "기준"
+        case .en: return "Standard"
+        }
+    }
+
+    private var priorityTitle: String {
+        switch language {
+        case .ko: return "권장 조치 순서"
+        case .en: return "Recommended Order"
+        }
+    }
+
+    private var findingGuideTitle: String {
+        switch language {
+        case .ko: return "발견 항목별 조치"
+        case .en: return "Finding-Level Remediation"
+        }
+    }
+
+    private var noFindingsTitle: String {
+        switch language {
+        case .ko: return "조치할 발견 항목이 없습니다."
+        case .en: return "No findings to remediate."
+        }
+    }
+
+    private var noFindingsSubtitle: String {
+        switch language {
+        case .ko: return "현재 기준의 결과에는 표시할 취약점이 없습니다. 예방 키트로 기본 가드레일을 유지하세요."
+        case .en: return "This standard currently has no visible findings. Keep baseline guardrails in place with the Prevention Kit."
+        }
+    }
+
+    private var immediateActions: [String] {
+        switch language {
+        case .ko:
+            return [
+                "치명/높음 항목과 비밀값 노출은 먼저 처리하고, 실제 키라면 즉시 폐기 또는 회전합니다.",
+                "취약 의존성은 고정 버전과 lockfile을 확인한 뒤 업그레이드, 패치, 대체 또는 보완 통제를 선택합니다.",
+                "디버그, CORS, 쿠키, 디렉터리 리스팅, WebDAV 같은 설정 문제는 운영 기본값을 보수적으로 조정합니다.",
+                "조치 후 같은 프로파일로 다시 점검하고 보안 점수 추적에서 위험점수와 위험군별 변화가 낮아졌는지 확인합니다.",
+            ]
+        case .en:
+            return [
+                "Start with critical/high findings and exposed secrets. Revoke or rotate any real key immediately.",
+                "For vulnerable dependencies, verify pinned versions and lockfiles, then upgrade, patch, replace, or document compensating controls.",
+                "For configuration issues such as debug mode, CORS, cookies, directory listing, and WebDAV, move production defaults to conservative settings.",
+                "After remediation, rerun the same profile and confirm risk score and severity deltas went down in Security Score History.",
+            ]
+        }
+    }
+}
+
+private struct RemediationFindingCard: View {
+    let finding: NativeFinding
+    let language: AppLanguage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(finding.title)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text(language.severityLabel(finding.severity))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(severityColor)
+                    .clipShape(Capsule())
+            }
+
+            infoLine(title: ruleTitle, value: finding.ruleID)
+            infoLine(title: categoryTitle, value: categoryLabel)
+            infoLine(title: locationTitle, value: locationText)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(recommendationTitle)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Text(finding.recommendation.isEmpty ? fallbackRecommendation : finding.recommendation)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(KODATheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+
+    private func infoLine(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var severityColor: Color {
+        switch finding.severity {
+        case "critical": return .purple
+        case "high": return .red
+        case "medium": return .orange
+        case "low": return .blue
+        default: return .gray
+        }
+    }
+
+    private var locationText: String {
+        if let line = finding.line {
+            return "\(finding.path):\(line)"
+        }
+        return finding.path
+    }
+
+    private var categoryLabel: String {
+        switch (language, finding.category) {
+        case (.ko, "secrets"): return "비밀값"
+        case (.ko, "dependencies"): return "의존성"
+        case (.ko, "configuration"): return "설정"
+        case (.ko, "code"): return "코드"
+        case (.ko, "prevention"): return "예방"
+        case (.en, "secrets"): return "Secrets"
+        case (.en, "dependencies"): return "Dependencies"
+        case (.en, "configuration"): return "Configuration"
+        case (.en, "code"): return "Code"
+        case (.en, "prevention"): return "Prevention"
+        default: return finding.category
+        }
+    }
+
+    private var ruleTitle: String {
+        language == .ko ? "룰" : "Rule"
+    }
+
+    private var categoryTitle: String {
+        language == .ko ? "분류" : "Category"
+    }
+
+    private var locationTitle: String {
+        language == .ko ? "위치" : "Location"
+    }
+
+    private var recommendationTitle: String {
+        language == .ko ? "권장 조치" : "Recommendation"
+    }
+
+    private var fallbackRecommendation: String {
+        language == .ko ? "항목의 근거를 검토하고 안전한 설정 또는 코드 패턴으로 수정하세요." : "Review the evidence and replace it with a safe configuration or code pattern."
     }
 }
 

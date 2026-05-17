@@ -11,6 +11,7 @@ from .dependency_inventory import component_payload
 from .models import DependencyComponent, Finding, SEVERITIES, SEVERITY_RANK
 from .sbom import cyclonedx_payload, render_cyclonedx
 from .standards import DEFAULT_STANDARD, DEFAULT_STANDARD_CATEGORY, rule_standard_mappings_payload, standards_payload
+from .vex import render_cyclonedx_vex
 
 
 SEVERITY_WEIGHTS = {
@@ -48,16 +49,18 @@ TRANSLATIONS = {
         "check_categories": "Check criteria",
         "mapped_checks": "mapped checks",
         "auto_supported": "automatic",
-        "partial_automatic": "partial automatic",
-        "local_coverage": "local rules",
+        "automatic_coverage": "automatic checks",
+        "external_required": "external integration required",
+        "evidence_required": "evidence review required",
+        "local_coverage": "automatic checks",
         "rule_details": "Rule Details",
         "related_standards": "Related standards",
         "no_related_standards": "No standard mapping recorded.",
         "dependency_components": "Components",
         "download_sbom": "Download SBOM",
         "sbom_unavailable": "No dependency components available for SBOM.",
-        "osv_toggle": "OSV/CVE lookup",
-        "osv_network_note": "Queries exact dependency versions through OSV.dev.",
+        "osv_toggle": "OSV/CVE + KEV/EPSS lookup",
+        "osv_network_note": "Queries exact dependency versions through OSV.dev and enriches CVEs with CISA KEV and FIRST EPSS priority data.",
         "supported": "supported",
         "not_supported": "not supported",
         "scan_directory": "Scan Directory",
@@ -129,6 +132,7 @@ TRANSLATIONS = {
             "dependencies": "Dependencies",
             "configuration": "Configuration",
             "code": "Code Patterns",
+            "prevention": "Prevention Guardrails",
         },
     },
     "ko": {
@@ -149,16 +153,18 @@ TRANSLATIONS = {
         "check_categories": "점검 기준",
         "mapped_checks": "매핑된 점검",
         "auto_supported": "자동",
-        "partial_automatic": "부분 자동 점검",
-        "local_coverage": "로컬 룰",
+        "automatic_coverage": "자동 점검",
+        "external_required": "외부 연동 필요",
+        "evidence_required": "증적 확인 필요",
+        "local_coverage": "자동 점검",
         "rule_details": "룰 상세 도움말",
         "related_standards": "관련 보안 기준",
         "no_related_standards": "연결된 기준 매핑이 없습니다.",
         "dependency_components": "컴포넌트",
         "download_sbom": "SBOM 다운로드",
         "sbom_unavailable": "SBOM으로 내보낼 의존성 컴포넌트가 없습니다.",
-        "osv_toggle": "OSV/CVE 조회",
-        "osv_network_note": "정확한 의존성 버전을 OSV.dev로 조회합니다.",
+        "osv_toggle": "OSV/CVE + KEV/EPSS 조회",
+        "osv_network_note": "정확한 의존성 버전을 OSV.dev로 조회하고 CVE에 CISA KEV와 FIRST EPSS 우선순위 정보를 덧붙입니다.",
         "supported": "지원",
         "not_supported": "미지원",
         "scan_directory": "점검 경로",
@@ -230,11 +236,92 @@ TRANSLATIONS = {
             "dependencies": "의존성",
             "configuration": "설정",
             "code": "코드 패턴",
+            "prevention": "예방 가드레일",
         },
     },
 }
 
 RULE_TRANSLATIONS_KO = {
+    "prevention.security-policy-missing": {
+        "title": "보안 정책 문서가 없음",
+        "description": "취약점 신고, 지원 버전, 공개 절차를 설명하는 SECURITY.md가 없습니다.",
+        "recommendation": "SECURITY.md에 신고 연락처, 지원 범위, 취약점 공개 기대사항을 작성하세요.",
+    },
+    "prevention.dependency-update-automation-missing": {
+        "title": "의존성 업데이트 자동화가 없음",
+        "description": "Dependabot 또는 Renovate 설정이 없어 취약·노후 의존성을 지속적으로 확인하기 어렵습니다.",
+        "recommendation": "Dependabot 또는 Renovate를 추가해 의존성 업데이트와 취약점 알림을 자동화하세요.",
+    },
+    "prevention.ci-security-scan-missing": {
+        "title": "CI 보안 점검 워크플로가 없음",
+        "description": "CI에서 실행되는 보안 점검 워크플로가 확인되지 않았습니다.",
+        "recommendation": "KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline 같은 보안 점검을 CI에 추가하세요.",
+    },
+    "prevention.env-not-gitignored": {
+        "title": ".env 파일이 gitignore로 제외되지 않음",
+        "description": "환경 파일이 존재하지만 .gitignore에서 제외하는 패턴이 확인되지 않았습니다.",
+        "recommendation": ".gitignore에 .env, .env.* 또는 동등한 제외 패턴을 추가하세요.",
+    },
+    "prevention.env-example-missing": {
+        "title": "정제된 환경 예시 파일이 없음",
+        "description": "실제 환경 파일은 있으나 안전하게 공유 가능한 .env.example 또는 .env.sample이 없습니다.",
+        "recommendation": "실제 값은 저장소 밖에 두고, 필요한 키만 담은 .env.example 또는 .env.sample을 커밋하세요.",
+    },
+    "prevention.dockerignore-missing": {
+        "title": ".dockerignore가 없음",
+        "description": "Dockerfile이 있지만 Docker 빌드 컨텍스트에서 제외할 파일 목록이 없습니다.",
+        "recommendation": ".dockerignore를 추가해 비밀값, VCS 메타데이터, 빌드 산출물, 로컬 파일이 이미지 빌드에 포함되지 않게 하세요.",
+    },
+    "prevention.sbom-missing": {
+        "title": "SBOM 산출물이 없음",
+        "description": "의존성 매니페스트는 있으나 로컬 SBOM 산출물이 확인되지 않았습니다.",
+        "recommendation": "릴리스 또는 CI 단계에서 CycloneDX나 SPDX SBOM을 생성하고 보관하세요.",
+    },
+    "prevention.sast-workflow-missing": {
+        "title": "SAST 워크플로가 없음",
+        "description": "CodeQL, Semgrep 등 정적 분석 workflow가 확인되지 않았습니다.",
+        "recommendation": "Pull request에서 코드 수준 보안 점검이 실행되도록 CodeQL 또는 Semgrep 같은 SAST workflow를 추가하세요.",
+    },
+    "prevention.openssf-scorecard-missing": {
+        "title": "OpenSSF Scorecard 워크플로가 없음",
+        "description": "공급망 보안 상태를 지속적으로 점검하는 OpenSSF Scorecard workflow가 확인되지 않았습니다.",
+        "recommendation": "토큰 권한, 고정된 액션, SAST, 의존성 업데이트 자동화 상태를 추적하도록 OpenSSF Scorecard를 CI에 추가하세요.",
+    },
+    "prevention.github-token-permissions-not-readonly": {
+        "title": "GitHub Actions 토큰 권한이 읽기 전용으로 제한되지 않음",
+        "description": "workflow token의 기본 권한이 최소 권한으로 명시되어 있지 않습니다.",
+        "recommendation": "workflow 최상단에 permissions: contents: read를 설정하고, 쓰기 권한은 필요한 job에만 별도로 부여하세요.",
+    },
+    "prevention.github-actions-unpinned": {
+        "title": "GitHub Actions 참조가 느슨하게 고정됨",
+        "description": "main, master, latest 같은 mutable branch/ref를 참조하는 GitHub Actions가 있습니다.",
+        "recommendation": "외부 GitHub Actions는 검토한 버전 태그나 immutable commit SHA로 고정하세요.",
+    },
+    "prevention.slsa-sigstore-missing": {
+        "title": "릴리스 서명 또는 출처 증명이 없음",
+        "description": "SLSA provenance, Sigstore, cosign, attestation workflow가 확인되지 않았습니다.",
+        "recommendation": "릴리스 산출물에 Sigstore/cosign 서명 또는 SLSA provenance 생성을 추가하세요.",
+    },
+    "prevention.zap-baseline-missing": {
+        "title": "DAST baseline이 설정되지 않음",
+        "description": "웹 프로젝트로 보이나 OWASP ZAP baseline workflow 또는 가이드가 확인되지 않았습니다.",
+        "recommendation": "권한이 있는 staging URL에 대해 OWASP ZAP baseline 점검 또는 DAST 인수인계 절차를 추가하세요.",
+    },
+    "prevention.dependency-track-integration-missing": {
+        "title": "Dependency-Track SBOM 업로드가 설정되지 않음",
+        "description": "의존성 매니페스트는 있으나 Dependency-Track 같은 SBOM 분석 backend로 업로드하는 workflow가 없습니다.",
+        "recommendation": "릴리스 SBOM을 Dependency-Track 또는 동등한 SBOM 분석 backend에 업로드하도록 자동화하세요.",
+    },
+    "prevention.vex-missing": {
+        "title": "VEX 문서가 없음",
+        "description": "의존성 취약점 검토 결과를 추적할 VEX 산출물이 확인되지 않았습니다.",
+        "recommendation": "검토된 의존성 취약점에 대해 exploitable, fixed, not_affected 같은 VEX 결정을 문서화하세요.",
+    },
+    "prevention.binary-artifact-committed": {
+        "title": "바이너리 릴리스 산출물이 저장소에 포함됨",
+        "description": "소스 저장소에 실행 파일 또는 빌드 산출물로 보이는 파일이 포함되어 있습니다.",
+        "recommendation": "의도적으로 vendoring한 파일이 아니라면 제거하고, 필요한 경우 출처 증명·체크섬·서명을 함께 관리하세요.",
+    },
     "secret.private-key": {
         "title": "개인 키 자료",
         "description": "개인 키로 보이는 값이 로컬 프로젝트 파일에 포함되어 있습니다.",
@@ -364,6 +451,51 @@ RULE_TRANSLATIONS_KO = {
         "title": "Compose 서비스가 Docker 소켓을 마운트함",
         "description": "Docker 소켓 접근은 사실상 호스트 수준 제어 권한에 가깝습니다.",
         "recommendation": "Docker 소켓 마운트를 피하거나 목적별 프록시 뒤로 격리하세요.",
+    },
+    "config.k8s-privileged-container": {
+        "title": "Kubernetes 컨테이너가 privileged 모드를 사용함",
+        "description": "privileged 컨테이너는 호스트 수준 접근 권한을 얻을 수 있습니다.",
+        "recommendation": "privileged 모드를 제거하고 필요한 Linux capability만 명시하세요.",
+    },
+    "config.k8s-allow-privilege-escalation": {
+        "title": "Kubernetes 컨테이너가 권한 상승을 허용함",
+        "description": "권한 상승 허용은 컨테이너 격리를 약화시킵니다.",
+        "recommendation": "문서화된 요구사항이 없다면 allowPrivilegeEscalation: false를 설정하세요.",
+    },
+    "config.k8s-host-network": {
+        "title": "Kubernetes workload가 host network를 사용함",
+        "description": "host network는 일반적인 Pod 네트워크 격리를 우회합니다.",
+        "recommendation": "필요하지 않다면 Pod 네트워크와 Service/NetworkPolicy를 사용하세요.",
+    },
+    "config.k8s-hostpath-volume": {
+        "title": "Kubernetes workload가 hostPath 볼륨을 마운트함",
+        "description": "hostPath는 호스트 파일시스템 경로를 컨테이너에 노출합니다.",
+        "recommendation": "가능하면 PersistentVolume으로 대체하고, 불가피한 경우 사유를 문서화하세요.",
+    },
+    "config.terraform-public-storage": {
+        "title": "Terraform 저장소 ACL이 public으로 설정됨",
+        "description": "공개 저장소 설정은 데이터 노출로 이어질 수 있습니다.",
+        "recommendation": "private ACL을 기본값으로 두고, 공개가 필요한 경우 명시적 정책 검토를 남기세요.",
+    },
+    "config.terraform-public-access-block-disabled": {
+        "title": "Terraform public access block이 비활성화됨",
+        "description": "public access block 통제를 끄면 실수로 공개될 가능성이 커집니다.",
+        "recommendation": "문서화된 공개 버킷 설계가 없다면 public access block을 유지하세요.",
+    },
+    "config.terraform-open-admin-port": {
+        "title": "Terraform 보안그룹이 관리자 포트를 인터넷에 공개함",
+        "description": "SSH/RDP를 0.0.0.0/0에 공개하면 초기 침투 경로가 될 수 있습니다.",
+        "recommendation": "관리자 포트는 VPN, bastion, 승인된 CIDR로 제한하세요.",
+    },
+    "config.github-pull-request-target": {
+        "title": "GitHub Actions가 pull_request_target을 사용함",
+        "description": "pull_request_target은 권한 있는 저장소 컨텍스트에서 실행되어 PR 코드와 함께 쓰면 위험합니다.",
+        "recommendation": "비신뢰 PR 코드는 pull_request에서 실행하고, 권한 작업과 checkout/build 단계를 분리하세요.",
+    },
+    "config.github-untrusted-event-in-run": {
+        "title": "GitHub Actions run 단계에 이벤트 데이터가 직접 삽입됨",
+        "description": "PR 이벤트 필드는 공격자가 제어할 수 있는 문자열을 포함할 수 있습니다.",
+        "recommendation": "이벤트 값은 환경변수로 전달하고 셸 사용 전에 quoting과 검증을 적용하세요.",
     },
     "code.xss-dom-sink": {
         "title": "XSS 의심 HTML 출력 지점",
@@ -514,6 +646,8 @@ def render_report(
 ) -> str:
     if report_format == "cyclonedx":
         return render_cyclonedx(components)
+    if report_format == "cyclonedx-vex":
+        return render_cyclonedx_vex(findings)
     if report_format == "json":
         return render_json(findings, target_names, language, target_paths=target_paths, components=components)
     if report_format == "markdown":
@@ -1397,6 +1531,16 @@ HTML_TEMPLATE = """<!doctype html>
       color: #047857;
     }
 
+    .status-badge.external {
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+
+    .status-badge.evidence {
+      background: #fff7ed;
+      color: #9a3412;
+    }
+
     .standards-help {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2002,6 +2146,26 @@ HTML_TEMPLATE = """<!doctype html>
       byId("help-toggle").setAttribute("aria-pressed", isHelp ? "true" : "false");
     }
 
+    function coverageStatus(level, activeLabels) {
+      const normalized = level || "evidence";
+      if (normalized === "local") {
+        return {
+          className: "local",
+          label: activeLabels.automatic_coverage || activeLabels.local_coverage,
+        };
+      }
+      if (normalized === "external") {
+        return {
+          className: "external",
+          label: activeLabels.external_required,
+        };
+      }
+      return {
+        className: "evidence",
+        label: activeLabels.evidence_required,
+      };
+    }
+
     function renderHelp() {
       if (state.helpRenderedLanguage === state.language) {
         return;
@@ -2012,12 +2176,12 @@ HTML_TEMPLATE = """<!doctype html>
         const leafCategories = (standard.categories || []).filter((category) => category.id !== "all");
         const supportedCount = leafCategories.filter((category) => category.supported).length;
         const total = Math.max(leafCategories.length, 1);
-        const statusLabel = standard.coverage_level === "local" ? activeLabels.local_coverage : activeLabels.partial_automatic;
+        const status = coverageStatus(standard.coverage_level, activeLabels);
         return `
           <tr>
             <td>${escapeText(labelFor(standard))}</td>
             <td>${supportedCount}/${total}</td>
-            <td><span class="status-badge ${standard.coverage_level === "local" ? "local" : ""}">${escapeText(statusLabel)}</span></td>
+            <td><span class="status-badge ${status.className}">${escapeText(status.label)}</span></td>
           </tr>
         `;
       }).join("");
@@ -2025,7 +2189,7 @@ HTML_TEMPLATE = """<!doctype html>
         const categories = standard.categories || [];
         const leafCategories = categories.filter((category) => category.id !== "all");
         const supportedCount = leafCategories.filter((category) => category.supported).length;
-        const statusLabel = standard.coverage_level === "local" ? activeLabels.local_coverage : activeLabels.partial_automatic;
+        const status = coverageStatus(standard.coverage_level, activeLabels);
         const references = standard.references || [];
         const links = references.length
           ? references.map((reference) => `
@@ -2046,7 +2210,7 @@ HTML_TEMPLATE = """<!doctype html>
               </div>
               <div class="standard-count">${supportedCount}/${Math.max(leafCategories.length, 1)} ${escapeText(activeLabels.mapped_checks)}</div>
             </div>
-            <div><span class="status-badge ${standard.coverage_level === "local" ? "local" : ""}">${escapeText(statusLabel)}</span></div>
+            <div><span class="status-badge ${status.className}">${escapeText(status.label)}</span></div>
             <div class="help-meta">
               <strong>${escapeText(activeLabels.coverage)}</strong>
               <span>${escapeText(localizedText(standard.coverage, ""))}</span>
