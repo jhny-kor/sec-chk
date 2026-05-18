@@ -1,20 +1,29 @@
 import Darwin
+import AppKit
 import Foundation
 import SwiftUI
 
 @main
 struct KODAApp: App {
+    @NSApplicationDelegateAdaptor(KODAAppDelegate.self) private var appDelegate
+
     init() {
         runHeadlessScanIfRequested()
     }
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        WindowGroup("KODA", id: KODAWindowCoordinator.mainWindowID) {
+            ZStack {
+                ContentView()
+                KODAWindowRegistrationView()
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
                 .frame(minWidth: 760, minHeight: 520)
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
+            KODAWindowCommands()
         }
     }
 
@@ -74,6 +83,101 @@ struct KODAApp: App {
         case "low": return 2
         case "info": return 1
         default: return nil
+        }
+    }
+}
+
+private final class KODAAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag else {
+            return true
+        }
+
+        KODAWindowCoordinator.shared.showMainWindow()
+        return false
+    }
+}
+
+@MainActor
+private final class KODAWindowCoordinator {
+    static let shared = KODAWindowCoordinator()
+    static let mainWindowID = "main-window"
+
+    private var openMainWindow: (() -> Void)?
+
+    func register(openWindow: OpenWindowAction) {
+        openMainWindow = {
+            openWindow(id: Self.mainWindowID)
+        }
+    }
+
+    func showMainWindow() {
+        if focusMainWindow() {
+            return
+        }
+
+        openMainWindow?()
+        DispatchQueue.main.async {
+            _ = self.focusMainWindow()
+        }
+    }
+
+    @discardableResult
+    private func focusMainWindow() -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard let window = NSApp.windows.first(where: { window in
+            window.identifier?.rawValue == Self.mainWindowID || window.title == "KODA"
+        }) else {
+            return false
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+}
+
+private struct KODAWindowCommands: Commands {
+    var body: some Commands {
+        CommandGroup(after: .windowArrangement) {
+            Button("Show KODA") {
+                KODAWindowCoordinator.shared.showMainWindow()
+            }
+            .keyboardShortcut("0", modifiers: [.command])
+        }
+    }
+}
+
+private struct KODAWindowRegistrationView: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        KODAWindowAccessor()
+            .onAppear {
+                KODAWindowCoordinator.shared.register(openWindow: openWindow)
+            }
+    }
+}
+
+private struct KODAWindowAccessor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        configureWindow(for: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        configureWindow(for: nsView)
+    }
+
+    private func configureWindow(for view: NSView) {
+        DispatchQueue.main.async {
+            guard let window = view.window else {
+                return
+            }
+
+            window.identifier = NSUserInterfaceItemIdentifier(KODAWindowCoordinator.mainWindowID)
+            window.title = "KODA"
         }
     }
 }
