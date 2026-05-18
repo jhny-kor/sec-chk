@@ -10,6 +10,8 @@ reports/*.html
 reports/*.sarif
 .playwright-cli/
 output/
+build/
+*.egg-info/
 .build/
 dist/macos/
 xcuserdata/
