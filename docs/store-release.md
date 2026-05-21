@@ -40,15 +40,17 @@ Apple references:
 The direct-download Windows installer is:
 
 ```text
-dist/Windows/SecChkSetup.exe
+dist/Windows/KODASetup.exe
 ```
 
-That installer is useful for website or GitHub release distribution, but Microsoft Store submission should be packaged as MSIX and uploaded through Partner Center.
+That installer is useful for website or GitHub release distribution, but
+Microsoft Store submission should be packaged as MSIX and uploaded through
+Partner Center.
 
 Recommended lane:
 
 1. Reserve the app name in Partner Center.
-2. Build the Windows executable.
+2. Build the Windows executable with `scripts\build-koda-windows-installer.ps1` on Windows.
 3. Package the executable as MSIX with Visual Studio or MSIX tooling.
 4. Generate a Store upload file (`.msixupload`).
 5. Submit the upload package and Store listing metadata in Partner Center.

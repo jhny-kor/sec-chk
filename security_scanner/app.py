@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import webbrowser
 from http.server import HTTPServer
+from os import environ
 
 from .server import DEFAULT_HOST, DEFAULT_PORT, create_dashboard_server, dashboard_url
 
@@ -15,9 +16,10 @@ def run_app(
     open_browser: bool = True,
     port_attempts: int = 20,
 ) -> int:
+    display_name = environ.get("KODA_DISPLAY_NAME", "SecChk")
     resolved_port, server = _create_available_server(host, port, language, port_attempts)
     url = dashboard_url(host, resolved_port)
-    print(f"SecChk is running: {url}")
+    print(f"{display_name} is running: {url}")
     print("Press Ctrl+C in this window to stop the local app.")
     browser_timer: threading.Timer | None = None
     if open_browser:
@@ -25,7 +27,7 @@ def run_app(
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping SecChk.")
+        print(f"\nStopping {display_name}.")
     finally:
         if browser_timer is not None:
             browser_timer.cancel()

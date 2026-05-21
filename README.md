@@ -9,7 +9,7 @@ Install quickly:
 | OS | Installer | Result |
 | --- | --- | --- |
 | macOS | Double-click `scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
-| Windows | Run `dist/Windows/SecChkSetup.exe` or double-click `scripts/install-windows.bat` | Installs to `%LOCALAPPDATA%\SecChk` and creates a Start Menu shortcut |
+| Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut |
 
 ## What It Checks
 
@@ -43,13 +43,16 @@ Mac App Store packaging for the native macOS app name `KODA` lives in `packaging
 
 The native KODA app also includes the prevention workflow that previously required terminal commands: an auto-fix wizard for missing guardrail files, in-app pre-commit gate installation, threat model wizard, compliance dashboard, GitHub repository security checklist export, SLSA/Sigstore release signing plan export, NIST SSDF workflow plan export, NIST CSF 2.0 profile export, CISA Secure by Design plan export, CISA secure software development attestation checklist export, API security plan export, OWASP SCVS plan export, privacy data map export, security roadmap export, evidence register export, security headers baseline export, container hardening baseline export, Cloud/IaC security plan export, AI/LLM security plan export, mobile security plan export, secret rotation runbook export, in-app CycloneDX SBOM export, in-app OSV/CVE lookup enriched with CISA KEV and FIRST EPSS where CVEs are available, CycloneDX VEX draft export, ZAP DAST plan generation and Docker-based ZAP baseline execution for authorized URLs, manual evidence checklists for standards that require evidence review, release security packages, `koda-ignore.yml` exception templates with owner/reason/expiry checks, scan change reports, local score history with latest-vs-previous comparison, remediation guide screens, and saved project profiles for frequently scanned target sets. SBOM and OSV inputs include `requirements.txt`, `requirements.in`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, and `pnpm-lock.yaml`.
 
-Windows users can install SecChk without administrator privileges. If you downloaded a release build, run `dist/Windows/SecChkSetup.exe`. If you cloned the repository, you can use the script installer:
+Windows users can install KODA without administrator privileges after the Windows installer is built on a Windows PC. The macOS App Store SwiftUI app cannot be compiled into a Windows `.exe` on macOS; use the Windows build script for the Python dashboard runtime:
 
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/).
-2. Download or clone this repository.
-3. Double-click `scripts/install-windows.bat`.
+2. Install Inno Setup 6.
+3. Download or clone this repository on the Windows build PC.
+4. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1`.
 
-The installer copies the app to `%LOCALAPPDATA%\SecChk`, creates a private Python virtual environment, and adds a Start Menu shortcut named `SecChk`. It does not install third-party dependencies. To remove it, run `%LOCALAPPDATA%\SecChk\Uninstall-SecChk.ps1` or double-click `scripts/uninstall-windows.bat` from the downloaded repository.
+The build creates `dist\KODA\KODA.exe` and `dist\Windows\KODASetup.exe`. Target users only need `KODASetup.exe`; it installs to `%LOCALAPPDATA%\KODA` and adds a Start Menu shortcut named `KODA`.
+
+The older source-tree developer installer remains available as `scripts/install-windows.bat`; it installs the legacy `SecChk` launcher directly from a cloned repository.
 
 For Microsoft Store distribution, the current Inno Setup installer is not the final upload format. The Store lane should package the Windows app as MSIX and submit a `.msixupload` package through Partner Center. See `packaging/windows/README.md` and `docs/store-release.md`.
 
@@ -186,7 +189,7 @@ Security-standard selections are mapping profiles over the local rules. The dash
 | OS | 설치 파일 | 설치 결과 |
 | --- | --- | --- |
 | macOS | `scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
-| Windows | `dist/Windows/SecChkSetup.exe` 실행 또는 `scripts/install-windows.bat` 더블클릭 | `%LOCALAPPDATA%\SecChk`에 설치하고 시작 메뉴 `SecChk` 바로가기 생성 |
+| Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성 |
 
 ### 점검 항목
 
@@ -220,13 +223,16 @@ Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `packaging/maco
 
 네이티브 KODA 앱에서는 터미널 명령 없이도 예방 워크플로를 실행할 수 있습니다. `자동 수정 마법사`로 누락된 가드레일 파일을 미리 보고 적용하고, 앱 안에서 pre-commit 차단 훅 설치, 위협 모델 마법사, 컴플라이언스 대시보드, GitHub 저장소 보안 설정 체크리스트 저장, SLSA/Sigstore 릴리스 서명 계획 저장, NIST SSDF workflow 계획 저장, NIST CSF 2.0 프로파일 저장, CISA Secure by Design 예방 계획 저장, CISA 보안 소프트웨어 개발 증명 체크리스트 저장, API 보안 계획 저장, OWASP SCVS 계획 저장, 개인정보 데이터 맵 저장, 보안 로드맵 저장, 보안 증적 대장 저장, 보안 헤더 기준 저장, 컨테이너 하드닝 기준 저장, Cloud/IaC 보안 계획 저장, AI/LLM 보안 계획 저장, 모바일 보안 계획 저장, 비밀값 로테이션 런북 저장, CycloneDX SBOM 생성, CISA KEV와 FIRST EPSS가 붙는 OSV/CVE 조회, CycloneDX VEX 초안 생성, 권한 있는 URL을 위한 ZAP DAST 계획 생성과 Docker 기반 ZAP baseline 실행, 증적 확인 필요 기준의 수동 증적 체크리스트, 릴리스 보안 패키지, owner/reason/expiry 검사를 포함한 `koda-ignore.yml` 예외 파일 생성, 스캔 변화 리포트, 보안 점수 추적을 사용할 수 있습니다. SBOM과 OSV 입력은 `requirements.txt`, `requirements.in`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`을 지원합니다.
 
-Windows에서는 관리자 권한 없이 설치할 수 있습니다. 릴리스 빌드를 받은 경우 `dist/Windows/SecChkSetup.exe`를 실행하고, 저장소를 clone한 경우 스크립트 설치 파일을 사용할 수 있습니다.
+Windows에서는 빌드된 설치 파일로 관리자 권한 없이 KODA를 설치할 수 있습니다. macOS App Store용 SwiftUI 앱은 macOS에서 Windows `.exe`로 바로 컴파일할 수 없으므로, Windows PC에서 Python 대시보드 런타임을 패키징합니다.
 
 1. [python.org](https://www.python.org/downloads/windows/)에서 Python 3.10 이상을 설치합니다.
-2. 이 저장소를 다운로드하거나 clone합니다.
-3. `scripts/install-windows.bat`를 더블클릭합니다.
+2. Inno Setup 6을 설치합니다.
+3. Windows 빌드 PC에서 이 저장소를 다운로드하거나 clone합니다.
+4. `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1`를 실행합니다.
 
-설치 스크립트는 앱을 `%LOCALAPPDATA%\SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 시작 메뉴에 `SecChk` 바로가기를 추가합니다. 추가 서드파티 의존성은 설치하지 않습니다. 삭제하려면 `%LOCALAPPDATA%\SecChk\Uninstall-SecChk.ps1`을 실행하거나, 다운로드한 저장소의 `scripts/uninstall-windows.bat`를 더블클릭하면 됩니다.
+빌드 결과는 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다. 최종 사용자는 `KODASetup.exe`만 실행하면 되고, 설치 후 `%LOCALAPPDATA%\KODA`와 시작 메뉴 `KODA` 바로가기가 생성됩니다.
+
+기존 개발자용 소스 설치 스크립트 `scripts/install-windows.bat`도 유지되어 있으며, clone한 저장소에서 레거시 `SecChk` 런처를 설치할 때 사용할 수 있습니다.
 
 Microsoft Store에 출시하려면 현재의 Inno Setup 설치 파일이 아니라 MSIX 패키지와 `.msixupload` 제출 파일을 준비해야 합니다. 자세한 절차는 `packaging/windows/README.md`와 `docs/store-release.md`에 정리했습니다.
 

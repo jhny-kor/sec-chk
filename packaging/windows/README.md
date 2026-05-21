@@ -1,17 +1,23 @@
-# SecChk Windows EXE installer build
+# KODA Windows EXE installer build
 
-This folder contains the Inno Setup script used to build `SecChkSetup.exe`.
+This folder contains the Inno Setup script used to build the direct-download
+KODA Windows installer.
+
+The native macOS App Store build is SwiftUI and cannot be compiled into a
+Windows executable on macOS. Build the Windows installer on a Windows PC so
+PyInstaller can produce a real Windows `.exe`.
 
 ## Result
 
 The build creates:
 
 ```text
-dist\SecChk\SecChk.exe
-dist\Windows\SecChkSetup.exe
+dist\KODA\KODA.exe
+dist\Windows\KODASetup.exe
 ```
 
-After installation, the Start Menu shortcut runs `SecChk.exe`. The executable starts the local dashboard server and opens the default web browser.
+After installation, the Start Menu shortcut runs `KODA.exe`. The executable
+starts the local dashboard server and opens the default web browser.
 
 ## Requirements on the build PC
 
@@ -19,31 +25,36 @@ After installation, the Start Menu shortcut runs `SecChk.exe`. The executable st
 - Python 3.10 or newer
 - Inno Setup 6
 
-Target users do **not** need to clone the repository. They only need `SecChkSetup.exe`.
+Target users do **not** need to clone the repository. They only need
+`KODASetup.exe`.
 
 ## Build
 
 Run from the repository root:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows-installer.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1
 ```
+
+For a double-clickable wrapper, run `scripts\build-koda-windows-installer.bat`.
 
 Optional version override:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows-installer.ps1 -Version 0.1.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1 -Version 0.1.1
 ```
 
 If Inno Setup is installed in a custom path:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows-installer.ps1 -InnoCompilerPath "C:\Path\To\ISCC.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1 -InnoCompilerPath "C:\Path\To\ISCC.exe"
 ```
 
 ## Microsoft Store path
 
-The current `SecChkSetup.exe` is an Inno Setup desktop installer for direct download. Microsoft Store distribution should use an MSIX package or `.msixupload` file through Partner Center, not the Inno installer.
+`KODASetup.exe` is an Inno Setup desktop installer for direct download.
+Microsoft Store distribution should use an MSIX package or `.msixupload` file
+through Partner Center, not the Inno installer.
 
 Recommended Store lane:
 
