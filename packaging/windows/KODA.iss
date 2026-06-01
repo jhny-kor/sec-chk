@@ -6,6 +6,7 @@
 #define MyAppPublisher "jhny-kor"
 #define MyAppExeName "KODA.exe"
 #define SourceDir "..\..\dist\KODA"
+#define MyAppIcon "assets\KODA.ico"
 
 [Setup]
 AppId={{2A235674-97E5-4B71-A57C-32BE33DC960C}
@@ -24,6 +25,7 @@ OutputBaseFilename=KODASetup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile={#MyAppIcon}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Tasks]

@@ -17,11 +17,12 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BuildRoot = Join-Path $RepoRoot ".build\koda-windows-installer"
 $VenvDir = Join-Path $BuildRoot ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
-$EntryPoint = Join-Path $RepoRoot "scripts\koda-app.py"
+$EntryPoint = Join-Path $RepoRoot "scripts\koda-desktop.py"
 $DistDir = Join-Path $RepoRoot "dist"
 $AppDistDir = Join-Path $DistDir $AppName
 $InstallerOutDir = Join-Path $DistDir "Windows"
 $InnoScript = Join-Path $RepoRoot "packaging\windows\KODA.iss"
+$IconPath = Join-Path $RepoRoot "packaging\windows\assets\KODA.ico"
 
 function Find-Python310 {
     $candidates = @(
@@ -112,9 +113,11 @@ if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
 
 if (-not $SkipDependencyInstall) {
     Write-Host "Installing build dependencies."
-    & $VenvPython -m pip install --upgrade pip pyinstaller
+    # pywebview hosts the dashboard in a single native window (Edge WebView2),
+    # so KODA opens like the macOS app instead of a console + browser tab.
+    & $VenvPython -m pip install --upgrade pip pyinstaller pywebview
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to install PyInstaller."
+        throw "Failed to install PyInstaller and pywebview."
     }
 }
 
@@ -125,21 +128,36 @@ if (Test-Path -LiteralPath $AppDistDir) {
 $workPath = Join-Path $BuildRoot "pyinstaller-work"
 $specPath = Join-Path $BuildRoot "pyinstaller-spec"
 
+$pyInstallerArgs = @(
+    "--noconfirm",
+    "--clean",
+    "--onedir",
+    # --windowed (no console): KODA launches as a single GUI window, with no
+    # terminal window behind it -- matching the macOS KODA app.
+    "--windowed",
+    "--name", $AppName,
+    "--distpath", $DistDir,
+    "--workpath", $workPath,
+    "--specpath", $specPath,
+    "--paths", $RepoRoot,
+    # pywebview + its Windows Edge WebView2 backend (pythonnet/clr) must be
+    # bundled fully or the native window backend fails to load at runtime.
+    "--collect-all", "webview",
+    "--collect-all", "clr_loader",
+    "--collect-all", "pythonnet",
+    "--hidden-import", "tkinter",
+    "--hidden-import", "tkinter.filedialog",
+    "--hidden-import", "tkinter.messagebox"
+)
+
+if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
+    $pyInstallerArgs += @("--icon", $IconPath)
+}
+
+$pyInstallerArgs += $EntryPoint
+
 Write-Host "Building KODA.exe with PyInstaller."
-& $VenvPython -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --onedir `
-    --console `
-    --name $AppName `
-    --distpath $DistDir `
-    --workpath $workPath `
-    --specpath $specPath `
-    --paths $RepoRoot `
-    --hidden-import tkinter `
-    --hidden-import tkinter.filedialog `
-    --hidden-import tkinter.messagebox `
-    $EntryPoint
+& $VenvPython -m PyInstaller @pyInstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed."
@@ -177,4 +195,4 @@ Write-Host ""
 Write-Host "Build finished successfully."
 Write-Host "Installer: $setupPath"
 Write-Host "Installed users will run KODA from the Start Menu or desktop shortcut."
-Write-Host "Double-clicking KODA starts the local dashboard and opens the default web browser."
+Write-Host "Double-clicking KODA opens a single native window (no console, no separate browser tab)."

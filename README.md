@@ -9,7 +9,7 @@ Install quickly:
 | OS | Installer | Result |
 | --- | --- | --- |
 | macOS | Double-click `scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
-| Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut |
+| Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut. Launches as a single native window (no console, no separate browser tab), matching the macOS app. |
 
 ## What It Checks
 
@@ -50,7 +50,7 @@ Windows users can install KODA without administrator privileges after the Window
 3. Download or clone this repository on the Windows build PC.
 4. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1`.
 
-The build creates `dist\KODA\KODA.exe` and `dist\Windows\KODASetup.exe`. Target users only need `KODASetup.exe`; it installs to `%LOCALAPPDATA%\KODA` and adds a Start Menu shortcut named `KODA`.
+The build creates `dist\KODA\KODA.exe` and `dist\Windows\KODASetup.exe`. Target users only need `KODASetup.exe`; it installs to `%LOCALAPPDATA%\KODA` and adds a Start Menu shortcut named `KODA`. Double-clicking `KODA` opens one native window powered by Edge WebView2 — no console window and no separate browser tab — so it behaves like the macOS KODA app. If the Edge WebView2 runtime is missing, KODA falls back to opening the dashboard in the default browser.
 
 The older source-tree developer installer remains available as `scripts/install-windows.bat`; it installs the legacy `SecChk` launcher directly from a cloned repository.
 
@@ -189,7 +189,7 @@ Security-standard selections are mapping profiles over the local rules. The dash
 | OS | 설치 파일 | 설치 결과 |
 | --- | --- | --- |
 | macOS | `scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
-| Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성 |
+| Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성. macOS 앱과 동일하게 단일 네이티브 창으로 실행되며(터미널 창·별도 브라우저 탭 없음) |
 
 ### 점검 항목
 
@@ -230,7 +230,7 @@ Windows에서는 빌드된 설치 파일로 관리자 권한 없이 KODA를 설�
 3. Windows 빌드 PC에서 이 저장소를 다운로드하거나 clone합니다.
 4. `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1`를 실행합니다.
 
-빌드 결과는 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다. 최종 사용자는 `KODASetup.exe`만 실행하면 되고, 설치 후 `%LOCALAPPDATA%\KODA`와 시작 메뉴 `KODA` 바로가기가 생성됩니다.
+빌드 결과는 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다. 최종 사용자는 `KODASetup.exe`만 실행하면 되고, 설치 후 `%LOCALAPPDATA%\KODA`와 시작 메뉴 `KODA` 바로가기가 생성됩니다. `KODA`를 더블클릭하면 Edge WebView2 기반 단일 네이티브 창 하나만 열립니다. 터미널 창이나 별도 브라우저 탭이 뜨지 않아 macOS KODA 앱과 동일하게 동작합니다. Edge WebView2 런타임이 없으면 기본 브라우저로 대시보드를 여는 방식으로 자동 전환됩니다.
 
 기존 개발자용 소스 설치 스크립트 `scripts/install-windows.bat`도 유지되어 있으며, clone한 저장소에서 레거시 `SecChk` 런처를 설치할 때 사용할 수 있습니다.
 
