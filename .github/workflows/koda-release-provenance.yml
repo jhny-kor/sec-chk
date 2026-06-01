@@ -13,7 +13,7 @@ jobs:
   release-provenance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build source release artifact
         run: |
           mkdir -p dist
@@ -29,7 +29,7 @@ jobs:
             cosign sign-blob "$artifact" --bundle "$artifact.sigstore.json" --yes
           done
       - name: Upload provenance material
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: koda-release-provenance
           path: dist/
