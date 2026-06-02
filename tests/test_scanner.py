@@ -1595,6 +1595,7 @@ GEM
         windows_uninstaller = root / "scripts" / "uninstall-windows.ps1"
         windows_builder = root / "scripts" / "build-windows-installer.ps1"
         windows_inno = root / "packaging" / "windows" / "SecChk.iss"
+        koda_windows_inno = root / "packaging" / "windows" / "KODA.iss"
         mac_app_builder = root / "packaging" / "macos" / "build-koda-app.command"
         mac_xcode_builder = root / "packaging" / "macos" / "build-koda-xcode-app.command"
         mac_entitlements = root / "packaging" / "macos" / "KODA.entitlements"
@@ -1635,6 +1636,8 @@ GEM
         self.assertIn("Remove-Item -Path $InstallRoot", windows_uninstaller.read_text(encoding="utf-8"))
         self.assertIn('InstallerOutDir = Join-Path $DistDir "Windows"', windows_builder.read_text(encoding="utf-8"))
         self.assertIn("OutputDir=..\\..\\dist\\Windows", windows_inno.read_text(encoding="utf-8"))
+        self.assertIn("--browser", koda_windows_inno.read_text(encoding="utf-8"))
+        self.assertIn("KODA (Browser Mode)", koda_windows_inno.read_text(encoding="utf-8"))
         self.assertTrue(os.access(mac_app_builder, os.X_OK))
         self.assertIn("APP_NAME=\"${APP_NAME:-KODA}\"", mac_app_builder.read_text(encoding="utf-8"))
         self.assertTrue(os.access(mac_xcode_builder, os.X_OK))

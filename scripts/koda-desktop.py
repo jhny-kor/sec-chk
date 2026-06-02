@@ -13,7 +13,9 @@ the user is never left without the dashboard.
 """
 from __future__ import annotations
 
+import argparse
 import os
+import platform
 import sys
 import threading
 import webbrowser
@@ -46,6 +48,9 @@ def _start_dashboard_server(host: str, port: int, language: str) -> str:
 
 def _run_native_window(url: str, display_name: str) -> bool:
     """Show the dashboard in a single native window. Return False if unavailable."""
+    if platform.system() == "Windows" and not _windows_webview2_runtime_available():
+        return False
+
     try:
         import webview  # type: ignore
     except Exception:
@@ -68,7 +73,53 @@ def _run_native_window(url: str, display_name: str) -> bool:
         return False
 
 
+def _windows_webview2_runtime_available() -> bool:
+    """Return whether the Evergreen WebView2 Runtime appears installed."""
+    try:
+        import winreg
+    except Exception:
+        return False
+
+    runtime_id = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    subkey = rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{runtime_id}"
+    roots = (
+        (winreg.HKEY_CURRENT_USER, 0),
+        (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_32KEY),
+        (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_64KEY),
+    )
+
+    for root, flags in roots:
+        try:
+            with winreg.OpenKey(root, subkey, 0, winreg.KEY_READ | flags) as key:
+                version, _ = winreg.QueryValueEx(key, "pv")
+                if str(version).strip():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _run_browser_mode(url: str) -> int:
+    webbrowser.open(url)
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run KODA desktop dashboard.")
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="Skip the native WebView window and open KODA in the default browser.",
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> int:
+    args = _parse_args(sys.argv[1:])
     display_name = os.environ.setdefault("KODA_DISPLAY_NAME", "KODA")
     _set_safe_working_directory()
 
@@ -78,17 +129,15 @@ def main() -> int:
 
     url = _start_dashboard_server(host, port, language)
 
+    if args.browser or os.environ.get("KODA_BROWSER_MODE") == "1":
+        return _run_browser_mode(url)
+
     if _run_native_window(url, display_name):
         return 0
 
     # Fallback: the native webview runtime is missing. Open the browser so the
     # dashboard is still reachable, then keep the server alive.
-    webbrowser.open(url)
-    try:
-        threading.Event().wait()
-    except KeyboardInterrupt:
-        pass
-    return 0
+    return _run_browser_mode(url)
 
 
 if __name__ == "__main__":

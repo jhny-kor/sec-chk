@@ -17,7 +17,12 @@ dist\Windows\KODASetup.exe
 ```
 
 After installation, the Start Menu shortcut runs `KODA.exe`. The executable
-starts the local dashboard server and opens the default web browser.
+starts the local dashboard server and opens it in one native Edge WebView2
+window, with no console window and no separate browser tab.
+
+If a PC does not have a working Edge WebView2 Runtime, KODA automatically opens
+the dashboard in the default browser instead. Users can also force this path
+from the Start Menu shortcut named `KODA (Browser Mode)`.
 
 ## Requirements on the build PC
 

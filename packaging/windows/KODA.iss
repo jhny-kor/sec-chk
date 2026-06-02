@@ -43,6 +43,7 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 
 [Icons]
 Name: "{group}\KODA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{userdocs}"; Comment: "KODA local security dashboard"
+Name: "{group}\KODA (Browser Mode)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--browser"; WorkingDir: "{userdocs}"; Comment: "Open KODA in the default browser if WebView2 is unavailable"
 Name: "{userdesktop}\KODA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{userdocs}"; Comment: "KODA local security dashboard"; Tasks: desktopicon
 Name: "{group}\KODA 제거"; Filename: "{uninstallexe}"
 
