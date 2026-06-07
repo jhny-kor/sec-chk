@@ -169,6 +169,35 @@ final class ScannerBridge: ObservableObject {
         }
     }
 
+    func runHostScan(language: AppLanguage) {
+        isRunning = true
+        reportURL = nil
+        reportItems = []
+        setDetail(ko: "", en: "")
+        setStatus(ko: "이 컴퓨터의 보안 상태를 점검하고 있습니다.", en: "Checking this computer's security posture.")
+        statusColor = .secondary
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.runHostScanCommand()
+            }.value
+            isRunning = false
+            setDetail(ko: result.detailKO, en: result.detailEN)
+            if result.exitCode == 0, let output = result.reportURL {
+                reportURL = output
+                reportItems = result.reportItems
+                if let snapshot = result.scoreSnapshot {
+                    recordScoreSnapshot(snapshot)
+                }
+                setStatus(ko: "점검 완료: \(output.path)", en: "Scan complete: \(output.path)")
+                statusColor = .green
+            } else {
+                setStatus(ko: result.messageKO, en: result.messageEN)
+                statusColor = .red
+            }
+        }
+    }
+
     func openReport(language: AppLanguage = .ko) {
         guard let reportURL else { return }
         if let report = reportItems.first(where: \.isOverall) {
@@ -1167,6 +1196,38 @@ final class ScannerBridge: ObservableObject {
         }
     }
 
+    private nonisolated static func runHostScanCommand() -> ScanResult {
+        let scanner = NativeSecurityScanner()
+        let result = scanner.scanHost()
+        do {
+            let overallFiles = try writeReportFiles(result: result, scanner: scanner, prefix: "KODA-host-posture")
+            let reportItems = try buildReportItems(result: result, scanner: scanner, overallFiles: overallFiles)
+            let warningTextKO = result.warnings.isEmpty ? "" : "\n경고:\n" + result.warnings.joined(separator: "\n")
+            let warningTextEN = result.warnings.isEmpty ? "" : "\nWarnings:\n" + result.warnings.joined(separator: "\n")
+            return ScanResult(
+                exitCode: 0,
+                reportURL: overallFiles.koHTMLURL,
+                messageKO: "호스트 점검 완료",
+                messageEN: "Host scan complete",
+                detailKO: "호스트 보안 항목 \(result.findings.count)건\(warningTextKO)",
+                detailEN: "host posture findings \(result.findings.count)\(warningTextEN)",
+                reportItems: reportItems,
+                scoreSnapshot: SecurityScoreSnapshot(result: result, targets: [])
+            )
+        } catch {
+            return ScanResult(
+                exitCode: 2,
+                reportURL: nil,
+                messageKO: "호스트 점검에 실패했습니다.",
+                messageEN: "Host scan failed.",
+                detailKO: error.localizedDescription,
+                detailEN: error.localizedDescription,
+                reportItems: [],
+                scoreSnapshot: nil
+            )
+        }
+    }
+
     private nonisolated static func writeSBOMCommand(targets: [URL], destination: URL) -> OperationResult {
         let accessedTargets = targets.filter { $0.startAccessingSecurityScopedResource() }
         defer {
@@ -1991,6 +2052,10 @@ final class ScannerBridge: ObservableObject {
         switch standard.id {
         case "local", "isms-p-28", "nist-ssdf", "owasp-samm-2":
             return true
+        case "cis-macos-benchmark":
+            // Map host posture problems (not the info-level "pass" findings) so the
+            // compliance card reflects actual endpoint issues.
+            return finding.category == "host" && finding.severity != "info"
         case "owasp-dependency-check", "owasp-dependency-track":
             return finding.category == "dependencies"
                 || finding.ruleID.contains("dependency")

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .models import CATEGORIES, SEVERITIES, ReportConfig, ScannerConfig, TargetConfig
+from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, ReportConfig, ScannerConfig, TargetConfig
 
 
 SUPPORTED_LANGUAGES = {"en", "ko"}
@@ -48,7 +48,7 @@ def _target_from_dict(raw: dict[str, Any], base_dir: Path) -> TargetConfig:
 
     target_path = expand_path(path_value, base_dir)
     name = raw.get("name") or target_path.name or str(target_path)
-    categories = _normalize_categories(raw.get("categories", CATEGORIES))
+    categories = _normalize_categories(raw.get("categories", DEFAULT_CATEGORIES))
     exclude_globs = tuple(str(item) for item in raw.get("exclude_globs", ()))
     max_file_size_bytes = int(raw.get("max_file_size_bytes", 524288))
     if max_file_size_bytes <= 0:
@@ -92,7 +92,8 @@ def _report_from_dict(raw: dict[str, Any], base_dir: Path) -> ReportConfig:
 
 def _normalize_categories(raw: Any) -> tuple[str, ...]:
     if raw == "all":
-        return CATEGORIES
+        # "all" covers file-based checks; host posture is opt-in (list it explicitly).
+        return DEFAULT_CATEGORIES
     if not isinstance(raw, list | tuple):
         raise ConfigError("categories must be a list or 'all'.")
 

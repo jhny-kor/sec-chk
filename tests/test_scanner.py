@@ -2028,6 +2028,242 @@ GEM
             self.assertEqual(payload["runs"][0]["results"][0]["ruleId"], "dependency.python-unpinned-requirement")
 
 
+class HostCheckTests(unittest.TestCase):
+    def test_current_platform_normalizes(self) -> None:
+        from security_scanner.checks.host.common import current_platform
+
+        self.assertIn(current_platform(), {"macos", "windows", "linux", "other"})
+
+    def test_runner_rejects_non_allowlisted_command(self) -> None:
+        from security_scanner.checks.host.runner import run_command
+
+        result = run_command(["rm", "-rf", "/"])
+        self.assertFalse(result.ok)
+        self.assertIn("not allowlisted", result.error)
+
+    def test_runner_rejects_allowlist_bypass_via_path(self) -> None:
+        from security_scanner.checks.host.runner import run_command
+
+        result = run_command(["/bin/rm", "-rf", "/"])
+        self.assertFalse(result.ok)
+        self.assertIn("not allowlisted", result.error)
+
+    def test_check_host_unsupported_platform_warns(self) -> None:
+        from security_scanner.checks.host import check_host
+
+        findings, warnings = check_host(platform="other")
+        self.assertEqual(findings, [])
+        self.assertTrue(any("not supported" in warning for warning in warnings))
+
+    def test_macos_filevault_off_is_high(self) -> None:
+        from security_scanner.checks.host import host_macos
+        from security_scanner.checks.host.runner import CommandResult
+
+        fake = CommandResult(command="fdesetup status", ok=True, returncode=0, stdout="FileVault is Off.\n")
+        with patch.object(host_macos, "run_command", return_value=fake):
+            findings = host_macos.check_filevault()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].rule_id, "host.macos.filevault-off")
+        self.assertEqual(findings[0].severity, "high")
+        self.assertEqual(findings[0].category, "host")
+        self.assertEqual(findings[0].resource, "macos/filevault")
+
+    def test_macos_sip_failure_yields_no_finding(self) -> None:
+        from security_scanner.checks.host import host_macos
+        from security_scanner.checks.host.runner import CommandResult
+
+        fake = CommandResult(command="csrutil status", ok=False, returncode=1, error="command not found")
+        with patch.object(host_macos, "run_command", return_value=fake):
+            self.assertEqual(host_macos.check_system_integrity_protection(), [])
+
+    def test_check_host_isolates_failing_probe(self) -> None:
+        from security_scanner.checks.host import check_host
+
+        def boom() -> list:
+            raise RuntimeError("probe blew up")
+
+        with patch("security_scanner.checks.host._platform_checks", return_value=(boom,)):
+            findings, warnings = check_host(platform="macos")
+        self.assertEqual(findings, [])
+        self.assertTrue(any("probe blew up" in warning for warning in warnings))
+
+    def test_scanner_skips_host_by_default(self) -> None:
+        from security_scanner.checks.host.common import host_finding
+
+        sentinel = [host_finding("host.test", "high", "t", "test/resource")]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+            with patch("security_scanner.scanner.check_host", return_value=(sentinel, [])) as mocked:
+                findings = _scan(root, categories=("code",))
+        mocked.assert_not_called()
+        self.assertFalse(any(f.category == "host" for f in findings))
+
+    def test_macos_stealth_mode_off_is_low(self) -> None:
+        from security_scanner.checks.host import host_macos
+        from security_scanner.checks.host.runner import CommandResult
+
+        fake = CommandResult(command="...", ok=True, returncode=0, stdout="Firewall stealth mode is off\n")
+        with patch.object(host_macos, "run_command", return_value=fake):
+            findings = host_macos.check_firewall_stealth_mode()
+        self.assertEqual([f.rule_id for f in findings], ["host.macos.firewall-stealth-disabled"])
+        self.assertEqual(findings[0].severity, "low")
+
+    def test_macos_security_updates_requires_both_keys(self) -> None:
+        from security_scanner.checks.host import host_macos
+        from security_scanner.checks.host.runner import CommandResult
+
+        def fake_run(args, **kwargs):
+            key = args[-1]
+            value = "1" if key == "ConfigDataInstall" else "0"
+            return CommandResult(command="defaults", ok=True, returncode=0, stdout=value + "\n")
+
+        with patch.object(host_macos, "run_command", side_effect=fake_run):
+            findings = host_macos.check_automatic_security_updates()
+        # ConfigDataInstall on but CriticalUpdateInstall off -> not fully enabled
+        self.assertEqual([f.rule_id for f in findings], ["host.macos.auto-security-updates-disabled"])
+        self.assertEqual(findings[0].severity, "medium")
+
+    def test_cis_benchmark_standards_registered(self) -> None:
+        from security_scanner.standards import resolve_standard_selection, standards_payload
+
+        ids = {s["id"] for s in standards_payload()}
+        self.assertIn("cis-macos-benchmark", ids)
+        self.assertIn("cis-windows-benchmark", ids)
+
+        selection = resolve_standard_selection("cis-macos-benchmark", "all")
+        self.assertEqual(selection.scanner_categories, ("host",))
+        self.assertIn("host.macos.filevault-off", selection.rule_ids)
+
+    def test_cis_benchmark_filters_to_host_findings(self) -> None:
+        from security_scanner.checks.host.common import host_finding
+        from security_scanner.standards import filter_findings_by_standard, resolve_standard_selection
+
+        selection = resolve_standard_selection("cis-macos-benchmark", "network")
+        findings = [
+            host_finding("host.macos.firewall-disabled", "medium", "fw", "macos/application-firewall"),
+            host_finding("host.macos.sip-enabled", "info", "sip", "macos/system-integrity-protection"),
+        ]
+        filtered = filter_findings_by_standard(findings, selection)
+        self.assertEqual([f.rule_id for f in filtered], ["host.macos.firewall-disabled"])
+
+    def test_scanner_runs_host_when_requested(self) -> None:
+        from security_scanner.checks.host.common import host_finding
+
+        sentinel = [host_finding("host.test", "high", "t", "test/resource")]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("security_scanner.scanner.check_host", return_value=(sentinel, [])) as mocked:
+                findings = _scan(root, categories=("host",))
+        mocked.assert_called_once()
+        host_findings = [f for f in findings if f.category == "host"]
+        self.assertEqual(len(host_findings), 1)
+        self.assertEqual(host_findings[0].target, "tmp")
+
+
+class Phase2InventoryTests(unittest.TestCase):
+    def test_macos_inventory_parses_system_profiler(self) -> None:
+        from security_scanner import inventory
+        from security_scanner.checks.host.runner import CommandResult
+
+        sp_json = json.dumps(
+            {"SPApplicationsDataType": [
+                {"_name": "Safari", "version": "17.0", "obtained_from": "apple"},
+                {"_name": "Safari", "version": "17.0", "obtained_from": "apple"},
+                {"_name": "Foo", "version": "", "obtained_from": "identified_developer"},
+            ]}
+        )
+        fake = CommandResult(command="system_profiler", ok=True, returncode=0, stdout=sp_json)
+        with patch.object(inventory, "run_command", return_value=fake):
+            apps, warnings = inventory.collect_installed_apps(platform="macos")
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(apps), 2)  # deduped Safari + Foo
+        self.assertEqual(apps[0].name, "Foo")
+
+    def test_inventory_unsupported_platform(self) -> None:
+        from security_scanner import inventory
+
+        apps, warnings = inventory.collect_installed_apps(platform="linux")
+        self.assertEqual(apps, [])
+        self.assertTrue(any("not supported" in w for w in warnings))
+
+    def test_eol_result_past_date_is_eol(self) -> None:
+        from datetime import date
+        from security_scanner.eol_data import _result_from_payload
+
+        result = _result_from_payload("macos", "12", {"eol": "2020-01-01", "latest": "12.7"}, date(2026, 1, 1))
+        self.assertTrue(result.is_eol)
+        self.assertFalse(result.support_unknown)
+
+    def test_eol_result_future_date_supported(self) -> None:
+        from datetime import date
+        from security_scanner.eol_data import _result_from_payload
+
+        result = _result_from_payload("macos", "26", {"eol": "2030-01-01"}, date(2026, 1, 1))
+        self.assertFalse(result.is_eol)
+
+    def test_eol_result_bool_and_unknown(self) -> None:
+        from datetime import date
+        from security_scanner.eol_data import _result_from_payload
+
+        self.assertTrue(_result_from_payload("p", "1", {"eol": True}, date(2026, 1, 1)).is_eol)
+        self.assertTrue(_result_from_payload("p", "1", {}, date(2026, 1, 1)).support_unknown)
+
+    def test_cpe_version_matching(self) -> None:
+        from security_scanner.cpe_lookup import _version_applies
+
+        cve = {"configurations": [{"nodes": [{"cpeMatch": [
+            {"criteria": "cpe:2.3:a:v:p:*:*", "versionStartIncluding": "1.0", "versionEndExcluding": "2.0"}
+        ]}]}]}
+        self.assertTrue(_version_applies("1.5", cve))
+        self.assertFalse(_version_applies("2.0", cve))
+        self.assertFalse(_version_applies("0.9", cve))
+
+    def test_cpe_no_bounded_node_drops_cve(self) -> None:
+        from security_scanner.cpe_lookup import _version_applies
+
+        cve = {"configurations": [{"nodes": [{"cpeMatch": [{"criteria": "cpe:2.3:a:v:p:*:*"}]}]}]}
+        self.assertFalse(_version_applies("1.5", cve))
+
+    def test_cpe_exact_version_match(self) -> None:
+        from security_scanner.cpe_lookup import _version_applies
+
+        cve = {"configurations": [{"nodes": [{"cpeMatch": [{"criteria": "cpe:2.3:a:v:p:1.2.3:*"}]}]}]}
+        self.assertTrue(_version_applies("1.2.3", cve))
+        self.assertFalse(_version_applies("1.2.4", cve))
+
+    def test_os_eol_finding_high_when_eol(self) -> None:
+        from security_scanner.checks.host import inventory_checks
+        from security_scanner.eol_data import EolResult
+
+        result = EolResult(product="macos", cycle="12", eol_date="2020-01-01", is_eol=True)
+        with patch.object(inventory_checks, "os_release", return_value=("macos", "12.7", "12")), patch(
+            "security_scanner.eol_data.query_cycle_eol", return_value=(result, [])
+        ):
+            findings, _ = inventory_checks.os_eol_finding()
+        self.assertEqual([f.rule_id for f in findings], ["host.eol.os-end-of-life"])
+        self.assertEqual(findings[0].severity, "high")
+
+    def test_dashboard_include_host_toggle(self) -> None:
+        from security_scanner.checks.host.common import host_finding
+
+        with patch(
+            "security_scanner.scanner.check_host",
+            return_value=([host_finding("host.x", "high", "t", "r")], []),
+        ):
+            with tempfile.TemporaryDirectory() as tmp:
+                on = scan_directory_payload(
+                    tmp, standard="local", standard_category="all", min_severity="info", include_host=True
+                )
+                off = scan_directory_payload(
+                    tmp, standard="local", standard_category="all", min_severity="info", include_host=False
+                )
+        on_host = [f for f in on["findings_by_language"]["en"] if f["category"] == "host"]
+        off_host = [f for f in off["findings_by_language"]["en"] if f["category"] == "host"]
+        self.assertEqual(len(on_host), 1)
+        self.assertEqual(len(off_host), 0)
+
+
 def _scan(root: Path, categories: tuple[str, ...]):
     config = ScannerConfig(targets=(TargetConfig(name="tmp", path=root, categories=categories),))
     return SecurityScanner(config).scan()

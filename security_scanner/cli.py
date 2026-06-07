@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -13,7 +14,7 @@ from pathlib import Path
 from shutil import copyfileobj
 
 from .config import ConfigError, expand_path, load_config
-from .models import CATEGORIES, SEVERITIES, ReportConfig, ScannerConfig, TargetConfig
+from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, ReportConfig, ScannerConfig, TargetConfig
 from .reporting import filter_by_min_severity, render_report, write_report
 from .scanner import SecurityScanner
 
@@ -247,6 +248,42 @@ def main(argv: list[str] | None = None) -> int:
         print(json_dumps(payload))
         return 0
 
+    if args.command == "host-scan":
+        report = ReportConfig(
+            format=args.format or "markdown",
+            output=expand_path(str(args.output), Path.cwd()) if args.output else None,
+            min_severity=args.min_severity or "info",
+            language=args.language or "en",
+        )
+        target = TargetConfig(name="host", path=Path.cwd(), categories=("host",))
+        config = ScannerConfig(
+            targets=(target,),
+            report=report,
+            enable_host_inventory=args.inventory or args.check_cve,
+            enable_host_eol=args.eol,
+            enable_host_cve=args.check_cve,
+            nvd_api_key=os.environ.get(args.nvd_api_key_env) if args.nvd_api_key_env else None,
+        )
+        scanner = SecurityScanner(config)
+        findings = scanner.scan()
+        filtered_findings = filter_by_min_severity(findings, config.report.min_severity)
+        content = render_report(
+            filtered_findings,
+            config.report.format,
+            target_names=("host",),
+            language=config.report.language,
+        )
+        write_report(content, config.report.output)
+        for warning in scanner.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        print(
+            f"Host scan: {len(filtered_findings)} finding(s) at or above {config.report.min_severity}.",
+            file=sys.stderr,
+        )
+        if args.fail_on and _has_failure(filtered_findings, args.fail_on):
+            return 1
+        return 0
+
     if args.command in {None, "scan"}:
         try:
             with _build_scan_config_context(args) as config:
@@ -318,6 +355,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--enable-vuln-intel",
         action="store_true",
         help="enrich OSV CVEs with CISA KEV and FIRST EPSS exploit intelligence; implies --enable-osv",
+    )
+
+    host_scan = subparsers.add_parser("host-scan", help="check this computer's security posture (host/endpoint)")
+    host_scan.add_argument("--format", choices=("markdown", "json", "html", "sarif"), help="report format")
+    host_scan.add_argument("--output", type=Path, help="report output path")
+    host_scan.add_argument("--language", choices=("en", "ko"), help="report display language")
+    host_scan.add_argument("--min-severity", choices=SEVERITIES, help="minimum severity to include (default info)")
+    host_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
+    host_scan.add_argument("--inventory", action="store_true", help="collect installed application inventory")
+    host_scan.add_argument("--eol", action="store_true", help="check OS end-of-life status via endoflife.date (network)")
+    host_scan.add_argument(
+        "--check-cve",
+        action="store_true",
+        help="look up installed-app CVEs via NVD (network, rate-limited, implies --inventory)",
+    )
+    host_scan.add_argument(
+        "--nvd-api-key-env",
+        help="environment variable holding an NVD API key (raises NVD rate limits)",
     )
 
     discover = subparsers.add_parser("discover", help="list project roots under a folder")
@@ -445,7 +500,7 @@ def _build_scan_config(args: argparse.Namespace, *, archive_extract_root: Path |
 
 def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | None = None) -> ScannerConfig:
     target_values = args.target or ["."]
-    categories = tuple(args.category or CATEGORIES)
+    categories = tuple(args.category or DEFAULT_CATEGORIES)
     base_dir = Path.cwd()
     targets = tuple(
         TargetConfig(

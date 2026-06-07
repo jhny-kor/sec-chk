@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// A categorized group of prevention-kit feature descriptions for the help panel.
+struct PreventionKitGroup: Identifiable {
+    let id = UUID()
+    let title: String
+    let items: [String]
+}
+
 enum AppLanguage: String, Hashable {
     case ko
     case en
@@ -383,6 +390,30 @@ enum AppLanguage: String, Hashable {
         }
     }
 
+    /// The flat `preventionKitItems` list grouped into functional categories so
+    /// the help panel reads as a small set of themed blocks instead of one long
+    /// wall of items. Items are sliced by index from `preventionKitItems`, so the
+    /// localized descriptions are reused without duplication.
+    var preventionKitGroups: [PreventionKitGroup] {
+        let items = preventionKitItems
+        func pick(_ indices: [Int]) -> [String] {
+            indices.compactMap { items.indices.contains($0) ? items[$0] : nil }
+        }
+        let definitions: [(ko: String, en: String, indices: [Int])] = [
+            ("적용 & 차단", "Apply & Block", [1, 2, 13, 12]),
+            ("점검 & 추이", "Scan & Trends", [0, 17, 11, 25]),
+            ("의존성 & 공급망", "Dependencies & Supply Chain", [3, 4, 5, 9, 10]),
+            ("동적 점검 (DAST)", "Dynamic Testing (DAST)", [6, 7]),
+            ("거버넌스 & 컴플라이언스 문서", "Governance & Compliance Docs", [8, 14, 15, 16, 18, 19, 20, 21, 22, 23, 24]),
+            ("작업 효율", "Productivity", [26, 27]),
+        ]
+        return definitions.compactMap { definition in
+            let groupItems = pick(definition.indices)
+            guard !groupItems.isEmpty else { return nil }
+            return PreventionKitGroup(title: self == .ko ? definition.ko : definition.en, items: groupItems)
+        }
+    }
+
     var preventionKitUsageItems: [String] {
         switch self {
         case .ko:
@@ -535,6 +566,13 @@ enum AppLanguage: String, Hashable {
         switch self {
         case .ko: return "OSV/CVE + KEV/EPSS 조회"
         case .en: return "Run OSV/CVE + KEV/EPSS"
+        }
+    }
+
+    var runHostScanTitle: String {
+        switch self {
+        case .ko: return "이 컴퓨터 점검 (호스트 보안)"
+        case .en: return "Check this computer (host posture)"
         }
     }
 
@@ -1354,6 +1392,12 @@ private enum SecurityStandardLocalization {
             subtitle: "Default profile for quickly checking secrets, dependencies, configuration, risky code patterns, and prevention guardrails.",
             scope: "File-based static checks",
             coverage: "Fully automated local checks"
+        ),
+        "cis-macos-benchmark": StandardText(
+            title: "CIS Apple macOS Benchmark",
+            subtitle: "Maps this computer's endpoint posture to CIS macOS Benchmark Level 1 controls. Run it with the Check this computer button.",
+            scope: "macOS host security posture",
+            coverage: "Host scan required · External integration"
         ),
         "owasp-top-10-2025": StandardText(
             title: "OWASP Top 10:2025",
@@ -2480,6 +2524,25 @@ enum SecurityStandardCatalog {
             ],
             references: [
                 reference("KODA GitHub", "https://github.com/jhny-kor/sec-chk")
+            ]
+        ),
+        AppSecurityStandard(
+            id: "cis-macos-benchmark",
+            title: "CIS Apple macOS 벤치마크",
+            subtitle: "이 컴퓨터(엔드포인트)의 보안 상태를 CIS macOS 벤치마크 Level 1 통제에 매핑합니다. '이 컴퓨터 점검' 버튼으로 실행합니다.",
+            scope: "macOS 호스트 보안 상태",
+            coverage: "호스트 점검 필요 · 외부 연동 필요",
+            badge: "국제 기준",
+            icon: "lock.laptopcomputer",
+            accent: .teal,
+            categories: [
+                category("disk-encryption", "디스크 암호화", "FileVault 디스크 암호화가 켜져 있는지 확인합니다."),
+                category("system-integrity", "시스템 무결성", "SIP와 Gatekeeper가 켜져 있는지 확인합니다."),
+                category("network", "네트워크", "응용프로그램 방화벽과 스텔스 모드를 확인합니다."),
+                category("software-updates", "소프트웨어 업데이트", "보안 응답 및 시스템 파일 자동 설치 여부를 확인합니다.")
+            ],
+            references: [
+                reference("CIS Apple macOS Benchmarks", "https://www.cisecurity.org/benchmark/apple_os")
             ]
         ),
         AppSecurityStandard(

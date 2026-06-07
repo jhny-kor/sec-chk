@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config import expand_path
-from .models import CATEGORIES, SEVERITIES, ScannerConfig, TargetConfig
+from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, ScannerConfig, TargetConfig
 from .reporting import build_dashboard_payload, filter_by_min_severity, render_html
 from .scanner import SecurityScanner
 from .standards import (
@@ -58,12 +58,13 @@ def scan_directory_payload(
     min_severity: str = "low",
     discover_projects: bool = True,
     discovery_depth: int = 2,
-    categories: tuple[str, ...] = CATEGORIES,
+    categories: tuple[str, ...] = DEFAULT_CATEGORIES,
     standard: str = DEFAULT_STANDARD,
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
     max_file_size_bytes: int = 524288,
     base_dir: Path | None = None,
     enable_osv: bool = False,
+    include_host: bool = False,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -71,6 +72,9 @@ def scan_directory_payload(
     if unknown_categories:
         raise ValueError(f"Unsupported categories: {', '.join(unknown_categories)}")
     standard_selection = resolve_standard_selection(standard, standard_category, categories)
+    scanner_categories = standard_selection.scanner_categories
+    if include_host and "host" not in scanner_categories:
+        scanner_categories = scanner_categories + ("host",)
     if discovery_depth < 0:
         raise ValueError("discovery_depth must be zero or greater")
     if max_file_size_bytes <= 0:
@@ -85,14 +89,20 @@ def scan_directory_payload(
     target = TargetConfig(
         name=target_path.name or "scan-target",
         path=target_path,
-        categories=standard_selection.scanner_categories,
+        categories=scanner_categories,
         max_file_size_bytes=max_file_size_bytes,
         discover_projects=discover_projects,
         discovery_depth=discovery_depth,
     )
     config = ScannerConfig(targets=(target,), enable_osv=enable_osv, enable_vuln_intel=enable_osv)
     scanner = SecurityScanner(config)
-    findings = filter_findings_by_standard(scanner.scan(), standard_selection)
+    raw_findings = scanner.scan()
+    findings = filter_findings_by_standard(raw_findings, standard_selection)
+    if include_host:
+        # Host posture is opt-in and orthogonal to the selected standard's rule_id
+        # filter, so keep host findings that the standard filter would have dropped.
+        host_findings = [item for item in raw_findings if item.category == "host"]
+        findings = findings + [item for item in host_findings if item not in findings]
     findings = filter_by_min_severity(findings, min_severity)
     effective_targets = scanner.effective_targets or config.targets
     target_names = tuple(item.name for item in effective_targets)
@@ -164,6 +174,7 @@ def _handler(language: str):
                     standard_category=_string_value(request, "standard_category", default=DEFAULT_STANDARD_CATEGORY),
                     max_file_size_bytes=int(request.get("max_file_size_bytes", 524288)),
                     enable_osv=bool(request.get("enable_osv", False)),
+                    include_host=bool(request.get("include_host", False)),
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
@@ -358,9 +369,10 @@ def _choice_value(request: dict[str, Any], key: str, choices: set[str], default:
 
 
 def _categories_value(request: dict[str, Any]) -> tuple[str, ...]:
-    value = request.get("categories", CATEGORIES)
+    value = request.get("categories", DEFAULT_CATEGORIES)
     if value == "all":
-        return CATEGORIES
+        # "all" means all file-based categories; host posture is opt-in only.
+        return DEFAULT_CATEGORIES
     if not isinstance(value, list | tuple):
         raise ValueError("'categories' must be a list or 'all'")
     categories = tuple(str(item).lower() for item in value)
