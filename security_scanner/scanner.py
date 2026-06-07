@@ -8,6 +8,7 @@ from typing import Callable
 
 from .checks import code_patterns, configuration, dependencies, prevention, secrets
 from .checks.common import clear_read_text_cache, normalized_relpath
+from .checks.host import HostScanOptions, check_host
 from .dependency_inventory import components_from_file, queryable_osv_components, unique_components
 from .discovery import discover_projects
 from .ignore import filter_ignored_findings
@@ -79,8 +80,33 @@ class SecurityScanner:
             target_findings, target_components = self._scan_target(target)
             components.extend(target_components)
             findings.extend(target_findings)
+        findings.extend(self._scan_host())
         self.components = unique_components(components)
         return sorted(findings, key=lambda finding: finding.sort_key())
+
+    def _scan_host(self) -> list[Finding]:
+        host_targets = [target for target in self.effective_targets if "host" in target.categories]
+        if not host_targets:
+            return []
+        options = HostScanOptions(
+            enable_inventory=self.config.enable_host_inventory,
+            enable_eol=self.config.enable_host_eol,
+            enable_cve=self.config.enable_host_cve,
+            nvd_api_key=self.config.nvd_api_key,
+        )
+        host_findings, warnings = check_host(options=options)
+        self.warnings.extend(warnings)
+        if not host_findings:
+            return []
+        target_name = host_targets[0].name
+        tagged = [
+            replace(finding, target=target_name) if not finding.target else finding
+            for finding in host_findings
+        ]
+        filtered, ignored = filter_ignored_findings(tagged, host_targets[0].path)
+        if ignored:
+            self.warnings.append(f"Ignored {ignored} host finding(s) using KODA ignore rules")
+        return filtered
 
     def _expand_targets(self) -> tuple[TargetConfig, ...]:
         targets: list[TargetConfig] = []
@@ -141,7 +167,9 @@ class SecurityScanner:
     def _scan_file(self, path: Path, target: TargetConfig) -> list[Finding]:
         findings: list[Finding] = []
         for category in target.categories:
-            check = CHECKS[category]
+            check = CHECKS.get(category)
+            if check is None:  # e.g. "host" is not file-based; handled in _scan_host
+                continue
             findings.extend(
                 replace(finding, target=target.name) if not finding.target else finding
                 for finding in check(path, target)

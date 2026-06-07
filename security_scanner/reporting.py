@@ -61,6 +61,8 @@ TRANSLATIONS = {
         "sbom_unavailable": "No dependency components available for SBOM.",
         "osv_toggle": "OSV/CVE + KEV/EPSS lookup",
         "osv_network_note": "Queries exact dependency versions through OSV.dev and enriches CVEs with CISA KEV and FIRST EPSS priority data.",
+        "host_toggle": "Check this computer (host posture)",
+        "host_note": "Also checks this machine's security posture (disk encryption, firewall, system integrity, updates). Runs read-only OS commands.",
         "supported": "supported",
         "not_supported": "not supported",
         "scan_directory": "Scan Directory",
@@ -133,6 +135,7 @@ TRANSLATIONS = {
             "configuration": "Configuration",
             "code": "Code Patterns",
             "prevention": "Prevention Guardrails",
+            "host": "Host Posture",
         },
     },
     "ko": {
@@ -165,6 +168,8 @@ TRANSLATIONS = {
         "sbom_unavailable": "SBOM으로 내보낼 의존성 컴포넌트가 없습니다.",
         "osv_toggle": "OSV/CVE + KEV/EPSS 조회",
         "osv_network_note": "정확한 의존성 버전을 OSV.dev로 조회하고 CVE에 CISA KEV와 FIRST EPSS 우선순위 정보를 덧붙입니다.",
+        "host_toggle": "이 컴퓨터 점검 (호스트 보안 상태)",
+        "host_note": "이 기기의 보안 상태(디스크 암호화, 방화벽, 시스템 무결성, 업데이트)도 함께 점검합니다. 읽기 전용 OS 명령을 실행합니다.",
         "supported": "지원",
         "not_supported": "미지원",
         "scan_directory": "점검 경로",
@@ -237,6 +242,7 @@ TRANSLATIONS = {
             "configuration": "설정",
             "code": "코드 패턴",
             "prevention": "예방 가드레일",
+            "host": "호스트 보안 상태",
         },
     },
 }
@@ -1140,6 +1146,7 @@ def _finding_payload(finding: Finding) -> dict[str, object]:
         "evidence": finding.evidence,
         "description": finding.description,
         "recommendation": finding.recommendation,
+        "resource": finding.resource,
     }
 
 
@@ -1966,8 +1973,13 @@ HTML_TEMPLATE = """<!doctype html>
           <input id="scan-osv" type="checkbox">
           <span id="scan-osv-label"></span>
         </label>
+        <label class="scan-option" title="">
+          <input id="scan-host" type="checkbox">
+          <span id="scan-host-label"></span>
+        </label>
         <button id="sbom-download" type="button"></button>
         <span id="scan-osv-note" class="scan-note"></span>
+        <span id="scan-host-note" class="scan-note"></span>
       </div>
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
@@ -2186,6 +2198,8 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-depth-label", activeLabels.discovery_depth);
       setText("scan-osv-label", activeLabels.osv_toggle);
       setText("scan-osv-note", activeLabels.osv_network_note);
+      setText("scan-host-label", activeLabels.host_toggle);
+      setText("scan-host-note", activeLabels.host_note);
       setText("sbom-download", activeLabels.download_sbom);
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
       byId("scan-run").disabled = state.scanRunning;
@@ -2193,6 +2207,7 @@ HTML_TEMPLATE = """<!doctype html>
       byId("scan-standard").disabled = state.scanRunning;
       byId("scan-standard-category").disabled = state.scanRunning;
       byId("scan-osv").disabled = state.scanRunning;
+      byId("scan-host").disabled = state.scanRunning;
       byId("sbom-download").disabled = components().length === 0;
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
@@ -2568,6 +2583,7 @@ HTML_TEMPLATE = """<!doctype html>
             standard_category: state.scanStandardCategory,
             min_severity: "low",
             enable_osv: byId("scan-osv").checked,
+            include_host: byId("scan-host").checked,
           }),
         });
         const nextPayload = await parseJsonResponse(response);

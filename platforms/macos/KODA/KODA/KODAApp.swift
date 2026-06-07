@@ -19,8 +19,9 @@ struct KODAApp: App {
                     .frame(width: 0, height: 0)
                     .accessibilityHidden(true)
             }
-                .frame(minWidth: 760, minHeight: 520)
+                .frame(minWidth: 1024, minHeight: 720)
         }
+        .defaultSize(width: 1440, height: 960)
         .commands {
             CommandGroup(replacing: .newItem) {}
             KODAWindowCommands()
@@ -160,6 +161,10 @@ private struct KODAWindowRegistrationView: View {
 }
 
 private struct KODAWindowAccessor: NSViewRepresentable {
+    // Size the window to a large share of the screen only once, so we don't fight
+    // the user's manual resizing or macOS state restoration on later updates.
+    private static var hasSizedInitialWindow = false
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
         configureWindow(for: view)
@@ -178,6 +183,22 @@ private struct KODAWindowAccessor: NSViewRepresentable {
 
             window.identifier = NSUserInterfaceItemIdentifier(KODAWindowCoordinator.mainWindowID)
             window.title = "KODA"
+            Self.sizeInitialWindowIfNeeded(window)
         }
+    }
+
+    private static func sizeInitialWindowIfNeeded(_ window: NSWindow) {
+        guard !hasSizedInitialWindow else { return }
+        hasSizedInitialWindow = true
+
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        // Open at 85% of the available screen, capped to a comfortable maximum,
+        // then center it.
+        let width = min(visible.width * 0.85, 1700)
+        let height = min(visible.height * 0.85, 1100)
+        let originX = visible.minX + (visible.width - width) / 2
+        let originY = visible.minY + (visible.height - height) / 2
+        window.setFrame(NSRect(x: originX, y: originY, width: width, height: height), display: true, animate: false)
     }
 }

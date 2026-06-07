@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .models import CATEGORIES, Finding
+from .models import CATEGORIES, DEFAULT_CATEGORIES, Finding
 
 
 DEFAULT_STANDARD = "local"
@@ -457,7 +457,7 @@ LOCAL_STANDARD = SecurityStandard(
         StandardCategory(
             DEFAULT_STANDARD_CATEGORY,
             {"en": "All local checks", "ko": "모든 로컬 점검"},
-            scanner_categories=CATEGORIES,
+            scanner_categories=DEFAULT_CATEGORIES,
         ),
         StandardCategory(
             "secrets",
@@ -1183,13 +1183,13 @@ _ISMS_P_28_CATEGORIES = (
     StandardCategory(
         "2.8.1-security-requirements-definition",
         {"en": "2.8.1 Security Requirements Definition", "ko": "2.8.1 보안 요구사항 정의"},
-        scanner_categories=CATEGORIES,
+        scanner_categories=DEFAULT_CATEGORIES,
         rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS,
     ),
     StandardCategory(
         "2.8.2-security-requirements-review-testing",
         {"en": "2.8.2 Security Requirements Review and Testing", "ko": "2.8.2 보안 요구사항 검토 및 시험"},
-        scanner_categories=CATEGORIES,
+        scanner_categories=DEFAULT_CATEGORIES,
         rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS,
     ),
     StandardCategory(
@@ -1597,7 +1597,7 @@ OWASP_WSTG = SecurityStandard(
 _NIST_SSDF_CATEGORIES = (
     StandardCategory("protect-software", {"en": "Protect the Software", "ko": "소프트웨어 보호"}, scanner_categories=("secrets", "dependencies", "configuration", "prevention"), rule_ids=SENSITIVE_DATA_RULE_IDS + INTEGRITY_RULE_IDS + PREVENTION_RULE_IDS),
     StandardCategory("produce-well-secured-software", {"en": "Produce Well-Secured Software", "ko": "안전한 소프트웨어 생산"}, scanner_categories=("configuration", "code", "prevention"), rule_ids=CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS),
-    StandardCategory("verify-security", {"en": "Verify Security", "ko": "보안 검증"}, scanner_categories=CATEGORIES, rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS),
+    StandardCategory("verify-security", {"en": "Verify Security", "ko": "보안 검증"}, scanner_categories=DEFAULT_CATEGORIES, rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS),
     StandardCategory("respond-vulnerabilities", {"en": "Respond to Vulnerabilities", "ko": "취약점 대응"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + ("prevention.security-policy-missing", "prevention.dependency-update-automation-missing", "prevention.sbom-missing")),
 )
 
@@ -1626,7 +1626,7 @@ _OWASP_SAMM_CATEGORIES = (
     StandardCategory(
         "design-security-requirements",
         {"en": "Design: Security Requirements", "ko": "설계: 보안 요구사항"},
-        scanner_categories=CATEGORIES,
+        scanner_categories=DEFAULT_CATEGORIES,
         rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS,
     ),
     StandardCategory(
@@ -1644,7 +1644,7 @@ _OWASP_SAMM_CATEGORIES = (
     StandardCategory(
         "verification-security-testing",
         {"en": "Verification: Security Testing", "ko": "검증: 보안 테스트"},
-        scanner_categories=CATEGORIES,
+        scanner_categories=DEFAULT_CATEGORIES,
         rule_ids=SECRET_RULE_IDS + DEPENDENCY_RULE_IDS + CONFIGURATION_RULE_IDS + CODE_PATTERN_RULE_IDS + PREVENTION_RULE_IDS,
     ),
     StandardCategory(
@@ -2008,6 +2008,126 @@ OWASP_SCVS = SecurityStandard(
 )
 
 
+_CIS_MACOS_CATEGORIES = (
+    StandardCategory(
+        "disk-encryption",
+        {"en": "Disk Encryption", "ko": "디스크 암호화"},
+        scanner_categories=("host",),
+        rule_ids=("host.macos.filevault-on", "host.macos.filevault-off"),
+    ),
+    StandardCategory(
+        "system-integrity",
+        {"en": "System Integrity", "ko": "시스템 무결성"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.macos.sip-enabled",
+            "host.macos.sip-disabled",
+            "host.macos.gatekeeper-enabled",
+            "host.macos.gatekeeper-disabled",
+        ),
+    ),
+    StandardCategory(
+        "network",
+        {"en": "Network", "ko": "네트워크"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.macos.firewall-enabled",
+            "host.macos.firewall-disabled",
+            "host.macos.firewall-stealth-enabled",
+            "host.macos.firewall-stealth-disabled",
+        ),
+    ),
+    StandardCategory(
+        "software-updates",
+        {"en": "Software Updates", "ko": "소프트웨어 업데이트"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.macos.auto-security-updates-enabled",
+            "host.macos.auto-security-updates-disabled",
+        ),
+    ),
+)
+
+CIS_MACOS_BENCHMARK = SecurityStandard(
+    "cis-macos-benchmark",
+    {"en": "CIS Apple macOS Benchmark", "ko": "CIS Apple macOS 벤치마크"},
+    (
+        _all_category(_CIS_MACOS_CATEGORIES, {"en": "All mapped macOS host checks", "ko": "매핑된 macOS 호스트 항목 전체"}),
+        *_CIS_MACOS_CATEGORIES,
+    ),
+    description=_text(
+        "Maps CIS Apple macOS Benchmark Level 1 endpoint controls (disk encryption, system integrity, network, software updates) to live host posture checks. Requires running 'host-scan' on the macOS endpoint.",
+        "CIS Apple macOS 벤치마크 Level 1 단말 통제(디스크 암호화, 시스템 무결성, 네트워크, 소프트웨어 업데이트)를 실시간 호스트 점검에 매핑합니다. macOS 단말에서 'host-scan' 실행이 필요합니다.",
+    ),
+    coverage=_text(
+        "Host posture checks run live on the macOS machine. Full benchmark conformance still requires items KODA does not yet probe (e.g. account, audit, and privacy controls).",
+        "호스트 점검은 macOS 기기에서 실시간으로 실행됩니다. KODA가 아직 점검하지 않는 항목(계정, 감사, 프라이버시 통제 등)은 벤치마크 전체 준수를 위해 별도 확인이 필요합니다.",
+    ),
+    references=(
+        _reference("CIS Apple macOS Benchmarks", "CIS Apple macOS 벤치마크", "https://www.cisecurity.org/benchmark/apple_os"),
+    ),
+    coverage_level="external",
+)
+
+_CIS_WINDOWS_CATEGORIES = (
+    StandardCategory(
+        "disk-encryption",
+        {"en": "Disk Encryption", "ko": "디스크 암호화"},
+        scanner_categories=("host",),
+        rule_ids=("host.windows.bitlocker-on", "host.windows.bitlocker-off"),
+    ),
+    StandardCategory(
+        "boot-integrity",
+        {"en": "Boot Integrity", "ko": "부팅 무결성"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.windows.secure-boot-on",
+            "host.windows.secure-boot-off",
+            "host.windows.secure-boot-unsupported",
+        ),
+    ),
+    StandardCategory(
+        "network",
+        {"en": "Network", "ko": "네트워크"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.windows.firewall-all-profiles-enabled",
+            "host.windows.firewall-profile-disabled",
+        ),
+    ),
+    StandardCategory(
+        "malware-defense",
+        {"en": "Malware Defense", "ko": "악성코드 방어"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.windows.defender-realtime-on",
+            "host.windows.defender-realtime-off",
+        ),
+    ),
+)
+
+CIS_WINDOWS_BENCHMARK = SecurityStandard(
+    "cis-windows-benchmark",
+    {"en": "CIS Microsoft Windows Benchmark", "ko": "CIS Microsoft Windows 벤치마크"},
+    (
+        _all_category(_CIS_WINDOWS_CATEGORIES, {"en": "All mapped Windows host checks", "ko": "매핑된 Windows 호스트 항목 전체"}),
+        *_CIS_WINDOWS_CATEGORIES,
+    ),
+    description=_text(
+        "Maps CIS Microsoft Windows Benchmark Level 1 endpoint controls (disk encryption, boot integrity, network, malware defense) to live host posture checks. Requires running 'host-scan' on the Windows endpoint.",
+        "CIS Microsoft Windows 벤치마크 Level 1 단말 통제(디스크 암호화, 부팅 무결성, 네트워크, 악성코드 방어)를 실시간 호스트 점검에 매핑합니다. Windows 단말에서 'host-scan' 실행이 필요합니다.",
+    ),
+    coverage=_text(
+        "Host posture checks run live on the Windows machine via read-only PowerShell. Coverage is partial; account, audit, and policy controls require separate confirmation.",
+        "호스트 점검은 Windows 기기에서 읽기 전용 PowerShell로 실시간 실행됩니다. 적용 범위는 일부이며 계정, 감사, 정책 통제는 별도 확인이 필요합니다.",
+    ),
+    references=(
+        _reference("CIS Microsoft Windows Benchmarks", "CIS Microsoft Windows 벤치마크", "https://www.cisecurity.org/benchmark/microsoft_windows_desktop"),
+    ),
+    coverage_level="external",
+)
+
+
 SECURITY_STANDARDS = (
     LOCAL_STANDARD,
     OWASP_TOP_10_2025,
@@ -2038,6 +2158,8 @@ SECURITY_STANDARDS = (
     OWASP_SCVS,
     CISA_KEV_EPSS_PRIORITY,
     SLSA_SIGSTORE_BASELINE,
+    CIS_MACOS_BENCHMARK,
+    CIS_WINDOWS_BENCHMARK,
 )
 SECURITY_STANDARD_IDS = tuple(standard.id for standard in SECURITY_STANDARDS)
 
@@ -2065,6 +2187,8 @@ EXTERNAL_COVERAGE_STANDARD_IDS = {
     "openssf-scorecard-baseline",
     "cisa-kev-epss-priority",
     "slsa-sigstore-baseline",
+    "cis-macos-benchmark",
+    "cis-windows-benchmark",
 }
 
 

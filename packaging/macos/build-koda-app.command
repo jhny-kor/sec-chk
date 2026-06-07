@@ -69,6 +69,7 @@ rm -rf "$APP_BUNDLE" "$BUILD_ROOT/pyinstaller-work" "$BUILD_ROOT/pyinstaller-spe
   --workpath "$BUILD_ROOT/pyinstaller-work" \
   --specpath "$BUILD_ROOT/pyinstaller-spec" \
   --paths "$REPO_ROOT" \
+  --collect-submodules security_scanner \
   --hidden-import tkinter \
   --hidden-import tkinter.filedialog \
   --hidden-import tkinter.messagebox \

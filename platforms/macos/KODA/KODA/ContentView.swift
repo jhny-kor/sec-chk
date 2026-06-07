@@ -199,6 +199,13 @@ struct ContentView: View {
                 .disabled(scanner.isRunning)
 
                 Button {
+                    scanner.runHostScan(language: language)
+                } label: {
+                    Label(language.runHostScanTitle, systemImage: "lock.laptopcomputer")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
                     scanner.exportVEX(language: language)
                 } label: {
                     Label(language.generateVEXTitle, systemImage: "doc.text.magnifyingglass")
@@ -723,11 +730,13 @@ private struct MainHelpScreen: View {
                                 title: language.preventionKitAboutTitle,
                                 items: language.preventionKitAboutItems
                             )
-                            HelpSummaryBlock(
-                                icon: "checklist.checked",
-                                title: language.preventionKitItemsTitle,
-                                items: language.preventionKitItems
-                            )
+                            ForEach(language.preventionKitGroups) { group in
+                                HelpSummaryBlock(
+                                    icon: "checklist.checked",
+                                    title: group.title,
+                                    items: group.items
+                                )
+                            }
                             HelpSummaryBlock(
                                 icon: "list.bullet.rectangle",
                                 title: language.preventionKitUsageTitle,
@@ -789,12 +798,68 @@ private struct HelpSummaryBlock: View {
     }
 }
 
+private enum FixPlanTier: Int, CaseIterable {
+    case essential
+    case recommended
+    case compliance
+
+    func title(_ language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.essential, .ko): return "필수 기본"
+        case (.essential, .en): return "Essentials"
+        case (.recommended, .ko): return "권장"
+        case (.recommended, .en): return "Recommended"
+        case (.compliance, .ko): return "컴플라이언스 · 선택"
+        case (.compliance, .en): return "Compliance · Optional"
+        }
+    }
+
+    func subtitle(_ language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.essential, .ko): return "거의 모든 프로젝트가 먼저 갖춰야 하는 핵심 가드레일입니다."
+        case (.essential, .en): return "Core guardrails almost every project should have first."
+        case (.recommended, .ko): return "성숙한 보안 운영을 위해 추가하면 좋은 항목입니다."
+        case (.recommended, .en): return "Worth adding as your security practice matures."
+        case (.compliance, .ko): return "특정 규제·프레임워크가 필요할 때 선택적으로 추가하세요."
+        case (.compliance, .en): return "Add only when a specific framework or regulation applies."
+        }
+    }
+
+    /// Classify a plan by its target file path into a usability tier.
+    static func tier(for plan: SecurityFixPlan) -> FixPlanTier {
+        let essentials: Set<String> = [
+            "SECURITY.md",
+            ".gitignore",
+            ".dockerignore",
+            ".env.example",
+            ".github/dependabot.yml",
+            ".github/workflows/koda-security.yml",
+            "docs/security/PRE_COMMIT.md",
+        ]
+        let compliance: Set<String> = [
+            "docs/security/NIST_SSDF_WORKFLOW.md",
+            "docs/security/NIST_CSF_2_PROFILE.md",
+            "docs/security/CISA_SECURE_SOFTWARE_ATTESTATION.md",
+            "docs/security/SCVS_PLAN.md",
+            "docs/security/AI_LLM_SECURITY.md",
+            "docs/security/MOBILE_SECURITY.md",
+            "docs/security/PRIVACY_DATA_MAP.md",
+            "docs/security/EVIDENCE_REGISTER.md",
+            "docs/security/CLOUD_IAC_SECURITY.md",
+        ]
+        if essentials.contains(plan.relativePath) { return .essential }
+        if compliance.contains(plan.relativePath) { return .compliance }
+        return .recommended
+    }
+}
+
 private struct SecurityFixWizardSheet: View {
     let plans: [SecurityFixPlan]
     let language: AppLanguage
     let onApply: ([SecurityFixPlan]) -> Void
     let onCancel: () -> Void
     @State private var selectedIDs: Set<String>
+    @State private var complianceExpanded = false
 
     init(
         plans: [SecurityFixPlan],
@@ -806,11 +871,21 @@ private struct SecurityFixWizardSheet: View {
         self.language = language
         self.onApply = onApply
         self.onCancel = onCancel
-        self._selectedIDs = State(initialValue: Set(plans.map(\.id)))
+        // Default to essentials only so the wizard is actionable, not overwhelming.
+        let essentialIDs = plans.filter { FixPlanTier.tier(for: $0) == .essential }.map(\.id)
+        self._selectedIDs = State(initialValue: Set(essentialIDs))
     }
 
     private var selectedPlans: [SecurityFixPlan] {
         plans.filter { selectedIDs.contains($0.id) }
+    }
+
+    private func plans(in tier: FixPlanTier) -> [SecurityFixPlan] {
+        plans.filter { FixPlanTier.tier(for: $0) == tier }
+    }
+
+    private func selectTiers(_ tiers: Set<FixPlanTier>) {
+        selectedIDs = Set(plans.filter { tiers.contains(FixPlanTier.tier(for: $0)) }.map(\.id))
     }
 
     var body: some View {
@@ -845,33 +920,13 @@ private struct SecurityFixWizardSheet: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
+                quickSelectBar
+                Divider()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(plans) { plan in
-                            Toggle(isOn: Binding(
-                                get: { selectedIDs.contains(plan.id) },
-                                set: { isSelected in
-                                    if isSelected {
-                                        selectedIDs.insert(plan.id)
-                                    } else {
-                                        selectedIDs.remove(plan.id)
-                                    }
-                                }
-                            )) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(plan.title(language: language))
-                                        .font(.headline)
-                                    Text(plan.detail(language: language))
-                                        .font(.callout)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .toggleStyle(.checkbox)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(KODATheme.cardBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
+                    VStack(alignment: .leading, spacing: 18) {
+                        tierSection(.essential, collapsible: false)
+                        tierSection(.recommended, collapsible: false)
+                        tierSection(.compliance, collapsible: true)
                     }
                     .padding(20)
                 }
@@ -898,7 +953,91 @@ private struct SecurityFixWizardSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 660, height: 560)
+        .frame(width: 720, height: 640)
+    }
+
+    private var quickSelectBar: some View {
+        HStack(spacing: 10) {
+            Text(language == .ko ? "빠른 선택:" : "Quick select:")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Button(language == .ko ? "필수만" : "Essentials only") { selectTiers([.essential]) }
+            Button(language == .ko ? "권장까지" : "Up to recommended") { selectTiers([.essential, .recommended]) }
+            Button(language == .ko ? "전체" : "All") { selectTiers(Set(FixPlanTier.allCases)) }
+            Button(language == .ko ? "해제" : "None") { selectedIDs = [] }
+            Spacer()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func tierSection(_ tier: FixPlanTier, collapsible: Bool) -> some View {
+        let tierPlans = plans(in: tier)
+        if !tierPlans.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                if collapsible {
+                    DisclosureGroup(isExpanded: $complianceExpanded) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(tierPlans) { planRow($0) }
+                        }
+                        .padding(.top, 8)
+                    } label: {
+                        sectionHeader(tier, count: tierPlans.count)
+                    }
+                } else {
+                    sectionHeader(tier, count: tierPlans.count)
+                    ForEach(tierPlans) { planRow($0) }
+                }
+            }
+        }
+    }
+
+    private func sectionHeader(_ tier: FixPlanTier, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Text(tier.title(language))
+                    .font(.headline)
+                Text("\(selectedCount(in: tier))/\(count)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text(tier.subtitle(language))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func selectedCount(in tier: FixPlanTier) -> Int {
+        plans(in: tier).filter { selectedIDs.contains($0.id) }.count
+    }
+
+    private func planRow(_ plan: SecurityFixPlan) -> some View {
+        Toggle(isOn: Binding(
+            get: { selectedIDs.contains(plan.id) },
+            set: { isSelected in
+                if isSelected {
+                    selectedIDs.insert(plan.id)
+                } else {
+                    selectedIDs.remove(plan.id)
+                }
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(plan.title(language: language))
+                    .font(.headline)
+                Text(plan.detail(language: language))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KODATheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -1846,6 +1985,16 @@ private struct RemediationFindingCard: View {
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            if let pane = settingsPane {
+                Button {
+                    openSettings(pane)
+                } label: {
+                    Label(language == .ko ? "설정 열기" : "Open Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1854,6 +2003,33 @@ private struct RemediationFindingCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+
+    /// Maps a host posture finding to the System Settings pane that fixes it.
+    /// Returns nil for non-host findings (no one-click target).
+    private var settingsPane: String? {
+        guard finding.ruleID.hasPrefix("host.macos.") else { return nil }
+        if finding.ruleID.contains("filevault") || finding.ruleID.contains("sip") || finding.ruleID.contains("gatekeeper") {
+            return "com.apple.settings.PrivacySecurity.extension"
+        }
+        if finding.ruleID.contains("firewall") {
+            return "com.apple.Network-Settings.extension"
+        }
+        if finding.ruleID.contains("auto-security-updates") {
+            return "com.apple.Software-Update-Settings.extension"
+        }
+        return nil
+    }
+
+    private func openSettings(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:\(pane)"),
+           NSWorkspace.shared.open(url) {
+            return
+        }
+        // Fallback: open System Settings app directly if the deep link is unavailable.
+        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.systempreferences") {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
         }
     }
 
