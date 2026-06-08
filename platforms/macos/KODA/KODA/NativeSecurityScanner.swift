@@ -278,15 +278,44 @@ final class NativeSecurityScanner {
     /// Mirrors the Python `host-scan` posture checks. Each probe degrades to a
     /// warning if its command is unavailable so one failure never aborts the run.
     func scanHost() -> NativeScanResult {
-        var findings: [NativeFinding] = []
+        var posture: [NativeFinding] = []
         var warnings: [String] = []
 
-        findings.append(contentsOf: Self.checkSystemIntegrityProtection(warnings: &warnings))
-        findings.append(contentsOf: Self.checkFileVault(warnings: &warnings))
-        findings.append(contentsOf: Self.checkGatekeeper(warnings: &warnings))
-        findings.append(contentsOf: Self.checkApplicationFirewall(warnings: &warnings))
-        findings.append(contentsOf: Self.checkFirewallStealthMode(warnings: &warnings))
-        findings.append(contentsOf: Self.checkAutomaticSecurityUpdates(warnings: &warnings))
+        // Core posture (A/C/E)
+        posture.append(contentsOf: Self.checkSystemIntegrityProtection(warnings: &warnings))
+        posture.append(contentsOf: Self.checkFileVault(warnings: &warnings))
+        posture.append(contentsOf: Self.checkGatekeeper(warnings: &warnings))
+        posture.append(contentsOf: Self.checkApplicationFirewall(warnings: &warnings))
+        posture.append(contentsOf: Self.checkFirewallStealthMode(warnings: &warnings))
+        posture.append(contentsOf: Self.checkAutomaticSecurityUpdates(warnings: &warnings))
+        // Account & lock controls (D)
+        posture.append(contentsOf: Self.checkAutomaticLogin(warnings: &warnings))
+        posture.append(contentsOf: Self.checkGuestAccount(warnings: &warnings))
+        posture.append(contentsOf: Self.checkScreenLock(warnings: &warnings))
+
+        var findings: [NativeFinding] = []
+
+        // #2 App Sandbox: read-only system commands are blocked under the Mac App
+        // Store sandbox. Surface this clearly instead of silently returning nothing.
+        if Self.isSandboxed {
+            findings.append(Self.hostFinding(
+                "host.macos.sandbox-limited", "info",
+                "샌드박스 환경: 일부 호스트 점검이 제한될 수 있습니다",
+                resource: "macos/sandbox",
+                evidence: "App Sandbox 활성",
+                recommendation: "전체 호스트 점검은 비샌드박스(직접 배포) 빌드에서 실행하세요. system 명령(csrutil/fdesetup 등)은 샌드박스에서 차단됩니다."
+            ))
+            if posture.allSatisfy({ $0.severity == "info" }) && warnings.count >= posture.count {
+                warnings.append("샌드박스 제약으로 일부 항목을 확인하지 못했을 수 있습니다.")
+            }
+        }
+
+        // #3 Posture drift: compare against the saved baseline before overwriting it.
+        let drift = Self.driftFindings(current: posture)
+
+        findings.append(contentsOf: drift)
+        findings.append(contentsOf: posture)
+        Self.saveBaseline(posture)
 
         return NativeScanResult(
             findings: findings.sorted { left, right in
@@ -300,6 +329,10 @@ final class NativeSecurityScanner {
             scannedFileCount: 0,
             generatedAt: Date()
         )
+    }
+
+    static var isSandboxed: Bool {
+        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
     }
 
     private static func hostFinding(
@@ -442,6 +475,110 @@ final class NativeSecurityScanner {
             resource: "macos/automatic-security-updates", evidence: evidence,
             recommendation: "시스템 설정 > 일반 > 소프트웨어 업데이트 > 자동 업데이트에서 '보안 응답 및 시스템 파일 설치'를 켜세요."
         )]
+    }
+
+    // MARK: - Account & lock controls (#1)
+
+    private static func checkAutomaticLogin(warnings: inout [String]) -> [NativeFinding] {
+        // The key only exists when automatic login is configured; a nil/empty read
+        // means it is off.
+        let value = runReadOnlyCommand("/usr/bin/defaults", ["read", "/Library/Preferences/com.apple.loginwindow", "autoLoginUser"])
+        if let user = value, !user.isEmpty {
+            return [hostFinding(
+                "host.macos.auto-login-enabled", "high",
+                "자동 로그인이 켜져 있습니다",
+                resource: "macos/automatic-login", evidence: "autoLoginUser=\(user)",
+                recommendation: "시스템 설정 > 잠금 화면 > 자동 로그인을 '꺼짐'으로 설정하세요. 분실/도난 시 잠금 없이 접근됩니다."
+            )]
+        }
+        return [hostFinding("host.macos.auto-login-disabled", "info", "자동 로그인이 꺼져 있습니다", resource: "macos/automatic-login", evidence: "autoLoginUser unset")]
+    }
+
+    private static func checkGuestAccount(warnings: inout [String]) -> [NativeFinding] {
+        guard let value = runReadOnlyCommand("/usr/bin/defaults", ["read", "/Library/Preferences/com.apple.loginwindow", "GuestEnabled"]) else {
+            return [hostFinding("host.macos.guest-account-disabled", "info", "게스트 계정이 비활성화되어 있습니다", resource: "macos/guest-account", evidence: "GuestEnabled unset")]
+        }
+        if value.trimmingCharacters(in: .whitespaces) == "1" {
+            return [hostFinding(
+                "host.macos.guest-account-enabled", "medium",
+                "게스트 계정이 활성화되어 있습니다",
+                resource: "macos/guest-account", evidence: "GuestEnabled=1",
+                recommendation: "시스템 설정 > 사용자 및 그룹에서 게스트 사용자를 끄세요."
+            )]
+        }
+        return [hostFinding("host.macos.guest-account-disabled", "info", "게스트 계정이 비활성화되어 있습니다", resource: "macos/guest-account", evidence: "GuestEnabled=\(value)")]
+    }
+
+    private static func checkScreenLock(warnings: inout [String]) -> [NativeFinding] {
+        guard let value = runReadOnlyCommand("/usr/bin/defaults", ["-currentHost", "read", "com.apple.screensaver", "askForPassword"]) else {
+            // Setting moved/absent on some macOS versions; do not assert a result.
+            warnings.append("화면 잠금 비밀번호 설정을 확인할 수 없습니다.")
+            return []
+        }
+        if value.trimmingCharacters(in: .whitespaces) == "1" {
+            return [hostFinding("host.macos.screen-lock-enabled", "info", "잠금 화면에서 비밀번호를 요구합니다", resource: "macos/screen-lock", evidence: "askForPassword=1")]
+        }
+        return [hostFinding(
+            "host.macos.screen-lock-disabled", "medium",
+            "화면 보호기/잠금 후 비밀번호를 요구하지 않습니다",
+            resource: "macos/screen-lock", evidence: "askForPassword=\(value)",
+            recommendation: "시스템 설정 > 잠금 화면에서 '화면 보호기 시작 또는 디스플레이 꺼짐 후 암호 요구'를 켜세요."
+        )]
+    }
+
+    // MARK: - Posture drift (#3)
+
+    private static var baselineURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        return base.appendingPathComponent("KODA", isDirectory: true).appendingPathComponent("host-posture-baseline.json")
+    }
+
+    /// Map of resource identifier -> severity from the previous host scan.
+    private static func loadBaseline() -> [String: String] {
+        guard let data = try? Data(contentsOf: baselineURL),
+              let map = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return map
+    }
+
+    private static func saveBaseline(_ findings: [NativeFinding]) {
+        var map: [String: String] = [:]
+        for finding in findings { map[finding.path] = finding.severity }
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        try? FileManager.default.createDirectory(at: baselineURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: baselineURL, options: .atomic)
+    }
+
+    /// Emit findings when a control regressed (was passing, now failing) or
+    /// improved since the last scan, so users notice posture changes over time.
+    private static func driftFindings(current: [NativeFinding]) -> [NativeFinding] {
+        let baseline = loadBaseline()
+        guard !baseline.isEmpty else { return [] }
+        var drift: [NativeFinding] = []
+        for finding in current {
+            guard let previous = baseline[finding.path] else { continue }
+            let wasProblem = previous != "info"
+            let isProblem = finding.severity != "info"
+            if !wasProblem && isProblem {
+                drift.append(hostFinding(
+                    "host.drift.regressed", "high",
+                    "보안 상태 악화 감지: \(finding.title)",
+                    resource: "drift/\(finding.path)",
+                    evidence: "이전: 양호(\(previous)) → 현재: \(finding.severity)",
+                    recommendation: "최근 변경으로 이 항목이 약화되었습니다. 즉시 점검하세요. (\(finding.recommendation))"
+                ))
+            } else if wasProblem && !isProblem {
+                drift.append(hostFinding(
+                    "host.drift.improved", "info",
+                    "보안 상태 개선 감지: \(finding.title)",
+                    resource: "drift/\(finding.path)",
+                    evidence: "이전: \(previous) → 현재: 양호"
+                ))
+            }
+        }
+        return drift
     }
 
     func writeHTMLReport(_ result: NativeScanResult, to output: URL, language: AppLanguage = .ko) throws {

@@ -127,6 +127,7 @@ Write-Host "Building SecChk.exe with PyInstaller."
     --workpath $workPath `
     --specpath $specPath `
     --paths $RepoRoot `
+    --collect-submodules security_scanner `
     --hidden-import tkinter `
     --hidden-import tkinter.filedialog `
     --hidden-import tkinter.messagebox `

@@ -2019,6 +2019,12 @@ private struct RemediationFindingCard: View {
         if finding.ruleID.contains("auto-security-updates") {
             return "com.apple.Software-Update-Settings.extension"
         }
+        if finding.ruleID.contains("auto-login") || finding.ruleID.contains("screen-lock") {
+            return "com.apple.Lock-Screen-Settings.extension"
+        }
+        if finding.ruleID.contains("guest-account") {
+            return "com.apple.Users-Groups-Settings.extension"
+        }
         return nil
     }
 

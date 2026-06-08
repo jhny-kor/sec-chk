@@ -140,6 +140,9 @@ $pyInstallerArgs = @(
     "--workpath", $workPath,
     "--specpath", $specPath,
     "--paths", $RepoRoot,
+    # Host posture, inventory, EOL, and CPE modules are imported lazily, so they
+    # must be force-collected or PyInstaller's static analysis drops them.
+    "--collect-submodules", "security_scanner",
     # pywebview + its Windows Edge WebView2 backend (pythonnet/clr) must be
     # bundled fully or the native window backend fails to load at runtime.
     "--collect-all", "webview",

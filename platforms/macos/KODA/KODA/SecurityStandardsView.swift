@@ -2539,7 +2539,8 @@ enum SecurityStandardCatalog {
                 category("disk-encryption", "디스크 암호화", "FileVault 디스크 암호화가 켜져 있는지 확인합니다."),
                 category("system-integrity", "시스템 무결성", "SIP와 Gatekeeper가 켜져 있는지 확인합니다."),
                 category("network", "네트워크", "응용프로그램 방화벽과 스텔스 모드를 확인합니다."),
-                category("software-updates", "소프트웨어 업데이트", "보안 응답 및 시스템 파일 자동 설치 여부를 확인합니다.")
+                category("software-updates", "소프트웨어 업데이트", "보안 응답 및 시스템 파일 자동 설치 여부를 확인합니다."),
+                category("account-lock", "계정 및 잠금", "자동 로그인, 게스트 계정, 화면 잠금 비밀번호 설정을 확인합니다.")
             ],
             references: [
                 reference("CIS Apple macOS Benchmarks", "https://www.cisecurity.org/benchmark/apple_os")
