@@ -8,10 +8,12 @@ probe never aborts the scan.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from ...models import Finding
-from .common import HostCheck, current_platform
+from .common import HostCheck, current_platform, host_finding
 
 
 @dataclass(frozen=True)
@@ -56,16 +58,82 @@ def check_host(
     if not checks and resolved not in {"macos", "windows"}:
         return [], [f"Host security checks are not supported on platform: {resolved}"]
 
-    findings: list[Finding] = []
+    posture: list[Finding] = []
     warnings: list[str] = []
     for check in checks:
         try:
-            findings.extend(check())
+            posture.extend(check())
         except Exception as exc:  # noqa: BLE001 - isolate a single probe's failure
             warnings.append(f"Host check {check.__name__} failed: {exc}")
 
+    findings: list[Finding] = []
+    # Posture drift (#3): compare against the saved baseline, then refresh it.
+    if posture:
+        try:
+            findings.extend(_drift_findings(posture))
+            _save_baseline(posture)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"Posture drift check failed: {exc}")
+    findings.extend(posture)
+
     findings.extend(_run_inventory_checks(opts, warnings))
     return findings, warnings
+
+
+def _baseline_path() -> Path:
+    return Path.home() / ".koda" / "host-posture-baseline.json"
+
+
+def _load_baseline() -> dict[str, str]:
+    try:
+        return json.loads(_baseline_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_baseline(posture: list[Finding]) -> None:
+    mapping = {finding.resource: finding.severity for finding in posture if finding.resource}
+    path = _baseline_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(mapping), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _drift_findings(posture: list[Finding]) -> list[Finding]:
+    baseline = _load_baseline()
+    if not baseline:
+        return []
+    drift: list[Finding] = []
+    for finding in posture:
+        if not finding.resource:
+            continue
+        previous = baseline.get(finding.resource)
+        if previous is None:
+            continue
+        was_problem = previous != "info"
+        is_problem = finding.severity != "info"
+        if not was_problem and is_problem:
+            drift.append(
+                host_finding(
+                    "host.drift.regressed", "high",
+                    f"Security posture regressed: {finding.title}",
+                    f"drift/{finding.resource}",
+                    evidence=f"previously info, now {finding.severity}",
+                    recommendation="A recent change weakened this control. Investigate immediately.",
+                )
+            )
+        elif was_problem and not is_problem:
+            drift.append(
+                host_finding(
+                    "host.drift.improved", "info",
+                    f"Security posture improved: {finding.title}",
+                    f"drift/{finding.resource}",
+                    evidence=f"previously {previous}, now info",
+                )
+            )
+    return drift
 
 
 def _run_inventory_checks(opts: HostScanOptions, warnings: list[str]) -> list[Finding]:

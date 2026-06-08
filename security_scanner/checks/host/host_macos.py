@@ -188,6 +188,68 @@ def check_automatic_security_updates() -> list[Finding]:
     ]
 
 
+def check_automatic_login() -> list[Finding]:
+    result = run_command(["defaults", "read", "/Library/Preferences/com.apple.loginwindow", "autoLoginUser"])
+    if result.ok and result.text.strip():
+        return [
+            host_finding(
+                "host.macos.auto-login-enabled",
+                "high",
+                "Automatic login is enabled",
+                "macos/automatic-login",
+                evidence=f"autoLoginUser={result.text.strip()}",
+                description="Automatic login bypasses the login password, so a lost or stolen Mac is accessible without authentication.",
+                recommendation="Turn off automatic login in System Settings > Lock Screen.",
+            )
+        ]
+    return [
+        host_finding(
+            "host.macos.auto-login-disabled", "info", "Automatic login is disabled",
+            "macos/automatic-login", evidence="autoLoginUser unset",
+        )
+    ]
+
+
+def check_guest_account() -> list[Finding]:
+    result = run_command(["defaults", "read", "/Library/Preferences/com.apple.loginwindow", "GuestEnabled"])
+    if result.ok and result.text.strip() == "1":
+        return [
+            host_finding(
+                "host.macos.guest-account-enabled", "medium", "Guest account is enabled",
+                "macos/guest-account", evidence="GuestEnabled=1",
+                description="The guest account allows unauthenticated local access to the machine.",
+                recommendation="Disable the guest user in System Settings > Users & Groups.",
+            )
+        ]
+    return [
+        host_finding(
+            "host.macos.guest-account-disabled", "info", "Guest account is disabled",
+            "macos/guest-account", evidence=f"GuestEnabled={result.text.strip() or 'unset'}",
+        )
+    ]
+
+
+def check_screen_lock() -> list[Finding]:
+    result = run_command(["defaults", "-currentHost", "read", "com.apple.screensaver", "askForPassword"])
+    if not result.ok:
+        return []
+    if result.text.strip() == "1":
+        return [
+            host_finding(
+                "host.macos.screen-lock-enabled", "info", "A password is required after screen saver/lock",
+                "macos/screen-lock", evidence="askForPassword=1",
+            )
+        ]
+    return [
+        host_finding(
+            "host.macos.screen-lock-disabled", "medium", "No password is required after screen saver/lock",
+            "macos/screen-lock", evidence=f"askForPassword={result.text.strip()}",
+            description="Without a password requirement after the screen locks, anyone with physical access can use the machine.",
+            recommendation="Require a password after sleep/screen saver in System Settings > Lock Screen.",
+        )
+    ]
+
+
 HOST_CHECKS: tuple = (
     check_system_integrity_protection,
     check_filevault,
@@ -195,4 +257,7 @@ HOST_CHECKS: tuple = (
     check_application_firewall,
     check_firewall_stealth_mode,
     check_automatic_security_updates,
+    check_automatic_login,
+    check_guest_account,
+    check_screen_lock,
 )

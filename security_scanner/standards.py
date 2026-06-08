@@ -2046,6 +2046,21 @@ _CIS_MACOS_CATEGORIES = (
             "host.macos.auto-security-updates-disabled",
         ),
     ),
+    StandardCategory(
+        "account-lock",
+        {"en": "Account and Lock", "ko": "계정 및 잠금"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.macos.auto-login-enabled",
+            "host.macos.auto-login-disabled",
+            "host.macos.guest-account-enabled",
+            "host.macos.guest-account-disabled",
+            "host.macos.screen-lock-enabled",
+            "host.macos.screen-lock-disabled",
+            "host.drift.regressed",
+            "host.drift.improved",
+        ),
+    ),
 )
 
 CIS_MACOS_BENCHMARK = SecurityStandard(
@@ -2102,6 +2117,21 @@ _CIS_WINDOWS_CATEGORIES = (
         rule_ids=(
             "host.windows.defender-realtime-on",
             "host.windows.defender-realtime-off",
+        ),
+    ),
+    StandardCategory(
+        "account-lock",
+        {"en": "Account and Lock", "ko": "계정 및 잠금"},
+        scanner_categories=("host",),
+        rule_ids=(
+            "host.windows.auto-login-enabled",
+            "host.windows.auto-login-disabled",
+            "host.windows.guest-account-enabled",
+            "host.windows.guest-account-disabled",
+            "host.windows.screen-lock-enabled",
+            "host.windows.screen-lock-disabled",
+            "host.drift.regressed",
+            "host.drift.improved",
         ),
     ),
 )

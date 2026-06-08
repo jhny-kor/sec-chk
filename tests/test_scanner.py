@@ -2067,6 +2067,49 @@ class HostCheckTests(unittest.TestCase):
         self.assertEqual(findings[0].category, "host")
         self.assertEqual(findings[0].resource, "macos/filevault")
 
+    def test_macos_automatic_login_enabled_is_high(self) -> None:
+        from security_scanner.checks.host import host_macos
+        from security_scanner.checks.host.runner import CommandResult
+
+        fake = CommandResult(command="defaults", ok=True, returncode=0, stdout="admin\n")
+        with patch.object(host_macos, "run_command", return_value=fake):
+            findings = host_macos.check_automatic_login()
+        self.assertEqual(findings[0].rule_id, "host.macos.auto-login-enabled")
+        self.assertEqual(findings[0].severity, "high")
+
+    def test_windows_guest_account_enabled_is_medium(self) -> None:
+        from security_scanner.checks.host import host_windows
+        from security_scanner.checks.host.runner import CommandResult
+
+        fake = CommandResult(command="powershell", ok=True, returncode=0, stdout="True\n")
+        with patch.object(host_windows, "powershell", return_value=fake):
+            findings = host_windows.check_guest_account()
+        self.assertEqual(findings[0].rule_id, "host.windows.guest-account-enabled")
+        self.assertEqual(findings[0].severity, "medium")
+
+    def test_drift_regression_and_improvement(self) -> None:
+        from security_scanner.checks import host as host_pkg
+        from security_scanner.checks.host.common import host_finding
+
+        baseline = {"macos/filevault": "info", "macos/firewall": "high"}
+        current = [
+            host_finding("host.macos.filevault-off", "high", "FileVault off", "macos/filevault"),
+            host_finding("host.macos.firewall-enabled", "info", "Firewall on", "macos/firewall"),
+        ]
+        with patch.object(host_pkg, "_load_baseline", return_value=baseline):
+            drift = host_pkg._drift_findings(current)
+        kinds = {f.rule_id for f in drift}
+        self.assertIn("host.drift.regressed", kinds)
+        self.assertIn("host.drift.improved", kinds)
+
+    def test_drift_empty_baseline_no_findings(self) -> None:
+        from security_scanner.checks import host as host_pkg
+        from security_scanner.checks.host.common import host_finding
+
+        current = [host_finding("host.macos.filevault-off", "high", "FileVault off", "macos/filevault")]
+        with patch.object(host_pkg, "_load_baseline", return_value={}):
+            self.assertEqual(host_pkg._drift_findings(current), [])
+
     def test_macos_sip_failure_yields_no_finding(self) -> None:
         from security_scanner.checks.host import host_macos
         from security_scanner.checks.host.runner import CommandResult

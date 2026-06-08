@@ -148,9 +148,84 @@ def check_firewall_profiles() -> list[Finding]:
     ]
 
 
+def check_automatic_login() -> list[Finding]:
+    result = powershell(
+        "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' "
+        "-Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon"
+    )
+    if not result.ok:
+        return []
+    if result.text.strip() == "1":
+        return [
+            host_finding(
+                "host.windows.auto-login-enabled", "high", "Automatic login is enabled",
+                "windows/automatic-login", evidence="AutoAdminLogon=1",
+                description="Automatic login bypasses the sign-in password, so a lost or stolen device is accessible without authentication.",
+                recommendation="Set AutoAdminLogon to 0 and remove stored DefaultPassword, or disable auto sign-in.",
+            )
+        ]
+    return [
+        host_finding(
+            "host.windows.auto-login-disabled", "info", "Automatic login is disabled",
+            "windows/automatic-login", evidence=f"AutoAdminLogon={result.text.strip() or 'unset'}",
+        )
+    ]
+
+
+def check_guest_account() -> list[Finding]:
+    result = powershell("(Get-LocalUser -Name 'Guest' -ErrorAction SilentlyContinue).Enabled")
+    if not result.ok:
+        return []
+    if result.text.strip().lower() == "true":
+        return [
+            host_finding(
+                "host.windows.guest-account-enabled", "medium", "Guest account is enabled",
+                "windows/guest-account", evidence="Guest.Enabled=True",
+                description="The built-in Guest account allows unauthenticated local access.",
+                recommendation="Disable the Guest account: Disable-LocalUser -Name Guest.",
+            )
+        ]
+    return [
+        host_finding(
+            "host.windows.guest-account-disabled", "info", "Guest account is disabled",
+            "windows/guest-account", evidence=f"Guest.Enabled={result.text.strip() or 'absent'}",
+        )
+    ]
+
+
+def check_screen_lock() -> list[Finding]:
+    result = powershell(
+        "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' "
+        "-Name InactivityTimeoutSecs -ErrorAction SilentlyContinue).InactivityTimeoutSecs"
+    )
+    if not result.ok:
+        return []
+    value = result.text.strip()
+    if value.isdigit() and int(value) > 0:
+        return [
+            host_finding(
+                "host.windows.screen-lock-enabled", "info",
+                f"Machine inactivity lock is enforced ({value}s)",
+                "windows/screen-lock", evidence=f"InactivityTimeoutSecs={value}",
+            )
+        ]
+    return [
+        host_finding(
+            "host.windows.screen-lock-disabled", "low",
+            "No machine inactivity lock policy is enforced",
+            "windows/screen-lock", evidence=f"InactivityTimeoutSecs={value or 'unset'}",
+            description="Without an inactivity lock, an unattended unlocked session stays accessible.",
+            recommendation="Set the 'Interactive logon: Machine inactivity limit' policy, or enable a password-protected screen saver timeout.",
+        )
+    ]
+
+
 HOST_CHECKS: tuple = (
     check_bitlocker,
     check_defender,
     check_secure_boot,
     check_firewall_profiles,
+    check_automatic_login,
+    check_guest_account,
+    check_screen_lock,
 )
