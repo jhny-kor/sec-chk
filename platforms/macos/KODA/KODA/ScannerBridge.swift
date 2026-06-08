@@ -1021,7 +1021,13 @@ final class ScannerBridge: ObservableObject {
         language: AppLanguage
     ) {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        // Offer Markdown (default), HTML, and PDF so documentation guardrails can be
+        // shared or printed, not just kept as raw Markdown.
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "md") ?? .plainText,
+            .html,
+            .pdf,
+        ]
         panel.canCreateDirectories = true
         panel.nameFieldStringValue = defaultFileName
         panel.message = language == .ko ? panelMessageKO : panelMessageEN
@@ -1030,8 +1036,17 @@ final class ScannerBridge: ObservableObject {
             return
         }
 
+        let docTitle = destination.deletingPathExtension().lastPathComponent
         do {
-            try content.write(to: destination, atomically: true, encoding: .utf8)
+            switch destination.pathExtension.lowercased() {
+            case "html", "htm":
+                try MarkdownDocumentExporter.html(from: content, title: docTitle)
+                    .write(to: destination, atomically: true, encoding: .utf8)
+            case "pdf":
+                try MarkdownDocumentExporter.writePDF(from: content, title: docTitle, to: destination)
+            default:
+                try content.write(to: destination, atomically: true, encoding: .utf8)
+            }
             setStatus(ko: "\(successKO): \(destination.path)", en: "\(successEN): \(destination.path)")
             statusColor = .green
         } catch {
@@ -4896,5 +4911,219 @@ private enum SecurityPreventionToolkit {
         python -m security_scanner upload-sbom --server-url https://dependency-track.example.com --api-key-env DEPENDENCY_TRACK_API_KEY --project-name "\(projectName)" --project-version main --sbom reports/sbom.cdx.json --auto-create
         ```
         """
+    }
+}
+
+/// Converts KODA's Markdown guardrail/plan documents into shareable HTML and
+/// printable PDF, so the prevention tool is not limited to raw `.md` output.
+/// Handles the controlled Markdown subset KODA templates emit: headings, bullet
+/// and numbered lists, tables, fenced/inline code, bold, and links.
+enum MarkdownDocumentExporter {
+    static func html(from markdown: String, title: String) -> String {
+        let body = renderBody(markdown)
+        return """
+        <!doctype html>
+        <html lang="ko">
+        <head>
+        <meta charset="utf-8">
+        <title>\(escape(title))</title>
+        <style>
+          body { font: 15px/1.65 -apple-system, "Helvetica Neue", "Apple SD Gothic Neo", sans-serif; color: #1b2330; max-width: 820px; margin: 40px auto; padding: 0 24px; }
+          h1 { font-size: 26px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+          h2 { font-size: 21px; margin-top: 28px; }
+          h3 { font-size: 17px; margin-top: 22px; }
+          h4 { font-size: 15px; margin-top: 18px; color: #475069; }
+          code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-family: "SF Mono", Menlo, monospace; font-size: 0.9em; }
+          pre { background: #0f172a; color: #e2e8f0; padding: 14px 16px; border-radius: 8px; overflow-x: auto; }
+          pre code { background: transparent; padding: 0; color: inherit; }
+          table { border-collapse: collapse; width: 100%; margin: 14px 0; }
+          th, td { border: 1px solid #d8dee9; padding: 7px 10px; text-align: left; font-size: 0.95em; }
+          th { background: #f1f5f9; }
+          ul, ol { padding-left: 22px; }
+          li { margin: 4px 0; }
+          a { color: #2563eb; }
+        </style>
+        </head>
+        <body>
+        \(body)
+        </body>
+        </html>
+        """
+    }
+
+    @MainActor
+    static func writePDF(from markdown: String, title: String, to destination: URL) throws {
+        let htmlString = html(from: markdown, title: title)
+        guard let data = htmlString.data(using: .utf8),
+              let attributed = try? NSAttributedString(
+                  data: data,
+                  options: [
+                      .documentType: NSAttributedString.DocumentType.html,
+                      .characterEncoding: String.Encoding.utf8.rawValue,
+                  ],
+                  documentAttributes: nil
+              )
+        else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+
+        let pageSize = NSSize(width: 595, height: 842) // A4 at 72 dpi
+        let margin: CGFloat = 48
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: pageSize.width - margin * 2, height: pageSize.height - margin * 2))
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textStorage?.setAttributedString(attributed)
+
+        let printInfo = NSPrintInfo()
+        printInfo.paperSize = pageSize
+        printInfo.topMargin = margin
+        printInfo.bottomMargin = margin
+        printInfo.leftMargin = margin
+        printInfo.rightMargin = margin
+        printInfo.horizontalPagination = .fit
+        printInfo.verticalPagination = .automatic
+        printInfo.isHorizontallyCentered = false
+        printInfo.isVerticallyCentered = false
+        printInfo.jobDisposition = .save
+        printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL.rawValue] = destination
+
+        let operation = NSPrintOperation(view: textView, printInfo: printInfo)
+        operation.showsPrintPanel = false
+        operation.showsProgressPanel = false
+        if !operation.run() {
+            throw CocoaError(.fileWriteUnknown)
+        }
+    }
+
+    // MARK: - Markdown -> HTML body
+
+    private static func renderBody(_ markdown: String) -> String {
+        var html = ""
+        var listKind: String? // "ul" or "ol"
+        var inCodeFence = false
+        var tableRows: [String] = []
+
+        func closeList() {
+            if let kind = listKind { html += "</\(kind)>\n"; listKind = nil }
+        }
+        func flushTable() {
+            guard !tableRows.isEmpty else { return }
+            html += renderTable(tableRows)
+            tableRows = []
+        }
+
+        for rawLine in markdown.components(separatedBy: "\n") {
+            let line = rawLine
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.hasPrefix("```") {
+                if inCodeFence { html += "</code></pre>\n"; inCodeFence = false }
+                else { closeList(); flushTable(); html += "<pre><code>"; inCodeFence = true }
+                continue
+            }
+            if inCodeFence { html += escape(line) + "\n"; continue }
+
+            if trimmed.hasPrefix("|") && trimmed.hasSuffix("|") {
+                closeList()
+                tableRows.append(trimmed)
+                continue
+            } else {
+                flushTable()
+            }
+
+            if trimmed.isEmpty { closeList(); continue }
+
+            if let heading = headingLevel(trimmed) {
+                closeList()
+                let text = inline(String(trimmed.dropFirst(heading + 1)).trimmingCharacters(in: .whitespaces))
+                html += "<h\(heading)>\(text)</h\(heading)>\n"
+                continue
+            }
+
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                if listKind != "ul" { closeList(); html += "<ul>\n"; listKind = "ul" }
+                html += "<li>\(inline(String(trimmed.dropFirst(2))))</li>\n"
+                continue
+            }
+            if let ordered = orderedItem(trimmed) {
+                if listKind != "ol" { closeList(); html += "<ol>\n"; listKind = "ol" }
+                html += "<li>\(inline(ordered))</li>\n"
+                continue
+            }
+
+            closeList()
+            html += "<p>\(inline(trimmed))</p>\n"
+        }
+        if inCodeFence { html += "</code></pre>\n" }
+        closeList()
+        flushTable()
+        return html
+    }
+
+    private static func headingLevel(_ line: String) -> Int? {
+        var count = 0
+        for char in line {
+            if char == "#" { count += 1 } else { break }
+        }
+        if count >= 1, count <= 6, line.dropFirst(count).first == " " { return count }
+        return nil
+    }
+
+    private static func orderedItem(_ line: String) -> String? {
+        guard let dotIndex = line.firstIndex(of: ".") else { return nil }
+        let prefix = line[line.startIndex..<dotIndex]
+        guard !prefix.isEmpty, prefix.allSatisfy(\.isNumber) else { return nil }
+        let after = line.index(after: dotIndex)
+        guard after < line.endIndex, line[after] == " " else { return nil }
+        return String(line[line.index(after: after)...])
+    }
+
+    private static func renderTable(_ rows: [String]) -> String {
+        func cells(_ row: String) -> [String] {
+            var trimmed = row
+            if trimmed.hasPrefix("|") { trimmed.removeFirst() }
+            if trimmed.hasSuffix("|") { trimmed.removeLast() }
+            return trimmed.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        func isSeparator(_ row: String) -> Bool {
+            cells(row).allSatisfy { cell in
+                !cell.isEmpty && cell.allSatisfy { $0 == "-" || $0 == ":" || $0 == " " }
+            }
+        }
+        var out = "<table>\n"
+        var wroteHeader = false
+        for (index, row) in rows.enumerated() {
+            if index == 1 && isSeparator(row) { continue }
+            let tag = (index == 0) ? "th" : "td"
+            if index == 0 { out += "<thead>" }
+            if index == 1 && !wroteHeader { out += "<tbody>" }
+            let cellHTML = cells(row).map { "<\(tag)>\(inline($0))</\(tag)>" }.joined()
+            out += "<tr>\(cellHTML)</tr>\n"
+            if index == 0 { out += "</thead>"; wroteHeader = true }
+        }
+        out += "</tbody></table>\n"
+        return out
+    }
+
+    // MARK: - Inline
+
+    private static func inline(_ text: String) -> String {
+        var result = escape(text)
+        result = replace(result, pattern: "`([^`]+)`", template: "<code>$1</code>")
+        result = replace(result, pattern: "\\*\\*([^*]+)\\*\\*", template: "<strong>$1</strong>")
+        result = replace(result, pattern: "\\[([^\\]]+)\\]\\(([^)]+)\\)", template: "<a href=\"$2\">$1</a>")
+        return result
+    }
+
+    private static func replace(_ text: String, pattern: String, template: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
+    }
+
+    private static func escape(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
     }
 }
