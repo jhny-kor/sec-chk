@@ -20,6 +20,10 @@ KODA can optionally enrich dependency and vulnerability findings through public 
 
 Network providers may receive standard request metadata such as IP address and user agent as part of normal HTTPS requests.
 
+## Optional AI triage
+
+KODA can optionally use a large language model to label findings as likely true or false positives (`--ai-triage`). This feature is disabled by default. When a **local** backend is used (Ollama, the default), finding context stays on the user's machine and nothing is sent over the network. When the user explicitly selects a **cloud** backend (for example `anthropic/...` or `openai/...`), KODA sends finding metadata and a short surrounding source snippet to that provider in order to obtain the label; KODA surfaces a one-time warning when this external transfer happens. Raw secret values are never included in the data sent for triage: `secrets` findings are triaged from their redacted evidence only, without a source snippet. API keys for cloud backends are read from environment variables and are not stored by KODA.
+
 ## Tracking and advertising
 
 KODA does not use third-party advertising SDKs, does not track users across apps or websites, and does not sell user data.

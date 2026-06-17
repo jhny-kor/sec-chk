@@ -284,6 +284,41 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
+    if args.command == "fix":
+        from .fixes import apply as fixes_apply
+
+        target_path = expand_path(args.target, Path.cwd())
+        categories = tuple(args.category) if args.category else ("code",)
+        config = ScannerConfig(
+            targets=(TargetConfig(name=target_path.name or "target", path=target_path, categories=categories),),
+        )
+        scanner = SecurityScanner(config)
+        findings = scanner.scan()
+        plans, warnings = fixes_apply.plan_fixes(findings, rule=args.rule)
+        for warning in (*scanner.warnings, *warnings):
+            print(f"warning: {warning}", file=sys.stderr)
+        if not plans:
+            print("No auto-fixable findings.", file=sys.stderr)
+            return 0
+        total = sum(len(plan.fixes) for plan in plans)
+        if not args.apply:
+            print(fixes_apply.render_diff(plans), end="")
+            print(
+                f"Dry run: {total} fix(es) across {len(plans)} file(s). "
+                "Review the diff, then re-run with --apply to write changes.",
+                file=sys.stderr,
+            )
+            return 0
+        result = fixes_apply.apply_plans(plans, make_backup=not args.no_backup)
+        for warning in result.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        backup_note = "" if args.no_backup else " Backups written as *.bak."
+        print(
+            f"Applied fixes to {len(result.applied)} file(s); skipped {len(result.skipped)}.{backup_note}",
+            file=sys.stderr,
+        )
+        return 0
+
     if args.command in {None, "scan"}:
         try:
             with _build_scan_config_context(args) as config:
@@ -311,7 +346,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"{len(filtered_findings)} finding(s) at or above {config.report.min_severity}.",
                     file=sys.stderr,
                 )
-                if args.fail_on and _has_failure(filtered_findings, args.fail_on):
+                gate_findings = filtered_findings
+                if getattr(args, "reachable_only", False):
+                    gate_findings = [
+                        finding for finding in filtered_findings if finding.reachable != "unreachable"
+                    ]
+                if args.fail_on and _has_failure(gate_findings, args.fail_on):
                     return 1
         except ConfigError as exc:
             print(f"Config error: {exc}", file=sys.stderr)
@@ -356,6 +396,46 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="enrich OSV CVEs with CISA KEV and FIRST EPSS exploit intelligence; implies --enable-osv",
     )
+    scan.add_argument(
+        "--reachability",
+        action="store_true",
+        help="label OSV dependency findings as reachable/unreachable by analyzing source imports (offline)",
+    )
+    scan.add_argument(
+        "--reachable-only",
+        action="store_true",
+        help="with --fail-on, ignore findings labelled unreachable when deciding the exit code",
+    )
+    scan.add_argument(
+        "--ai-triage",
+        action="store_true",
+        help="label findings as likely true/false positives via an LLM (opt-in; local Ollama keeps data offline)",
+    )
+    scan.add_argument(
+        "--llm",
+        dest="llm",
+        help="LLM model spec for --ai-triage, e.g. ollama/qwen2.5-coder:7b (overrides KODA_LLM env)",
+    )
+    scan.add_argument(
+        "--changed-only",
+        action="store_true",
+        help="scan only files changed versus --base (for fast per-pull-request CI checks)",
+    )
+    scan.add_argument(
+        "--base",
+        dest="base",
+        help="base git ref for --changed-only, e.g. origin/main",
+    )
+
+    fix = subparsers.add_parser(
+        "fix",
+        help="apply safe deterministic fixes for auto-fixable findings (dry-run by default)",
+    )
+    fix.add_argument("--target", default=".", help="folder or file to scan and fix")
+    fix.add_argument("--category", action="append", choices=CATEGORIES, help="categories to scan (default: code)")
+    fix.add_argument("--rule", help="only fix findings with this rule id")
+    fix.add_argument("--apply", action="store_true", help="write changes (default prints a dry-run diff)")
+    fix.add_argument("--no-backup", action="store_true", help="do not write *.bak backups when applying")
 
     host_scan = subparsers.add_parser("host-scan", help="check this computer's security posture (host/endpoint)")
     host_scan.add_argument("--format", choices=("markdown", "json", "html", "sarif"), help="report format")
@@ -520,7 +600,17 @@ def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | N
         language=args.language or "en",
     )
     enable_vuln_intel = bool(getattr(args, "enable_vuln_intel", False))
-    return ScannerConfig(targets=targets, report=report, enable_osv=bool(args.enable_osv) or enable_vuln_intel, enable_vuln_intel=enable_vuln_intel)
+    return ScannerConfig(
+        targets=targets,
+        report=report,
+        enable_osv=bool(args.enable_osv) or enable_vuln_intel,
+        enable_vuln_intel=enable_vuln_intel,
+        enable_reachability=bool(getattr(args, "reachability", False)),
+        enable_ai_triage=bool(getattr(args, "ai_triage", False)),
+        llm_model=getattr(args, "llm", None),
+        changed_only=bool(getattr(args, "changed_only", False)),
+        diff_base=getattr(args, "base", None),
+    )
 
 
 def _apply_overrides(
@@ -559,6 +649,11 @@ def _apply_overrides(
         report=report,
         enable_osv=bool(args.enable_osv) or config.enable_osv or enable_vuln_intel,
         enable_vuln_intel=enable_vuln_intel,
+        enable_reachability=bool(getattr(args, "reachability", False)) or config.enable_reachability,
+        enable_ai_triage=bool(getattr(args, "ai_triage", False)) or config.enable_ai_triage,
+        llm_model=getattr(args, "llm", None) or config.llm_model,
+        changed_only=bool(getattr(args, "changed_only", False)) or config.changed_only,
+        diff_base=getattr(args, "base", None) or config.diff_base,
     )
 
 

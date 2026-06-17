@@ -6,8 +6,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+from . import git_changes, reachability
 from .checks import code_patterns, configuration, dependencies, prevention, secrets
-from .checks.common import clear_read_text_cache, normalized_relpath
+from .checks.common import clear_read_text_cache, normalized_relpath, read_text_lines
 from .checks.host import HostScanOptions, check_host
 from .dependency_inventory import components_from_file, queryable_osv_components, unique_components
 from .discovery import discover_projects
@@ -70,6 +71,8 @@ class SecurityScanner:
         self.warnings: list[str] = []
         self.effective_targets: tuple[TargetConfig, ...] = ()
         self.components: tuple[DependencyComponent, ...] = ()
+        self._python_imports: set[str] = set()
+        self._js_imports: set[str] = set()
 
     def scan(self) -> list[Finding]:
         clear_read_text_cache()
@@ -82,7 +85,39 @@ class SecurityScanner:
             findings.extend(target_findings)
         findings.extend(self._scan_host())
         self.components = unique_components(components)
+        if self.config.enable_reachability:
+            index = reachability.ImportIndex(
+                python=frozenset(self._python_imports),
+                js=frozenset(self._js_imports),
+            )
+            findings = reachability.annotate_reachability(findings, tuple(components), index)
+        if self.config.enable_ai_triage:
+            from .ai import triage as ai_triage
+
+            findings, triage_warnings = ai_triage.triage_findings(
+                findings,
+                model=self.config.llm_model,
+                language=self.config.report.language,
+            )
+            self.warnings.extend(triage_warnings)
         return sorted(findings, key=lambda finding: finding.sort_key())
+
+    def _changed_files(self, target: TargetConfig) -> set[Path] | None:
+        if not self.config.changed_only:
+            return None
+        changed, warnings = git_changes.changed_files(self.config.diff_base, target.path)
+        self.warnings.extend(warnings)
+        return changed
+
+    def _collect_imports(self, path: Path, target: TargetConfig) -> None:
+        if not self.config.enable_reachability or not reachability.is_analyzable(path.suffix):
+            return
+        lines = read_text_lines(path, target.max_file_size_bytes)
+        if lines is None:
+            return
+        index = reachability.imported_names_from_lines(lines, path.suffix)
+        self._python_imports |= index.python
+        self._js_imports |= index.js
 
     def _scan_host(self) -> list[Finding]:
         host_targets = [target for target in self.effective_targets if "host" in target.categories]
@@ -139,6 +174,7 @@ class SecurityScanner:
         if target.path.is_file():
             components = self._components_from_file(target.path, target)
             findings = self._scan_file(target.path, target)
+            self._collect_imports(target.path, target)
             findings.extend(self._osv_findings(components))
             filtered, ignored = filter_ignored_findings(findings, target.path.parent)
             if ignored:
@@ -148,12 +184,19 @@ class SecurityScanner:
         findings: list[Finding] = []
         components: list[DependencyComponent] = []
         scanned_files: list[Path] = []
+        changed = self._changed_files(target)
+        filtering = self.config.changed_only and changed is not None
         for file_path in self._iter_files(target):
+            if filtering and file_path.resolve() not in changed:
+                continue
             scanned_files.append(file_path)
             file_components = self._components_from_file(file_path, target)
             components.extend(file_components)
             findings.extend(self._scan_file(file_path, target))
-        if "prevention" in target.categories:
+            self._collect_imports(file_path, target)
+        # Project-level prevention reasons over the whole project; skip it while diff-scoping
+        # so a partial file list does not produce spurious "missing control" findings.
+        if "prevention" in target.categories and not filtering:
             findings.extend(
                 replace(finding, target=target.name) if not finding.target else finding
                 for finding in prevention.check_project(target.path, scanned_files, target)

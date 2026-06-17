@@ -1147,6 +1147,10 @@ def _finding_payload(finding: Finding) -> dict[str, object]:
         "description": finding.description,
         "recommendation": finding.recommendation,
         "resource": finding.resource,
+        "reachable": finding.reachable,
+        "triage_verdict": finding.triage_verdict,
+        "triage_confidence": finding.triage_confidence,
+        "triage_note": finding.triage_note,
     }
 
 

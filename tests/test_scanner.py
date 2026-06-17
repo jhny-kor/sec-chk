@@ -23,6 +23,17 @@ from security_scanner.evidence import render_evidence_checklist
 from security_scanner.integrations import upload_sbom_to_dependency_track
 from security_scanner.models import DependencyComponent, Finding, ScannerConfig, TargetConfig
 from security_scanner.osv_vulnerabilities import _finding_from_vulnerability
+from security_scanner.reachability import (
+    ImportIndex,
+    annotate_reachability,
+    imported_names_from_lines,
+    package_import_candidates,
+)
+from security_scanner.ai import provider as ai_provider
+from security_scanner.ai import triage as ai_triage
+from security_scanner.ai.provider import LLMResult, LLMUnavailable
+from security_scanner.fixes import apply as fixes_apply
+from security_scanner.fixes import deterministic as fixes_deterministic
 from security_scanner.release import build_release_security_package
 from security_scanner.reporting import render_html, render_json, render_report, render_sarif
 from security_scanner.scanner import SecurityScanner
@@ -2304,6 +2315,495 @@ class Phase2InventoryTests(unittest.TestCase):
         off_host = [f for f in off["findings_by_language"]["en"] if f["category"] == "host"]
         self.assertEqual(len(on_host), 1)
         self.assertEqual(len(off_host), 0)
+
+
+class ReachabilityTests(unittest.TestCase):
+    def test_python_import_extraction_ignores_relative(self) -> None:
+        index = imported_names_from_lines(
+            [
+                "import os",
+                "import requests",
+                "from yaml import safe_load",
+                "from . import local",
+                "from .pkg import thing",
+                "import google.protobuf",
+            ],
+            ".py",
+        )
+        self.assertEqual(index.python, frozenset({"os", "requests", "yaml", "google"}))
+        self.assertEqual(index.js, frozenset())
+
+    def test_js_import_extraction(self) -> None:
+        index = imported_names_from_lines(
+            [
+                "import x from 'lodash';",
+                'const y = require("express");',
+                "import './local';",
+                "import foo from '@scope/pkg';",
+                "await import('axios');",
+            ],
+            ".ts",
+        )
+        self.assertEqual(index.js, frozenset({"lodash", "express", "@scope/pkg", "axios"}))
+        self.assertEqual(index.python, frozenset())
+
+    def test_pypi_import_aliases(self) -> None:
+        self.assertIn("yaml", package_import_candidates("PyYAML", "PyPI"))
+        self.assertIn("bs4", package_import_candidates("beautifulsoup4", "PyPI"))
+        self.assertIn("dateutil", package_import_candidates("python-dateutil", "PyPI"))
+
+    def test_annotate_marks_reachable_and_unreachable(self) -> None:
+        component = DependencyComponent("jinja2", "PyPI", "2.4.1", Path("requirements.txt"), target="t", line=1)
+        finding = Finding(
+            rule_id="dependency.osv-known-vulnerability",
+            category="dependencies",
+            severity="high",
+            title="vuln",
+            path=Path("requirements.txt"),
+            target="t",
+            line=1,
+        )
+        reachable = annotate_reachability([finding], (component,), ImportIndex(python=frozenset({"jinja2"})))
+        self.assertEqual(reachable[0].reachable, "reachable")
+        unreachable = annotate_reachability([finding], (component,), ImportIndex(python=frozenset({"os"})))
+        self.assertEqual(unreachable[0].reachable, "unreachable")
+
+    def test_annotate_unknown_when_language_not_analyzed(self) -> None:
+        component = DependencyComponent("jinja2", "PyPI", "2.4.1", Path("requirements.txt"), target="t", line=1)
+        finding = Finding(
+            rule_id="dependency.osv-known-vulnerability",
+            category="dependencies",
+            severity="high",
+            title="vuln",
+            path=Path("requirements.txt"),
+            target="t",
+            line=1,
+        )
+        # Only JS imports were collected, so the Python verdict stays unknown (never downgraded).
+        result = annotate_reachability([finding], (component,), ImportIndex(js=frozenset({"lodash"})))
+        self.assertEqual(result[0].reachable, "unknown")
+
+    def test_annotate_leaves_non_osv_findings_untouched(self) -> None:
+        finding = Finding(
+            rule_id="dependency.missing-lockfile",
+            category="dependencies",
+            severity="low",
+            title="x",
+            path=Path("package.json"),
+            target="t",
+            line=1,
+        )
+        result = annotate_reachability([finding], (), ImportIndex(python=frozenset({"os"})))
+        self.assertEqual(result[0].reachable, "")
+
+    def test_scanner_labels_unreachable_dependency(self) -> None:
+        reachable = self._scan_osv_with_app("import os\nprint(os.getcwd())\n")
+        self.assertEqual(reachable, "unreachable")
+
+    def test_scanner_labels_reachable_dependency(self) -> None:
+        reachable = self._scan_osv_with_app("import jinja2\nprint(jinja2.__version__)\n")
+        self.assertEqual(reachable, "reachable")
+
+    def test_reachability_off_leaves_findings_unlabelled(self) -> None:
+        reachable = self._scan_osv_with_app("import os\n", enable_reachability=False)
+        self.assertEqual(reachable, "")
+
+    def test_reachable_only_gate_excludes_unreachable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("jinja2==2.4.1\n", encoding="utf-8")
+            (root / "app.py").write_text("import os\n", encoding="utf-8")
+
+            with patch("security_scanner.scanner.query_osv_findings", side_effect=_fake_osv_high_jinja2):
+                with redirect_stdout(io.StringIO()):
+                    blocked = cli_main(
+                        ["scan", "--target", str(root), "--category", "dependencies",
+                         "--enable-osv", "--reachability", "--fail-on", "high"]
+                    )
+                    allowed = cli_main(
+                        ["scan", "--target", str(root), "--category", "dependencies",
+                         "--enable-osv", "--reachability", "--reachable-only", "--fail-on", "high"]
+                    )
+        self.assertEqual(blocked, 1)
+        self.assertEqual(allowed, 0)
+
+    def _scan_osv_with_app(self, app_source: str, *, enable_reachability: bool = True) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text("jinja2==2.4.1\n", encoding="utf-8")
+            (root / "app.py").write_text(app_source, encoding="utf-8")
+            config = ScannerConfig(
+                targets=(TargetConfig(name="t", path=root, categories=("dependencies",)),),
+                enable_osv=True,
+                enable_reachability=enable_reachability,
+            )
+            with patch("security_scanner.scanner.query_osv_findings", side_effect=_fake_osv_high_jinja2):
+                findings = SecurityScanner(config).scan()
+        osv = [finding for finding in findings if finding.rule_id == "dependency.osv-known-vulnerability"]
+        self.assertEqual(len(osv), 1)
+        return osv[0].reachable
+
+
+def _fake_osv_high_jinja2(components, **kwargs):
+    component = next(component for component in components if component.name == "jinja2")
+    return (
+        [
+            Finding(
+                rule_id="dependency.osv-known-vulnerability",
+                category="dependencies",
+                severity="high",
+                title="Known vulnerable dependency reported by OSV",
+                path=Path(component.path),
+                target=component.target,
+                line=component.line,
+                evidence="PyPI jinja2@2.4.1: GHSA-test",
+            )
+        ],
+        [],
+    )
+
+
+class _FakeHTTPResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self) -> "_FakeHTTPResponse":
+        return self
+
+    def __exit__(self, *args) -> bool:
+        return False
+
+
+class AIProviderTests(unittest.TestCase):
+    def test_resolve_model_requires_configuration(self) -> None:
+        with patch.dict(os.environ, {"KODA_LLM": ""}, clear=False):
+            with self.assertRaises(LLMUnavailable):
+                ai_provider.resolve_model()
+
+    def test_complete_rejects_unsupported_backend(self) -> None:
+        with self.assertRaises(LLMUnavailable):
+            ai_provider.complete("hello", model="madeup/model-x")
+
+    def test_complete_rejects_spec_without_model_name(self) -> None:
+        with self.assertRaises(LLMUnavailable):
+            ai_provider.complete("hello", model="ollama")
+
+    def test_ollama_backend_uses_local_urllib_without_external_transfer(self) -> None:
+        with patch(
+            "security_scanner.ai.provider.urllib.request.urlopen",
+            return_value=_FakeHTTPResponse({"response": "hello"}),
+        ):
+            result = ai_provider.complete("hi", model="ollama/qwen2.5-coder:7b")
+        self.assertEqual(result.text, "hello")
+        self.assertEqual(result.backend, "ollama")
+        self.assertFalse(result.sent_externally)
+
+    def test_ollama_backend_failure_raises_unavailable(self) -> None:
+        with patch(
+            "security_scanner.ai.provider.urllib.request.urlopen",
+            side_effect=OSError("connection refused"),
+        ):
+            with self.assertRaises(LLMUnavailable):
+                ai_provider.complete("hi", model="ollama/qwen2.5-coder:7b")
+
+
+class AITriageTests(unittest.TestCase):
+    def _finding(self, **overrides) -> Finding:
+        base = dict(
+            rule_id="code.eval-usage",
+            category="code",
+            severity="high",
+            title="Use of eval",
+            path=Path("does-not-exist.py"),
+            target="t",
+            line=1,
+        )
+        base.update(overrides)
+        return Finding(**base)
+
+    def test_triage_annotates_and_preserves_severity(self) -> None:
+        def fake_complete(prompt, **kwargs):
+            return LLMResult(
+                text='{"verdict": "likely_true", "confidence": 0.9, "note": "reaches eval"}',
+                backend="ollama",
+                sent_externally=False,
+            )
+
+        out, warnings = ai_triage.triage_findings([self._finding()], complete=fake_complete)
+        self.assertEqual(out[0].triage_verdict, "likely_true")
+        self.assertEqual(out[0].triage_confidence, 0.9)
+        self.assertEqual(out[0].triage_note, "reaches eval")
+        self.assertEqual(out[0].severity, "high")
+        self.assertEqual(warnings, [])
+
+    def test_triage_warns_once_on_external_backend(self) -> None:
+        def fake_complete(prompt, **kwargs):
+            return LLMResult(
+                text='{"verdict": "likely_false", "confidence": 0.1, "note": "test stub"}',
+                backend="anthropic",
+                sent_externally=True,
+            )
+
+        _, warnings = ai_triage.triage_findings(
+            [self._finding(), self._finding(rule_id="code.other")], complete=fake_complete
+        )
+        external = [warning for warning in warnings if "external network call" in warning]
+        self.assertEqual(len(external), 1)
+
+    def test_triage_does_not_send_raw_secret_material(self) -> None:
+        captured: dict[str, str] = {}
+
+        def fake_complete(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return LLMResult(
+                text='{"verdict": "likely_false", "confidence": 0.2, "note": "placeholder"}',
+                backend="ollama",
+                sent_externally=False,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secret_value = "sk-" + "abcdefghijklmnopqrstuvwxyz0123"
+            env_file = root / ".env"
+            env_file.write_text(f"OPENAI_API_KEY={secret_value}\n", encoding="utf-8")
+            finding = self._finding(
+                rule_id="secret.openai-key",
+                category="secrets",
+                path=env_file,
+                evidence="OPENAI_API_KEY=<redacted>",
+            )
+            ai_triage.triage_findings([finding], complete=fake_complete)
+
+        self.assertIn("prompt", captured)
+        self.assertNotIn(secret_value, captured["prompt"])
+
+    def test_triage_stops_and_warns_when_backend_unavailable(self) -> None:
+        def fake_complete(prompt, **kwargs):
+            raise LLMUnavailable("ollama is not running")
+
+        out, warnings = ai_triage.triage_findings([self._finding()], complete=fake_complete)
+        self.assertEqual(out[0].triage_verdict, "")
+        self.assertTrue(any("AI triage skipped" in warning for warning in warnings))
+
+    def test_triage_handles_unparseable_response(self) -> None:
+        def fake_complete(prompt, **kwargs):
+            return LLMResult(text="sorry, I cannot help", backend="ollama", sent_externally=False)
+
+        out, warnings = ai_triage.triage_findings([self._finding()], complete=fake_complete)
+        self.assertEqual(out[0].triage_verdict, "")
+        self.assertTrue(any("could not parse" in warning for warning in warnings))
+
+    def test_scanner_ai_triage_labels_findings(self) -> None:
+        def fake_complete(prompt, **kwargs):
+            return LLMResult(
+                text='{"verdict": "likely_true", "confidence": 0.8, "note": "real key"}',
+                backend="ollama",
+                sent_externally=False,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text("OPENAI_API_KEY=sk-" + "x" * 30 + "\n", encoding="utf-8")
+            config = ScannerConfig(
+                targets=(TargetConfig(name="t", path=root, categories=("secrets",)),),
+                enable_ai_triage=True,
+            )
+            with patch("security_scanner.ai.provider.complete", side_effect=fake_complete):
+                findings = SecurityScanner(config).scan()
+
+        secrets = [finding for finding in findings if finding.category == "secrets"]
+        self.assertTrue(secrets)
+        self.assertTrue(all(finding.triage_verdict == "likely_true" for finding in secrets))
+        self.assertTrue(all(finding.severity != "" for finding in secrets))
+
+    def test_scanner_ai_triage_off_leaves_findings_unlabelled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env").write_text("OPENAI_API_KEY=sk-" + "x" * 30 + "\n", encoding="utf-8")
+            config = ScannerConfig(
+                targets=(TargetConfig(name="t", path=root, categories=("secrets",)),),
+            )
+            findings = SecurityScanner(config).scan()
+
+        secrets = [finding for finding in findings if finding.category == "secrets"]
+        self.assertTrue(secrets)
+        self.assertTrue(all(finding.triage_verdict == "" for finding in secrets))
+
+
+class AutoFixTests(unittest.TestCase):
+    def test_fix_weak_hash_rewrites_qualified_calls_only(self) -> None:
+        self.assertEqual(fixes_deterministic.fix_weak_hash("h = hashlib.md5(d)"), "h = hashlib.sha256(d)")
+        self.assertEqual(fixes_deterministic.fix_weak_hash("h = digest.sha1(d)"), "h = digest.sha256(d)")
+        self.assertIsNone(fixes_deterministic.fix_weak_hash("h = sha256(d)"))
+        self.assertIsNone(fixes_deterministic.fix_weak_hash("value = 1"))
+
+    def test_fix_yaml_load_respects_existing_loader(self) -> None:
+        self.assertEqual(fixes_deterministic.fix_yaml_load("c = yaml.load(s)"), "c = yaml.safe_load(s)")
+        self.assertIsNone(fixes_deterministic.fix_yaml_load("c = yaml.load(s, Loader=yaml.SafeLoader)"))
+        self.assertIsNone(fixes_deterministic.fix_yaml_load("c = yaml.safe_load(s)"))
+
+    def test_plan_render_and_apply_with_backup_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "app.py"
+            src.write_text(
+                "import hashlib, yaml\n"
+                "h = hashlib.md5(b'x').hexdigest()\n"
+                "c = yaml.load('a: 1')\n",
+                encoding="utf-8",
+            )
+            plans, warnings = fixes_apply.plan_fixes(_scan(root, categories=("code",)))
+            self.assertEqual(warnings, [])
+            self.assertEqual(len(plans), 1)
+            self.assertEqual(len(plans[0].fixes), 2)
+
+            diff = fixes_apply.render_diff(plans)
+            self.assertIn("hashlib.sha256(", diff)
+            self.assertIn("yaml.safe_load(", diff)
+            # Planning/rendering must not modify the file.
+            self.assertIn("hashlib.md5(", src.read_text(encoding="utf-8"))
+
+            result = fixes_apply.apply_plans(plans)
+            self.assertEqual(result.skipped, [])
+            self.assertEqual(len(result.applied), 1)
+            updated = src.read_text(encoding="utf-8")
+            self.assertIn("hashlib.sha256(", updated)
+            self.assertIn("yaml.safe_load(", updated)
+            self.assertNotIn("hashlib.md5(", updated)
+            self.assertTrue((root / "app.py.bak").exists())
+
+            # Re-scanning the fixed tree yields nothing more to fix.
+            plans_again, _ = fixes_apply.plan_fixes(_scan(root, categories=("code",)))
+            self.assertEqual(plans_again, [])
+
+    def test_apply_skips_when_fix_would_break_python_syntax(self) -> None:
+        from security_scanner.fixes.apply import FilePlan, LineFix, apply_plans
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "broken.py"
+            src.write_text("x = 1\n", encoding="utf-8")
+            plan = FilePlan(
+                path=src,
+                fixes=[LineFix(line=1, rule_id="x", original="x = 1", fixed="x = (")],
+                original_text="x = 1\n",
+                fixed_text="x = (\n",
+            )
+            result = apply_plans([plan])
+
+            self.assertIn(src, result.skipped)
+            self.assertEqual(result.applied, [])
+            self.assertEqual(src.read_text(encoding="utf-8"), "x = 1\n")
+            self.assertTrue(any("syntax" in warning for warning in result.warnings))
+
+    def test_cli_fix_dry_run_does_not_write_then_apply_does(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "app.py"
+            src.write_text("import hashlib\nh = hashlib.md5(b'x')\n", encoding="utf-8")
+
+            with redirect_stdout(io.StringIO()):
+                dry_code = cli_main(["fix", "--target", str(root)])
+            self.assertEqual(dry_code, 0)
+            self.assertIn("hashlib.md5(", src.read_text(encoding="utf-8"))
+
+            with redirect_stdout(io.StringIO()):
+                apply_code = cli_main(["fix", "--target", str(root), "--apply"])
+            self.assertEqual(apply_code, 0)
+            self.assertIn("hashlib.sha256(", src.read_text(encoding="utf-8"))
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, check=True)
+
+
+def _init_git_repo(root: Path) -> None:
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test")
+    _git(root, "config", "commit.gpgsign", "false")
+
+
+class DiffScopeTests(unittest.TestCase):
+    def test_changed_files_lists_modified_and_excludes_unchanged(self) -> None:
+        from security_scanner.git_changes import changed_files
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _init_git_repo(root)
+            (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "b.py").write_text("y = 2\n", encoding="utf-8")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-q", "-m", "base")
+            base = _git(root, "rev-parse", "HEAD").stdout.strip()
+            (root / "a.py").write_text("x = 99\n", encoding="utf-8")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-q", "-m", "change a")
+
+            changed, warnings = changed_files(base, root)
+
+        self.assertIsNotNone(changed)
+        self.assertIn((root / "a.py").resolve(), changed)
+        self.assertNotIn((root / "b.py").resolve(), changed)
+        self.assertEqual(warnings, [])
+
+    def test_changed_files_requires_base(self) -> None:
+        from security_scanner.git_changes import changed_files
+
+        with tempfile.TemporaryDirectory() as tmp:
+            changed, warnings = changed_files("", Path(tmp))
+        self.assertIsNone(changed)
+        self.assertTrue(any("requires --base" in warning for warning in warnings))
+
+    def test_changed_files_outside_git_repo_returns_none(self) -> None:
+        from security_scanner.git_changes import changed_files
+
+        with tempfile.TemporaryDirectory() as tmp:
+            changed, warnings = changed_files("main", Path(tmp))
+        self.assertIsNone(changed)
+        self.assertTrue(any("git repository" in warning for warning in warnings))
+
+    def test_scanner_changed_only_scopes_to_changed_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.env").write_text("OPENAI_API_KEY=sk-" + "x" * 30 + "\n", encoding="utf-8")
+            (root / "b.env").write_text("OPENAI_API_KEY=sk-" + "y" * 30 + "\n", encoding="utf-8")
+            changed = {(root / "a.env").resolve()}
+            config = ScannerConfig(
+                targets=(TargetConfig(name="t", path=root, categories=("secrets",)),),
+                changed_only=True,
+                diff_base="origin/main",
+            )
+            with patch("security_scanner.git_changes.changed_files", return_value=(changed, [])):
+                findings = SecurityScanner(config).scan()
+
+        scanned = {finding.path.resolve() for finding in findings}
+        self.assertIn((root / "a.env").resolve(), scanned)
+        self.assertNotIn((root / "b.env").resolve(), scanned)
+
+    def test_scanner_changed_only_falls_back_when_git_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.env").write_text("OPENAI_API_KEY=sk-" + "x" * 30 + "\n", encoding="utf-8")
+            (root / "b.env").write_text("OPENAI_API_KEY=sk-" + "y" * 30 + "\n", encoding="utf-8")
+            config = ScannerConfig(
+                targets=(TargetConfig(name="t", path=root, categories=("secrets",)),),
+                changed_only=True,
+                diff_base="origin/main",
+            )
+            with patch(
+                "security_scanner.git_changes.changed_files",
+                return_value=(None, ["git diff failed; scanning all files instead."]),
+            ):
+                scanner = SecurityScanner(config)
+                findings = scanner.scan()
+
+        scanned = {finding.path.resolve() for finding in findings}
+        self.assertIn((root / "a.env").resolve(), scanned)
+        self.assertIn((root / "b.env").resolve(), scanned)
+        self.assertTrue(any("scanning all files" in warning for warning in scanner.warnings))
 
 
 def _scan(root: Path, categories: tuple[str, ...]):

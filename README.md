@@ -130,6 +130,10 @@ python3 -m security_scanner scan --target . --format sarif --output reports/resu
 python3 -m security_scanner scan --target . --format cyclonedx --output reports/sbom.cdx.json
 python3 -m security_scanner scan --target . --enable-osv --format html
 python3 -m security_scanner scan --target . --enable-vuln-intel --format html
+python3 -m security_scanner scan --target . --enable-osv --reachability --format json
+python3 -m security_scanner scan --target . --ai-triage --llm ollama/qwen2.5-coder:7b --format json
+python3 -m security_scanner scan --target . --changed-only --base origin/main --format sarif --fail-on high
+python3 -m security_scanner fix --target .            # dry-run diff; add --apply to write changes
 python3 -m security_scanner scan --target . --enable-vuln-intel --format cyclonedx-vex --output reports/vex.cdx.json
 python3 -m security_scanner init-security --target . --project-name my-project
 python3 -m security_scanner install-hook --target . --fail-on high
@@ -149,7 +153,40 @@ SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scann
 
 `--fail-on` returns a non-zero exit code when findings at or above that severity are present, which is useful for CI or scheduled jobs.
 
-`--enable-osv` sends exact package names and pinned versions from supported manifests to OSV.dev. `--enable-vuln-intel` implies OSV and enriches CVEs with CISA Known Exploited Vulnerabilities and FIRST EPSS priority data. Both are disabled by default so normal local scans remain offline. Supported dependency inventory inputs include Python requirements, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, npm package locks, `yarn.lock`, and `pnpm-lock.yaml`; range-only entries such as `^1.2.3` or `>=1.2` are kept in the SBOM but skipped for OSV until a lockfile resolves the exact version.
+`--enable-osv` sends exact package names and pinned versions from supported manifests to OSV.dev. `--enable-vuln-intel` implies OSV and enriches CVEs with CISA Known Exploited Vulnerabilities and FIRST EPSS priority data. Both are disabled by default so normal local scans remain offline.
+
+`--reachability` adds an offline, dependency-free pass that labels each OSV dependency finding as `reachable`, `unreachable`, or `unknown` by analyzing the imports in the scanned Python (`ast`) and JavaScript/TypeScript source. A vulnerable package that is never imported is marked `unreachable` so it can be deprioritized; the finding is never removed. With `--fail-on`, add `--reachable-only` to ignore `unreachable` findings when deciding the exit code. The `reachable` label is included in the JSON report.
+
+`--ai-triage` is an opt-in pass that asks a large language model to label each finding as `likely_true`, `likely_false`, or `uncertain`, with a confidence and a one-line reason, to help filter false positives. It is disabled by default. The model is selected with `--llm` or the `KODA_LLM` environment variable using a `<backend>/<model>` spec: `ollama/qwen2.5-coder:7b` (local, no data leaves the machine — the default and recommended path), `anthropic/<model>`, or `openai/<model>` (cloud backends are optional extras and require an API key in `KODA_LLM_API_KEY`). AI triage never changes a finding's severity, so the `--fail-on` gate stays deterministic; the labels (`triage_verdict`, `triage_confidence`, `triage_note`) are added to the JSON report. Raw secret values are never sent to a backend. If no model is configured or the backend is unreachable, the scan continues unlabelled with a warning. See [PRIVACY.md](PRIVACY.md) for what each backend transmits.
+
+`--changed-only --base <ref>` scans only the files changed versus a base git ref, which is the fast path for per-pull-request checks. KODA runs `git diff --name-only <ref>...HEAD` and restricts file-based checks to that set; project-level prevention checks are skipped while diff-scoping. If git is unavailable, the base ref is missing, or the checkout is shallow, KODA prints a warning and falls back to a full scan rather than hiding findings, so the gate is never silently weakened.
+
+### Continuous integration (GitHub Actions)
+
+This repository ships a composite action at `.github/actions/koda/`. From another repository, scan changed files on every pull request and upload results to GitHub code scanning:
+
+```yaml
+jobs:
+  koda-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # required to upload SARIF
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # full history so --changed-only can diff the base branch
+      - uses: <owner>/<koda-repo>/.github/actions/koda@main
+        with:
+          fail-on: high
+          changed-only: "true"  # base ref defaults to origin/<PR base branch>
+```
+
+The action installs KODA, runs the scan with `--format sarif` and `--fail-on`, and uploads the SARIF file. On pull requests it scopes to changed files automatically. Set `fail-on: none` to report without failing the build.
+
+### Auto-fix
+
+`python3 -m security_scanner fix --target .` applies safe, deterministic fixes for the subset of findings that have an unambiguous correction (currently `code.weak-hash` rewriting `.md5(`/`.sha1(` to `.sha256(`, and `code.unsafe-deserialization` rewriting `yaml.load(` to `yaml.safe_load(`). It is **dry-run by default**: it prints a unified diff and writes nothing. Add `--apply` to write the changes; each modified file is backed up as `*.bak` first (use `--no-backup` to skip), and for Python files the result is re-parsed so a fix that would break syntax is skipped rather than written. Scope it with `--rule <id>` to fix one rule at a time. Fixes are line-scoped and conservative — anything uncertain is left for manual review. Supported dependency inventory inputs include Python requirements, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, npm package locks, `yarn.lock`, and `pnpm-lock.yaml`; range-only entries such as `^1.2.3` or `>=1.2` are kept in the SBOM but skipped for OSV until a lockfile resolves the exact version.
 
 `init-security` creates preventive templates without overwriting existing files by default: `SECURITY.md`, Dependabot, a KODA GitHub Actions security workflow with SBOM and OpenSSF Scorecard jobs, CODEOWNERS, a release provenance workflow, `.dockerignore`, `.env.example`, pre-commit guidance, GitHub repository security checklist, ZAP/Dependency-Track notes, VEX tracking notes, SLSA/Sigstore release guardrails, NIST SSDF workflow plan, CISA Secure by Design plan, threat model, secret rotation runbook, API security plan, OWASP SCVS plan, privacy data map, security roadmap, evidence register, security headers baseline, container hardening baseline, Cloud/IaC security plan, AI/LLM security plan, mobile security plan, NIST CSF 2.0 profile, and CISA secure software development attestation checklist. In the native KODA macOS app, the same baseline files can be created from `Prevention Kit > Apply Guardrails to Folders`.
 
@@ -308,6 +345,10 @@ python3 -m security_scanner scan --target . --format sarif --output reports/resu
 python3 -m security_scanner scan --target . --format cyclonedx --output reports/sbom.cdx.json
 python3 -m security_scanner scan --target . --enable-osv --format html
 python3 -m security_scanner scan --target . --enable-vuln-intel --format html
+python3 -m security_scanner scan --target . --enable-osv --reachability --format json
+python3 -m security_scanner scan --target . --ai-triage --llm ollama/qwen2.5-coder:7b --format json
+python3 -m security_scanner scan --target . --changed-only --base origin/main --format sarif --fail-on high
+python3 -m security_scanner fix --target .            # dry-run diff; add --apply to write changes
 python3 -m security_scanner scan --target . --enable-vuln-intel --format cyclonedx-vex --output reports/vex.cdx.json
 python3 -m security_scanner init-security --target . --project-name my-project
 python3 -m security_scanner install-hook --target . --fail-on high
@@ -327,7 +368,40 @@ SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scann
 
 `--fail-on`은 지정한 심각도 이상의 발견 항목이 있을 때 0이 아닌 종료 코드를 반환하므로 CI나 예약 작업에 사용할 수 있습니다.
 
-`--enable-osv`는 지원되는 매니페스트에서 정확한 패키지명과 고정 버전을 OSV.dev로 조회합니다. `--enable-vuln-intel`은 OSV를 포함하고 CVE가 있을 때 CISA Known Exploited Vulnerabilities와 FIRST EPSS 우선순위 정보를 덧붙입니다. 기본값은 꺼짐이므로 일반 로컬 스캔은 오프라인으로 유지됩니다. Python requirements, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, npm package lock, `yarn.lock`, `pnpm-lock.yaml`을 의존성 인벤토리 입력으로 사용하며, `^1.2.3`이나 `>=1.2` 같은 범위 버전은 SBOM에는 남기되 lockfile로 실제 버전이 확정되기 전까지 OSV 조회에서 제외합니다.
+`--enable-osv`는 지원되는 매니페스트에서 정확한 패키지명과 고정 버전을 OSV.dev로 조회합니다. `--enable-vuln-intel`은 OSV를 포함하고 CVE가 있을 때 CISA Known Exploited Vulnerabilities와 FIRST EPSS 우선순위 정보를 덧붙입니다. 기본값은 꺼짐이므로 일반 로컬 스캔은 오프라인으로 유지됩니다.
+
+`--reachability`는 추가 의존성 없이 오프라인으로 동작하는 도달 가능성 분석을 켭니다. 스캔한 Python(`ast`)과 JavaScript/TypeScript 소스의 import를 분석해 각 OSV 의존성 발견을 `reachable`(사용됨), `unreachable`(미사용), `unknown`(판단 불가)으로 라벨링합니다. 한 번도 import하지 않은 취약 패키지는 `unreachable`로 표시해 우선순위를 낮출 수 있으며, 발견 자체는 삭제하지 않습니다. `--fail-on`과 함께 `--reachable-only`를 추가하면 종료 코드 판정에서 `unreachable` 발견을 제외합니다. `reachable` 라벨은 JSON 리포트에 포함됩니다.
+
+`--ai-triage`는 LLM으로 각 발견을 `likely_true`(진짜로 보임), `likely_false`(오탐으로 보임), `uncertain`(불확실)으로 라벨링하고 신뢰도와 한 줄 근거를 붙여 오탐을 거르는 선택 기능입니다. 기본값은 꺼짐입니다. 모델은 `--llm` 또는 `KODA_LLM` 환경 변수에 `<백엔드>/<모델>` 형식으로 지정합니다: `ollama/qwen2.5-coder:7b`(로컬, 데이터가 기기를 벗어나지 않음 — 기본 권장 경로), `anthropic/<모델>`, `openai/<모델>`(클라우드 백엔드는 선택적 extra이며 `KODA_LLM_API_KEY`에 API 키 필요). AI triage는 발견의 심각도를 절대 바꾸지 않으므로 `--fail-on` 게이트는 결정론적으로 유지되며, 라벨(`triage_verdict`, `triage_confidence`, `triage_note`)은 JSON 리포트에 추가됩니다. 비밀값 원문은 백엔드로 전송하지 않습니다. 모델이 설정되지 않았거나 백엔드에 연결할 수 없으면 스캔은 라벨 없이 계속되고 경고를 출력합니다. 각 백엔드가 무엇을 전송하는지는 [PRIVACY.md](PRIVACY.md)를 참고하세요.
+
+`--changed-only --base <ref>`는 base git ref 대비 변경된 파일만 스캔하므로 PR 단위 빠른 점검에 적합합니다. KODA는 `git diff --name-only <ref>...HEAD`를 실행해 그 파일들에만 파일 기반 점검을 적용하며, diff 스코프 동안에는 프로젝트 단위 prevention 점검은 건너뜁니다. git을 사용할 수 없거나 base ref가 없거나 shallow 체크아웃이면 경고를 출력하고 전체 스캔으로 폴백하므로, 게이트가 조용히 약화되지 않습니다.
+
+### CI 연동 (GitHub Actions)
+
+이 저장소는 `.github/actions/koda/`에 composite 액션을 포함합니다. 다른 저장소에서 PR마다 변경 파일을 스캔하고 결과를 GitHub code scanning에 업로드하려면:
+
+```yaml
+jobs:
+  koda-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # SARIF 업로드에 필요
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # --changed-only이 base 브랜치와 diff할 수 있도록 전체 히스토리
+      - uses: <owner>/<koda-repo>/.github/actions/koda@main
+        with:
+          fail-on: high
+          changed-only: "true"  # base ref는 origin/<PR base 브랜치>로 자동 설정
+```
+
+액션은 KODA를 설치하고 `--format sarif`와 `--fail-on`으로 스캔한 뒤 SARIF 파일을 업로드합니다. PR에서는 변경 파일로 자동 스코프됩니다. 빌드를 실패시키지 않고 보고만 하려면 `fail-on: none`으로 설정하세요.
+
+### 자동 교정 (Auto-fix)
+
+`python3 -m security_scanner fix --target .`는 명확한 교정안이 있는 일부 발견에 대해 안전한 결정론적 수정을 적용합니다(현재 `code.weak-hash`의 `.md5(`/`.sha1(` → `.sha256(`, `code.unsafe-deserialization`의 `yaml.load(` → `yaml.safe_load(`). **기본은 드라이런**으로, unified diff만 출력하고 파일은 변경하지 않습니다. `--apply`를 붙이면 실제로 수정하며, 각 파일은 먼저 `*.bak`로 백업됩니다(`--no-backup`로 생략). Python 파일은 수정 결과를 다시 파싱해 구문이 깨지는 수정은 적용하지 않고 건너뜁니다. `--rule <id>`로 한 룰씩 좁혀서 적용할 수 있습니다. 수정은 라인 단위로 보수적으로 이뤄지며, 불확실한 것은 수동 검토로 남깁니다. Python requirements, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, npm package lock, `yarn.lock`, `pnpm-lock.yaml`을 의존성 인벤토리 입력으로 사용하며, `^1.2.3`이나 `>=1.2` 같은 범위 버전은 SBOM에는 남기되 lockfile로 실제 버전이 확정되기 전까지 OSV 조회에서 제외합니다.
 
 `init-security`는 기존 파일을 덮어쓰지 않고 `SECURITY.md`, Dependabot, SBOM과 OpenSSF Scorecard job이 포함된 KODA GitHub Actions 보안 workflow, CODEOWNERS, release provenance workflow, `.dockerignore`, `.env.example`, pre-commit 안내, GitHub 저장소 보안 설정 체크리스트, ZAP/Dependency-Track 안내 문서, VEX 추적 문서, SLSA/Sigstore 릴리스 가드레일, NIST SSDF workflow 계획, CISA Secure by Design 예방 계획, 위협 모델, 비밀값 로테이션 런북, API 보안 계획, OWASP SCVS 계획, 개인정보 데이터 맵, 보안 로드맵, 보안 증적 대장, 보안 헤더 기준, 컨테이너 하드닝 기준, Cloud/IaC 보안 계획, AI/LLM 보안 계획, 모바일 보안 계획, NIST CSF 2.0 프로파일, CISA 보안 소프트웨어 개발 증명 체크리스트를 생성합니다. macOS KODA 앱에서는 `예방 키트 > 선택 폴더에 예방 설정 적용`으로 같은 기준 파일을 앱 안에서 바로 생성할 수 있습니다.
 

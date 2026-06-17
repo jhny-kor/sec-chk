@@ -1,0 +1,89 @@
+name: "KODA Security Scan"
+description: "Run the KODA local security scanner, gate on severity, and upload SARIF to GitHub code scanning."
+author: "KODA"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  target:
+    description: "Folder, file, or archive to scan."
+    required: false
+    default: "."
+  categories:
+    description: "Comma-separated categories to run (secrets,dependencies,configuration,code,prevention)."
+    required: false
+    default: "secrets,dependencies,configuration,code"
+  fail-on:
+    description: "Severity that fails the build (info, low, medium, high, critical), or 'none' to never fail."
+    required: false
+    default: "high"
+  changed-only:
+    description: "Scan only files changed versus the base ref (recommended for pull requests)."
+    required: false
+    default: "true"
+  base-ref:
+    description: "Base git ref for changed-only. Defaults to origin/<PR base branch> on pull_request events."
+    required: false
+    default: ""
+  sarif-file:
+    description: "Path to write the SARIF report."
+    required: false
+    default: "koda.sarif"
+  upload-sarif:
+    description: "Upload the SARIF report to GitHub code scanning."
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+
+    - name: Install KODA
+      shell: bash
+      run: |
+        set -euo pipefail
+        koda_root="$(cd "${{ github.action_path }}/../../.." && pwd)"
+        echo "Installing KODA from $koda_root"
+        python -m pip install --upgrade pip
+        python -m pip install "$koda_root"
+
+    - name: Run KODA scan
+      shell: bash
+      run: |
+        set -euo pipefail
+        base="${{ inputs.base-ref }}"
+        if [ -z "$base" ] && [ -n "${{ github.base_ref }}" ]; then
+          base="origin/${{ github.base_ref }}"
+        fi
+
+        args=(--target "${{ inputs.target }}" --format sarif --output "${{ inputs.sarif-file }}")
+
+        IFS=',' read -ra categories <<< "${{ inputs.categories }}"
+        for category in "${categories[@]}"; do
+          category="$(echo "$category" | tr -d '[:space:]')"
+          if [ -n "$category" ]; then
+            args+=(--category "$category")
+          fi
+        done
+
+        if [ "${{ inputs.fail-on }}" != "none" ]; then
+          args+=(--fail-on "${{ inputs.fail-on }}")
+        fi
+
+        if [ "${{ inputs.changed-only }}" = "true" ] && [ -n "$base" ]; then
+          args+=(--changed-only --base "$base")
+        fi
+
+        echo "Running: python -m security_scanner scan ${args[*]}"
+        python -m security_scanner scan "${args[@]}"
+
+    - name: Upload SARIF
+      if: ${{ always() && inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}

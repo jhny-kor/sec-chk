@@ -35,7 +35,24 @@ def config_from_dict(raw: dict[str, Any], base_dir: Path | None = None) -> Scann
     report = _report_from_dict(raw.get("report", {}), base)
     enable_vuln_intel = bool(raw.get("enable_vuln_intel", False))
     enable_osv = bool(raw.get("enable_osv", False)) or enable_vuln_intel
-    return ScannerConfig(targets=targets, report=report, enable_osv=enable_osv, enable_vuln_intel=enable_vuln_intel)
+    enable_reachability = bool(raw.get("enable_reachability", False))
+    enable_ai_triage = bool(raw.get("enable_ai_triage", False))
+    llm_model_raw = raw.get("llm_model")
+    llm_model = str(llm_model_raw) if isinstance(llm_model_raw, str) and llm_model_raw.strip() else None
+    changed_only = bool(raw.get("changed_only", False))
+    diff_base_raw = raw.get("diff_base")
+    diff_base = str(diff_base_raw) if isinstance(diff_base_raw, str) and diff_base_raw.strip() else None
+    return ScannerConfig(
+        targets=targets,
+        report=report,
+        enable_osv=enable_osv,
+        enable_vuln_intel=enable_vuln_intel,
+        enable_reachability=enable_reachability,
+        enable_ai_triage=enable_ai_triage,
+        llm_model=llm_model,
+        changed_only=changed_only,
+        diff_base=diff_base,
+    )
 
 
 def _target_from_dict(raw: dict[str, Any], base_dir: Path) -> TargetConfig:
