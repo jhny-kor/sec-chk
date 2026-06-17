@@ -353,7 +353,7 @@ CODE_PATTERN_RULES = (
         "API handler appears to mass-assign request body data",
         "medium",
         re.compile(
-            rf"(\b(create|update|assign|save|insert|merge)\s*\([^#\n]*(req\.body|request\.body|body|params)|\.\.\.\s*(req\.body|request\.body|body))",
+            r"(\b(create|update|assign|save|insert|merge)\s*\([^#\n]*(req\.body|request\.body|body|params)|\.\.\.\s*(req\.body|request\.body|body))",
             re.IGNORECASE,
         ),
         "Request body data appears to be assigned directly to a model or persistence call.",

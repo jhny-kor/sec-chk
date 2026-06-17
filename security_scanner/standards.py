@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .models import CATEGORIES, DEFAULT_CATEGORIES, Finding
+from .models import DEFAULT_CATEGORIES, Finding
 
 
 DEFAULT_STANDARD = "local"

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 from ..models import Finding, TargetConfig
 from .common import find_line_containing, read_text_lines
