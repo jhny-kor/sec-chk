@@ -16,3 +16,5 @@ build/
 dist/macos/
 xcuserdata/
 *.xcuserstate
+.omc/
+*.mov
