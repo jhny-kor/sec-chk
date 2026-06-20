@@ -9,8 +9,9 @@
 > - **C3 Reachability ✅ 구현 완료**(`security_scanner/reachability.py`, `--reachability`/`--reachable-only`, JSON `reachable` 필드).
 > - **C5 CI/CD diff-scope ✅ 구현 완료**(`security_scanner/git_changes.py`, `--changed-only`/`--base`, git 실패 시 전체 스캔 폴백, 배포형 composite action `.github/actions/koda/action.yml`, README CI 섹션).
 > - **C4 Auto-Fix ✅ 구현 완료**(`security_scanner/fixes/`: 결정론적 line-scoped fixer[weak-hash, yaml.load], `fix` CLI 기본 dry-run diff + `--apply` 백업·구문검증 게이트, `--rule`/`--no-backup`).
-> - 테스트: reachability 10 + provider 5 + triage 7 + diff-scope 5 + auto-fix 5 = 32종 추가(전체 123 통과). **C1·C2·C3·C4·C5 전부 구현 완료.**
-> 최종 갱신: 2026-06-14
+> - 테스트: reachability 10 + provider 5 + triage 7 + diff-scope 5 + auto-fix 5 = 32종 추가(전체 123 통과). **C1·C2·C3·C4·C5 전부 구현 완료(Python).**
+> - **네이티브 Swift 앱 포팅 ✅ 완료** (`platforms/macos/KODA/KODA/ScannerBridge.swift` 등): C4 `SecurityCodeFixer`(+`.replaceFile` 백업), C3 `NativeReachability`(OSV 발견 라벨), C2 `NativeLLMProvider`+`NativeAITriage`(로컬 Ollama/클라우드, "AI 오탐 검토" 버튼), C5 `NativeGitChanges`("변경 파일만 점검" 버튼). 각 기능 `xcodebuild` BUILD SUCCEEDED. 동작 의미는 Python 구현(테스트 통과)과 동일.
+> 최종 갱신: 2026-06-17
 
 ---
 
