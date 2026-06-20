@@ -286,7 +286,8 @@ final class ScannerBridge: ObservableObject {
             return []
         }
 
-        let plans = targets.flatMap { SecurityAutoFixer.plans(for: $0) }
+        var plans = targets.flatMap { SecurityAutoFixer.plans(for: $0) }
+        plans += targets.flatMap { SecurityCodeFixer.plans(for: $0) }
         if plans.isEmpty {
             setStatus(
                 ko: "적용할 자동 수정 항목이 없습니다.",
@@ -2453,6 +2454,8 @@ struct SecurityFixPlan: Identifiable, Hashable {
     enum Action: Hashable {
         case writeFile(String)
         case appendLines([String])
+        // Overwrite an existing file with corrected content (used by code-level auto-fix).
+        case replaceFile(String)
     }
 
     let id: String
@@ -2578,6 +2581,17 @@ private enum SecurityAutoFixer {
                         try output.write(to: destination, atomically: true, encoding: .utf8)
                         applied += 1
                     }
+                case .replaceFile(let content):
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        // Back up the original next to it before overwriting with the fix.
+                        let backup = destination.appendingPathExtension("bak")
+                        try? FileManager.default.removeItem(at: backup)
+                        try FileManager.default.copyItem(at: destination, to: backup)
+                        try content.write(to: destination, atomically: true, encoding: .utf8)
+                        applied += 1
+                    } else {
+                        skipped += 1
+                    }
                 }
             } catch {
                 failures.append("\(plan.relativePath): \(error.localizedDescription)")
@@ -2625,6 +2639,116 @@ private enum SecurityAutoFixer {
                 action: .appendLines(missing)
             )
         )
+    }
+}
+
+/// Deterministic, line-scoped code fixes that mirror the Python `security_scanner.fixes`
+/// engine. Conservative: only rewrites forms with an unambiguous safe equivalent, and
+/// leaves the original backed up as `*.bak` when applied (see SecurityAutoFixer.apply).
+private enum SecurityCodeFixer {
+    static let codeExtensions: Set<String> = [
+        "py", "js", "jsx", "ts", "tsx", "vue", "rb", "php", "java", "kt", "cs", "go", "rs", "swift",
+    ]
+    private static let excludedDirectories: Set<String> = [
+        ".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".build", "reports",
+    ]
+    private static let maxFileBytes = 524_288
+
+    private static let weakHashRegex = try! NSRegularExpression(
+        pattern: "\\.(?:md5|sha1)\\(",
+        options: [.caseInsensitive]
+    )
+
+    static func plans(for root: URL) -> [SecurityFixPlan] {
+        let accessed = root.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { root.stopAccessingSecurityScopedResource() }
+        }
+
+        let fileManager = FileManager.default
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return []
+        }
+        guard let enumerator = fileManager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var plans: [SecurityFixPlan] = []
+        for case let fileURL as URL in enumerator {
+            if fileURL.pathComponents.contains(where: { excludedDirectories.contains($0) }) {
+                continue
+            }
+            guard codeExtensions.contains(fileURL.pathExtension.lowercased()) else { continue }
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values?.isRegularFile == true, (values?.fileSize ?? 0) <= maxFileBytes else { continue }
+            guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
+            guard let fixed = fixContent(text) else { continue }
+
+            let relative = relativePath(of: fileURL, from: root)
+            plans.append(
+                SecurityFixPlan(
+                    id: "\(root.path)::codefix::\(relative)",
+                    targetURL: root,
+                    relativePath: relative,
+                    titleKO: "코드 수정: \(relative)",
+                    titleEN: "Code fix: \(relative)",
+                    detailKO: "약한 해시/안전하지 않은 역직렬화를 안전한 형태로 교체합니다. 적용 시 원본은 .bak로 백업됩니다. (라인: \(fixed.changedLines))",
+                    detailEN: "Replace weak hashes / unsafe deserialization with safe equivalents. The original is backed up as .bak on apply. (lines: \(fixed.changedLines))",
+                    action: .replaceFile(fixed.text)
+                )
+            )
+        }
+        return plans
+    }
+
+    /// Returns the corrected text plus a summary of changed line numbers, or nil if unchanged.
+    static func fixContent(_ text: String) -> (text: String, changedLines: String)? {
+        let lines = text.components(separatedBy: "\n")
+        var output: [String] = []
+        output.reserveCapacity(lines.count)
+        var changed: [Int] = []
+        for (index, line) in lines.enumerated() {
+            var newLine = line
+            if let hashFixed = fixWeakHashLine(newLine) { newLine = hashFixed }
+            if let yamlFixed = fixYamlLoadLine(newLine) { newLine = yamlFixed }
+            if newLine != line {
+                changed.append(index + 1)
+            }
+            output.append(newLine)
+        }
+        guard !changed.isEmpty else { return nil }
+        return (output.joined(separator: "\n"), changed.map(String.init).joined(separator: ", "))
+    }
+
+    /// Rewrite qualified weak-hash calls (`x.md5(` / `x.sha1(`) to `.sha256(`.
+    static func fixWeakHashLine(_ line: String) -> String? {
+        let range = NSRange(line.startIndex..., in: line)
+        guard weakHashRegex.firstMatch(in: line, options: [], range: range) != nil else { return nil }
+        let fixed = weakHashRegex.stringByReplacingMatches(in: line, options: [], range: range, withTemplate: ".sha256(")
+        return fixed == line ? nil : fixed
+    }
+
+    /// Rewrite `yaml.load(` to `yaml.safe_load(` unless a Loader is already specified.
+    static func fixYamlLoadLine(_ line: String) -> String? {
+        guard line.contains("yaml.load(") else { return nil }
+        if line.contains("safe_load") || line.contains("Loader") { return nil }
+        let fixed = line.replacingOccurrences(of: "yaml.load(", with: "yaml.safe_load(")
+        return fixed == line ? nil : fixed
+    }
+
+    private static func relativePath(of fileURL: URL, from root: URL) -> String {
+        let rootPath = root.standardizedFileURL.path
+        let filePath = fileURL.standardizedFileURL.path
+        if filePath.hasPrefix(rootPath) {
+            let trimmed = String(filePath.dropFirst(rootPath.count))
+            return trimmed.hasPrefix("/") ? String(trimmed.dropFirst()) : trimmed
+        }
+        return fileURL.lastPathComponent
     }
 }
 
