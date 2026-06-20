@@ -583,6 +583,13 @@ enum AppLanguage: String, Hashable {
         }
     }
 
+    var runChangedOnlyTitle: String {
+        switch self {
+        case .ko: return "변경 파일만 점검 (git)"
+        case .en: return "Scan changed files only (git)"
+        }
+    }
+
     var generateVEXTitle: String {
         switch self {
         case .ko: return "VEX 문서 생성"

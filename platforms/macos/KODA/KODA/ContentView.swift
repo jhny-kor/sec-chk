@@ -213,6 +213,13 @@ struct ContentView: View {
                 .disabled(scanner.isRunning)
 
                 Button {
+                    scanner.runChangedOnlyScan(language: language)
+                } label: {
+                    Label(language.runChangedOnlyTitle, systemImage: "arrow.triangle.branch")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
                     scanner.exportVEX(language: language)
                 } label: {
                     Label(language.generateVEXTitle, systemImage: "doc.text.magnifyingglass")

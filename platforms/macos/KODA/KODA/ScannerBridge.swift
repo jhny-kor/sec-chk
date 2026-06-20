@@ -590,6 +590,58 @@ final class ScannerBridge: ObservableObject {
         }
     }
 
+    static func resolvedDiffBase() -> String {
+        let environment = ProcessInfo.processInfo.environment
+        if let env = environment["KODA_DIFF_BASE"], !env.trimmingCharacters(in: .whitespaces).isEmpty {
+            return env.trimmingCharacters(in: .whitespaces)
+        }
+        if let stored = UserDefaults.standard.string(forKey: "kodaDiffBase"),
+           !stored.trimmingCharacters(in: .whitespaces).isEmpty {
+            return stored.trimmingCharacters(in: .whitespaces)
+        }
+        return "origin/main"
+    }
+
+    func runChangedOnlyScan(language: AppLanguage) {
+        let targets = selectedTargets
+        guard !targets.isEmpty else {
+            setStatus(ko: "변경 파일 점검을 실행할 폴더를 선택하세요.", en: "Choose folders before running the changed-files scan.")
+            statusColor = .red
+            return
+        }
+
+        isRunning = true
+        reportURL = nil
+        reportItems = []
+        let base = Self.resolvedDiffBase()
+        setDetail(
+            ko: "git에서 \(base) 대비 변경된 파일만 점검합니다. 저장소가 아니거나 base를 찾을 수 없으면 전체 점검으로 진행합니다.",
+            en: "Scanning only files changed versus \(base). Falls back to a full scan if the folder is not a git repo or the base is missing."
+        )
+        setStatus(ko: "변경 파일 점검을 실행하고 있습니다.", en: "Running changed-files scan.")
+        statusColor = .secondary
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.runChangedOnlyScanCommand(targets: targets, base: base)
+            }.value
+            isRunning = false
+            setDetail(ko: result.detailKO, en: result.detailEN)
+            if result.exitCode == 0, let output = result.reportURL {
+                reportURL = output
+                reportItems = result.reportItems
+                if let snapshot = result.scoreSnapshot {
+                    recordScoreSnapshot(snapshot)
+                }
+                setStatus(ko: result.messageKO, en: result.messageEN)
+                statusColor = .green
+            } else {
+                setStatus(ko: result.messageKO, en: result.messageEN)
+                statusColor = result.reportURL == nil && result.exitCode == 0 ? .secondary : .red
+            }
+        }
+    }
+
     static func resolvedLLMModel() -> String {
         let environment = ProcessInfo.processInfo.environment
         if let env = environment["KODA_LLM"], !env.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -1974,6 +2026,82 @@ final class ScannerBridge: ObservableObject {
                 reportURL: nil,
                 messageKO: "OSV/CVE + KEV/EPSS 조회 실패",
                 messageEN: "OSV/CVE + KEV/EPSS lookup failed",
+                detailKO: error.localizedDescription,
+                detailEN: error.localizedDescription,
+                reportItems: [],
+                scoreSnapshot: nil
+            )
+        }
+    }
+
+    private nonisolated static func runChangedOnlyScanCommand(targets: [URL], base: String) -> ScanResult {
+        let accessedTargets = targets.filter { $0.startAccessingSecurityScopedResource() }
+        defer {
+            accessedTargets.forEach { $0.stopAccessingSecurityScopedResource() }
+        }
+
+        var changedURLs: [URL] = []
+        var warnings: [String] = []
+        var gitFallback = false
+        for target in targets {
+            var isDirectory = ObjCBool(false)
+            guard FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+            let (urls, warning) = NativeGitChanges.changedFiles(base: base, in: target)
+            if let warning {
+                warnings.append(warning)
+                gitFallback = true
+            }
+            changedURLs.append(contentsOf: urls)
+        }
+
+        let existing = Array(Set(changedURLs)).filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !existing.isEmpty else {
+            if gitFallback {
+                // Could not diff any target: run a normal full scan so findings are never hidden.
+                return runScanCommand(targets: targets)
+            }
+            return ScanResult(
+                exitCode: 0,
+                reportURL: nil,
+                messageKO: "\(base) 대비 변경된 파일이 없습니다.",
+                messageEN: "No files changed versus \(base).",
+                detailKO: "",
+                detailEN: "",
+                reportItems: [],
+                scoreSnapshot: nil
+            )
+        }
+
+        do {
+            let scanner = NativeSecurityScanner()
+            let scanResult = try scanner.scan(targets: existing)
+            let result = NativeScanResult(
+                findings: scanResult.findings,
+                warnings: scanResult.warnings + warnings,
+                targetCount: existing.count,
+                scannedFileCount: scanResult.scannedFileCount,
+                generatedAt: Date()
+            )
+            let overallFiles = try writeReportFiles(result: result, scanner: scanner, prefix: "KODA-changed-only")
+            let reportItems = try buildReportItems(result: result, scanner: scanner, overallFiles: overallFiles)
+            return ScanResult(
+                exitCode: 0,
+                reportURL: overallFiles.koHTMLURL,
+                messageKO: "변경 파일 점검 완료: 파일 \(existing.count)개, 발견 \(result.findings.count)건",
+                messageEN: "Changed-files scan complete: \(existing.count) file(s), \(result.findings.count) finding(s)",
+                detailKO: warnings.first ?? "변경된 파일만 점검했습니다(\(base) 대비).",
+                detailEN: warnings.first ?? "Scanned only files changed versus \(base).",
+                reportItems: reportItems,
+                scoreSnapshot: SecurityScoreSnapshot(result: result, targets: existing)
+            )
+        } catch {
+            return ScanResult(
+                exitCode: 2,
+                reportURL: nil,
+                messageKO: "변경 파일 점검 실패",
+                messageEN: "Changed-files scan failed",
                 detailKO: error.localizedDescription,
                 detailEN: error.localizedDescription,
                 reportItems: [],
@@ -3853,6 +3981,60 @@ private enum NativeDependencyInventory {
             return "\(targetName)/\(rel)"
         }
         return file.lastPathComponent
+    }
+}
+
+/// Git diff-scope helper, mirroring the Python `security_scanner.git_changes` module. Runs
+/// `git diff` to list files changed versus a base ref. Any problem returns a warning and an
+/// empty list so the caller can fall back to a full scan rather than hiding findings.
+private enum NativeGitChanges {
+    private static let gitPath = "/usr/bin/git"
+
+    static func changedFiles(base: String, in directory: URL) -> (urls: [URL], warning: String?) {
+        let trimmedBase = base.trimmingCharacters(in: .whitespaces)
+        guard !trimmedBase.isEmpty else {
+            return ([], "변경 파일 점검에는 base ref가 필요합니다.")
+        }
+        guard FileManager.default.isExecutableFile(atPath: gitPath) else {
+            return ([], "git을 찾을 수 없어 전체 점검으로 진행합니다.")
+        }
+        guard let top = run(["rev-parse", "--show-toplevel"], in: directory)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !top.isEmpty else {
+            return ([], "git 저장소가 아니어서 전체 점검으로 진행합니다: \(directory.lastPathComponent)")
+        }
+        let root = URL(fileURLWithPath: top)
+        guard let output = run(["diff", "--name-only", "--diff-filter=d", "\(trimmedBase)...HEAD"], in: root) else {
+            return ([], "git diff(\(trimmedBase)) 실행에 실패해 전체 점검으로 진행합니다.")
+        }
+        var urls: [URL] = []
+        for line in output.split(separator: "\n") {
+            let relative = line.trimmingCharacters(in: .whitespaces)
+            if !relative.isEmpty {
+                urls.append(root.appendingPathComponent(relative))
+            }
+        }
+        return (urls, nil)
+    }
+
+    private static func run(_ arguments: [String], in directory: URL) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: gitPath)
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        _ = stderr.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
 
