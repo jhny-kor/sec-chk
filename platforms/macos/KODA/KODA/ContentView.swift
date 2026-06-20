@@ -160,267 +160,257 @@ struct ContentView: View {
             Spacer()
 
             Menu {
-                Button {
-                    fixPlans = scanner.buildSecurityFixPlans(language: language)
-                    showFixWizard = true
+                Menu {
+                    Button {
+                        fixPlans = scanner.buildSecurityFixPlans(language: language)
+                        showFixWizard = true
+                    } label: {
+                        Label(language.autoFixWizardTitle, systemImage: "wand.and.sparkles")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.applySecurityToolkit(language: language)
+                    } label: {
+                        Label(language.applyPreventionToolkitTitle, systemImage: "folder.badge.gearshape")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.installPreCommitHook(language: language)
+                    } label: {
+                        Label(language.installPreCommitHookTitle, systemImage: "checkmark.seal")
+                    }
+                    .disabled(!scanner.hasSelection || scanner.isRunning)
+
+                    Button {
+                        scanner.createIgnoreTemplate(language: language)
+                    } label: {
+                        Label(language.createIgnoreFileTitle, systemImage: "eye.slash")
+                    }
+                    .disabled(scanner.isRunning)
                 } label: {
-                    Label(language.autoFixWizardTitle, systemImage: "wand.and.sparkles")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.applySecurityToolkit(language: language)
-                } label: {
-                    Label(language.applyPreventionToolkitTitle, systemImage: "folder.badge.gearshape")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.installPreCommitHook(language: language)
-                } label: {
-                    Label(language.installPreCommitHookTitle, systemImage: "checkmark.seal")
-                }
-                .disabled(!scanner.hasSelection || scanner.isRunning)
-
-                Divider()
-
-                Button {
-                    scanner.exportSBOM(language: language)
-                } label: {
-                    Label(language.generateSBOMTitle, systemImage: "shippingbox")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.runOSVLookup(language: language)
-                } label: {
-                    Label(language.runOSVLookupTitle, systemImage: "network")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.runHostScan(language: language)
-                } label: {
-                    Label(language.runHostScanTitle, systemImage: "lock.laptopcomputer")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.runAITriage(language: language)
-                } label: {
-                    Label(language.runAITriageTitle, systemImage: "sparkles")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.runChangedOnlyScan(language: language)
-                } label: {
-                    Label(language.runChangedOnlyTitle, systemImage: "arrow.triangle.branch")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportVEX(language: language)
-                } label: {
-                    Label(language.generateVEXTitle, systemImage: "doc.text.magnifyingglass")
-                }
-                .disabled(scanner.isRunning)
-
-                Divider()
-
-                Button {
-                    scanner.exportZAPBaselinePlan(language: language)
-                } label: {
-                    Label(language.generateZAPPlanTitle, systemImage: "bolt.shield")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.runZAPBaseline(language: language)
-                } label: {
-                    Label(language.runZAPDASTTitle, systemImage: "play.shield")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportEvidenceChecklist(language: language)
-                } label: {
-                    Label(language.evidenceChecklistTitle, systemImage: "checklist")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportReleaseSecurityPackage(language: language)
-                } label: {
-                    Label(language.releaseSecurityPackageTitle, systemImage: "archivebox")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportReleaseSigningPlan(language: language)
-                } label: {
-                    Label(language.releaseSigningPlanTitle, systemImage: "signature")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportScoreDiff(language: language)
-                } label: {
-                    Label(language.scoreDiffTitle, systemImage: "arrow.triangle.2.circlepath")
-                }
-                .disabled(scanner.isRunning)
-
-                Divider()
-
-                Button {
-                    scanner.createIgnoreTemplate(language: language)
-                } label: {
-                    Label(language.createIgnoreFileTitle, systemImage: "eye.slash")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportRepositorySecurityChecklist(language: language)
-                } label: {
-                    Label(language.repositorySecurityChecklistTitle, systemImage: "lock.shield")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportSSDFWorkflowPlan(language: language)
-                } label: {
-                    Label(language.ssdfWorkflowPlanTitle, systemImage: "list.clipboard")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportSecureByDesignPlan(language: language)
-                } label: {
-                    Label(language.secureByDesignPlanTitle, systemImage: "shield.righthalf.filled")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    showThreatModelWizard = true
-                } label: {
-                    Label(language.threatModelWizardTitle, systemImage: "person.text.rectangle")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    showComplianceDashboard = true
-                } label: {
-                    Label(language.complianceDashboardTitle, systemImage: "checkmark.rectangle.stack")
+                    Label(language == .ko ? "적용 & 차단" : "Apply & Block", systemImage: "checkmark.shield")
                 }
 
-                Button {
-                    scanner.exportSecretResponseChecklist(language: language)
-                } label: {
-                    Label(language.secretRotationRunbookTitle, systemImage: "key.horizontal")
-                }
-                .disabled(scanner.isRunning)
+                Menu {
+                    Button {
+                        scanner.exportSBOM(language: language)
+                    } label: {
+                        Label(language.generateSBOMTitle, systemImage: "shippingbox")
+                    }
+                    .disabled(scanner.isRunning)
 
-                Button {
-                    scanner.exportAILLMSecurityPlan(language: language)
-                } label: {
-                    Label(language.aiLLMSecurityPlanTitle, systemImage: "sparkles")
-                }
-                .disabled(scanner.isRunning)
+                    Button {
+                        scanner.exportVEX(language: language)
+                    } label: {
+                        Label(language.generateVEXTitle, systemImage: "doc.text.magnifyingglass")
+                    }
+                    .disabled(scanner.isRunning)
 
-                Button {
-                    scanner.exportMobileSecurityPlan(language: language)
-                } label: {
-                    Label(language.mobileSecurityPlanTitle, systemImage: "iphone.and.arrow.forward")
-                }
-                .disabled(scanner.isRunning)
+                    Button {
+                        scanner.exportReleaseSecurityPackage(language: language)
+                    } label: {
+                        Label(language.releaseSecurityPackageTitle, systemImage: "archivebox")
+                    }
+                    .disabled(scanner.isRunning)
 
-                Button {
-                    scanner.exportNISTCSFProfile(language: language)
+                    Button {
+                        scanner.exportReleaseSigningPlan(language: language)
+                    } label: {
+                        Label(language.releaseSigningPlanTitle, systemImage: "signature")
+                    }
+                    .disabled(scanner.isRunning)
                 } label: {
-                    Label(language.nistCSFProfileTitle, systemImage: "hexagon.lefthalf.filled")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportCISAAttestationChecklist(language: language)
-                } label: {
-                    Label(language.cisaAttestationChecklistTitle, systemImage: "doc.text.badge.checkmark")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportAPISecurityPlan(language: language)
-                } label: {
-                    Label(language == .ko ? "API 보안 계획" : "API Security Plan", systemImage: "point.3.connected.trianglepath.dotted")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportSCVSPlan(language: language)
-                } label: {
-                    Label(language == .ko ? "OWASP SCVS 계획" : "OWASP SCVS Plan", systemImage: "shippingbox.and.arrow.backward")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportPrivacyDataMap(language: language)
-                } label: {
-                    Label(language == .ko ? "개인정보 데이터 맵" : "Privacy Data Map", systemImage: "person.text.rectangle")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportSecurityRoadmap(language: language)
-                } label: {
-                    Label(language == .ko ? "보안 로드맵" : "Security Roadmap", systemImage: "map")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportEvidenceRegister(language: language)
-                } label: {
-                    Label(language == .ko ? "보안 증적 보관대장" : "Evidence Register", systemImage: "archivebox")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportSecurityHeadersBaseline(language: language)
-                } label: {
-                    Label(language == .ko ? "보안 헤더 기준" : "Security Headers", systemImage: "rectangle.and.text.magnifyingglass")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportContainerHardeningBaseline(language: language)
-                } label: {
-                    Label(language == .ko ? "컨테이너 하드닝 기준" : "Container Hardening", systemImage: "shippingbox")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    scanner.exportCloudIACSecurityPlan(language: language)
-                } label: {
-                    Label(language == .ko ? "Cloud/IaC 보안 계획" : "Cloud/IaC Security", systemImage: "cloud")
-                }
-                .disabled(scanner.isRunning)
-
-                Button {
-                    showScoreHistory = true
-                } label: {
-                    Label(language.scoreHistoryTitle, systemImage: "chart.line.uptrend.xyaxis")
+                    Label(language == .ko ? "의존성 & 공급망" : "Dependencies & Supply Chain", systemImage: "shippingbox.and.arrow.backward")
                 }
 
-                Button {
-                    scanner.saveProjectProfile(language: language)
-                } label: {
-                    Label(language.saveProjectProfileTitle, systemImage: "tray.and.arrow.down")
-                }
-                .disabled(!scanner.hasSelection || scanner.isRunning)
+                Menu {
+                    Button {
+                        scanner.exportZAPBaselinePlan(language: language)
+                    } label: {
+                        Label(language.generateZAPPlanTitle, systemImage: "bolt.shield")
+                    }
+                    .disabled(scanner.isRunning)
 
-                Button {
-                    showProjectProfiles = true
+                    Button {
+                        scanner.runZAPBaseline(language: language)
+                    } label: {
+                        Label(language.runZAPDASTTitle, systemImage: "play.shield")
+                    }
+                    .disabled(scanner.isRunning)
                 } label: {
-                    Label(language.projectProfilesTitle, systemImage: "folder.badge.person.crop")
+                    Label(language == .ko ? "동적 점검 (DAST)" : "Dynamic Testing (DAST)", systemImage: "bolt.shield")
+                }
+
+                Menu {
+                    Button {
+                        scanner.exportEvidenceChecklist(language: language)
+                    } label: {
+                        Label(language.evidenceChecklistTitle, systemImage: "checklist")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportRepositorySecurityChecklist(language: language)
+                    } label: {
+                        Label(language.repositorySecurityChecklistTitle, systemImage: "lock.shield")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportSSDFWorkflowPlan(language: language)
+                    } label: {
+                        Label(language.ssdfWorkflowPlanTitle, systemImage: "list.clipboard")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportSecureByDesignPlan(language: language)
+                    } label: {
+                        Label(language.secureByDesignPlanTitle, systemImage: "shield.righthalf.filled")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        showThreatModelWizard = true
+                    } label: {
+                        Label(language.threatModelWizardTitle, systemImage: "person.text.rectangle")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        showComplianceDashboard = true
+                    } label: {
+                        Label(language.complianceDashboardTitle, systemImage: "checkmark.rectangle.stack")
+                    }
+
+                    Button {
+                        scanner.exportSecretResponseChecklist(language: language)
+                    } label: {
+                        Label(language.secretRotationRunbookTitle, systemImage: "key.horizontal")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportAILLMSecurityPlan(language: language)
+                    } label: {
+                        Label(language.aiLLMSecurityPlanTitle, systemImage: "sparkles")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportMobileSecurityPlan(language: language)
+                    } label: {
+                        Label(language.mobileSecurityPlanTitle, systemImage: "iphone.and.arrow.forward")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportNISTCSFProfile(language: language)
+                    } label: {
+                        Label(language.nistCSFProfileTitle, systemImage: "hexagon.lefthalf.filled")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportCISAAttestationChecklist(language: language)
+                    } label: {
+                        Label(language.cisaAttestationChecklistTitle, systemImage: "doc.text.badge.checkmark")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportAPISecurityPlan(language: language)
+                    } label: {
+                        Label(language == .ko ? "API 보안 계획" : "API Security Plan", systemImage: "point.3.connected.trianglepath.dotted")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportSCVSPlan(language: language)
+                    } label: {
+                        Label(language == .ko ? "OWASP SCVS 계획" : "OWASP SCVS Plan", systemImage: "shippingbox.and.arrow.backward")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportPrivacyDataMap(language: language)
+                    } label: {
+                        Label(language == .ko ? "개인정보 데이터 맵" : "Privacy Data Map", systemImage: "person.text.rectangle")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportSecurityRoadmap(language: language)
+                    } label: {
+                        Label(language == .ko ? "보안 로드맵" : "Security Roadmap", systemImage: "map")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportEvidenceRegister(language: language)
+                    } label: {
+                        Label(language == .ko ? "보안 증적 보관대장" : "Evidence Register", systemImage: "archivebox")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportSecurityHeadersBaseline(language: language)
+                    } label: {
+                        Label(language == .ko ? "보안 헤더 기준" : "Security Headers", systemImage: "rectangle.and.text.magnifyingglass")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportContainerHardeningBaseline(language: language)
+                    } label: {
+                        Label(language == .ko ? "컨테이너 하드닝 기준" : "Container Hardening", systemImage: "shippingbox")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        scanner.exportCloudIACSecurityPlan(language: language)
+                    } label: {
+                        Label(language == .ko ? "Cloud/IaC 보안 계획" : "Cloud/IaC Security", systemImage: "cloud")
+                    }
+                    .disabled(scanner.isRunning)
+                } label: {
+                    Label(language == .ko ? "거버넌스 & 컴플라이언스 문서" : "Governance & Compliance Docs", systemImage: "doc.text")
+                }
+
+                Menu {
+                    Button {
+                        scanner.exportScoreDiff(language: language)
+                    } label: {
+                        Label(language.scoreDiffTitle, systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
+                        showScoreHistory = true
+                    } label: {
+                        Label(language.scoreHistoryTitle, systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                } label: {
+                    Label(language == .ko ? "기록 & 추이" : "Reports & Trends", systemImage: "chart.line.uptrend.xyaxis")
+                }
+
+                Menu {
+                    Button {
+                        scanner.saveProjectProfile(language: language)
+                    } label: {
+                        Label(language.saveProjectProfileTitle, systemImage: "tray.and.arrow.down")
+                    }
+                    .disabled(!scanner.hasSelection || scanner.isRunning)
+
+                    Button {
+                        showProjectProfiles = true
+                    } label: {
+                        Label(language.projectProfilesTitle, systemImage: "folder.badge.person.crop")
+                    }
+                } label: {
+                    Label(language == .ko ? "작업 효율" : "Productivity", systemImage: "folder.badge.person.crop")
                 }
 
                 Divider()
@@ -481,6 +471,34 @@ struct ContentView: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!scanner.hasSelection || scanner.isRunning)
+
+                Menu {
+                    Button {
+                        scanner.runOSVLookup(language: language)
+                    } label: {
+                        Label(language.runOSVLookupTitle, systemImage: "network")
+                    }
+                    Button {
+                        scanner.runHostScan(language: language)
+                    } label: {
+                        Label(language.runHostScanTitle, systemImage: "lock.laptopcomputer")
+                    }
+                    Button {
+                        scanner.runAITriage(language: language)
+                    } label: {
+                        Label(language.runAITriageTitle, systemImage: "sparkles")
+                    }
+                    Button {
+                        scanner.runChangedOnlyScan(language: language)
+                    } label: {
+                        Label(language.runChangedOnlyTitle, systemImage: "arrow.triangle.branch")
+                    }
+                } label: {
+                    Label(language == .ko ? "추가 점검" : "More scans", systemImage: "plus.magnifyingglass")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .disabled(scanner.isRunning)
             }
 
             ScrollView {
