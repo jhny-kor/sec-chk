@@ -590,6 +590,57 @@ final class ScannerBridge: ObservableObject {
         }
     }
 
+    static func resolvedLLMModel() -> String {
+        let environment = ProcessInfo.processInfo.environment
+        if let env = environment["KODA_LLM"], !env.trimmingCharacters(in: .whitespaces).isEmpty {
+            return env.trimmingCharacters(in: .whitespaces)
+        }
+        if let stored = UserDefaults.standard.string(forKey: "kodaLLMModel"),
+           !stored.trimmingCharacters(in: .whitespaces).isEmpty {
+            return stored.trimmingCharacters(in: .whitespaces)
+        }
+        return "ollama/qwen2.5-coder:7b"
+    }
+
+    func runAITriage(language: AppLanguage) {
+        let targets = selectedTargets
+        guard !targets.isEmpty else {
+            setStatus(ko: "AI 오탐 검토를 실행할 폴더나 파일을 선택하세요.", en: "Choose folders or files before running AI triage.")
+            statusColor = .red
+            return
+        }
+
+        isRunning = true
+        reportURL = nil
+        reportItems = []
+        let model = Self.resolvedLLMModel()
+        setDetail(
+            ko: "로컬 LLM으로 발견 항목의 오탐 여부를 검토합니다. 모델: \(model). 심각도는 바뀌지 않고 비밀값 원문은 전송되지 않습니다.",
+            en: "Reviewing findings for false positives with a local LLM. Model: \(model). Severity is unchanged and raw secrets are never sent."
+        )
+        setStatus(ko: "AI 오탐 검토를 실행하고 있습니다.", en: "Running AI false-positive triage.")
+        statusColor = .secondary
+
+        Task {
+            let result = await Self.runAITriageCommand(targets: targets, model: model, language: language)
+
+            isRunning = false
+            setDetail(ko: result.detailKO, en: result.detailEN)
+            if result.exitCode == 0, let output = result.reportURL {
+                reportURL = output
+                reportItems = result.reportItems
+                if let snapshot = result.scoreSnapshot {
+                    recordScoreSnapshot(snapshot)
+                }
+                setStatus(ko: result.messageKO, en: result.messageEN)
+                statusColor = .green
+            } else {
+                setStatus(ko: result.messageKO, en: result.messageEN)
+                statusColor = .red
+            }
+        }
+    }
+
     func runOSVLookup(language: AppLanguage) {
         let targets = selectedTargets
         guard !targets.isEmpty else {
@@ -1923,6 +1974,67 @@ final class ScannerBridge: ObservableObject {
                 reportURL: nil,
                 messageKO: "OSV/CVE + KEV/EPSS 조회 실패",
                 messageEN: "OSV/CVE + KEV/EPSS lookup failed",
+                detailKO: error.localizedDescription,
+                detailEN: error.localizedDescription,
+                reportItems: [],
+                scoreSnapshot: nil
+            )
+        }
+    }
+
+    private static func runAITriageCommand(targets: [URL], model: String, language: AppLanguage) async -> ScanResult {
+        let accessedTargets = targets.filter { $0.startAccessingSecurityScopedResource() }
+        defer {
+            accessedTargets.forEach { $0.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let scanner = NativeSecurityScanner()
+            let scanResult = try scanner.scan(targets: targets)
+            guard !scanResult.findings.isEmpty else {
+                return ScanResult(
+                    exitCode: 2,
+                    reportURL: nil,
+                    messageKO: "검토할 발견 항목이 없습니다.",
+                    messageEN: "There are no findings to triage.",
+                    detailKO: "먼저 점검을 실행해 발견 항목이 있는지 확인하세요.",
+                    detailEN: "Run a scan first so there are findings to review.",
+                    reportItems: [],
+                    scoreSnapshot: nil
+                )
+            }
+
+            let (annotated, triageWarnings) = await NativeAITriage.triage(findings: scanResult.findings, model: model, language: language)
+            let labeledCount = annotated.filter { !$0.triageVerdict.isEmpty }.count
+            let falsePositiveCount = annotated.filter { $0.triageVerdict == "likely_false" }.count
+
+            let result = NativeScanResult(
+                findings: annotated,
+                warnings: scanResult.warnings + triageWarnings,
+                targetCount: targets.count,
+                scannedFileCount: scanResult.scannedFileCount,
+                generatedAt: Date()
+            )
+            let overallFiles = try writeReportFiles(result: result, scanner: scanner, prefix: "KODA-ai-triage")
+            let reportItems = try buildReportItems(result: result, scanner: scanner, overallFiles: overallFiles)
+            let warnSuffixKO = triageWarnings.isEmpty ? "" : " | 경고 \(triageWarnings.count)건"
+            let warnSuffixEN = triageWarnings.isEmpty ? "" : " | \(triageWarnings.count) warning(s)"
+            return ScanResult(
+                exitCode: 0,
+                reportURL: overallFiles.koHTMLURL,
+                messageKO: "AI 오탐 검토 완료: 라벨 \(labeledCount)건(오탐 의심 \(falsePositiveCount)건)\(warnSuffixKO)",
+                messageEN: "AI triage complete: labeled \(labeledCount) (likely false-positive \(falsePositiveCount))\(warnSuffixEN)",
+                detailKO: triageWarnings.first ?? "심각도는 변경되지 않으며, 라벨은 발견 항목 근거(evidence)에 추가됩니다.",
+                detailEN: triageWarnings.first ?? "Severity is unchanged; labels are appended to each finding's evidence.",
+                reportItems: reportItems,
+                scoreSnapshot: SecurityScoreSnapshot(result: result, targets: targets)
+            )
+        } catch {
+            return ScanResult(
+                exitCode: 2,
+                reportURL: nil,
+                messageKO: "AI 오탐 검토 실패",
+                messageEN: "AI triage failed",
                 detailKO: error.localizedDescription,
                 detailEN: error.localizedDescription,
                 reportItems: [],
@@ -3741,6 +3853,240 @@ private enum NativeDependencyInventory {
             return "\(targetName)/\(rel)"
         }
         return file.lastPathComponent
+    }
+}
+
+struct NativeLLMResult {
+    let text: String
+    let backend: String
+    // True when the request left the local machine (cloud backends). Drives a privacy warning.
+    let sentExternally: Bool
+}
+
+struct LLMUnavailable: Error {
+    let message: String
+}
+
+/// Minimal LLM provider, mirroring security_scanner.ai.provider. The local Ollama backend uses
+/// URLSession to localhost and sends nothing off-device; cloud backends (anthropic, openai) are
+/// opt-in REST calls keyed from the environment. Any problem is surfaced as LLMUnavailable so
+/// the caller degrades gracefully.
+private enum NativeLLMProvider {
+    static func complete(prompt: String, system: String, jsonMode: Bool, model: String) async throws -> NativeLLMResult {
+        let spec = model.trimmingCharacters(in: .whitespaces)
+        guard !spec.isEmpty else {
+            throw LLMUnavailable(message: "No LLM configured. Use ollama/qwen2.5-coder:7b or set KODA_LLM.")
+        }
+        let parts = spec.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2, !parts[1].isEmpty else {
+            throw LLMUnavailable(message: "Invalid model '\(spec)'. Use '<backend>/<model>'.")
+        }
+        let backend = parts[0].lowercased()
+        let name = parts[1]
+        switch backend {
+        case "ollama": return try await completeOllama(model: name, prompt: prompt, system: system, jsonMode: jsonMode)
+        case "anthropic": return try await completeAnthropic(model: name, prompt: prompt, system: system)
+        case "openai": return try await completeOpenAI(model: name, prompt: prompt, system: system)
+        default: throw LLMUnavailable(message: "Unsupported backend '\(backend)'. Use ollama, anthropic, or openai.")
+        }
+    }
+
+    private static func completeOllama(model: String, prompt: String, system: String, jsonMode: Bool) async throws -> NativeLLMResult {
+        let base = (ProcessInfo.processInfo.environment["KODA_LLM_API_BASE"] ?? "http://localhost:11434")
+            .trimmingCharacters(in: .whitespaces)
+        guard let url = URL(string: base + "/api/generate") else {
+            throw LLMUnavailable(message: "Invalid KODA_LLM_API_BASE.")
+        }
+        var body: [String: Any] = ["model": model, "prompt": prompt, "stream": false, "options": ["temperature": 0]]
+        if !system.isEmpty { body["system"] = system }
+        if jsonMode { body["format"] = "json" }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 45
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+                throw LLMUnavailable(message: "Ollama returned HTTP \(http.statusCode).")
+            }
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            return NativeLLMResult(text: (object?["response"] as? String) ?? "", backend: "ollama", sentExternally: false)
+        } catch let error as LLMUnavailable {
+            throw error
+        } catch {
+            throw LLMUnavailable(message: "Local Ollama request failed (\(base)). Is Ollama running? \(error.localizedDescription)")
+        }
+    }
+
+    private static func completeAnthropic(model: String, prompt: String, system: String) async throws -> NativeLLMResult {
+        guard let key = apiKey(["KODA_LLM_API_KEY", "ANTHROPIC_API_KEY"]) else {
+            throw LLMUnavailable(message: "Set KODA_LLM_API_KEY (or ANTHROPIC_API_KEY) for the anthropic backend.")
+        }
+        guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
+            throw LLMUnavailable(message: "Bad Anthropic URL.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(key, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.timeoutInterval = 45
+        var body: [String: Any] = [
+            "model": model,
+            "max_tokens": 1024,
+            "messages": [["role": "user", "content": prompt]],
+        ]
+        if !system.isEmpty { body["system"] = system }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+                throw LLMUnavailable(message: "Anthropic returned HTTP \(http.statusCode).")
+            }
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let content = object?["content"] as? [[String: Any]] ?? []
+            let text = content.compactMap { $0["text"] as? String }.joined()
+            return NativeLLMResult(text: text, backend: "anthropic", sentExternally: true)
+        } catch let error as LLMUnavailable {
+            throw error
+        } catch {
+            throw LLMUnavailable(message: "Anthropic request failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func completeOpenAI(model: String, prompt: String, system: String) async throws -> NativeLLMResult {
+        guard let key = apiKey(["KODA_LLM_API_KEY", "OPENAI_API_KEY"]) else {
+            throw LLMUnavailable(message: "Set KODA_LLM_API_KEY (or OPENAI_API_KEY) for the openai backend.")
+        }
+        let base = ProcessInfo.processInfo.environment["KODA_LLM_API_BASE"] ?? "https://api.openai.com/v1"
+        guard let url = URL(string: base + "/chat/completions") else {
+            throw LLMUnavailable(message: "Bad OpenAI URL.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 45
+        var messages: [[String: String]] = []
+        if !system.isEmpty { messages.append(["role": "system", "content": system]) }
+        messages.append(["role": "user", "content": prompt])
+        let body: [String: Any] = ["model": model, "messages": messages, "temperature": 0]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+                throw LLMUnavailable(message: "OpenAI returned HTTP \(http.statusCode).")
+            }
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let choices = object?["choices"] as? [[String: Any]] ?? []
+            let message = choices.first?["message"] as? [String: Any]
+            return NativeLLMResult(text: (message?["content"] as? String) ?? "", backend: "openai", sentExternally: true)
+        } catch let error as LLMUnavailable {
+            throw error
+        } catch {
+            throw LLMUnavailable(message: "OpenAI request failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func apiKey(_ names: [String]) -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        for name in names {
+            if let value = environment[name], !value.isEmpty { return value }
+        }
+        return nil
+    }
+}
+
+/// AI-assisted triage, mirroring security_scanner.ai.triage. Labels findings without ever
+/// changing severity, never forwards raw secret material, caps the number of calls, and
+/// degrades gracefully (stops and warns) when the backend is unavailable.
+private enum NativeAITriage {
+    private static let maxFindings = 40
+    private static let systemPrompt = """
+    You are a security triage assistant. Decide whether a static-analysis finding is a real \
+    issue (true positive) or noise (false positive). You must NOT change the severity. Reply \
+    ONLY with a compact JSON object: {"verdict": "likely_true|likely_false|uncertain", \
+    "confidence": 0.0-1.0, "note": "<=20 words"}.
+    """
+
+    static func triage(findings: [NativeFinding], model: String, language: AppLanguage) async -> ([NativeFinding], [String]) {
+        guard !findings.isEmpty else { return (findings, []) }
+        var output = findings
+        var warnings: [String] = []
+        var budget = maxFindings
+        var externalWarned = false
+
+        for index in output.indices {
+            if budget <= 0 { break }
+            let finding = output[index]
+            if finding.category == "host" || !finding.triageVerdict.isEmpty { continue }
+            do {
+                let result = try await NativeLLMProvider.complete(
+                    prompt: buildPrompt(finding, language: language),
+                    system: systemPrompt,
+                    jsonMode: true,
+                    model: model
+                )
+                budget -= 1
+                if result.sentExternally, !externalWarned {
+                    warnings.append("AI triage sent finding context to the '\(result.backend)' backend (external network call).")
+                    externalWarned = true
+                }
+                guard let verdict = parseVerdict(result.text) else {
+                    warnings.append("AI triage could not parse the model response for \(finding.ruleID).")
+                    continue
+                }
+                output[index].triageVerdict = verdict.verdict
+                output[index].triageConfidence = verdict.confidence
+                output[index].triageNote = verdict.note
+                let confidenceText = verdict.confidence.map { String(format: " %.0f%%", $0 * 100) } ?? ""
+                output[index].evidence += " | AI: \(verdict.verdict)\(confidenceText)"
+            } catch let error as LLMUnavailable {
+                warnings.append("AI triage skipped: \(error.message)")
+                return (output, warnings)
+            } catch {
+                warnings.append("AI triage error: \(error.localizedDescription)")
+                return (output, warnings)
+            }
+        }
+        return (output, warnings)
+    }
+
+    private static func buildPrompt(_ finding: NativeFinding, language: AppLanguage) -> String {
+        var parts = [
+            "Rule: \(finding.ruleID)",
+            "Category: \(finding.category)",
+            "Severity (do not change): \(finding.severity)",
+            "Title: \(finding.title)",
+        ]
+        // Never forward raw secret material; secrets are triaged from metadata only.
+        if finding.category != "secrets", !finding.evidence.isEmpty {
+            parts.append("Evidence: \(finding.evidence)")
+        }
+        if !finding.recommendation.isEmpty {
+            parts.append("Guidance: \(finding.recommendation.prefix(300))")
+        }
+        parts.append(language == .ko ? "Write the note in Korean." : "Write the note in English.")
+        parts.append("Return JSON only: {\"verdict\": \"likely_true|likely_false|uncertain\", \"confidence\": 0.0-1.0, \"note\": \"short reason\"}.")
+        return parts.joined(separator: "\n")
+    }
+
+    private static func parseVerdict(_ text: String) -> (verdict: String, confidence: Double?, note: String)? {
+        guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else { return nil }
+        let json = String(text[start...end])
+        guard let data = json.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        let verdict = (object["verdict"] as? String)?.lowercased() ?? ""
+        guard ["likely_true", "likely_false", "uncertain"].contains(verdict) else { return nil }
+        var confidence: Double?
+        if let number = object["confidence"] as? NSNumber {
+            confidence = min(1, max(0, number.doubleValue))
+        }
+        let note = String((object["note"] as? String ?? "").prefix(200))
+        return (verdict, confidence, note)
     }
 }
 

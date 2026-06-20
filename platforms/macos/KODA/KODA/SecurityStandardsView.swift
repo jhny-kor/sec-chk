@@ -576,6 +576,13 @@ enum AppLanguage: String, Hashable {
         }
     }
 
+    var runAITriageTitle: String {
+        switch self {
+        case .ko: return "AI 오탐 검토 (로컬 LLM)"
+        case .en: return "AI false-positive triage (local LLM)"
+        }
+    }
+
     var generateVEXTitle: String {
         switch self {
         case .ko: return "VEX 문서 생성"

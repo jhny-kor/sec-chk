@@ -206,6 +206,13 @@ struct ContentView: View {
                 .disabled(scanner.isRunning)
 
                 Button {
+                    scanner.runAITriage(language: language)
+                } label: {
+                    Label(language.runAITriageTitle, systemImage: "sparkles")
+                }
+                .disabled(scanner.isRunning)
+
+                Button {
                     scanner.exportVEX(language: language)
                 } label: {
                     Label(language.generateVEXTitle, systemImage: "doc.text.magnifyingglass")

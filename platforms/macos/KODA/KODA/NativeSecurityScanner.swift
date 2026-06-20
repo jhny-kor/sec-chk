@@ -10,10 +10,14 @@ struct NativeFinding: Hashable {
     let title: String
     let path: String
     let line: Int?
-    let evidence: String
+    var evidence: String
     let recommendation: String
     // Optional reachability label for dependency findings: "" / "reachable" / "unreachable" / "unknown".
     var reachable: String = ""
+    // Optional AI triage labels (see NativeAITriage). Severity is never derived from these.
+    var triageVerdict: String = ""
+    var triageConfidence: Double? = nil
+    var triageNote: String = ""
 }
 
 struct NativeScanResult {
