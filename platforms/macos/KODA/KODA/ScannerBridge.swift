@@ -1895,7 +1895,8 @@ final class ScannerBridge: ObservableObject {
                 )
             }
 
-            let findings = try await NativeOSVClient.queryFindings(components: components)
+            let imports = NativeReachability.importIndex(targets: targets)
+            let findings = try await NativeOSVClient.queryFindings(components: components, imports: imports)
             let result = NativeScanResult(
                 findings: findings,
                 warnings: [],
@@ -3743,8 +3744,146 @@ private enum NativeDependencyInventory {
     }
 }
 
+/// Offline import-graph reachability, mirroring the Python `security_scanner.reachability`
+/// module. Labels OSV dependency findings reachable/unreachable/unknown by checking whether
+/// the vulnerable package is imported anywhere in the scanned source. Conservative: a verdict
+/// is only "unreachable" for ecosystems we actually analyzed; everything else stays "unknown".
+private enum NativeReachability {
+    struct ImportIndex {
+        var python: Set<String> = []
+        var js: Set<String> = []
+        var isEmpty: Bool { python.isEmpty && js.isEmpty }
+    }
+
+    private static let pythonExtensions: Set<String> = ["py"]
+    private static let jsExtensions: Set<String> = ["js", "jsx", "ts", "tsx", "vue", "mjs", "cjs"]
+    private static let excludedDirectories: Set<String> = [
+        ".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".build", "reports",
+    ]
+    private static let maxFileBytes = 524_288
+    private static let pypiAliases: [String: Set<String>] = [
+        "pyyaml": ["yaml"], "beautifulsoup4": ["bs4"], "pillow": ["pil"],
+        "scikit-learn": ["sklearn"], "python-dateutil": ["dateutil"], "python-dotenv": ["dotenv"],
+        "pyjwt": ["jwt"], "opencv-python": ["cv2"], "protobuf": ["google"],
+        "setuptools": ["setuptools", "pkg_resources"], "msgpack-python": ["msgpack"],
+    ]
+    private static let jsImportRegex = try! NSRegularExpression(
+        pattern: "(?:\\bfrom\\s*|\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bimport\\s+)['\"]([^'\"\\n]+)['\"]"
+    )
+
+    /// Build the import index for the given targets. The caller must already hold any required
+    /// security-scoped access (runOSVLookupCommand does).
+    static func importIndex(targets: [URL]) -> ImportIndex {
+        var index = ImportIndex()
+        let fileManager = FileManager.default
+        for target in targets {
+            var isDirectory = ObjCBool(false)
+            guard fileManager.fileExists(atPath: target.path, isDirectory: &isDirectory) else { continue }
+            if isDirectory.boolValue {
+                guard let enumerator = fileManager.enumerator(
+                    at: target,
+                    includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                    options: [.skipsHiddenFiles]
+                ) else { continue }
+                for case let fileURL as URL in enumerator {
+                    if fileURL.pathComponents.contains(where: { excludedDirectories.contains($0) }) { continue }
+                    ingest(fileURL, into: &index)
+                }
+            } else {
+                ingest(target, into: &index)
+            }
+        }
+        return index
+    }
+
+    static func status(name: String, ecosystem: String, index: ImportIndex) -> String {
+        let eco = ecosystem.lowercased()
+        let names = candidates(name: name, ecosystem: eco)
+        if eco == "pypi" || eco == "python" {
+            if index.python.isEmpty { return "unknown" }
+            return names.isDisjoint(with: index.python) ? "unreachable" : "reachable"
+        }
+        if eco == "npm" || eco == "node" {
+            if index.js.isEmpty { return "unknown" }
+            return names.isDisjoint(with: index.js) ? "unreachable" : "reachable"
+        }
+        return "unknown"
+    }
+
+    private static func candidates(name: String, ecosystem eco: String) -> Set<String> {
+        let raw = name.lowercased()
+        guard !raw.isEmpty else { return [] }
+        var set: Set<String> = [raw]
+        if eco == "pypi" || eco == "python" {
+            let normalized = raw.replacingOccurrences(of: "_", with: "-")
+            if let aliases = pypiAliases[normalized] { set.formUnion(aliases) }
+            set.insert(raw.replacingOccurrences(of: "-", with: "_"))
+            set.insert(raw.replacingOccurrences(of: "-", with: ""))
+            set.insert(normalized.replacingOccurrences(of: "-", with: "_"))
+        }
+        return set
+    }
+
+    private static func ingest(_ fileURL: URL, into index: inout ImportIndex) {
+        let ext = fileURL.pathExtension.lowercased()
+        let isPython = pythonExtensions.contains(ext)
+        let isJS = jsExtensions.contains(ext)
+        guard isPython || isJS else { return }
+        let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values?.isRegularFile == true, (values?.fileSize ?? 0) <= maxFileBytes else { return }
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return }
+        if isPython {
+            index.python.formUnion(pythonImports(text))
+        } else {
+            index.js.formUnion(jsImports(text))
+        }
+    }
+
+    private static func pythonImports(_ text: String) -> Set<String> {
+        var names: Set<String> = []
+        text.enumerateLines { line, _ in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("from ") {
+                let afterFrom = trimmed.dropFirst("from ".count)
+                guard let module = afterFrom.split(separator: " ").first, !module.hasPrefix(".") else { return }
+                if let top = module.split(separator: ".").first, !top.isEmpty {
+                    names.insert(top.lowercased())
+                }
+            } else if trimmed.hasPrefix("import ") {
+                let afterImport = trimmed.dropFirst("import ".count)
+                for part in afterImport.split(separator: ",") {
+                    let token = part.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? ""
+                    if let top = token.split(separator: ".").first, !top.isEmpty {
+                        names.insert(top.lowercased())
+                    }
+                }
+            }
+        }
+        return names
+    }
+
+    private static func jsImports(_ text: String) -> Set<String> {
+        var names: Set<String> = []
+        let range = NSRange(text.startIndex..., in: text)
+        jsImportRegex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+            guard let match, match.numberOfRanges > 1, let specRange = Range(match.range(at: 1), in: text) else { return }
+            let spec = String(text[specRange])
+            if spec.hasPrefix(".") { return }
+            if spec.hasPrefix("@") {
+                names.insert(spec.split(separator: "/").prefix(2).joined(separator: "/").lowercased())
+            } else if let first = spec.split(separator: "/").first {
+                names.insert(first.lowercased())
+            }
+        }
+        return names
+    }
+}
+
 private enum NativeOSVClient {
-    static func queryFindings(components: [NativeDependencyComponent]) async throws -> [NativeFinding] {
+    static func queryFindings(
+        components: [NativeDependencyComponent],
+        imports: NativeReachability.ImportIndex = NativeReachability.ImportIndex()
+    ) async throws -> [NativeFinding] {
         let queries = components.map { component in
             [
                 "package": [
@@ -3785,7 +3924,7 @@ private enum NativeOSVClient {
         }
         let intel = (try? await NativeVulnerabilityIntelClient.query(cveIDs: Array(discoveredCVEIDs))) ?? [:]
         return pending.map { item in
-            finding(component: item.0, vulnerability: item.1, cveIDs: item.2, intel: intel)
+            finding(component: item.0, vulnerability: item.1, cveIDs: item.2, intel: intel, imports: imports)
         }
     }
 
@@ -3793,14 +3932,22 @@ private enum NativeOSVClient {
         component: NativeDependencyComponent,
         vulnerability: [String: Any],
         cveIDs: [String],
-        intel: [String: NativeVulnerabilityIntel]
+        intel: [String: NativeVulnerabilityIntel],
+        imports: NativeReachability.ImportIndex
     ) -> NativeFinding {
         let id = vulnerability["id"] as? String ?? "OSV"
         let summary = vulnerability["summary"] as? String
         let aliases = (vulnerability["aliases"] as? [String] ?? []).prefix(4).joined(separator: ", ")
         let severity = prioritizedSeverity(base: severityLabel(vulnerability), cveIDs: cveIDs, intel: intel)
         let intelSummary = NativeVulnerabilityIntelClient.summary(cveIDs: cveIDs, intel: intel)
-        let evidence = "\(component.ecosystem) \(component.name)@\(component.version): \(id)\(aliases.isEmpty ? "" : " | \(aliases)")\(intelSummary.isEmpty ? "" : " | \(intelSummary)")"
+        let reachable = NativeReachability.status(name: component.name, ecosystem: component.ecosystem, index: imports)
+        let reachMarker: String
+        switch reachable {
+        case "unreachable": reachMarker = " | 도달성: 미사용(소스 import 없음) / reachability: unused"
+        case "reachable": reachMarker = " | 도달성: 사용됨 / reachability: reachable"
+        default: reachMarker = ""
+        }
+        let evidence = "\(component.ecosystem) \(component.name)@\(component.version): \(id)\(aliases.isEmpty ? "" : " | \(aliases)")\(intelSummary.isEmpty ? "" : " | \(intelSummary)")\(reachMarker)"
         return NativeFinding(
             ruleID: "dependency.osv-known-vulnerability",
             severity: severity,
@@ -3809,7 +3956,8 @@ private enum NativeOSVClient {
             path: component.path,
             line: component.line,
             evidence: evidence,
-            recommendation: recommendation(id: id, cveIDs: cveIDs, intel: intel)
+            recommendation: recommendation(id: id, cveIDs: cveIDs, intel: intel),
+            reachable: reachable
         )
     }
 

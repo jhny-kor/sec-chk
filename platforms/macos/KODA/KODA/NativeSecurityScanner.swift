@@ -12,6 +12,8 @@ struct NativeFinding: Hashable {
     let line: Int?
     let evidence: String
     let recommendation: String
+    // Optional reachability label for dependency findings: "" / "reachable" / "unreachable" / "unknown".
+    var reachable: String = ""
 }
 
 struct NativeScanResult {
