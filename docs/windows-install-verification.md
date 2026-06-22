@@ -8,7 +8,7 @@
 - App Store 브랜드명에 맞춘 직접 배포용 설치파일 진입점은 `scripts/build-koda-windows-installer.ps1`입니다.
 - 빌드 산출물은 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다.
 - 설치 대상은 `%LOCALAPPDATA%\KODA`이고, Start Menu `KODA` 바로가기를 생성하도록 구현되어 있습니다.
-- 기존 개발자용 소스 설치 진입점 `scripts/install-windows.bat`도 유지되며, 이 경로는 레거시 `SecChk` 런처를 설치합니다.
+- 기존 개발자용 소스 설치 진입점은 `archive/windows/legacy-secchk/`로 이동했습니다. 이 경로는 레거시 `SecChk` 런처용이며 현재 KODA 설치 경로에서는 사용하지 않습니다.
 
 ## 근거
 

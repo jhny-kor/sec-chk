@@ -52,7 +52,11 @@ Windows users can install KODA without administrator privileges after the Window
 
 The build creates `dist\KODA\KODA.exe` and `dist\Windows\KODASetup.exe`. Target users only need `KODASetup.exe`; it installs to `%LOCALAPPDATA%\KODA` and adds Start Menu shortcuts named `KODA` and `KODA (Browser Mode)`. Double-clicking `KODA` opens one native window powered by Edge WebView2 — no console window and no separate browser tab — so it behaves like the macOS KODA app. If the Edge WebView2 runtime is missing, KODA falls back to opening the dashboard in the default browser. On managed PCs where WebView2 is blocked or broken, use `KODA (Browser Mode)` to skip WebView2 and open directly in the default browser.
 
-The older source-tree developer installer remains available as `scripts/install-windows.bat`; it installs the legacy `SecChk` launcher directly from a cloned repository.
+The active Windows installer files are `scripts/build-koda-windows-installer.ps1`,
+`scripts/build-koda-windows-installer.bat`, and `packaging/windows/KODA.iss`.
+Legacy SecChk source-tree installer scripts were moved to
+`archive/windows/legacy-secchk/` so the active Windows install path stays focused
+on the KODA builder and `KODASetup.exe`.
 
 For Microsoft Store distribution, the current Inno Setup installer is not the final upload format. The Store lane should package the Windows app as MSIX and submit a `.msixupload` package through Partner Center. See `packaging/windows/README.md` and `docs/store-release.md`.
 
@@ -269,7 +273,11 @@ Windows에서는 빌드된 설치 파일로 관리자 권한 없이 KODA를 설�
 
 빌드 결과는 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다. 최종 사용자는 `KODASetup.exe`만 실행하면 되고, 설치 후 `%LOCALAPPDATA%\KODA`와 시작 메뉴 `KODA`, `KODA (Browser Mode)` 바로가기가 생성됩니다. `KODA`를 더블클릭하면 Edge WebView2 기반 단일 네이티브 창 하나만 열립니다. 터미널 창이나 별도 브라우저 탭이 뜨지 않아 macOS KODA 앱과 동일하게 동작합니다. Edge WebView2 런타임이 없으면 기본 브라우저로 대시보드를 여는 방식으로 자동 전환됩니다. 회사/관리형 PC에서 WebView2가 차단되거나 손상된 경우에는 `KODA (Browser Mode)`를 실행하면 WebView2를 건너뛰고 기본 브라우저로 바로 열 수 있습니다.
 
-기존 개발자용 소스 설치 스크립트 `scripts/install-windows.bat`도 유지되어 있으며, clone한 저장소에서 레거시 `SecChk` 런처를 설치할 때 사용할 수 있습니다.
+현재 활성 Windows 설치 파일은 `scripts/build-koda-windows-installer.ps1`,
+`scripts/build-koda-windows-installer.bat`, `packaging/windows/KODA.iss`입니다.
+기존 개발자용 SecChk 소스 설치 스크립트 묶음은
+`archive/windows/legacy-secchk/`로 이동했습니다. 현재 Windows 설치 경로는 KODA
+빌더와 `KODASetup.exe`에 맞춰져 있습니다.
 
 Microsoft Store에 출시하려면 현재의 Inno Setup 설치 파일이 아니라 MSIX 패키지와 `.msixupload` 제출 파일을 준비해야 합니다. 자세한 절차는 `packaging/windows/README.md`와 `docs/store-release.md`에 정리했습니다.
 

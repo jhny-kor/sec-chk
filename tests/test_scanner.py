@@ -1601,11 +1601,15 @@ GEM
         mac_installer = root / "scripts" / "install-macos.command"
         mac_uninstaller = root / "scripts" / "uninstall-macos.command"
         windows_launcher = root / "scripts" / "sec-chk.bat"
-        windows_installer = root / "scripts" / "install-windows.ps1"
-        windows_installer_bat = root / "scripts" / "install-windows.bat"
-        windows_uninstaller = root / "scripts" / "uninstall-windows.ps1"
-        windows_builder = root / "scripts" / "build-windows-installer.ps1"
-        windows_inno = root / "packaging" / "windows" / "SecChk.iss"
+        windows_builder = root / "scripts" / "build-koda-windows-installer.ps1"
+        windows_builder_bat = root / "scripts" / "build-koda-windows-installer.bat"
+        archived_windows = root / "archive" / "windows" / "legacy-secchk"
+        archived_windows_scripts = archived_windows / "scripts"
+        archived_windows_installer = archived_windows_scripts / "install-windows.ps1"
+        archived_windows_installer_bat = archived_windows_scripts / "install-windows.bat"
+        archived_windows_uninstaller = archived_windows_scripts / "uninstall-windows.ps1"
+        archived_windows_builder = archived_windows_scripts / "build-windows-installer.ps1"
+        archived_windows_inno = archived_windows / "packaging" / "windows" / "SecChk.iss"
         koda_windows_inno = root / "packaging" / "windows" / "KODA.iss"
         mac_app_builder = root / "packaging" / "macos" / "build-koda-app.command"
         mac_xcode_builder = root / "packaging" / "macos" / "build-koda-xcode-app.command"
@@ -1640,13 +1644,16 @@ GEM
         self.assertIn("rm -rf", mac_uninstaller.read_text(encoding="utf-8"))
         self.assertIn("-m security_scanner app", windows_launcher.read_text(encoding="utf-8"))
         self.assertIn("py -3", windows_launcher.read_text(encoding="utf-8"))
-        self.assertIn("install-windows.ps1", windows_installer_bat.read_text(encoding="utf-8"))
-        self.assertIn("LOCALAPPDATA", windows_installer.read_text(encoding="utf-8"))
-        self.assertIn("SecChk.bat", windows_installer.read_text(encoding="utf-8"))
-        self.assertIn("security_scanner", windows_installer.read_text(encoding="utf-8"))
-        self.assertIn("Remove-Item -Path $InstallRoot", windows_uninstaller.read_text(encoding="utf-8"))
+        self.assertIn("build-koda-windows-installer.ps1", windows_builder_bat.read_text(encoding="utf-8"))
         self.assertIn('InstallerOutDir = Join-Path $DistDir "Windows"', windows_builder.read_text(encoding="utf-8"))
-        self.assertIn("OutputDir=..\\..\\dist\\Windows", windows_inno.read_text(encoding="utf-8"))
+        self.assertIn("KODASetup.exe", windows_builder.read_text(encoding="utf-8"))
+        self.assertIn("install-windows.ps1", archived_windows_installer_bat.read_text(encoding="utf-8"))
+        self.assertIn("LOCALAPPDATA", archived_windows_installer.read_text(encoding="utf-8"))
+        self.assertIn("SecChk.bat", archived_windows_installer.read_text(encoding="utf-8"))
+        self.assertIn("security_scanner", archived_windows_installer.read_text(encoding="utf-8"))
+        self.assertIn("Remove-Item -Path $InstallRoot", archived_windows_uninstaller.read_text(encoding="utf-8"))
+        self.assertIn('InstallerOutDir = Join-Path $DistDir "Windows"', archived_windows_builder.read_text(encoding="utf-8"))
+        self.assertIn("OutputDir=..\\..\\dist\\Windows", archived_windows_inno.read_text(encoding="utf-8"))
         self.assertIn("--browser", koda_windows_inno.read_text(encoding="utf-8"))
         self.assertIn("KODA (Browser Mode)", koda_windows_inno.read_text(encoding="utf-8"))
         self.assertTrue(os.access(mac_app_builder, os.X_OK))
@@ -1967,7 +1974,7 @@ GEM
         self.assertIn("Install quickly", readme)
         self.assertIn("설치 방법 요약", readme)
         self.assertIn("scripts/install-macos.command", readme)
-        self.assertIn("scripts/install-windows.bat", readme)
+        self.assertIn("archive/windows/legacy-secchk", readme)
         self.assertIn("KODA", readme)
         self.assertIn("auto-fix wizard", readme)
         self.assertIn("koda-ignore.yml", readme)
