@@ -71,6 +71,10 @@ TRANSLATIONS = {
         "scan_path_placeholder": "No folder selected",
         "choose_folder": "Choose Folder",
         "scan_now": "Scan",
+        "web_scan_title": "Scan Website (Live)",
+        "web_url_placeholder": "https://example.com",
+        "web_scan_now": "Scan URL",
+        "web_scan_note": "Checks live security headers, TLS, cookies, and CORS with read-only requests. Only scan sites you are authorized to test.",
         "discover_projects": "Discover projects",
         "discovery_depth": "Depth",
         "scan_status_idle": "Ready",
@@ -136,6 +140,7 @@ TRANSLATIONS = {
             "code": "Code Patterns",
             "prevention": "Prevention Guardrails",
             "host": "Host Posture",
+            "web": "Web Posture",
         },
     },
     "ko": {
@@ -178,6 +183,10 @@ TRANSLATIONS = {
         "scan_path_placeholder": "선택된 폴더 없음",
         "choose_folder": "폴더 선택",
         "scan_now": "점검 실행",
+        "web_scan_title": "웹사이트 점검 (실시간)",
+        "web_url_placeholder": "https://example.com",
+        "web_scan_now": "URL 점검",
+        "web_scan_note": "읽기 전용 요청으로 실시간 보안 헤더·TLS·쿠키·CORS를 점검합니다. 점검 권한이 있는 사이트에만 실행하세요.",
         "discover_projects": "하위 프로젝트 탐색",
         "discovery_depth": "깊이",
         "scan_status_idle": "대기 중",
@@ -243,6 +252,7 @@ TRANSLATIONS = {
             "code": "코드 패턴",
             "prevention": "예방 가드레일",
             "host": "호스트 보안 상태",
+            "web": "웹 보안 상태",
         },
     },
 }
@@ -899,13 +909,21 @@ def render_report(
     *,
     target_paths: dict[str, str] | None = None,
     components: tuple[DependencyComponent, ...] = (),
+    warnings: tuple[str, ...] = (),
 ) -> str:
     if report_format == "cyclonedx":
         return render_cyclonedx(components)
     if report_format == "cyclonedx-vex":
         return render_cyclonedx_vex(findings)
     if report_format == "json":
-        return render_json(findings, target_names, language, target_paths=target_paths, components=components)
+        return render_json(
+            findings,
+            target_names,
+            language,
+            target_paths=target_paths,
+            components=components,
+            warnings=warnings,
+        )
     if report_format == "markdown":
         return render_markdown(findings, target_names, language, target_paths=target_paths)
     if report_format == "html":
@@ -922,12 +940,14 @@ def render_json(
     *,
     target_paths: dict[str, str] | None = None,
     components: tuple[DependencyComponent, ...] = (),
+    warnings: tuple[str, ...] = (),
 ) -> str:
     payload = {
         "generated_at": _generated_at()[0],
         "language": _labels(language)["html_lang"],
         "scanner": {"name": "local-security-scanner", "version": __version__},
         "summary": _summary(findings, target_names, target_paths),
+        "warnings": list(warnings),
         "components": [component_payload(component) for component in components],
         "findings": [_finding_payload(finding) for finding in findings],
     }
@@ -1101,6 +1121,9 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_SCAN_PATH_PLACEHOLDER__": html.escape(str(labels["scan_path_placeholder"]), quote=True),
         "__INITIAL_CHOOSE_FOLDER__": html.escape(str(labels["choose_folder"])),
         "__INITIAL_SCAN_NOW__": html.escape(str(labels["scan_now"])),
+        "__INITIAL_WEB_SCAN_TITLE__": html.escape(str(labels["web_scan_title"])),
+        "__INITIAL_WEB_URL_PLACEHOLDER__": html.escape(str(labels["web_url_placeholder"]), quote=True),
+        "__INITIAL_WEB_SCAN_NOW__": html.escape(str(labels["web_scan_now"])),
         "__INITIAL_DISCOVER_PROJECTS__": html.escape(str(labels["discover_projects"])),
         "__INITIAL_DISCOVERY_DEPTH__": html.escape(str(labels["discovery_depth"])),
         "__INITIAL_SCAN_STATUS_IDLE__": html.escape(str(labels["scan_status_idle"])),
@@ -1471,6 +1494,25 @@ HTML_TEMPLATE = """<!doctype html>
       grid-template-columns: repeat(2, minmax(220px, 1fr));
       gap: 10px;
       align-items: end;
+    }
+
+    .scan-web-form {
+      display: grid;
+      grid-template-columns: auto minmax(240px, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .scan-web-form .scan-note {
+      grid-column: 1 / -1;
+    }
+
+    .scan-web-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
     }
 
     .scan-actions {
@@ -1917,7 +1959,7 @@ HTML_TEMPLATE = """<!doctype html>
       .topbar-action { position: absolute; top: 16px; right: 96px; }
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
-      .metrics, .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr; }
+      .metrics, .filters, .scan-form, .scan-standard-form, .scan-web-form { grid-template-columns: 1fr; }
       .scan-actions { display: grid; grid-template-columns: 1fr; }
       .standard-head { grid-template-columns: 1fr; }
       .metric { min-height: 84px; }
@@ -1961,6 +2003,12 @@ HTML_TEMPLATE = """<!doctype html>
           <input id="scan-depth" type="number" min="0" max="20" value="2">
         </label>
         <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
+      </div>
+      <div class="scan-web-form">
+        <span id="web-scan-title" class="scan-web-title">__INITIAL_WEB_SCAN_TITLE__</span>
+        <input id="web-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
+        <button id="web-scan-run" type="button">__INITIAL_WEB_SCAN_NOW__</button>
+        <span id="web-scan-note" class="scan-note"></span>
       </div>
       <div class="scan-standard-form">
         <label class="scan-select">
@@ -2208,6 +2256,12 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
       byId("scan-run").disabled = state.scanRunning;
       byId("scan-choose").disabled = state.scanRunning;
+      setText("web-scan-title", activeLabels.web_scan_title);
+      byId("web-url").placeholder = activeLabels.web_url_placeholder;
+      setText("web-scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.web_scan_now);
+      byId("web-scan-run").disabled = state.scanRunning;
+      byId("web-url").disabled = state.scanRunning;
+      setText("web-scan-note", activeLabels.web_scan_note);
       byId("scan-standard").disabled = state.scanRunning;
       byId("scan-standard-category").disabled = state.scanRunning;
       byId("scan-osv").disabled = state.scanRunning;
@@ -2606,6 +2660,47 @@ HTML_TEMPLATE = """<!doctype html>
       }
     }
 
+    async function runWebScan() {
+      const activeLabels = labels();
+      const url = byId("web-url").value.trim();
+      if (!url) {
+        state.scanStatus = activeLabels.web_url_placeholder;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+
+      state.scanRunning = true;
+      state.scanStatus = activeLabels.scan_status_running;
+      state.scanStatusClass = "";
+      render();
+
+      try {
+        const response = await fetch(apiEndpoint("/api/web-scan"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url,
+            language: state.language,
+            min_severity: "info",
+          }),
+        });
+        const nextPayload = await parseJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(nextPayload.error || activeLabels.scan_status_failed);
+        }
+        state.scanRunning = false;
+        state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}`;
+        state.scanStatusClass = "ok";
+        applyPayload(nextPayload);
+      } catch (error) {
+        state.scanRunning = false;
+        state.scanStatus = `${activeLabels.scan_status_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
+        state.scanStatusClass = "error";
+        render();
+      }
+    }
+
     function downloadSbom() {
       const activeLabels = labels();
       if (!components().length || !payload.sbom) {
@@ -2667,6 +2762,14 @@ HTML_TEMPLATE = """<!doctype html>
     });
     byId("scan-run").addEventListener("click", () => {
       runDirectoryScan();
+    });
+    byId("web-scan-run").addEventListener("click", () => {
+      runWebScan();
+    });
+    byId("web-url").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        runWebScan();
+      }
     });
     byId("sbom-download").addEventListener("click", () => {
       downloadSbom();

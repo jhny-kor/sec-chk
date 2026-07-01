@@ -227,6 +227,13 @@ struct ContentView: View {
 
                 Menu {
                     Button {
+                        scanner.runWebScan(language: language)
+                    } label: {
+                        Label(language == .ko ? "웹사이트 점검 (실시간)" : "Scan Website (Live)", systemImage: "globe")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
                         scanner.exportZAPBaselinePlan(language: language)
                     } label: {
                         Label(language.generateZAPPlanTitle, systemImage: "bolt.shield")

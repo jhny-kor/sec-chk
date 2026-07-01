@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -306,6 +306,37 @@ class ScannerTests(unittest.TestCase):
             payload = json.loads(render_json(findings))
 
             self.assertEqual(payload["summary"]["by_category"]["dependencies"], 1)
+
+    def test_cli_json_report_includes_scan_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "report.json"
+            (root / ".env").write_text("OPENAI_API_KEY=sk-" + "x" * 30 + "\n", encoding="utf-8")
+
+            stderr = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                exit_code = cli_main(
+                    [
+                        "scan",
+                        "--target",
+                        str(root),
+                        "--category",
+                        "secrets",
+                        "--format",
+                        "json",
+                        "--output",
+                        str(output),
+                        "--ai-triage",
+                        "--llm",
+                        "invalid/model",
+                    ]
+                )
+
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(any("AI triage skipped" in warning for warning in payload["warnings"]))
+        self.assertIn("warning: AI triage skipped", stderr.getvalue())
 
     def test_discovers_project_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2546,6 +2577,32 @@ class AITriageTests(unittest.TestCase):
         self.assertEqual(out[0].severity, "high")
         self.assertEqual(warnings, [])
 
+    def test_triage_uses_separate_fp_and_tp_chains(self) -> None:
+        systems: list[str] = []
+
+        def fake_complete(prompt, **kwargs):
+            system = kwargs["system"]
+            systems.append(system)
+            if "false-positive" in system:
+                return LLMResult(
+                    text='{"verdict": "uncertain", "confidence": 0.2, "note": "not noise"}',
+                    backend="ollama",
+                    sent_externally=False,
+                )
+            return LLMResult(
+                text='{"verdict": "likely_true", "confidence": 0.9, "note": "real issue"}',
+                backend="ollama",
+                sent_externally=False,
+            )
+
+        out, warnings = ai_triage.triage_findings([self._finding()], complete=fake_complete)
+
+        self.assertEqual(len(systems), 2)
+        self.assertTrue(any("false-positive" in system for system in systems))
+        self.assertTrue(any("true-positive" in system for system in systems))
+        self.assertEqual(out[0].triage_verdict, "likely_true")
+        self.assertEqual(warnings, [])
+
     def test_triage_warns_once_on_external_backend(self) -> None:
         def fake_complete(prompt, **kwargs):
             return LLMResult(
@@ -2823,6 +2880,83 @@ def _html_payload(content: str) -> dict[str, object]:
     start = content.index(marker) + len(marker)
     end = content.index("</script>", start)
     return json.loads(content[start:end])
+
+
+class WebScanTests(unittest.TestCase):
+    def _rules(self, findings) -> set[str]:
+        return {finding.rule_id for finding in findings}
+
+    def test_missing_headers_are_flagged(self):
+        from security_scanner.web import analyze_response
+
+        findings = analyze_response("https://example.com", {"Content-Type": "text/html"}, [])
+        rules = self._rules(findings)
+        self.assertIn("web.missing-hsts", rules)
+        self.assertIn("web.missing-csp", rules)
+        self.assertIn("web.missing-x-content-type-options", rules)
+        self.assertIn("web.missing-frame-protection", rules)
+        self.assertTrue(all(finding.category == "web" for finding in findings))
+
+    def test_hardened_headers_pass(self):
+        from security_scanner.web import analyze_response
+
+        headers = {
+            "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+            "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Permissions-Policy": "geolocation=()",
+        }
+        rules = self._rules(analyze_response("https://example.com", headers, []))
+        for rule in (
+            "web.missing-hsts",
+            "web.missing-csp",
+            "web.missing-x-content-type-options",
+            "web.missing-frame-protection",
+            "web.missing-referrer-policy",
+            "web.missing-permissions-policy",
+        ):
+            self.assertNotIn(rule, rules)
+
+    def test_insecure_cookie_and_cors_and_disclosure(self):
+        from security_scanner.web import analyze_response
+
+        headers = {
+            "Server": "nginx/1.18.0",
+            "X-Powered-By": "Express",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+        set_cookies = ["session=abc; Path=/"]
+        rules = self._rules(analyze_response("https://example.com", headers, set_cookies))
+        self.assertIn("web.server-version-disclosure", rules)
+        self.assertIn("web.x-powered-by-disclosure", rules)
+        self.assertIn("web.cors-wildcard-credentials", rules)
+        self.assertIn("web.cookie-missing-secure", rules)
+        self.assertIn("web.cookie-missing-httponly", rules)
+        self.assertIn("web.cookie-missing-samesite", rules)
+
+    def test_hsts_not_required_on_http(self):
+        from security_scanner.web import analyze_response
+
+        rules = self._rules(analyze_response("http://example.com", {}, []))
+        self.assertNotIn("web.missing-hsts", rules)
+
+    def test_non_http_url_is_skipped(self):
+        from security_scanner.web import check_web
+
+        findings, warnings = check_web("ftp://example.com")
+        self.assertEqual(findings, [])
+        self.assertTrue(warnings)
+
+    def test_expired_certificate_is_critical(self):
+        from security_scanner.web import _certificate_expiry
+
+        findings = _certificate_expiry(
+            "https://example.com", {"notAfter": "Jan  1 00:00:00 2000 GMT"}, "example.com"
+        )
+        self.assertEqual([finding.rule_id for finding in findings], ["web.tls-certificate-expired"])
+        self.assertEqual(findings[0].severity, "critical")
 
 
 if __name__ == "__main__":

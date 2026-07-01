@@ -145,6 +145,7 @@ python3 -m security_scanner repo-security-checklist --target . --output docs/sec
 python3 -m security_scanner ssdf-plan --target . --output docs/security/NIST_SSDF_WORKFLOW.md
 python3 -m security_scanner secure-by-design-plan --target . --output docs/security/SECURE_BY_DESIGN.md
 python3 -m security_scanner sigstore-plan --target . --artifact dist/app.tar.gz --output docs/security/SLSA_SIGSTORE_PLAN.md
+python3 -m security_scanner web-scan --url https://example.com --format markdown
 python3 -m security_scanner zap-command --url https://example.com --output-dir reports/zap
 python3 -m security_scanner zap-run --url https://example.com --output-dir reports/zap
 python3 -m security_scanner evidence-checklist --target . --output docs/security/evidence-checklist.md --language ko
@@ -195,6 +196,8 @@ The action installs KODA, runs the scan with `--format sarif` and `--fail-on`, a
 `init-security` creates preventive templates without overwriting existing files by default: `SECURITY.md`, Dependabot, a KODA GitHub Actions security workflow with SBOM and OpenSSF Scorecard jobs, CODEOWNERS, a release provenance workflow, `.dockerignore`, `.env.example`, pre-commit guidance, GitHub repository security checklist, ZAP/Dependency-Track notes, VEX tracking notes, SLSA/Sigstore release guardrails, NIST SSDF workflow plan, CISA Secure by Design plan, threat model, secret rotation runbook, API security plan, OWASP SCVS plan, privacy data map, security roadmap, evidence register, security headers baseline, container hardening baseline, Cloud/IaC security plan, AI/LLM security plan, mobile security plan, NIST CSF 2.0 profile, and CISA secure software development attestation checklist. In the native KODA macOS app, the same baseline files can be created from `Prevention Kit > Apply Guardrails to Folders`.
 
 `install-hook` installs a local KODA pre-commit gate in a Git repository. `repo-security-checklist`, `ssdf-plan`, `secure-by-design-plan`, and `sigstore-plan` create focused Markdown plans for repository-hosted settings, NIST SSDF workflow evidence, CISA Secure by Design prevention work, and SLSA/Sigstore release signing.
+
+`web-scan` runs a lightweight, dependency-free live check against an authorized URL using only the Python standard library (no Docker). It sends a single GET plus one TLS handshake — never attack payloads — and reports missing security headers (HSTS, CSP, X-Content-Type-Options, clickjacking protection, Referrer-Policy, Permissions-Policy), TLS certificate expiry and weak negotiated protocols, cookie flags (Secure/HttpOnly/SameSite), HTTP-to-HTTPS enforcement, information disclosure (Server/X-Powered-By), and wildcard CORS. It complements `zap-run`: use `web-scan` for a fast posture check everywhere, and the Docker-based ZAP baseline for deeper dynamic testing. Only run it against systems you own or are explicitly authorized to test.
 
 `zap-command` prints an OWASP ZAP baseline Docker command for an authorized URL. `zap-run` runs that baseline through Docker, writes the ZAP HTML/Markdown/JSON outputs, and emits a `koda-zap-findings.json` summary. Only run it against systems you own or are explicitly authorized to test.
 
@@ -364,6 +367,7 @@ python3 -m security_scanner repo-security-checklist --target . --output docs/sec
 python3 -m security_scanner ssdf-plan --target . --output docs/security/NIST_SSDF_WORKFLOW.md
 python3 -m security_scanner secure-by-design-plan --target . --output docs/security/SECURE_BY_DESIGN.md
 python3 -m security_scanner sigstore-plan --target . --artifact dist/app.tar.gz --output docs/security/SLSA_SIGSTORE_PLAN.md
+python3 -m security_scanner web-scan --url https://example.com --format markdown
 python3 -m security_scanner zap-command --url https://example.com --output-dir reports/zap
 python3 -m security_scanner zap-run --url https://example.com --output-dir reports/zap
 python3 -m security_scanner evidence-checklist --target . --output docs/security/evidence-checklist.md --language ko
@@ -414,6 +418,8 @@ jobs:
 `init-security`는 기존 파일을 덮어쓰지 않고 `SECURITY.md`, Dependabot, SBOM과 OpenSSF Scorecard job이 포함된 KODA GitHub Actions 보안 workflow, CODEOWNERS, release provenance workflow, `.dockerignore`, `.env.example`, pre-commit 안내, GitHub 저장소 보안 설정 체크리스트, ZAP/Dependency-Track 안내 문서, VEX 추적 문서, SLSA/Sigstore 릴리스 가드레일, NIST SSDF workflow 계획, CISA Secure by Design 예방 계획, 위협 모델, 비밀값 로테이션 런북, API 보안 계획, OWASP SCVS 계획, 개인정보 데이터 맵, 보안 로드맵, 보안 증적 대장, 보안 헤더 기준, 컨테이너 하드닝 기준, Cloud/IaC 보안 계획, AI/LLM 보안 계획, 모바일 보안 계획, NIST CSF 2.0 프로파일, CISA 보안 소프트웨어 개발 증명 체크리스트를 생성합니다. macOS KODA 앱에서는 `예방 키트 > 선택 폴더에 예방 설정 적용`으로 같은 기준 파일을 앱 안에서 바로 생성할 수 있습니다.
 
 `install-hook`은 Git 저장소에 로컬 KODA pre-commit 차단 훅을 설치합니다. `repo-security-checklist`, `ssdf-plan`, `secure-by-design-plan`, `sigstore-plan`은 저장소 보안 설정, NIST SSDF workflow 증적, CISA Secure by Design 예방 활동, SLSA/Sigstore 릴리스 서명 계획을 각각 Markdown으로 생성합니다.
+
+`web-scan`은 Docker 없이 Python 표준 라이브러리만으로 권한 있는 URL을 실시간 점검하는 경량 기능입니다. GET 1회와 TLS 핸드셰이크 1회만 보내며(공격 페이로드 없음), 누락된 보안 헤더(HSTS, CSP, X-Content-Type-Options, 클릭재킹 보호, Referrer-Policy, Permissions-Policy), TLS 인증서 만료·약한 프로토콜, 쿠키 플래그(Secure/HttpOnly/SameSite), HTTP→HTTPS 강제, 정보 노출(Server/X-Powered-By), 와일드카드 CORS를 보고합니다. `zap-run`을 보완합니다. 어디서나 빠른 상태 점검은 `web-scan`, 더 깊은 동적 점검은 Docker 기반 ZAP baseline을 쓰세요. 소유하거나 명시적으로 허가받은 시스템에만 실행하세요.
 
 `zap-command`는 권한이 있는 URL에 대해 OWASP ZAP baseline Docker 명령을 출력합니다. `zap-run`은 Docker로 baseline을 실행하고 ZAP HTML/Markdown/JSON 출력과 `koda-zap-findings.json` 요약을 생성합니다. 소유하거나 명시적으로 허가받은 시스템에만 실행하세요.
 

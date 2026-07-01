@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import Foundation
+import Security
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -181,6 +182,54 @@ final class ScannerBridge: ObservableObject {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.runHostScanCommand()
             }.value
+            isRunning = false
+            setDetail(ko: result.detailKO, en: result.detailEN)
+            if result.exitCode == 0, let output = result.reportURL {
+                reportURL = output
+                reportItems = result.reportItems
+                if let snapshot = result.scoreSnapshot {
+                    recordScoreSnapshot(snapshot)
+                }
+                setStatus(ko: "점검 완료: \(output.path)", en: "Scan complete: \(output.path)")
+                statusColor = .green
+            } else {
+                setStatus(ko: result.messageKO, en: result.messageEN)
+                statusColor = .red
+            }
+        }
+    }
+
+    func runWebScan(language: AppLanguage) {
+        let alert = NSAlert()
+        alert.messageText = language == .ko ? "웹사이트 점검 (실시간)" : "Scan Website (Live)"
+        alert.informativeText = language == .ko
+            ? "권한이 있는 URL만 입력하세요. 읽기 전용 HTTP/TLS 요청으로 보안 헤더·쿠키·CORS·리다이렉트를 점검합니다."
+            : "Enter only an authorized URL. Read-only HTTP/TLS requests check security headers, cookies, CORS, and redirects."
+        alert.addButton(withTitle: language == .ko ? "점검" : "Scan")
+        alert.addButton(withTitle: language.cancelTitle)
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
+        input.placeholderString = "https://example.com"
+        alert.accessoryView = input
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+        let targetURL = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isHTTPURL(targetURL) else {
+            setStatus(ko: "웹 점검 실패: http(s) URL만 입력할 수 있습니다.", en: "Web scan failed: enter an http(s) URL.")
+            statusColor = .red
+            return
+        }
+
+        isRunning = true
+        reportURL = nil
+        reportItems = []
+        setDetail(ko: "대상: \(targetURL)", en: "Target: \(targetURL)")
+        setStatus(ko: "웹사이트 보안 상태를 점검하고 있습니다.", en: "Checking the website's security posture.")
+        statusColor = .secondary
+
+        Task {
+            let result = await Self.runWebScanCommand(url: targetURL)
             isRunning = false
             setDetail(ko: result.detailKO, en: result.detailEN)
             if result.exitCode == 0, let output = result.reportURL {
@@ -1339,6 +1388,45 @@ final class ScannerBridge: ObservableObject {
                 reportURL: nil,
                 messageKO: "호스트 점검에 실패했습니다.",
                 messageEN: "Host scan failed.",
+                detailKO: error.localizedDescription,
+                detailEN: error.localizedDescription,
+                reportItems: [],
+                scoreSnapshot: nil
+            )
+        }
+    }
+
+    private nonisolated static func runWebScanCommand(url: String) async -> ScanResult {
+        let scanner = NativeSecurityScanner()
+        let (findings, warnings) = await NativeWebScanner.scan(urlString: url)
+        let result = NativeScanResult(
+            findings: findings,
+            warnings: warnings,
+            targetCount: 1,
+            scannedFileCount: 0,
+            generatedAt: Date()
+        )
+        do {
+            let overallFiles = try writeReportFiles(result: result, scanner: scanner, prefix: "KODA-web-posture")
+            let reportItems = try buildReportItems(result: result, scanner: scanner, overallFiles: overallFiles)
+            let warningTextKO = warnings.isEmpty ? "" : "\n경고:\n" + warnings.joined(separator: "\n")
+            let warningTextEN = warnings.isEmpty ? "" : "\nWarnings:\n" + warnings.joined(separator: "\n")
+            return ScanResult(
+                exitCode: 0,
+                reportURL: overallFiles.koHTMLURL,
+                messageKO: "웹 점검 완료",
+                messageEN: "Web scan complete",
+                detailKO: "웹 보안 항목 \(findings.count)건\(warningTextKO)",
+                detailEN: "web posture findings \(findings.count)\(warningTextEN)",
+                reportItems: reportItems,
+                scoreSnapshot: SecurityScoreSnapshot(result: result, targets: [])
+            )
+        } catch {
+            return ScanResult(
+                exitCode: 2,
+                reportURL: nil,
+                messageKO: "웹 점검에 실패했습니다.",
+                messageEN: "Web scan failed.",
                 detailKO: error.localizedDescription,
                 detailEN: error.localizedDescription,
                 reportItems: [],
@@ -3987,6 +4075,309 @@ private enum NativeDependencyInventory {
 /// Git diff-scope helper, mirroring the Python `security_scanner.git_changes` module. Runs
 /// `git diff` to list files changed versus a base ref. Any problem returns a warning and an
 /// empty list so the caller can fall back to a full scan rather than hiding findings.
+/// Live, non-destructive website posture checks using URLSession only.
+/// Mirrors the Python `security_scanner.web` header/cookie/CORS/redirect checks.
+/// It only reads what the server already returns -- no payloads, no fuzzing.
+private enum NativeWebScanner {
+    private static let userAgent = "KODA-web-scanner (+https://github.com/jhny-kor)"
+    private static let severityOrder = ["critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0]
+
+    static func scan(urlString: String, timeout: TimeInterval = 15) async -> (findings: [NativeFinding], warnings: [String]) {
+        guard let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else {
+            return ([], ["웹 점검 건너뜀: http(s) URL이 아닙니다: \(urlString)"])
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let delegate = WebScanTLSDelegate()
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return ([finding("web.connection-failed", "info", "HTTP 응답을 해석할 수 없습니다", urlString)],
+                        ["웹 점검: HTTP 응답이 아닙니다."])
+            }
+            let finalURL = http.url ?? url
+            let headers = loweredHeaders(http.allHeaderFields)
+            let cookies = HTTPCookie.cookies(withResponseHeaderFields: stringHeaders(http.allHeaderFields), for: finalURL)
+            var findings = analyze(url: finalURL.absoluteString, headers: headers, cookies: cookies)
+            if scheme == "http", finalURL.scheme?.lowercased() != "https" {
+                findings.append(finding(
+                    "web.no-https-redirect", "medium", "HTTP가 HTTPS로 리다이렉트되지 않음",
+                    finalURL.absoluteString,
+                    recommendation: "모든 HTTP 트래픽을 HTTPS로 리다이렉트하고 HTTPS 응답에 HSTS를 적용하세요."
+                ))
+            }
+            if finalURL.scheme?.lowercased() == "https" {
+                findings.append(contentsOf: tlsFindings(
+                    url: finalURL.absoluteString,
+                    trust: delegate.serverTrust,
+                    version: delegate.negotiatedTLSVersion
+                ))
+            }
+            return (sortBySeverity(findings), [])
+        } catch {
+            return ([tlsOrConnectionFailure(urlString: urlString, error: error)],
+                    ["웹 점검 연결 실패: \(error.localizedDescription)"])
+        }
+    }
+
+    /// Pure header/cookie analysis (no network) so the logic mirrors the Python side.
+    static func analyze(url: String, headers: [String: String], cookies: [HTTPCookie]) -> [NativeFinding] {
+        let isHTTPS = URL(string: url)?.scheme?.lowercased() == "https"
+        var findings: [NativeFinding] = []
+        let csp = headers["content-security-policy"] ?? ""
+
+        if isHTTPS && headers["strict-transport-security"] == nil {
+            findings.append(finding("web.missing-hsts", "medium", "HSTS 헤더 누락", url,
+                recommendation: "'Strict-Transport-Security: max-age=31536000; includeSubDomains'를 추가하세요."))
+        }
+        if csp.isEmpty {
+            findings.append(finding("web.missing-csp", "medium", "Content-Security-Policy 헤더 누락", url,
+                recommendation: "스크립트/스타일/연결 소스를 제한하는 Content-Security-Policy를 설정하세요."))
+        }
+        if (headers["x-content-type-options"] ?? "").lowercased() != "nosniff" {
+            findings.append(finding("web.missing-x-content-type-options", "low", "'X-Content-Type-Options: nosniff' 누락", url,
+                recommendation: "MIME 스니핑을 막기 위해 'X-Content-Type-Options: nosniff'를 보내세요."))
+        }
+        if headers["x-frame-options"] == nil && !csp.lowercased().contains("frame-ancestors") {
+            findings.append(finding("web.missing-frame-protection", "medium", "클릭재킹 보호 누락 (X-Frame-Options / frame-ancestors)", url,
+                recommendation: "'X-Frame-Options: DENY' 또는 CSP 'frame-ancestors' 지시어를 보내세요."))
+        }
+        if headers["referrer-policy"] == nil {
+            findings.append(finding("web.missing-referrer-policy", "low", "Referrer-Policy 헤더 누락", url,
+                recommendation: "'strict-origin-when-cross-origin' 같은 Referrer-Policy를 보내세요."))
+        }
+        if headers["permissions-policy"] == nil {
+            findings.append(finding("web.missing-permissions-policy", "info", "Permissions-Policy 헤더 누락", url,
+                recommendation: "강력한 브라우저 기능을 제한하는 Permissions-Policy를 보내세요."))
+        }
+
+        if let server = headers["server"], server.contains(where: \.isNumber) {
+            findings.append(finding("web.server-version-disclosure", "low", "Server 헤더가 소프트웨어 버전을 노출", url,
+                evidence: "Server: \(server)", recommendation: "'Server' 헤더에서 버전 정보를 제거하거나 일반화하세요."))
+        }
+        if let poweredBy = headers["x-powered-by"] {
+            findings.append(finding("web.x-powered-by-disclosure", "low", "X-Powered-By 헤더가 기술 스택을 노출", url,
+                evidence: "X-Powered-By: \(poweredBy)", recommendation: "'X-Powered-By' 헤더를 제거하세요."))
+        }
+
+        if (headers["access-control-allow-origin"] ?? "").trimmingCharacters(in: .whitespaces) == "*" {
+            let credentials = (headers["access-control-allow-credentials"] ?? "").trimmingCharacters(in: .whitespaces).lowercased() == "true"
+            if credentials {
+                findings.append(finding("web.cors-wildcard-credentials", "high", "CORS가 모든 출처와 credentials를 함께 허용", url,
+                    evidence: "Access-Control-Allow-Origin: * + Access-Control-Allow-Credentials: true",
+                    recommendation: "와일드카드 출처와 credentials를 함께 쓰지 말고 허용된 출처만 명시하세요."))
+            } else {
+                findings.append(finding("web.cors-wildcard", "low", "CORS가 모든 출처를 허용 (Access-Control-Allow-Origin: *)", url,
+                    evidence: "Access-Control-Allow-Origin: *",
+                    recommendation: "교차 출처 접근이 필요한 특정 출처로 CORS를 제한하세요."))
+            }
+        }
+
+        findings.append(contentsOf: cookieFindings(url: url, cookies: cookies, isHTTPS: isHTTPS))
+        return findings
+    }
+
+    private static func cookieFindings(url: String, cookies: [HTTPCookie], isHTTPS: Bool) -> [NativeFinding] {
+        guard !cookies.isEmpty else { return [] }
+        var missingSecure: [String] = []
+        var missingHTTPOnly: [String] = []
+        var missingSameSite: [String] = []
+        for cookie in cookies {
+            if isHTTPS && !cookie.isSecure { missingSecure.append(cookie.name) }
+            if !cookie.isHTTPOnly { missingHTTPOnly.append(cookie.name) }
+            if cookie.sameSitePolicy == nil { missingSameSite.append(cookie.name) }
+        }
+        var findings: [NativeFinding] = []
+        if !missingSecure.isEmpty {
+            findings.append(finding("web.cookie-missing-secure", "medium", "HTTPS에서 Secure 플래그 없는 쿠키", url,
+                evidence: "쿠키: \(missingSecure.joined(separator: ", "))",
+                recommendation: "HTTPS에서만 전송되도록 'Secure' 속성을 추가하세요."))
+        }
+        if !missingHTTPOnly.isEmpty {
+            findings.append(finding("web.cookie-missing-httponly", "low", "HttpOnly 플래그 없는 쿠키", url,
+                evidence: "쿠키: \(missingHTTPOnly.joined(separator: ", "))",
+                recommendation: "JavaScript 접근을 막도록 'HttpOnly'를 추가하세요."))
+        }
+        if !missingSameSite.isEmpty {
+            findings.append(finding("web.cookie-missing-samesite", "low", "SameSite 속성 없는 쿠키", url,
+                evidence: "쿠키: \(missingSameSite.joined(separator: ", "))",
+                recommendation: "CSRF 노출을 줄이도록 'SameSite=Lax' 또는 'SameSite=Strict'를 추가하세요."))
+        }
+        return findings
+    }
+
+    private static func loweredHeaders(_ raw: [AnyHashable: Any]) -> [String: String] {
+        var result: [String: String] = [:]
+        for (key, value) in raw {
+            guard let name = key as? String else { continue }
+            result[name.lowercased()] = String(describing: value)
+        }
+        return result
+    }
+
+    private static func stringHeaders(_ raw: [AnyHashable: Any]) -> [String: String] {
+        var result: [String: String] = [:]
+        for (key, value) in raw {
+            guard let name = key as? String else { continue }
+            result[name] = String(describing: value)
+        }
+        return result
+    }
+
+    private static func sortBySeverity(_ findings: [NativeFinding]) -> [NativeFinding] {
+        findings.sorted { left, right in
+            let leftRank = severityOrder[left.severity] ?? 0
+            let rightRank = severityOrder[right.severity] ?? 0
+            if leftRank != rightRank { return leftRank > rightRank }
+            return left.ruleID < right.ruleID
+        }
+    }
+
+    // Certificates expiring within this window are surfaced before they break TLS.
+    private static let certExpiryWarnDays = 21
+    private static let weakTLSVersions: Set<tls_protocol_version_t> = [.TLSv10, .TLSv11, .DTLSv10]
+
+    /// Certificate expiry + negotiated-protocol findings, mirroring the Python `check_tls`.
+    private static func tlsFindings(url: String, trust: SecTrust?, version: tls_protocol_version_t?) -> [NativeFinding] {
+        var findings: [NativeFinding] = []
+        if let trust, let notAfter = certificateNotAfter(trust) {
+            let daysLeft = Int(notAfter.timeIntervalSinceNow / 86_400)
+            if daysLeft < 0 {
+                findings.append(finding("web.tls-certificate-expired", "critical", "TLS 인증서가 만료됨", url,
+                    evidence: "notAfter: \(isoDate(notAfter))",
+                    recommendation: "유효한 인증서를 즉시 갱신·배포하세요."))
+            } else if daysLeft <= certExpiryWarnDays {
+                findings.append(finding("web.tls-certificate-expiring", "medium", "TLS 인증서가 \(daysLeft)일 내 만료", url,
+                    evidence: "notAfter: \(isoDate(notAfter))",
+                    recommendation: "만료 전에 인증서를 갱신하고 자동 갱신을 설정하세요."))
+            }
+        }
+        if let version, weakTLSVersions.contains(version) {
+            findings.append(finding("web.weak-tls-version", "medium", "서버가 약한 TLS 버전을 사용 (\(tlsVersionName(version)))", url,
+                evidence: "협상된 프로토콜: \(tlsVersionName(version))",
+                recommendation: "TLS 1.1 이하를 비활성화하고 TLS 1.2 이상을 요구하세요."))
+        }
+        return findings
+    }
+
+    /// Map a request failure to a certificate-invalid finding when the cause is TLS trust.
+    private static func tlsOrConnectionFailure(urlString: String, error: Error) -> NativeFinding {
+        let nsError = error as NSError
+        let tlsCodes: Set<Int> = [
+            NSURLErrorServerCertificateUntrusted,
+            NSURLErrorServerCertificateHasBadDate,
+            NSURLErrorServerCertificateHasUnknownRoot,
+            NSURLErrorServerCertificateNotYetValid,
+            NSURLErrorSecureConnectionFailed,
+        ]
+        if nsError.domain == NSURLErrorDomain, tlsCodes.contains(nsError.code) {
+            return finding("web.tls-certificate-invalid", "high", "TLS 인증서가 검증되지 않음", urlString,
+                evidence: nsError.localizedDescription,
+                recommendation: "이 호스트에 대해 신뢰되는 유효한 인증서 체인을 설치하세요.")
+        }
+        return finding("web.connection-failed", "info", "웹사이트에 연결할 수 없습니다", urlString,
+            evidence: nsError.localizedDescription,
+            recommendation: "URL과 서비스 상태, TLS 인증서 유효성을 확인하세요.")
+    }
+
+    private static func certificateNotAfter(_ trust: SecTrust) -> Date? {
+        guard let certificate = leafCertificate(from: trust),
+              let values = SecCertificateCopyValues(certificate, [kSecOIDX509V1ValidityNotAfter] as CFArray, nil) as? [CFString: Any],
+              let entry = values[kSecOIDX509V1ValidityNotAfter] as? [CFString: Any],
+              let raw = entry[kSecPropertyKeyValue] as? NSNumber else {
+            return nil
+        }
+        // SecCertificateCopyValues returns the validity as seconds since the 2001 reference date.
+        return Date(timeIntervalSinceReferenceDate: raw.doubleValue)
+    }
+
+    private static func leafCertificate(from trust: SecTrust) -> SecCertificate? {
+        if #available(macOS 12.0, *) {
+            return (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first
+        }
+        return SecTrustGetCertificateAtIndex(trust, 0)
+    }
+
+    private static func tlsVersionName(_ version: tls_protocol_version_t) -> String {
+        switch version {
+        case .TLSv10: return "TLS 1.0"
+        case .TLSv11: return "TLS 1.1"
+        case .TLSv12: return "TLS 1.2"
+        case .TLSv13: return "TLS 1.3"
+        case .DTLSv10: return "DTLS 1.0"
+        case .DTLSv12: return "DTLS 1.2"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func isoDate(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
+    private static func finding(
+        _ ruleID: String,
+        _ severity: String,
+        _ title: String,
+        _ url: String,
+        evidence: String = "",
+        recommendation: String = ""
+    ) -> NativeFinding {
+        NativeFinding(
+            ruleID: ruleID,
+            severity: severity,
+            category: "web",
+            title: title,
+            path: url,
+            line: nil,
+            evidence: evidence,
+            recommendation: recommendation
+        )
+    }
+}
+
+/// Captures the server trust and negotiated TLS version from a URLSession web scan
+/// so certificate expiry and weak-protocol checks match the Python `check_tls`.
+private final class WebScanTLSDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
+    private(set) var serverTrust: SecTrust?
+    private(set) var negotiatedTLSVersion: tls_protocol_version_t?
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            serverTrust = trust
+        }
+        // Always defer to default validation; we only observe, never override trust.
+        completionHandler(.performDefaultHandling, nil)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        if let transaction = metrics.transactionMetrics.last(where: { $0.negotiatedTLSProtocolVersion != nil }) {
+            negotiatedTLSVersion = transaction.negotiatedTLSProtocolVersion
+        }
+    }
+}
+
 private enum NativeGitChanges {
     private static let gitPath = "/usr/bin/git"
 
@@ -4185,11 +4576,15 @@ private enum NativeLLMProvider {
 /// degrades gracefully (stops and warns) when the backend is unavailable.
 private enum NativeAITriage {
     private static let maxFindings = 40
-    private static let systemPrompt = """
-    You are a security triage assistant. Decide whether a static-analysis finding is a real \
-    issue (true positive) or noise (false positive). You must NOT change the severity. Reply \
-    ONLY with a compact JSON object: {"verdict": "likely_true|likely_false|uncertain", \
-    "confidence": 0.0-1.0, "note": "<=20 words"}.
+    private static let falsePositivePrompt = """
+    You are the false-positive gate for a static-analysis finding. Look only for evidence \
+    that this finding is noise. You must NOT change the severity. Reply ONLY with JSON: \
+    {"verdict": "likely_false|uncertain", "confidence": 0.0-1.0, "note": "<=20 words"}.
+    """
+    private static let truePositivePrompt = """
+    You are the true-positive explainer for a static-analysis finding. Look only for evidence \
+    that this finding is real and exploitable. You must NOT change the severity. Reply ONLY \
+    with JSON: {"verdict": "likely_true|uncertain", "confidence": 0.0-1.0, "note": "<=20 words"}.
     """
 
     static func triage(findings: [NativeFinding], model: String, language: AppLanguage) async -> ([NativeFinding], [String]) {
@@ -4204,21 +4599,29 @@ private enum NativeAITriage {
             let finding = output[index]
             if finding.category == "host" || !finding.triageVerdict.isEmpty { continue }
             do {
-                let result = try await NativeLLMProvider.complete(
+                let falsePositiveResult = try await NativeLLMProvider.complete(
                     prompt: buildPrompt(finding, language: language),
-                    system: systemPrompt,
+                    system: falsePositivePrompt,
+                    jsonMode: true,
+                    model: model
+                )
+                let truePositiveResult = try await NativeLLMProvider.complete(
+                    prompt: buildPrompt(finding, language: language),
+                    system: truePositivePrompt,
                     jsonMode: true,
                     model: model
                 )
                 budget -= 1
-                if result.sentExternally, !externalWarned {
-                    warnings.append("AI triage sent finding context to the '\(result.backend)' backend (external network call).")
+                if (falsePositiveResult.sentExternally || truePositiveResult.sentExternally), !externalWarned {
+                    warnings.append("AI triage sent finding context to the '\(falsePositiveResult.backend)' backend (external network call).")
                     externalWarned = true
                 }
-                guard let verdict = parseVerdict(result.text) else {
+                guard let falsePositive = parseVerdict(falsePositiveResult.text),
+                      let truePositive = parseVerdict(truePositiveResult.text) else {
                     warnings.append("AI triage could not parse the model response for \(finding.ruleID).")
                     continue
                 }
+                let verdict = combineVerdicts(falsePositive: falsePositive, truePositive: truePositive)
                 output[index].triageVerdict = verdict.verdict
                 output[index].triageConfidence = verdict.confidence
                 output[index].triageNote = verdict.note
@@ -4233,6 +4636,24 @@ private enum NativeAITriage {
             }
         }
         return (output, warnings)
+    }
+
+    private static func combineVerdicts(
+        falsePositive: (verdict: String, confidence: Double?, note: String),
+        truePositive: (verdict: String, confidence: Double?, note: String)
+    ) -> (verdict: String, confidence: Double?, note: String) {
+        if falsePositive.verdict == "likely_false", truePositive.verdict == "likely_true" {
+            let confidence = [falsePositive.confidence, truePositive.confidence].compactMap(\.self).min()
+            return ("uncertain", confidence, "FP and TP chains disagree")
+        }
+        if falsePositive.verdict == "likely_false" {
+            return falsePositive
+        }
+        if truePositive.verdict == "likely_true" {
+            return truePositive
+        }
+        let confidence = [falsePositive.confidence, truePositive.confidence].compactMap(\.self).max()
+        return ("uncertain", confidence, falsePositive.note.isEmpty ? truePositive.note : falsePositive.note)
     }
 
     private static func buildPrompt(_ finding: NativeFinding, language: AppLanguage) -> String {

@@ -143,6 +143,10 @@ $pyInstallerArgs = @(
     # Host posture, inventory, EOL, and CPE modules are imported lazily, so they
     # must be force-collected or PyInstaller's static analysis drops them.
     "--collect-submodules", "security_scanner",
+    # Live web posture scan (headers/TLS/cookies/CORS) is reached from the
+    # dashboard via /api/web-scan and imported lazily; force-include it so the
+    # feature ships in KODA.exe even if the collect flag above is narrowed later.
+    "--hidden-import", "security_scanner.web",
     # pywebview + its Windows Edge WebView2 backend (pythonnet/clr) must be
     # bundled fully or the native window backend fails to load at runtime.
     "--collect-all", "webview",

@@ -121,6 +121,34 @@ def scan_directory_payload(
     )
 
 
+def web_scan_payload(
+    url: str,
+    *,
+    language: str = "ko",
+    min_severity: str = "info",
+    timeout: float = 15.0,
+) -> dict[str, object]:
+    if min_severity not in SEVERITIES:
+        raise ValueError(f"Unsupported min_severity: {min_severity}")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Enter an http(s) URL, e.g. https://example.com")
+
+    from .web import check_web
+
+    findings, warnings = check_web(url, timeout=timeout)
+    findings = filter_by_min_severity(findings, min_severity)
+    target_name = parsed.netloc
+    return build_dashboard_payload(
+        findings,
+        (target_name,),
+        language,
+        target_paths={target_name: url},
+        warnings=tuple(warnings),
+        scan_path=url,
+    )
+
+
 def _handler(language: str):
     initial_html = render_html([], language=language)
 
@@ -139,7 +167,7 @@ def _handler(language: str):
 
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
-            if path in {"/api/health", "/api/scan", "/api/select-directory"}:
+            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/select-directory"}:
                 self.send_response(HTTPStatus.NO_CONTENT)
                 self._send_cors_headers()
                 self.send_header("Content-Length", "0")
@@ -151,6 +179,9 @@ def _handler(language: str):
             path = urlparse(self.path).path
             if path == "/api/select-directory":
                 self._handle_select_directory()
+                return
+            if path == "/api/web-scan":
+                self._handle_web_scan()
                 return
             if path != "/api/scan":
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -180,6 +211,19 @@ def _handler(language: str):
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
 
+            self._send_json(payload)
+
+        def _handle_web_scan(self) -> None:
+            try:
+                request = self._read_json()
+                payload = web_scan_payload(
+                    _string_value(request, "url"),
+                    language=_choice_value(request, "language", {"en", "ko"}, language),
+                    min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "info"),
+                )
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
             self._send_json(payload)
 
         def _handle_select_directory(self) -> None:

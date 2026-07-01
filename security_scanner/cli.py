@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.parse
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -272,12 +273,44 @@ def main(argv: list[str] | None = None) -> int:
             config.report.format,
             target_names=("host",),
             language=config.report.language,
+            warnings=tuple(scanner.warnings),
         )
         write_report(content, config.report.output)
         for warning in scanner.warnings:
             print(f"warning: {warning}", file=sys.stderr)
         print(
             f"Host scan: {len(filtered_findings)} finding(s) at or above {config.report.min_severity}.",
+            file=sys.stderr,
+        )
+        if args.fail_on and _has_failure(filtered_findings, args.fail_on):
+            return 1
+        return 0
+
+    if args.command == "web-scan":
+        from .web import check_web
+
+        findings, warnings = check_web(args.url, timeout=args.timeout)
+        report = ReportConfig(
+            format=args.format or "markdown",
+            output=expand_path(str(args.output), Path.cwd()) if args.output else None,
+            min_severity=args.min_severity or "info",
+            language=args.language or "en",
+        )
+        target_name = urllib.parse.urlparse(args.url).netloc or args.url
+        filtered_findings = filter_by_min_severity(findings, report.min_severity)
+        content = render_report(
+            filtered_findings,
+            report.format,
+            target_names=(target_name,),
+            target_paths={target_name: args.url},
+            language=report.language,
+            warnings=tuple(warnings),
+        )
+        write_report(content, report.output)
+        for warning in warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        print(
+            f"Web scan: {len(filtered_findings)} finding(s) at or above {report.min_severity} for {target_name}.",
             file=sys.stderr,
         )
         if args.fail_on and _has_failure(filtered_findings, args.fail_on):
@@ -335,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
                     target_paths=target_paths,
                     language=config.report.language,
                     components=scanner.components,
+                    warnings=tuple(scanner.warnings),
                 )
                 write_report(content, config.report.output)
 
@@ -454,6 +488,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--nvd-api-key-env",
         help="environment variable holding an NVD API key (raises NVD rate limits)",
     )
+
+    web_scan = subparsers.add_parser("web-scan", help="check a live website's security posture (headers, TLS, cookies, CORS)")
+    web_scan.add_argument("--url", required=True, help="authorized http(s) URL to check")
+    web_scan.add_argument("--format", choices=("markdown", "json", "html", "sarif"), help="report format")
+    web_scan.add_argument("--output", type=Path, help="report output path")
+    web_scan.add_argument("--language", choices=("en", "ko"), help="report display language")
+    web_scan.add_argument("--min-severity", choices=SEVERITIES, help="minimum severity to include (default info)")
+    web_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
+    web_scan.add_argument("--timeout", type=float, default=15.0, help="per-request timeout in seconds")
 
     discover = subparsers.add_parser("discover", help="list project roots under a folder")
     discover.add_argument("--target", default=".", help="folder to inspect")
