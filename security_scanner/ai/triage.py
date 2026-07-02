@@ -31,11 +31,15 @@ _MAX_FILE_BYTES = 524288
 
 _VALID_VERDICTS = {"likely_true", "likely_false", "uncertain"}
 
-_SYSTEM_PROMPT = (
-    "You are a security triage assistant. Decide whether a static-analysis finding is a "
-    "real issue (true positive) or noise (false positive). You must NOT change the "
-    "severity. Reply ONLY with a compact JSON object: "
-    '{"verdict": "likely_true|likely_false|uncertain", "confidence": 0.0-1.0, "note": "<=20 words"}.'
+_FALSE_POSITIVE_PROMPT = (
+    "You are the false-positive gate for a static-analysis finding. Look only for "
+    "evidence that this finding is noise. You must NOT change the severity. Reply ONLY "
+    'with JSON: {"verdict": "likely_false|uncertain", "confidence": 0.0-1.0, "note": "<=20 words"}.'
+)
+_TRUE_POSITIVE_PROMPT = (
+    "You are the true-positive explainer for a static-analysis finding. Look only for "
+    "evidence that this finding is real and exploitable. You must NOT change the severity. "
+    'Reply ONLY with JSON: {"verdict": "likely_true|uncertain", "confidence": 0.0-1.0, "note": "<=20 words"}.'
 )
 
 
@@ -76,9 +80,16 @@ def triage_findings(
             continue
         prompt = _build_prompt(finding, language)
         try:
-            result = complete_fn(
+            false_positive_result = complete_fn(
                 prompt,
-                system=_SYSTEM_PROMPT,
+                system=_FALSE_POSITIVE_PROMPT,
+                json_mode=True,
+                model=model,
+                timeout_seconds=timeout_seconds,
+            )
+            true_positive_result = complete_fn(
+                prompt,
+                system=_TRUE_POSITIVE_PROMPT,
                 json_mode=True,
                 model=model,
                 timeout_seconds=timeout_seconds,
@@ -87,15 +98,17 @@ def triage_findings(
             warnings.append(f"AI triage skipped: {exc}")
             return annotated, warnings
         budget -= 1
-        if result.sent_externally and not external_warned:
+        if (false_positive_result.sent_externally or true_positive_result.sent_externally) and not external_warned:
             warnings.append(
-                f"AI triage sent finding context to the '{result.backend}' backend (external network call)."
+                f"AI triage sent finding context to the '{false_positive_result.backend}' backend (external network call)."
             )
             external_warned = True
-        verdict = _parse_verdict(result.text)
-        if verdict is None:
+        false_positive = _parse_verdict(false_positive_result.text)
+        true_positive = _parse_verdict(true_positive_result.text)
+        if false_positive is None or true_positive is None:
             warnings.append(f"AI triage could not parse the model response for {finding.rule_id}.")
             continue
+        verdict = _combine_verdicts(false_positive, true_positive)
         annotated[index] = replace(
             finding,
             triage_verdict=verdict.verdict,
@@ -103,6 +116,23 @@ def triage_findings(
             triage_note=verdict.note,
         )
     return annotated, warnings
+
+
+def _combine_verdicts(false_positive: _Verdict, true_positive: _Verdict) -> _Verdict:
+    if false_positive.verdict == "likely_false" and true_positive.verdict == "likely_true":
+        confidence_values = [
+            value for value in (false_positive.confidence, true_positive.confidence) if value is not None
+        ]
+        confidence = min(confidence_values) if confidence_values else None
+        return _Verdict(verdict="uncertain", confidence=confidence, note="FP and TP chains disagree")
+    if false_positive.verdict == "likely_false":
+        return false_positive
+    if true_positive.verdict == "likely_true":
+        return true_positive
+    confidence_values = [value for value in (false_positive.confidence, true_positive.confidence) if value is not None]
+    confidence = max(confidence_values) if confidence_values else None
+    note = false_positive.note or true_positive.note
+    return _Verdict(verdict="uncertain", confidence=confidence, note=note)
 
 
 def _should_triage(finding: Finding) -> bool:
