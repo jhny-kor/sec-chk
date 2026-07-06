@@ -77,6 +77,28 @@ def install_pre_commit_hook(root: Path, *, fail_on: str = "high", force: bool = 
     return TemplateWriteResult(hook, "written")
 
 
+def write_ignore_template(root: Path, *, force: bool = False) -> TemplateWriteResult:
+    root = root.expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise ValueError(f"Target directory does not exist: {root}")
+    destination = root / "koda-ignore.yml"
+    if destination.exists() and not force:
+        return TemplateWriteResult(destination, "skipped")
+    destination.write_text(_ignore_template(), encoding="utf-8")
+    return TemplateWriteResult(destination, "written")
+
+
+def _ignore_template() -> str:
+    return """# KODA finding exceptions. Existing scans ignore matching entries until the date expires.
+# Keep reasons specific and review every exception before extending it.
+ignore:
+  - rule: secret.generic-assignment
+    path: "tests/**"
+    reason: "example test fixture only"
+    until: "2099-12-31"
+"""
+
+
 def render_pre_commit_hook(*, fail_on: str = "high") -> str:
     threshold = fail_on if fail_on in {"critical", "high", "medium", "low", "info"} else "high"
     return f"""#!/bin/sh

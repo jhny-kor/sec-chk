@@ -4248,7 +4248,7 @@ private enum NativeWebScanner {
 
     // Certificates expiring within this window are surfaced before they break TLS.
     private static let certExpiryWarnDays = 21
-    private static let weakTLSVersions: Set<tls_protocol_version_t> = [.TLSv10, .TLSv11, .DTLSv10]
+    private static let weakTLSWireVersionRawValues: Set<tls_protocol_version_t.RawValue> = [0x0301, 0x0302, 0xfeff]
 
     /// Certificate expiry + negotiated-protocol findings, mirroring the Python `check_tls`.
     private static func tlsFindings(url: String, trust: SecTrust?, version: tls_protocol_version_t?) -> [NativeFinding] {
@@ -4265,7 +4265,7 @@ private enum NativeWebScanner {
                     recommendation: "만료 전에 인증서를 갱신하고 자동 갱신을 설정하세요."))
             }
         }
-        if let version, weakTLSVersions.contains(version) {
+        if let version, weakTLSWireVersionRawValues.contains(version.rawValue) {
             findings.append(finding("web.weak-tls-version", "medium", "서버가 약한 TLS 버전을 사용 (\(tlsVersionName(version)))", url,
                 evidence: "협상된 프로토콜: \(tlsVersionName(version))",
                 recommendation: "TLS 1.1 이하를 비활성화하고 TLS 1.2 이상을 요구하세요."))
@@ -4305,10 +4305,7 @@ private enum NativeWebScanner {
     }
 
     private static func leafCertificate(from trust: SecTrust) -> SecCertificate? {
-        if #available(macOS 12.0, *) {
-            return (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first
-        }
-        return SecTrustGetCertificateAtIndex(trust, 0)
+        (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first
     }
 
     private static func tlsVersionName(_ version: tls_protocol_version_t) -> String {

@@ -149,6 +149,42 @@ def web_scan_payload(
     )
 
 
+PREVENTION_KIT_ACTIONS = {"toolkit", "hook", "ignore"}
+
+
+def prevention_kit_payload(
+    action: str,
+    path_value: str,
+    *,
+    base_dir: Path | None = None,
+) -> dict[str, object]:
+    if action not in PREVENTION_KIT_ACTIONS:
+        raise ValueError(f"Unsupported action: {action}")
+    target_path = expand_path(path_value, base_dir or Path.cwd())
+    if not target_path.exists():
+        raise ValueError(f"Path does not exist: {target_path}")
+    if not target_path.is_dir():
+        raise ValueError(f"Path is not a directory: {target_path}")
+
+    from .toolkit import (
+        install_pre_commit_hook,
+        write_ignore_template,
+        write_security_template_files,
+    )
+
+    if action == "toolkit":
+        results = write_security_template_files(target_path)
+    elif action == "hook":
+        results = [install_pre_commit_hook(target_path)]
+    else:
+        results = [write_ignore_template(target_path)]
+
+    return {
+        "action": action,
+        "results": [{"path": str(item.path), "status": item.status} for item in results],
+    }
+
+
 def _handler(language: str):
     initial_html = render_html([], language=language)
 
@@ -167,7 +203,7 @@ def _handler(language: str):
 
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
-            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/select-directory"}:
+            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/select-directory", "/api/prevention-kit"}:
                 self.send_response(HTTPStatus.NO_CONTENT)
                 self._send_cors_headers()
                 self.send_header("Content-Length", "0")
@@ -182,6 +218,9 @@ def _handler(language: str):
                 return
             if path == "/api/web-scan":
                 self._handle_web_scan()
+                return
+            if path == "/api/prevention-kit":
+                self._handle_prevention_kit()
                 return
             if path != "/api/scan":
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -220,6 +259,18 @@ def _handler(language: str):
                     _string_value(request, "url"),
                     language=_choice_value(request, "language", {"en", "ko"}, language),
                     min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "info"),
+                )
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(payload)
+
+        def _handle_prevention_kit(self) -> None:
+            try:
+                request = self._read_json()
+                payload = prevention_kit_payload(
+                    _choice_value(request, "action", PREVENTION_KIT_ACTIONS, "toolkit"),
+                    _string_value(request, "path"),
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)

@@ -75,6 +75,17 @@ TRANSLATIONS = {
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "Scan URL",
         "web_scan_note": "Checks live security headers, TLS, cookies, and CORS with read-only requests. Only scan sites you are authorized to test.",
+        "prevention_kit_title": "Prevention Kit",
+        "prevention_kit_note": "Writes baseline guardrails into the selected folder above.",
+        "prevention_apply_toolkit": "Apply guardrail files",
+        "prevention_install_hook": "Install pre-commit hook",
+        "prevention_create_ignore": "Create ignore template",
+        "prevention_need_folder": "Choose a folder above first.",
+        "prevention_running": "Applying prevention kit...",
+        "prevention_done": "Prevention kit applied",
+        "prevention_written": "written",
+        "prevention_kept": "kept existing",
+        "prevention_failed": "Prevention kit failed",
         "discover_projects": "Discover projects",
         "discovery_depth": "Depth",
         "scan_status_idle": "Ready",
@@ -187,6 +198,17 @@ TRANSLATIONS = {
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "URL 점검",
         "web_scan_note": "읽기 전용 요청으로 실시간 보안 헤더·TLS·쿠키·CORS를 점검합니다. 점검 권한이 있는 사이트에만 실행하세요.",
+        "prevention_kit_title": "예방 키트",
+        "prevention_kit_note": "위에서 선택한 폴더에 기본 예방 가드레일 파일을 생성합니다.",
+        "prevention_apply_toolkit": "가드레일 파일 생성",
+        "prevention_install_hook": "커밋 전 차단 훅 설치",
+        "prevention_create_ignore": "예외 템플릿 생성",
+        "prevention_need_folder": "먼저 위에서 폴더를 선택하세요.",
+        "prevention_running": "예방 키트를 적용하고 있습니다...",
+        "prevention_done": "예방 키트 적용 완료",
+        "prevention_written": "생성",
+        "prevention_kept": "기존 유지",
+        "prevention_failed": "예방 키트 실패",
         "discover_projects": "하위 프로젝트 탐색",
         "discovery_depth": "깊이",
         "scan_status_idle": "대기 중",
@@ -1124,6 +1146,10 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_WEB_SCAN_TITLE__": html.escape(str(labels["web_scan_title"])),
         "__INITIAL_WEB_URL_PLACEHOLDER__": html.escape(str(labels["web_url_placeholder"]), quote=True),
         "__INITIAL_WEB_SCAN_NOW__": html.escape(str(labels["web_scan_now"])),
+        "__INITIAL_PREVENTION_KIT_TITLE__": html.escape(str(labels["prevention_kit_title"])),
+        "__INITIAL_PREVENTION_APPLY_TOOLKIT__": html.escape(str(labels["prevention_apply_toolkit"])),
+        "__INITIAL_PREVENTION_INSTALL_HOOK__": html.escape(str(labels["prevention_install_hook"])),
+        "__INITIAL_PREVENTION_CREATE_IGNORE__": html.escape(str(labels["prevention_create_ignore"])),
         "__INITIAL_DISCOVER_PROJECTS__": html.escape(str(labels["discover_projects"])),
         "__INITIAL_DISCOVERY_DEPTH__": html.escape(str(labels["discovery_depth"])),
         "__INITIAL_SCAN_STATUS_IDLE__": html.escape(str(labels["scan_status_idle"])),
@@ -2010,6 +2036,13 @@ HTML_TEMPLATE = """<!doctype html>
         <button id="web-scan-run" type="button">__INITIAL_WEB_SCAN_NOW__</button>
         <span id="web-scan-note" class="scan-note"></span>
       </div>
+      <div class="scan-prevention-form">
+        <span id="prevention-kit-title" class="scan-web-title">__INITIAL_PREVENTION_KIT_TITLE__</span>
+        <button id="prevention-apply-toolkit" type="button">__INITIAL_PREVENTION_APPLY_TOOLKIT__</button>
+        <button id="prevention-install-hook" type="button">__INITIAL_PREVENTION_INSTALL_HOOK__</button>
+        <button id="prevention-create-ignore" type="button">__INITIAL_PREVENTION_CREATE_IGNORE__</button>
+        <span id="prevention-kit-note" class="scan-note"></span>
+      </div>
       <div class="scan-standard-form">
         <label class="scan-select">
           <span id="scan-standard-label">__INITIAL_SCAN_STANDARD__</span>
@@ -2262,6 +2295,14 @@ HTML_TEMPLATE = """<!doctype html>
       byId("web-scan-run").disabled = state.scanRunning;
       byId("web-url").disabled = state.scanRunning;
       setText("web-scan-note", activeLabels.web_scan_note);
+      setText("prevention-kit-title", activeLabels.prevention_kit_title);
+      setText("prevention-kit-note", activeLabels.prevention_kit_note);
+      setText("prevention-apply-toolkit", activeLabels.prevention_apply_toolkit);
+      setText("prevention-install-hook", activeLabels.prevention_install_hook);
+      setText("prevention-create-ignore", activeLabels.prevention_create_ignore);
+      byId("prevention-apply-toolkit").disabled = state.scanRunning;
+      byId("prevention-install-hook").disabled = state.scanRunning;
+      byId("prevention-create-ignore").disabled = state.scanRunning;
       byId("scan-standard").disabled = state.scanRunning;
       byId("scan-standard-category").disabled = state.scanRunning;
       byId("scan-osv").disabled = state.scanRunning;
@@ -2701,6 +2742,45 @@ HTML_TEMPLATE = """<!doctype html>
       }
     }
 
+    async function runPreventionAction(action) {
+      const activeLabels = labels();
+      const path = byId("scan-path").value.trim();
+      if (!path) {
+        state.scanStatus = activeLabels.prevention_need_folder;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+
+      state.scanRunning = true;
+      state.scanStatus = activeLabels.prevention_running;
+      state.scanStatusClass = "";
+      render();
+
+      try {
+        const response = await fetch(apiEndpoint("/api/prevention-kit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, path }),
+        });
+        const result = await parseJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(result.error || activeLabels.prevention_failed);
+        }
+        state.scanRunning = false;
+        const written = (result.results || []).filter((item) => item.status === "written").length;
+        const kept = (result.results || []).filter((item) => item.status === "skipped").length;
+        state.scanStatus = `${activeLabels.prevention_done}: ${activeLabels.prevention_written} ${written}, ${activeLabels.prevention_kept} ${kept}`;
+        state.scanStatusClass = "ok";
+        render();
+      } catch (error) {
+        state.scanRunning = false;
+        state.scanStatus = `${activeLabels.prevention_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
+        state.scanStatusClass = "error";
+        render();
+      }
+    }
+
     function downloadSbom() {
       const activeLabels = labels();
       if (!components().length || !payload.sbom) {
@@ -2765,6 +2845,15 @@ HTML_TEMPLATE = """<!doctype html>
     });
     byId("web-scan-run").addEventListener("click", () => {
       runWebScan();
+    });
+    byId("prevention-apply-toolkit").addEventListener("click", () => {
+      runPreventionAction("toolkit");
+    });
+    byId("prevention-install-hook").addEventListener("click", () => {
+      runPreventionAction("hook");
+    });
+    byId("prevention-create-ignore").addEventListener("click", () => {
+      runPreventionAction("ignore");
     });
     byId("web-url").addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
