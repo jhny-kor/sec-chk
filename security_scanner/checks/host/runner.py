@@ -32,6 +32,10 @@ ALLOWED_COMMANDS: frozenset[str] = frozenset(
         "powershell.exe",
         "pwsh",
         "pwsh.exe",
+        "systemctl",
+        "ufw",
+        "ss",
+        "uname",
         # cross-platform
         "sysctl",
     }

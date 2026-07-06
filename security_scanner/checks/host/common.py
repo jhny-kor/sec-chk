@@ -49,7 +49,33 @@ def os_release() -> tuple[str, str, str]:
         # Windows 11 is build >= 22000; otherwise treat as Windows 10.
         cycle = "11" if build.isdigit() and int(build) >= 22000 else "10"
         return ("windows", build, cycle)
+    if platform == "linux":
+        return _linux_os_release()
     return ("", "", "")
+
+
+def _linux_os_release() -> tuple[str, str, str]:
+    from .runner import run_command
+
+    fields: dict[str, str] = {}
+    try:
+        lines = Path("/etc/os-release").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        uname = run_command(["uname", "-r"])
+        version = uname.text if uname.ok else ""
+        return ("linux", version, version.split(".", 1)[0] if version else "")
+    for line in lines:
+        key, separator, value = line.partition("=")
+        if separator:
+            fields[key] = value.strip().strip('"')
+
+    product = fields.get("ID", "linux")
+    version = fields.get("VERSION_ID", "")
+    if product == "ubuntu":
+        cycle = version
+    else:
+        cycle = version.split(".", 1)[0] if version else ""
+    return (product, version, cycle)
 
 
 def host_finding(

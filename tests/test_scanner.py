@@ -2103,6 +2103,20 @@ class HostCheckTests(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertTrue(any("not supported" in warning for warning in warnings))
 
+    def test_check_host_linux_dispatches_without_unsupported_warning(self) -> None:
+        from security_scanner.checks import host as host_pkg
+        from security_scanner.checks.host import host_linux, check_host
+        from security_scanner.checks.host.common import host_finding
+
+        sentinel = host_finding("host.linux.test", "info", "Linux check", "linux/test")
+        with patch.object(host_linux, "HOST_CHECKS", (lambda: [sentinel],)), patch.object(
+            host_pkg, "_load_baseline", return_value={}
+        ), patch.object(host_pkg, "_save_baseline"):
+            findings, warnings = check_host(platform="linux")
+
+        self.assertEqual([finding.rule_id for finding in findings], ["host.linux.test"])
+        self.assertFalse(any("not supported" in warning for warning in warnings))
+
     def test_macos_filevault_off_is_high(self) -> None:
         from security_scanner.checks.host import host_macos
         from security_scanner.checks.host.runner import CommandResult
@@ -2134,6 +2148,29 @@ class HostCheckTests(unittest.TestCase):
         with patch.object(host_windows, "powershell", return_value=fake):
             findings = host_windows.check_guest_account()
         self.assertEqual(findings[0].rule_id, "host.windows.guest-account-enabled")
+        self.assertEqual(findings[0].severity, "medium")
+
+    def test_linux_ssh_root_login_enabled_is_high(self) -> None:
+        from security_scanner.checks.host import host_linux
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sshd_config = Path(tmp) / "sshd_config"
+            sshd_config.write_text("PermitRootLogin yes\n", encoding="utf-8")
+            with patch.object(host_linux, "SSHD_CONFIG", sshd_config):
+                findings = host_linux.check_ssh_root_login()
+
+        self.assertEqual(findings[0].rule_id, "host.linux.ssh-root-login-enabled")
+        self.assertEqual(findings[0].severity, "high")
+
+    def test_linux_ip_forwarding_enabled_is_medium(self) -> None:
+        from security_scanner.checks.host import host_linux
+        from security_scanner.checks.host.runner import CommandResult
+
+        fake = CommandResult(command="sysctl", ok=True, returncode=0, stdout="1\n")
+        with patch.object(host_linux, "run_command", return_value=fake):
+            findings = host_linux.check_ip_forwarding()
+
+        self.assertEqual(findings[0].rule_id, "host.linux.ip-forwarding-enabled")
         self.assertEqual(findings[0].severity, "medium")
 
     def test_drift_regression_and_improvement(self) -> None:

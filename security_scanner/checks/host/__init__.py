@@ -37,6 +37,10 @@ def _platform_checks(platform: str) -> tuple[HostCheck, ...]:
         from . import host_windows
 
         return host_windows.HOST_CHECKS
+    if platform == "linux":
+        from . import host_linux
+
+        return host_linux.HOST_CHECKS
     return ()
 
 
@@ -55,7 +59,7 @@ def check_host(
     resolved = platform or current_platform()
     opts = options or HostScanOptions()
     checks = _platform_checks(resolved)
-    if not checks and resolved not in {"macos", "windows"}:
+    if not checks and resolved not in {"macos", "windows", "linux"}:
         return [], [f"Host security checks are not supported on platform: {resolved}"]
 
     posture: list[Finding] = []
