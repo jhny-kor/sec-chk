@@ -5,12 +5,18 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
+if str(SHARED_PYTHON) not in sys.path:
+    sys.path.insert(0, str(SHARED_PYTHON))
 
 from security_scanner.app import _create_available_server, run_app
 from security_scanner.cli import main as cli_main
@@ -21,6 +27,7 @@ from security_scanner.diffing import diff_reports, render_diff_markdown
 from security_scanner.discovery import discover_projects
 from security_scanner.evidence import render_evidence_checklist
 from security_scanner.integrations import upload_sbom_to_dependency_track
+from security_scanner.manifest import compare_manifest_to_target, create_manifest
 from security_scanner.models import DependencyComponent, Finding, ScannerConfig, TargetConfig
 from security_scanner.osv_vulnerabilities import _finding_from_vulnerability
 from security_scanner.reachability import (
@@ -693,6 +700,73 @@ ignore:
             self.assertTrue((output / "koda-vex.cdx.json").exists())
             self.assertTrue((output / "manual-evidence-checklist.md").exists())
             self.assertTrue((output / "checksums.txt").exists())
+
+    def test_manifest_create_and_compare_detects_file_shape_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "app.py").write_text("print('ok')\n", encoding="utf-8")
+            (root / "static").mkdir()
+            (root / "static" / "app.js").write_text("console.log('ok')\n", encoding="utf-8")
+
+            manifest = create_manifest(root)
+            (root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+            (root / "static" / "app.js").unlink()
+            (root / "new.txt").write_text("new\n", encoding="utf-8")
+
+            comparison = compare_manifest_to_target(manifest, root)
+
+            self.assertEqual(comparison.summary["changed"], 1)
+            self.assertEqual(comparison.summary["removed"], 1)
+            self.assertEqual(comparison.summary["added"], 1)
+            self.assertIn("app.py", comparison.changed)
+            self.assertIn("static/app.js", comparison.removed)
+            self.assertIn("new.txt", comparison.added)
+
+    def test_manifest_cli_create_compare_and_deploy_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "target"
+            target.mkdir()
+            (target / ".env").write_text(
+                "OPENAI_API_KEY=sk-1234567890abcdefghijklmnop\n",
+                encoding="utf-8",
+            )
+            manifest_path = root / "manifest.json"
+            comparison_path = root / "comparison.json"
+            reports = root / "reports"
+
+            create_code = cli_main(["manifest", "create", "--target", str(target), "--output", str(manifest_path)])
+            compare_code = cli_main(
+                [
+                    "manifest",
+                    "compare",
+                    "--baseline",
+                    str(manifest_path),
+                    "--target",
+                    str(target),
+                    "--output",
+                    str(comparison_path),
+                ]
+            )
+            deploy_code = cli_main(
+                [
+                    "deploy-check",
+                    "--target",
+                    str(target),
+                    "--output-dir",
+                    str(reports),
+                    "--fail-on",
+                    "high",
+                ]
+            )
+
+            self.assertEqual(create_code, 0)
+            self.assertEqual(compare_code, 0)
+            self.assertEqual(deploy_code, 1)
+            self.assertTrue(manifest_path.exists())
+            self.assertTrue(comparison_path.exists())
+            self.assertTrue((reports / "koda-deploy-scan.json").exists())
+            self.assertTrue((reports / "koda-deploy-manifest.json").exists())
 
     def test_cyclonedx_report_uses_collected_dependency_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1628,12 +1702,12 @@ GEM
 
     def test_platform_launchers_start_app_mode(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        mac_launcher = root / "scripts" / "sec-chk.command"
-        mac_installer = root / "scripts" / "install-macos.command"
-        mac_uninstaller = root / "scripts" / "uninstall-macos.command"
-        windows_launcher = root / "scripts" / "sec-chk.bat"
-        windows_builder = root / "scripts" / "build-koda-windows-installer.ps1"
-        windows_builder_bat = root / "scripts" / "build-koda-windows-installer.bat"
+        mac_launcher = root / "platforms" / "macos" / "scripts" / "sec-chk.command"
+        mac_installer = root / "platforms" / "macos" / "scripts" / "install-macos.command"
+        mac_uninstaller = root / "platforms" / "macos" / "scripts" / "uninstall-macos.command"
+        windows_launcher = root / "platforms" / "windows" / "scripts" / "sec-chk.bat"
+        windows_builder = root / "platforms" / "windows" / "scripts" / "build-koda-windows-installer.ps1"
+        windows_builder_bat = root / "platforms" / "windows" / "scripts" / "build-koda-windows-installer.bat"
         archived_windows = root / "archive" / "windows" / "legacy-secchk"
         archived_windows_scripts = archived_windows / "scripts"
         archived_windows_installer = archived_windows_scripts / "install-windows.ps1"
@@ -1641,28 +1715,29 @@ GEM
         archived_windows_uninstaller = archived_windows_scripts / "uninstall-windows.ps1"
         archived_windows_builder = archived_windows_scripts / "build-windows-installer.ps1"
         archived_windows_inno = archived_windows / "packaging" / "windows" / "SecChk.iss"
-        koda_windows_inno = root / "packaging" / "windows" / "KODA.iss"
-        mac_app_builder = root / "packaging" / "macos" / "build-koda-app.command"
-        mac_xcode_builder = root / "packaging" / "macos" / "build-koda-xcode-app.command"
-        mac_entitlements = root / "packaging" / "macos" / "KODA.entitlements"
-        mac_icon = root / "packaging" / "macos" / "assets" / "KODA.icns"
-        mac_packaging_readme = root / "packaging" / "macos" / "README.md"
-        koda_project = root / "platforms" / "macos" / "KODA" / "KODA.xcodeproj" / "project.pbxproj"
+        koda_windows_inno = root / "platforms" / "windows" / "packaging" / "KODA.iss"
+        mac_app_builder = root / "platforms" / "macos" / "scripts" / "build-koda-app.command"
+        mac_xcode_builder = root / "platforms" / "macos" / "scripts" / "build-koda-xcode-app.command"
+        mac_entitlements = root / "platforms" / "macos" / "packaging" / "KODA.entitlements"
+        mac_icon = root / "platforms" / "macos" / "packaging" / "assets" / "KODA.icns"
+        mac_packaging_readme = root / "platforms" / "macos" / "packaging" / "README.md"
+        koda_project = root / "platforms" / "macos" / "app" / "KODA" / "KODA.xcodeproj" / "project.pbxproj"
         koda_scheme = (
             root
             / "platforms"
             / "macos"
+            / "app"
             / "KODA"
             / "KODA.xcodeproj"
             / "xcshareddata"
             / "xcschemes"
             / "KODA.xcscheme"
         )
-        koda_content_view = root / "platforms" / "macos" / "KODA" / "KODA" / "ContentView.swift"
-        koda_standards_view = root / "platforms" / "macos" / "KODA" / "KODA" / "SecurityStandardsView.swift"
-        koda_bridge = root / "platforms" / "macos" / "KODA" / "KODA" / "ScannerBridge.swift"
-        koda_app = root / "platforms" / "macos" / "KODA" / "KODA" / "KODAApp.swift"
-        koda_native_scanner = root / "platforms" / "macos" / "KODA" / "KODA" / "NativeSecurityScanner.swift"
+        koda_content_view = root / "platforms" / "macos" / "app" / "KODA" / "KODA" / "ContentView.swift"
+        koda_standards_view = root / "platforms" / "macos" / "app" / "KODA" / "KODA" / "SecurityStandardsView.swift"
+        koda_bridge = root / "platforms" / "macos" / "app" / "KODA" / "KODA" / "ScannerBridge.swift"
+        koda_app = root / "platforms" / "macos" / "app" / "KODA" / "KODA" / "KODAApp.swift"
+        koda_native_scanner = root / "platforms" / "macos" / "app" / "KODA" / "KODA" / "NativeSecurityScanner.swift"
         store_release_notes = root / "docs" / "store-release.md"
         readme = (root / "README.md").read_text(encoding="utf-8")
 
@@ -1690,7 +1765,7 @@ GEM
         self.assertTrue(os.access(mac_app_builder, os.X_OK))
         self.assertIn("APP_NAME=\"${APP_NAME:-KODA}\"", mac_app_builder.read_text(encoding="utf-8"))
         self.assertTrue(os.access(mac_xcode_builder, os.X_OK))
-        self.assertIn("platforms/macos/KODA/KODA.xcodeproj", mac_xcode_builder.read_text(encoding="utf-8"))
+        self.assertIn("platforms/macos/app/KODA/KODA.xcodeproj", mac_xcode_builder.read_text(encoding="utf-8"))
         self.assertIn("dist/macos", mac_xcode_builder.read_text(encoding="utf-8"))
         self.assertIn("com.apple.security.app-sandbox", mac_entitlements.read_text(encoding="utf-8"))
         self.assertIn("com.apple.security.files.user-selected.read-write", mac_entitlements.read_text(encoding="utf-8"))
@@ -1699,7 +1774,7 @@ GEM
         self.assertIn("KODA macOS App Store Packaging", mac_packaging_readme.read_text(encoding="utf-8"))
         self.assertIn("productType = \"com.apple.product-type.application\"", koda_project.read_text(encoding="utf-8"))
         self.assertIn("PRODUCT_BUNDLE_IDENTIFIER = com.jhnykor.koda", koda_project.read_text(encoding="utf-8"))
-        self.assertIn("CODE_SIGN_ENTITLEMENTS = ../../../packaging/macos/KODA.entitlements", koda_project.read_text(encoding="utf-8"))
+        self.assertIn("CODE_SIGN_ENTITLEMENTS = ../../packaging/KODA.entitlements", koda_project.read_text(encoding="utf-8"))
         self.assertIn("NativeSecurityScanner.swift in Sources", koda_project.read_text(encoding="utf-8"))
         self.assertIn("SecurityStandardsView.swift in Sources", koda_project.read_text(encoding="utf-8"))
         self.assertNotIn("security_scanner in Resources", koda_project.read_text(encoding="utf-8"))
@@ -1998,13 +2073,13 @@ GEM
         ):
             self.assertIn(rule_id, koda_native_scanner.read_text(encoding="utf-8"))
         self.assertNotIn("scaleBy(x: 1, y: -1)", koda_native_scanner.read_text(encoding="utf-8"))
-        self.assertIn(".msixupload", (root / "packaging" / "windows" / "README.md").read_text(encoding="utf-8"))
+        self.assertIn(".msixupload", (root / "platforms" / "windows" / "README.md").read_text(encoding="utf-8"))
         self.assertIn("Microsoft Store", store_release_notes.read_text(encoding="utf-8"))
         self.assertIn("App Store Connect", store_release_notes.read_text(encoding="utf-8"))
         self.assertIn("native Swift scanner", store_release_notes.read_text(encoding="utf-8"))
         self.assertIn("Install quickly", readme)
         self.assertIn("설치 방법 요약", readme)
-        self.assertIn("scripts/install-macos.command", readme)
+        self.assertIn("platforms/macos/scripts/install-macos.command", readme)
         self.assertIn("archive/windows/legacy-secchk", readme)
         self.assertIn("KODA", readme)
         self.assertIn("auto-fix wizard", readme)

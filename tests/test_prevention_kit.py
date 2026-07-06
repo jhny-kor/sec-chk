@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import re
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
+if str(SHARED_PYTHON) not in sys.path:
+    sys.path.insert(0, str(SHARED_PYTHON))
 
 from security_scanner.reporting import render_html
 from security_scanner.server import prevention_kit_payload

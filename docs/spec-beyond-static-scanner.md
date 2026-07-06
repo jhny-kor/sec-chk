@@ -4,13 +4,13 @@
 > 업계 기법(Strix·XBOW·Endor·Copilot Autofix·Semgrep Assistant)을 분석해 KODA에 맞게 채택/변형/기각한 결정을 코드 스켈레톤과 함께 기록한다.
 > 상태: 설계(Design) + 일부 구현. 함수 시그니처·모듈 경계·CLI/Config 스키마는 구현 시작 기준점이다.
 > 구현 진행:
-> - **C1 LLM Provider ✅ 구현 완료**(`security_scanner/ai/provider.py`: `KODA_LLM` 규약, ollama=stdlib/전송0, anthropic·openai=lazy extra).
-> - **C2 AI Triage ✅ 구현 완료**(`security_scanner/ai/triage.py`: FP/TP 라벨, 심각도 불변, 시크릿 원문 미전송, graceful degrade, `--ai-triage`/`--llm`, JSON `triage_*` 필드, PRIVACY.md 갱신).
-> - **C3 Reachability ✅ 구현 완료**(`security_scanner/reachability.py`, `--reachability`/`--reachable-only`, JSON `reachable` 필드).
-> - **C5 CI/CD diff-scope ✅ 구현 완료**(`security_scanner/git_changes.py`, `--changed-only`/`--base`, git 실패 시 전체 스캔 폴백, 배포형 composite action `.github/actions/koda/action.yml`, README CI 섹션).
-> - **C4 Auto-Fix ✅ 구현 완료**(`security_scanner/fixes/`: 결정론적 line-scoped fixer[weak-hash, yaml.load], `fix` CLI 기본 dry-run diff + `--apply` 백업·구문검증 게이트, `--rule`/`--no-backup`).
+> - **C1 LLM Provider ✅ 구현 완료**(`platforms/shared/python/security_scanner/ai/provider.py`: `KODA_LLM` 규약, ollama=stdlib/전송0, anthropic·openai=lazy extra).
+> - **C2 AI Triage ✅ 구현 완료**(`platforms/shared/python/security_scanner/ai/triage.py`: FP/TP 라벨, 심각도 불변, 시크릿 원문 미전송, graceful degrade, `--ai-triage`/`--llm`, JSON `triage_*` 필드, PRIVACY.md 갱신).
+> - **C3 Reachability ✅ 구현 완료**(`platforms/shared/python/security_scanner/reachability.py`, `--reachability`/`--reachable-only`, JSON `reachable` 필드).
+> - **C5 CI/CD diff-scope ✅ 구현 완료**(`platforms/shared/python/security_scanner/git_changes.py`, `--changed-only`/`--base`, git 실패 시 전체 스캔 폴백, 배포형 composite action `.github/actions/koda/action.yml`, README CI 섹션).
+> - **C4 Auto-Fix ✅ 구현 완료**(`platforms/shared/python/security_scanner/fixes/`: 결정론적 line-scoped fixer[weak-hash, yaml.load], `fix` CLI 기본 dry-run diff + `--apply` 백업·구문검증 게이트, `--rule`/`--no-backup`).
 > - 테스트: reachability 10 + provider 5 + triage 7 + diff-scope 5 + auto-fix 5 = 32종 추가(전체 123 통과). **C1·C2·C3·C4·C5 전부 구현 완료(Python).**
-> - **네이티브 Swift 앱 포팅 ✅ 완료** (`platforms/macos/KODA/KODA/ScannerBridge.swift` 등): C4 `SecurityCodeFixer`(+`.replaceFile` 백업), C3 `NativeReachability`(OSV 발견 라벨), C2 `NativeLLMProvider`+`NativeAITriage`(로컬 Ollama/클라우드, "AI 오탐 검토" 버튼), C5 `NativeGitChanges`("변경 파일만 점검" 버튼). 각 기능 `xcodebuild` BUILD SUCCEEDED. 동작 의미는 Python 구현(테스트 통과)과 동일.
+> - **네이티브 Swift 앱 포팅 ✅ 완료** (`platforms/macos/app/KODA/KODA/ScannerBridge.swift` 등): C4 `SecurityCodeFixer`(+`.replaceFile` 백업), C3 `NativeReachability`(OSV 발견 라벨), C2 `NativeLLMProvider`+`NativeAITriage`(로컬 Ollama/클라우드, "AI 오탐 검토" 버튼), C5 `NativeGitChanges`("변경 파일만 점검" 버튼). 각 기능 `xcodebuild` BUILD SUCCEEDED. 동작 의미는 Python 구현(테스트 통과)과 동일.
 > 최종 갱신: 2026-06-17
 
 ---
@@ -65,7 +65,7 @@
 
 ---
 
-## 3. C1 — LLM Provider 추상화 (`security_scanner/ai/provider.py`)
+## 3. C1 — LLM Provider 추상화 (`platforms/shared/python/security_scanner/ai/provider.py`)
 
 Strix의 litellm 규약을 따르되 **로컬 경로는 stdlib만** 사용한다.
 
@@ -105,7 +105,7 @@ def complete(prompt: str, *, system: str = "", json_mode: bool = False,
 
 ---
 
-## 4. C2 — AI Triage (`security_scanner/ai/triage.py`)
+## 4. C2 — AI Triage (`platforms/shared/python/security_scanner/ai/triage.py`)
 
 Semgrep Assistant 교훈: **FP 판정과 TP 근거 생성을 별도 프롬프트 체인으로** 분리하고, LLM은 **강등 라벨만** 달되 심각도 원본은 보존한다.
 
@@ -152,7 +152,7 @@ if config.enable_ai_triage:                 # 신규, 기본 False
 
 ---
 
-## 5. C3 — Reachability (`security_scanner/reachability.py`)
+## 5. C3 — Reachability (`platforms/shared/python/security_scanner/reachability.py`)
 
 Endor Labs 교훈: 빌드 없이도 가능한 **pre-computed(매니페스트/import 기반)** 부터. KODA는 소스만 읽으므로 여기에 정확히 맞는다.
 
@@ -179,7 +179,7 @@ def annotate_dependency_reachability(findings, imported):
 
 ---
 
-## 6. C4 — Auto-Fix (`security_scanner/fixes/`)
+## 6. C4 — Auto-Fix (`platforms/shared/python/security_scanner/fixes/`)
 
 Copilot Autofix 교훈: **결정론적 fix 우선**, 미해결만 LLM 패치, **항상 사람 승인**.
 

@@ -1,0 +1,69 @@
+# KODA Linux Offline Distribution
+
+This folder is the Linux distribution layer for KODA. It does not fork scanner
+logic. Source installs and packages copy the shared Python engine from
+`platforms/shared/python/security_scanner/` into the Linux bundle.
+
+## Install From Source
+
+```bash
+cd /path/to/koda
+bash platforms/linux/install.sh
+~/.local/bin/koda list-categories
+```
+
+Use a custom install location when the server account has a managed application
+directory:
+
+```bash
+KODA_PREFIX=/opt/koda KODA_BIN_DIR=/usr/local/bin bash platforms/linux/install.sh
+```
+
+## Build An Offline Tarball
+
+Build on a connected machine, then move the tarball into the closed network.
+
+```bash
+bash platforms/linux/package.sh
+```
+
+Install on the target Linux server:
+
+```bash
+tar -xzf koda-linux-x86_64-0.1.0.tar.gz
+cd koda-linux-x86_64-0.1.0
+bash install.sh
+koda scan --target /deploy/app --format json --output reports/koda.json --fail-on high
+```
+
+## Deployment Gate
+
+KODA exits with status `1` when `--fail-on` finds a matching severity. Put that
+command before deployment promotion:
+
+```bash
+koda scan --target "$DEPLOY_DIR" --format json --output reports/koda-security.json --fail-on high
+```
+
+For scan plus deployment-shape evidence in one command:
+
+```bash
+koda deploy-check --target "$DEPLOY_DIR" --output-dir reports/koda-deploy --fail-on high
+```
+
+To verify that the deployed files match an approved shape:
+
+```bash
+koda manifest create --target /deploy/package --output reports/approved-manifest.json
+koda manifest compare --baseline reports/approved-manifest.json --target /app/current --output reports/manifest-compare.json
+```
+
+For a full example, see `examples/deploy-gate.sh`.
+
+## Closed-Network Defaults
+
+- Default scans are local and offline.
+- Do not enable `--enable-osv` or `--enable-vuln-intel` in a closed network
+  unless those services are routed to an approved internal mirror.
+- Keep shared scanner changes in `platforms/shared/python/security_scanner/`;
+  keep Linux install, packaging, and deployment scripts in `platforms/linux/`.

@@ -8,18 +8,18 @@ The App Store app name is `KODA`.
 
 Primary lane:
 
-- Xcode project: `platforms/macos/KODA/KODA.xcodeproj`
+- Xcode project: `platforms/macos/app/KODA/KODA.xcodeproj`
 - Bundle identifier: `com.jhnykor.koda` by default
-- App Sandbox entitlements: `packaging/macos/KODA.entitlements`
-- Icon: `packaging/macos/assets/KODA.icns`
-- App Store 1024 px icon source: `packaging/macos/assets/KODA-AppStore-1024.png`
+- App Sandbox entitlements: `platforms/macos/packaging/KODA.entitlements`
+- Icon: `platforms/macos/packaging/assets/KODA.icns`
+- App Store 1024 px icon source: `platforms/macos/packaging/assets/KODA-AppStore-1024.png`
 - Scanner runtime: native Swift scanner in the KODA app target; no external Python runtime required for `.app` scanning.
 - Inputs: folder selection, multiple file selection, and supported archives (`zip`, `jar`, `war`, `tar`, `tar.gz`, `tgz`, `gz`).
 
 Local build check:
 
 ```zsh
-packaging/macos/build-koda-xcode-app.command
+platforms/macos/scripts/build-koda-xcode-app.command
 ```
 
 Before submission:
@@ -50,7 +50,7 @@ Partner Center.
 Recommended lane:
 
 1. Reserve the app name in Partner Center.
-2. Build the Windows executable with `scripts\build-koda-windows-installer.ps1` on Windows.
+2. Build the Windows executable with `platforms\windows\scripts\build-koda-windows-installer.ps1` on Windows.
 3. Package the executable as MSIX with Visual Studio or MSIX tooling.
 4. Generate a Store upload file (`.msixupload`).
 5. Submit the upload package and Store listing metadata in Partner Center.

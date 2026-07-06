@@ -97,7 +97,7 @@ Strix를 그대로 복제하지 않는다. Strix는 ① 코드를 클라우드 L
 ## 3. 아키텍처 설계 (제안)
 
 ```
-security_scanner/
+platforms/shared/python/security_scanner/
   ai/
     __init__.py
     provider.py        # (①) LLM 추상화: local(Ollama)/anthropic/openai, 키=env only

@@ -50,7 +50,7 @@ runs:
         koda_root="$(cd "${{ github.action_path }}/../../.." && pwd)"
         echo "Installing KODA from $koda_root"
         python -m pip install --upgrade pip
-        python -m pip install "$koda_root"
+        python -m pip install "$koda_root/platforms/shared/python"
 
     - name: Run KODA scan
       shell: bash

@@ -89,7 +89,7 @@ A/B/C/E를 붙이기 전에 메워야 할 구조적 공백.
 ## 3. 아키텍처 설계 (제안)
 
 ```
-security_scanner/
+platforms/shared/python/security_scanner/
   checks/
     host/
       __init__.py        # register host checks, OS 분기
@@ -146,7 +146,7 @@ macOS `host-scan` 현재 6개 항목 점검: SIP·FileVault·Gatekeeper(A) + App
 주의: NVD는 익명 5req/30s 제한 → `--check-cve`는 버전 있는 앱 최대 20개로 제한, `--nvd-api-key-env`로 키 사용 권장. 키워드 매칭 특성상 오탐 가능(발견에 검증 권고 문구 포함).
 
 ### macOS — Swift 네이티브 앱에 host posture 추가 — ✅ (2026-06-07)
-> 방침: macOS는 **Swift 네이티브 KODA 앱**(`platforms/macos/KODA`)으로 구동된다. host posture는 별도 Python 앱/창이 아니라 **기존 Swift 앱의 네이티브 스캐너에 직접 추가**한다. PyInstaller/pywebview 방향은 폐기(되돌림).
+> 방침: macOS는 **Swift 네이티브 KODA 앱**(`platforms/macos/app/KODA`)으로 구동된다. host posture는 별도 Python 앱/창이 아니라 **기존 Swift 앱의 네이티브 스캐너에 직접 추가**한다. PyInstaller/pywebview 방향은 폐기(되돌림).
 - [x] `NativeSecurityScanner.swift`에 `scanHost()` + 읽기전용 `Process` 러너 추가. 점검 6종(SIP·FileVault·Gatekeeper·Application Firewall·Stealth·자동 보안 업데이트), 각 프로브 실패는 경고로 격리.
 - [x] `category="host"` 라벨(ko/en) 추가 — 기존 리포트(HTML/MD/PDF/점수)에 그대로 통합.
 - [x] `ScannerBridge.swift`: `runHostScan(language:)` + `runHostScanCommand()` — 기존 리포트/점수 스냅샷 파이프라인 재사용(타깃 선택 불필요).

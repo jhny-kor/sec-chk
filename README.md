@@ -1,4 +1,21 @@
-# Local Security Scanner
+# KODA Platform Index
+
+KODA is organized as a platform-first local security and quality scanner. The macOS app keeps its native Swift scanner, while Linux, Windows, CI, and server deployments use the shared Python engine under `platforms/shared/python/`.
+
+| Area | Path | Notes |
+| --- | --- | --- |
+| Shared Python engine | `platforms/shared/python/` | CLI package for Linux, Windows, CI, and server use. |
+| macOS native app | `platforms/macos/app/KODA/` | Swift app with native scanner; it does not call the Python engine. |
+| macOS packaging/scripts | `platforms/macos/packaging/`, `platforms/macos/scripts/` | App Store assets, entitlements, and local script wrappers. |
+| Linux distribution | `platforms/linux/` | Offline install/package layer for closed-network servers. |
+| Windows distribution | `platforms/windows/` | Windows scripts, Inno Setup packaging, and assets. |
+| Install docs | `docs/install/` | Platform-specific install and usage notes. |
+
+Detailed install guides:
+
+- macOS: `docs/install/macos.md`
+- Linux: `docs/install/linux.md`
+- Windows: `docs/install/windows.md`
 
 Read-only security scanner for local project folders. It scans configured paths, can auto-discover project roots under a parent folder, and runs selected vulnerability categories without installing dependencies. The default scan is offline; OSV/CVE and KEV/EPSS dependency intelligence is opt-in because it queries external security feeds.
 
@@ -8,7 +25,7 @@ Install quickly:
 
 | OS | Installer | Result |
 | --- | --- | --- |
-| macOS | Double-click `scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
+| macOS | Double-click `platforms/macos/scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
 | Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut. Launches as a single native window (no console, no separate browser tab), matching the macOS app. |
 
 ## What It Checks
@@ -24,10 +41,11 @@ Install quickly:
 Run it like a local app:
 
 ```bash
+export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner app
 ```
 
-This opens `security-dashboard.html` in the default browser and keeps a local server running until you press `Ctrl+C`. On macOS, you can double-click `scripts/sec-chk.command` from Finder. On Windows, double-click `scripts/sec-chk.bat`.
+This opens `security-dashboard.html` in the default browser and keeps a local server running until you press `Ctrl+C`. On macOS, you can double-click `platforms/macos/scripts/sec-chk.command` from Finder. On Windows, double-click `platforms/windows/scripts/sec-chk.bat`.
 
 ## Installation
 
@@ -35,11 +53,11 @@ macOS users can install SecChk without administrator privileges:
 
 1. Install Python 3.10 or newer.
 2. Download or clone this repository.
-3. Double-click `scripts/install-macos.command`.
+3. Double-click `platforms/macos/scripts/install-macos.command`.
 
-The macOS installer copies the app to `~/Library/Application Support/SecChk`, creates a private Python virtual environment, and creates `~/Applications/SecChk.command`. To remove it, run `~/Library/Application Support/SecChk/Uninstall-SecChk.command` or double-click `scripts/uninstall-macos.command` from the downloaded repository.
+The macOS installer copies the app to `~/Library/Application Support/SecChk`, creates a private Python virtual environment, and creates `~/Applications/SecChk.command`. To remove it, run `~/Library/Application Support/SecChk/Uninstall-SecChk.command` or double-click `platforms/macos/scripts/uninstall-macos.command` from the downloaded repository.
 
-Mac App Store packaging for the native macOS app name `KODA` lives in `packaging/macos`, with the Xcode project at `platforms/macos/KODA/KODA.xcodeproj`. The app supports folder selection, multiple file selection, common archive inputs, and in-app prevention guardrail creation with a built-in Swift scanner, so `.app` scanning and baseline template setup do not require Python. See `docs/store-release.md` for the store checklist.
+Mac App Store packaging for the native macOS app name `KODA` lives in `platforms/macos/packaging`, with the Xcode project at `platforms/macos/app/KODA/KODA.xcodeproj`. The app supports folder selection, multiple file selection, common archive inputs, and in-app prevention guardrail creation with a built-in Swift scanner, so `.app` scanning and baseline template setup do not require Python. See `docs/store-release.md` for the store checklist.
 
 The native KODA app also includes the prevention workflow that previously required terminal commands: an auto-fix wizard for missing guardrail files, in-app pre-commit gate installation, threat model wizard, compliance dashboard, GitHub repository security checklist export, SLSA/Sigstore release signing plan export, NIST SSDF workflow plan export, NIST CSF 2.0 profile export, CISA Secure by Design plan export, CISA secure software development attestation checklist export, API security plan export, OWASP SCVS plan export, privacy data map export, security roadmap export, evidence register export, security headers baseline export, container hardening baseline export, Cloud/IaC security plan export, AI/LLM security plan export, mobile security plan export, secret rotation runbook export, in-app CycloneDX SBOM export, in-app OSV/CVE lookup enriched with CISA KEV and FIRST EPSS where CVEs are available, CycloneDX VEX draft export, ZAP DAST plan generation and Docker-based ZAP baseline execution for authorized URLs, manual evidence checklists for standards that require evidence review, release security packages, `koda-ignore.yml` exception templates with owner/reason/expiry checks, scan change reports, local score history with latest-vs-previous comparison, remediation guide screens, and saved project profiles for frequently scanned target sets. SBOM and OSV inputs include `requirements.txt`, `requirements.in`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, and `pnpm-lock.yaml`.
 
@@ -48,21 +66,22 @@ Windows users can install KODA without administrator privileges after the Window
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/).
 2. Install Inno Setup 6.
 3. Download or clone this repository on the Windows build PC.
-4. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1`.
+4. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\platforms\windows\scripts\build-koda-windows-installer.ps1`.
 
 The build creates `dist\KODA\KODA.exe` and `dist\Windows\KODASetup.exe`. Target users only need `KODASetup.exe`; it installs to `%LOCALAPPDATA%\KODA` and adds Start Menu shortcuts named `KODA` and `KODA (Browser Mode)`. Double-clicking `KODA` opens one native window powered by Edge WebView2 — no console window and no separate browser tab — so it behaves like the macOS KODA app. If the Edge WebView2 runtime is missing, KODA falls back to opening the dashboard in the default browser. On managed PCs where WebView2 is blocked or broken, use `KODA (Browser Mode)` to skip WebView2 and open directly in the default browser.
 
-The active Windows installer files are `scripts/build-koda-windows-installer.ps1`,
-`scripts/build-koda-windows-installer.bat`, and `packaging/windows/KODA.iss`.
+The active Windows installer files are `platforms/windows/scripts/build-koda-windows-installer.ps1`,
+`platforms/windows/scripts/build-koda-windows-installer.bat`, and `platforms/windows/packaging/KODA.iss`.
 Legacy SecChk source-tree installer scripts were moved to
 `archive/windows/legacy-secchk/` so the active Windows install path stays focused
 on the KODA builder and `KODASetup.exe`.
 
-For Microsoft Store distribution, the current Inno Setup installer is not the final upload format. The Store lane should package the Windows app as MSIX and submit a `.msixupload` package through Partner Center. See `packaging/windows/README.md` and `docs/store-release.md`.
+For Microsoft Store distribution, the current Inno Setup installer is not the final upload format. The Store lane should package the Windows app as MSIX and submit a `.msixupload` package through Partner Center. See `platforms/windows/README.md` and `docs/store-release.md`.
 
 Server-only mode is still available:
 
 ```bash
+export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner serve
 ```
 
@@ -71,7 +90,7 @@ Open `http://127.0.0.1:8765/security-dashboard.html`, choose a folder to scan, s
 To generate a static dashboard file instead:
 
 ```bash
-python3 -m security_scanner scan --config scanner_config.example.json
+PYTHONPATH=platforms/shared/python python3 -m security_scanner scan --config platforms/shared/python/scanner_config.example.json
 ```
 
 Use a narrower target before scanning a large folder. Normal scans are read-only, but the optional prevention guardrail action intentionally writes template files to folders you explicitly choose. Broad scans can produce noisy reports.
@@ -80,7 +99,7 @@ For a portfolio-style scan of a folder that contains multiple projects:
 
 ```bash
 python3 -m security_scanner discover --target /path/to/projects --depth 2
-SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scanner_config.documents.example.json
+SEC_CHK_TARGET=/path/to/projects PYTHONPATH=platforms/shared/python python3 -m security_scanner scan --config platforms/shared/python/scanner_config.documents.example.json
 ```
 
 ## Configuration
@@ -151,6 +170,9 @@ python3 -m security_scanner zap-run --url https://example.com --output-dir repor
 python3 -m security_scanner evidence-checklist --target . --output docs/security/evidence-checklist.md --language ko
 python3 -m security_scanner release-package --target . --output-dir release-security --project-name my-project
 python3 -m security_scanner diff-reports --baseline reports/old.json --current reports/new.json --output reports/diff.md
+python3 -m security_scanner manifest create --target /deploy/app --output reports/approved-manifest.json
+python3 -m security_scanner manifest compare --baseline reports/approved-manifest.json --target /app/current --output reports/manifest-compare.json
+python3 -m security_scanner deploy-check --target /deploy/app --output-dir reports/koda-deploy --fail-on high
 python3 -m security_scanner dependency-track-command --server-url https://dependency-track.example.com --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 python3 -m security_scanner upload-sbom --server-url https://dependency-track.example.com --api-key-env DEPENDENCY_TRACK_API_KEY --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scanner_config.documents.example.json --language ko
@@ -203,6 +225,8 @@ The action installs KODA, runs the scan with `--format sarif` and `--fail-on`, a
 
 `evidence-checklist` creates a manual evidence checklist for standards that cannot be fully proven from local files, such as ASVS, WSTG, ISMS-P, NIST SSDF, and OWASP SAMM. `release-package` creates a release security folder with SBOM, VEX, scan findings, manual evidence checklist, checksums, and a manifest. `diff-reports` compares two JSON scan reports and shows added/resolved findings.
 
+`manifest create` records the deployed file shape with relative path, SHA-256, size, and modified time. `manifest compare` compares that approved manifest against a target directory and reports added, removed, changed, and unchanged files. `deploy-check` runs the normal local scan as a deployment gate and writes both `koda-deploy-scan.json` and `koda-deploy-manifest.json` under the selected output directory.
+
 `upload-sbom` sends a CycloneDX SBOM to a Dependency-Track backend using `/api/v1/bom`; keep the API key in `DEPENDENCY_TRACK_API_KEY` or another environment variable.
 
 Report formats:
@@ -232,7 +256,7 @@ Security-standard selections are mapping profiles over the local rules. The dash
 
 | OS | 설치 파일 | 설치 결과 |
 | --- | --- | --- |
-| macOS | `scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
+| macOS | `platforms/macos/scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
 | Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성. macOS 앱과 동일하게 단일 네이티브 창으로 실행되며(터미널 창·별도 브라우저 탭 없음) |
 
 ### 점검 항목
@@ -248,10 +272,11 @@ Security-standard selections are mapping profiles over the local rules. The dash
 로컬 프로그램처럼 실행하려면:
 
 ```bash
+export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner app
 ```
 
-기본 브라우저에 `security-dashboard.html`을 자동으로 열고, 터미널에서 `Ctrl+C`를 누를 때까지 로컬 서버를 유지합니다. macOS에서는 Finder에서 `scripts/sec-chk.command`, Windows에서는 `scripts/sec-chk.bat`를 더블클릭하면 됩니다.
+기본 브라우저에 `security-dashboard.html`을 자동으로 열고, 터미널에서 `Ctrl+C`를 누를 때까지 로컬 서버를 유지합니다. macOS에서는 Finder에서 `platforms/macos/scripts/sec-chk.command`, Windows에서는 `platforms/windows/scripts/sec-chk.bat`를 더블클릭하면 됩니다.
 
 ### 데스크톱 설치 파일
 
@@ -259,11 +284,11 @@ macOS에서는 관리자 권한 없이 설치할 수 있습니다.
 
 1. Python 3.10 이상을 설치합니다.
 2. 이 저장소를 다운로드하거나 clone합니다.
-3. `scripts/install-macos.command`를 더블클릭합니다.
+3. `platforms/macos/scripts/install-macos.command`를 더블클릭합니다.
 
-macOS 설치 스크립트는 앱을 `~/Library/Application Support/SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 `~/Applications/SecChk.command` 바로가기를 생성합니다. 삭제하려면 `~/Library/Application Support/SecChk/Uninstall-SecChk.command`를 실행하거나, 다운로드한 저장소의 `scripts/uninstall-macos.command`를 더블클릭하면 됩니다.
+macOS 설치 스크립트는 앱을 `~/Library/Application Support/SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 `~/Applications/SecChk.command` 바로가기를 생성합니다. 삭제하려면 `~/Library/Application Support/SecChk/Uninstall-SecChk.command`를 실행하거나, 다운로드한 저장소의 `platforms/macos/scripts/uninstall-macos.command`를 더블클릭하면 됩니다.
 
-Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `packaging/macos`에 KODA 아이콘과 샌드박스 entitlements를 추가했고 `platforms/macos/KODA/KODA.xcodeproj`에 Xcode 프로젝트를 추가했습니다. 앱에서는 Python 없이 내장 Swift 스캐너로 폴더 선택, 여러 파일 선택, 일반 압축파일 입력, 보안 예방 가드레일 파일 생성을 지원합니다. 스토어 출시 체크리스트는 `docs/store-release.md`에서 확인할 수 있습니다.
+Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `platforms/macos/packaging`에 KODA 아이콘과 샌드박스 entitlements를 추가했고 `platforms/macos/app/KODA/KODA.xcodeproj`에 Xcode 프로젝트를 추가했습니다. 앱에서는 Python 없이 내장 Swift 스캐너로 폴더 선택, 여러 파일 선택, 일반 압축파일 입력, 보안 예방 가드레일 파일 생성을 지원합니다. 스토어 출시 체크리스트는 `docs/store-release.md`에서 확인할 수 있습니다.
 
 네이티브 KODA 앱에서는 터미널 명령 없이도 예방 워크플로를 실행할 수 있습니다. `자동 수정 마법사`로 누락된 가드레일 파일을 미리 보고 적용하고, 앱 안에서 pre-commit 차단 훅 설치, 위협 모델 마법사, 컴플라이언스 대시보드, GitHub 저장소 보안 설정 체크리스트 저장, SLSA/Sigstore 릴리스 서명 계획 저장, NIST SSDF workflow 계획 저장, NIST CSF 2.0 프로파일 저장, CISA Secure by Design 예방 계획 저장, CISA 보안 소프트웨어 개발 증명 체크리스트 저장, API 보안 계획 저장, OWASP SCVS 계획 저장, 개인정보 데이터 맵 저장, 보안 로드맵 저장, 보안 증적 대장 저장, 보안 헤더 기준 저장, 컨테이너 하드닝 기준 저장, Cloud/IaC 보안 계획 저장, AI/LLM 보안 계획 저장, 모바일 보안 계획 저장, 비밀값 로테이션 런북 저장, CycloneDX SBOM 생성, CISA KEV와 FIRST EPSS가 붙는 OSV/CVE 조회, CycloneDX VEX 초안 생성, 권한 있는 URL을 위한 ZAP DAST 계획 생성과 Docker 기반 ZAP baseline 실행, 증적 확인 필요 기준의 수동 증적 체크리스트, 릴리스 보안 패키지, owner/reason/expiry 검사를 포함한 `koda-ignore.yml` 예외 파일 생성, 스캔 변화 리포트, 보안 점수 추적을 사용할 수 있습니다. SBOM과 OSV 입력은 `requirements.txt`, `requirements.in`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`을 지원합니다.
 
@@ -272,21 +297,22 @@ Windows에서는 빌드된 설치 파일로 관리자 권한 없이 KODA를 설�
 1. [python.org](https://www.python.org/downloads/windows/)에서 Python 3.10 이상을 설치합니다.
 2. Inno Setup 6을 설치합니다.
 3. Windows 빌드 PC에서 이 저장소를 다운로드하거나 clone합니다.
-4. `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1`를 실행합니다.
+4. `powershell -NoProfile -ExecutionPolicy Bypass -File .\platforms\windows\scripts\build-koda-windows-installer.ps1`를 실행합니다.
 
 빌드 결과는 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다. 최종 사용자는 `KODASetup.exe`만 실행하면 되고, 설치 후 `%LOCALAPPDATA%\KODA`와 시작 메뉴 `KODA`, `KODA (Browser Mode)` 바로가기가 생성됩니다. `KODA`를 더블클릭하면 Edge WebView2 기반 단일 네이티브 창 하나만 열립니다. 터미널 창이나 별도 브라우저 탭이 뜨지 않아 macOS KODA 앱과 동일하게 동작합니다. Edge WebView2 런타임이 없으면 기본 브라우저로 대시보드를 여는 방식으로 자동 전환됩니다. 회사/관리형 PC에서 WebView2가 차단되거나 손상된 경우에는 `KODA (Browser Mode)`를 실행하면 WebView2를 건너뛰고 기본 브라우저로 바로 열 수 있습니다.
 
-현재 활성 Windows 설치 파일은 `scripts/build-koda-windows-installer.ps1`,
-`scripts/build-koda-windows-installer.bat`, `packaging/windows/KODA.iss`입니다.
+현재 활성 Windows 설치 파일은 `platforms/windows/scripts/build-koda-windows-installer.ps1`,
+`platforms/windows/scripts/build-koda-windows-installer.bat`, `platforms/windows/packaging/KODA.iss`입니다.
 기존 개발자용 SecChk 소스 설치 스크립트 묶음은
 `archive/windows/legacy-secchk/`로 이동했습니다. 현재 Windows 설치 경로는 KODA
 빌더와 `KODASetup.exe`에 맞춰져 있습니다.
 
-Microsoft Store에 출시하려면 현재의 Inno Setup 설치 파일이 아니라 MSIX 패키지와 `.msixupload` 제출 파일을 준비해야 합니다. 자세한 절차는 `packaging/windows/README.md`와 `docs/store-release.md`에 정리했습니다.
+Microsoft Store에 출시하려면 현재의 Inno Setup 설치 파일이 아니라 MSIX 패키지와 `.msixupload` 제출 파일을 준비해야 합니다. 자세한 절차는 `platforms/windows/README.md`와 `docs/store-release.md`에 정리했습니다.
 
 서버만 직접 띄우려면:
 
 ```bash
+export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner serve
 ```
 
@@ -295,14 +321,14 @@ python3 -m security_scanner serve
 정적 HTML 대시보드를 파일로 생성하려면 다음 명령을 사용합니다.
 
 ```bash
-python3 -m security_scanner scan --config scanner_config.example.json
+PYTHONPATH=platforms/shared/python python3 -m security_scanner scan --config platforms/shared/python/scanner_config.example.json
 ```
 
 여러 프로젝트가 들어 있는 폴더를 한 번에 점검하려면:
 
 ```bash
 python3 -m security_scanner discover --target /path/to/projects --depth 2
-SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scanner_config.documents.example.json
+SEC_CHK_TARGET=/path/to/projects PYTHONPATH=platforms/shared/python python3 -m security_scanner scan --config platforms/shared/python/scanner_config.documents.example.json
 ```
 
 ### 설정
@@ -373,6 +399,9 @@ python3 -m security_scanner zap-run --url https://example.com --output-dir repor
 python3 -m security_scanner evidence-checklist --target . --output docs/security/evidence-checklist.md --language ko
 python3 -m security_scanner release-package --target . --output-dir release-security --project-name my-project
 python3 -m security_scanner diff-reports --baseline reports/old.json --current reports/new.json --output reports/diff.md
+python3 -m security_scanner manifest create --target /deploy/app --output reports/approved-manifest.json
+python3 -m security_scanner manifest compare --baseline reports/approved-manifest.json --target /app/current --output reports/manifest-compare.json
+python3 -m security_scanner deploy-check --target /deploy/app --output-dir reports/koda-deploy --fail-on high
 python3 -m security_scanner dependency-track-command --server-url https://dependency-track.example.com --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 python3 -m security_scanner upload-sbom --server-url https://dependency-track.example.com --api-key-env DEPENDENCY_TRACK_API_KEY --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scanner_config.documents.example.json --language ko
@@ -424,6 +453,8 @@ jobs:
 `zap-command`는 권한이 있는 URL에 대해 OWASP ZAP baseline Docker 명령을 출력합니다. `zap-run`은 Docker로 baseline을 실행하고 ZAP HTML/Markdown/JSON 출력과 `koda-zap-findings.json` 요약을 생성합니다. 소유하거나 명시적으로 허가받은 시스템에만 실행하세요.
 
 `evidence-checklist`는 ASVS, WSTG, ISMS-P, NIST SSDF, OWASP SAMM처럼 로컬 파일만으로 전부 입증할 수 없는 기준을 위한 수동 증적 체크리스트를 생성합니다. `release-package`는 SBOM, VEX, 스캔 결과, 수동 증적 체크리스트, 체크섬, manifest를 포함한 릴리스 보안 폴더를 생성합니다. `diff-reports`는 두 JSON 스캔 리포트를 비교해 새로 생긴 항목과 해결된 항목을 보여줍니다.
+
+`manifest create`는 배포 파일의 상대 경로, SHA-256, 크기, 수정 시각을 기록합니다. `manifest compare`는 승인된 manifest와 실제 반영 경로를 비교해 추가, 삭제, 변경, 동일 파일을 보고합니다. `deploy-check`는 기존 로컬 스캔을 배포 게이트로 실행하고 선택한 출력 폴더에 `koda-deploy-scan.json`과 `koda-deploy-manifest.json`을 함께 생성합니다.
 
 `upload-sbom`은 CycloneDX SBOM을 Dependency-Track backend의 `/api/v1/bom`으로 업로드합니다. API 키는 `DEPENDENCY_TRACK_API_KEY` 같은 환경 변수에 두는 방식을 권장합니다.
 

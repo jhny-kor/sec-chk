@@ -2,7 +2,7 @@
 
 > 목적: KODA `host-scan`의 **Windows 체크는 macOS 개발 환경에서 실행·검증이 불가**하다. 실제 Windows에서 확인해야 할 항목과 절차를 정리한다.
 > 상태: 미검증(unverified) — 구조는 구현 완료, **실 Windows 실행 검증 대기**.
-> 관련 코드: `security_scanner/checks/host/host_windows.py`
+> 관련 코드: `platforms/shared/python/security_scanner/checks/host/host_windows.py`
 > 최종 갱신: 2026-06-07
 
 ---
@@ -62,7 +62,7 @@ try { [string](Confirm-SecureBootUEFI) } catch { 'unsupported' }
 - [ ] 가능하면 GitHub Actions `windows-latest` 러너로 스모크 테스트(`host-scan` 실행) 추가.
 
 ## 5a. Phase 2 Windows 인벤토리/CVE 검증 (신규, 미검증)
-`security_scanner/inventory.py`의 Windows 경로는 레지스트리 Uninstall 키를 PowerShell로 조회한다.
+`platforms/shared/python/security_scanner/inventory.py`의 Windows 경로는 레지스트리 Uninstall 키를 PowerShell로 조회한다.
 
 ```powershell
 # 인벤토리 원시 출력 확인
