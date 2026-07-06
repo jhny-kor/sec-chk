@@ -11,6 +11,34 @@ KODA is organized as a platform-first local security and quality scanner. The ma
 | Windows distribution | `platforms/windows/` | Windows scripts, Inno Setup packaging, and assets. |
 | Install docs | `docs/install/` | Platform-specific install and usage notes. |
 
+## Repository Layout
+
+`platforms/` contains the actively maintained runtime and packaging code. Other tracked folders keep project governance, docs, tests, and legacy/reference material:
+
+| Path | Role |
+| --- | --- |
+| `.github/` | GitHub Actions, composite KODA scan action, Dependabot, and CODEOWNERS. |
+| `docs/` | Roadmaps, platform install guides, release notes, and security integration docs. |
+| `tests/` | Python unit tests for the shared engine, platform wrappers, and report contracts. |
+| `archive/` | Legacy material kept for reference; not the active distribution path. |
+| `store-assets/` | Store listing screenshots and marketing assets. |
+| `icon/` | Source images used to create product icons. |
+| root files | Repository-wide policy and metadata such as `README.md`, `SECURITY.md`, `PRIVACY.md`, `LICENSE`, and `koda-ignore.yml`. |
+| generated outputs | `dist/`, `reports/`, `.build/`, and release package folders are build/report artifacts, not primary source. |
+
+The old root-level `security_scanner/`, `scripts/`, and `packaging/` source locations were moved into `platforms/`. Any leftover local `scripts/` or `packaging/` directory should be treated as generated or untracked residue unless Git shows tracked files in it.
+
+## Platform-First Refactor Summary
+
+- Moved the shared Python scanner from `security_scanner/` to `platforms/shared/python/security_scanner/`.
+- Moved Python package metadata and example scanner configs into `platforms/shared/python/`.
+- Moved the macOS Swift app to `platforms/macos/app/KODA/`.
+- Moved macOS packaging assets and scripts to `platforms/macos/packaging/` and `platforms/macos/scripts/`.
+- Moved Windows packaging, assets, and scripts to `platforms/windows/`.
+- Added the Linux offline/server distribution layer under `platforms/linux/`.
+- Updated CI, tests, installer scripts, and docs to use `platforms/shared/python` for Linux, Windows, CI, and server flows.
+- Kept macOS native scanning separate: the Swift app does not call the Python engine and only shares the rule/report contract.
+
 Detailed install guides:
 
 - macOS: `docs/install/macos.md`
@@ -251,6 +279,34 @@ Security-standard selections are mapping profiles over the local rules. The dash
 ## 한국어 안내
 
 로컬 프로젝트 폴더를 기본적으로 읽기 전용으로 점검하는 보안 스캐너입니다. 추가 의존성 설치 없이 설정한 경로를 스캔하고, 하위 프로젝트 자동 탐색과 한국어/영어 토글 대시보드를 제공합니다. 선택 기능인 보안 예방 가드레일 적용은 사용자가 명시적으로 선택한 폴더에 템플릿 파일을 생성합니다. 기본 스캔은 오프라인이며, OSV/CVE와 KEV/EPSS 의존성 인텔리전스 조회는 외부 보안 피드를 호출하므로 사용자가 켰을 때만 실행됩니다.
+
+### 레포 폴더 역할
+
+`platforms/`는 현재 유지보수하는 실행/배포 코드입니다. 그 밖의 추적 폴더는 다음 역할입니다.
+
+| 경로 | 역할 |
+| --- | --- |
+| `.github/` | GitHub Actions, KODA composite action, Dependabot, CODEOWNERS |
+| `docs/` | 로드맵, 플랫폼별 설치 문서, 출시/보안 연동 문서 |
+| `tests/` | 공통 Python 엔진, 플랫폼 wrapper, 리포트 계약 테스트 |
+| `archive/` | 현재 배포 경로가 아닌 레거시 참고 자료 |
+| `store-assets/` | 스토어 등록용 스크린샷과 마케팅 이미지 |
+| `icon/` | 제품 아이콘 생성에 쓰는 원본 이미지 |
+| 루트 파일 | `README.md`, `SECURITY.md`, `PRIVACY.md`, `LICENSE`, `koda-ignore.yml` 같은 레포 공통 정책/메타데이터 |
+| 생성 산출물 | `dist/`, `reports/`, `.build/`, 릴리스 패키지 폴더는 소스가 아니라 빌드/리포트 결과물 |
+
+기존 루트의 `security_scanner/`, `scripts/`, `packaging/` 소스 위치는 `platforms/` 아래로 이동했습니다. 로컬에 같은 이름의 빈 폴더가 남아 있더라도 Git 추적 파일이 없으면 현재 소스 구조가 아닙니다.
+
+### 플랫폼 우선 리팩토링 요약
+
+- 공통 Python 스캐너를 `platforms/shared/python/security_scanner/`로 이동했습니다.
+- Python 패키지 설정과 예제 설정 파일을 `platforms/shared/python/`로 이동했습니다.
+- macOS Swift 앱을 `platforms/macos/app/KODA/`로 이동했습니다.
+- macOS 패키징 자산과 스크립트를 `platforms/macos/packaging/`, `platforms/macos/scripts/`로 이동했습니다.
+- Windows 패키징, 자산, 스크립트를 `platforms/windows/`로 이동했습니다.
+- Linux 폐쇄망/서버 배포 레이어를 `platforms/linux/`에 추가했습니다.
+- CI, 테스트, 설치 스크립트, 문서는 Linux/Windows/CI/서버 경로에서 `platforms/shared/python`을 사용하도록 수정했습니다.
+- macOS 네이티브 앱은 Python 엔진을 호출하지 않고, rule/report 계약만 맞추는 방향으로 분리했습니다.
 
 ### 설치 방법 요약
 
