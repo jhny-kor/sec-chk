@@ -19,6 +19,22 @@ directory:
 KODA_PREFIX=/opt/koda KODA_BIN_DIR=/usr/local/bin bash platforms/linux/install.sh
 ```
 
+## Web Dashboard
+
+Start the dashboard for another workstation on the closed network:
+
+```bash
+koda serve --host 0.0.0.0 --port 8765
+```
+
+Then open:
+
+```text
+http://<server-ip>:8765/security-dashboard.html
+```
+
+Use `koda serve` without `--host` for same-server loopback access only.
+
 ## Build An Offline Tarball
 
 Build on a connected machine, then move the tarball into the closed network.

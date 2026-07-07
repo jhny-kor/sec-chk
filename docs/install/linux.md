@@ -27,6 +27,28 @@ koda scan --target /deploy/app --format json --fail-on high
 koda host-scan --format json --min-severity info
 ```
 
+## Web Dashboard
+
+On a headless or closed-network Linux server, start the dashboard server:
+
+```bash
+koda serve --host 0.0.0.0 --port 8765
+```
+
+Open it from an allowed workstation:
+
+```text
+http://<server-ip>:8765/security-dashboard.html
+```
+
+For local-only access on the same server, keep the default loopback binding:
+
+```bash
+koda serve
+```
+
+Use `koda app --no-browser --host 0.0.0.0 --port 8765` only when you specifically want the local-app runner behavior without opening a browser. For servers, `koda serve` is the simpler path.
+
 ## GitLab Runner
 
 Use `platforms/linux/examples/gitlab-ci.yml` as the starter job for closed-network GitLab Runner setups. It installs KODA into the job workspace, runs changed-file scanning for merge requests, writes a full HTML report, and always writes a Linux host posture report:

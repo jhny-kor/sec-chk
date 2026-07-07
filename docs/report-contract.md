@@ -33,11 +33,11 @@ Current production categories:
 - `configuration`
 - `code`
 - `prevention`
+- `screen_quality`
 - `host`
 
 Reserved categories for the next platform work:
 
-- `screen_quality`
 - `action_flow`
 
 `web` is used by authorized web posture scans and should keep the same finding field shape.

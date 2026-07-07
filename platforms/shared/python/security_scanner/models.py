@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 # File-based checks run once per scanned file (see scanner.CHECKS).
-FILE_CATEGORIES = ("secrets", "dependencies", "configuration", "code", "prevention")
+FILE_CATEGORIES = ("secrets", "dependencies", "configuration", "code", "prevention", "screen_quality")
 # Host/endpoint checks query the local machine's security posture once per scan.
 # They are opt-in: not part of DEFAULT_CATEGORIES so existing repo scans are unchanged.
 HOST_CATEGORIES = ("host",)

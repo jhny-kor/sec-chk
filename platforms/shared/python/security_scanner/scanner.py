@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import git_changes, reachability
-from .checks import code_patterns, configuration, dependencies, prevention, secrets
+from .checks import code_patterns, configuration, dependencies, prevention, screen_quality, secrets
 from .checks.common import clear_read_text_cache, normalized_relpath, read_text_lines
 from .checks.host import HostScanOptions, check_host
 from .dependency_inventory import components_from_file, queryable_osv_components, unique_components
@@ -62,6 +62,7 @@ CHECKS: dict[str, Callable[[Path, TargetConfig], list[Finding]]] = {
     "configuration": configuration.check_file,
     "code": code_patterns.check_file,
     "prevention": prevention.check_file,
+    "screen_quality": screen_quality.check_file,
 }
 
 

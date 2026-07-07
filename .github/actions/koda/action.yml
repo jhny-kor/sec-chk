@@ -11,9 +11,9 @@ inputs:
     required: false
     default: "."
   categories:
-    description: "Comma-separated categories to run (secrets,dependencies,configuration,code,prevention)."
+    description: "Comma-separated categories to run (secrets,dependencies,configuration,code,prevention,screen_quality)."
     required: false
-    default: "secrets,dependencies,configuration,code"
+    default: "secrets,dependencies,configuration,code,screen_quality"
   fail-on:
     description: "Severity that fails the build (info, low, medium, high, critical), or 'none' to never fail."
     required: false
