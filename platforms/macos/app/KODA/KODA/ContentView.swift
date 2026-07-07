@@ -2117,11 +2117,13 @@ private struct RemediationFindingCard: View {
         case (.ko, "configuration"): return "설정"
         case (.ko, "code"): return "코드"
         case (.ko, "prevention"): return "예방"
+        case (.ko, "screen_quality"): return "화면 품질"
         case (.en, "secrets"): return "Secrets"
         case (.en, "dependencies"): return "Dependencies"
         case (.en, "configuration"): return "Configuration"
         case (.en, "code"): return "Code"
         case (.en, "prevention"): return "Prevention"
+        case (.en, "screen_quality"): return "Screen Quality"
         default: return finding.category
         }
     }

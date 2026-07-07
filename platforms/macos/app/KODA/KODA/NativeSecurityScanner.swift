@@ -1207,6 +1207,7 @@ final class NativeSecurityScanner {
             + checkDependencies(lines: lines, file: file, root: root, displayPath: displayPath)
             + checkConfiguration(lines: lines, file: file, displayPath: displayPath)
             + checkCode(lines: lines, file: file, displayPath: displayPath)
+            + checkScreenQuality(lines: lines, file: file, displayPath: displayPath)
 
         appendFindings(localFindings, targetName: targetName, findings: &findings)
     }
@@ -1693,6 +1694,136 @@ final class NativeSecurityScanner {
                 findings.append(finding("code.llm-sensitive-data-in-prompt", "medium", "code", "민감정보가 LLM 프롬프트로 전달될 수 있음", displayPath, lineNumber, line, "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요."))
             }
         }
+        return findings
+    }
+
+    private func checkScreenQuality(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
+        let screenExtensions: Set<String> = ["html", "htm", "jsp", "jspx", "vue", "jsx", "tsx"]
+        let htmlExtensions: Set<String> = ["html", "htm", "jsp", "jspx"]
+        let suffix = file.pathExtension.lowercased()
+        guard screenExtensions.contains(suffix) else { return [] }
+
+        let text = lines.joined(separator: "\n")
+        let lowerText = text.lowercased()
+        let labelTargets = Set(captures(#"(?i)<label\b[^>]*\bfor\s*=\s*['"]([^'"]+)['"]"#, in: text))
+        var findings: [NativeFinding] = []
+
+        if htmlExtensions.contains(suffix),
+           lowerText.contains("<html"),
+           !matches(#"(?i)<html\b[^>]*\blang\s*="#, text) {
+            findings.append(finding(
+                "screen.html-lang-missing",
+                "medium",
+                "screen_quality",
+                "HTML language is not declared",
+                displayPath,
+                nil,
+                "<html>",
+                "Add a lang attribute to the html element."
+            ))
+        }
+        if lowerText.contains("<head"),
+           !lowerText.contains(#"name="viewport""#),
+           !lowerText.contains(#"name='viewport'"#) {
+            findings.append(finding(
+                "screen.viewport-missing",
+                "medium",
+                "screen_quality",
+                "Responsive viewport meta tag is missing",
+                displayPath,
+                nil,
+                "<head>",
+                "Add a viewport meta tag for responsive layouts."
+            ))
+        }
+
+        for (index, line) in lines.enumerated() {
+            let lineNumber = index + 1
+            for tag in captures(#"(?i)(<img\b[^>]*>)"#, in: line) where !matches(#"(?i)\balt\s*="#, tag) {
+                findings.append(finding(
+                    "screen.image-alt-missing",
+                    "medium",
+                    "screen_quality",
+                    "Image is missing alt text",
+                    displayPath,
+                    lineNumber,
+                    tag,
+                    "Add meaningful alt text or alt=\"\" for decorative images."
+                ))
+            }
+            for tag in captures(#"(?i)(<input\b[^>]*>)"#, in: line) {
+                let type = firstCapture(#"(?i)\btype\s*=\s*['"]?([^'"\s>]+)"#, in: tag)?.lowercased() ?? "text"
+                if ["hidden", "submit", "button", "reset"].contains(type) { continue }
+                let id = firstCapture(#"(?i)\bid\s*=\s*['"]([^'"]+)['"]"#, in: tag)
+                let hasAccessibleName = matches(#"(?i)\baria-(label|labelledby)\s*="#, tag)
+                    || matches(#"(?i)\btitle\s*="#, tag)
+                    || id.map { labelTargets.contains($0) } == true
+                if !hasAccessibleName {
+                    findings.append(finding(
+                        "screen.input-label-missing",
+                        "medium",
+                        "screen_quality",
+                        "Input has no accessible label",
+                        displayPath,
+                        lineNumber,
+                        tag,
+                        "Connect the input to a label or add aria-label."
+                    ))
+                }
+            }
+            for tag in captures(#"(?i)(<button\b[^>]*>)"#, in: line) where !matches(#"(?i)\btype\s*="#, tag) {
+                findings.append(finding(
+                    "screen.button-type-missing",
+                    "low",
+                    "screen_quality",
+                    "Button type is not explicit",
+                    displayPath,
+                    lineNumber,
+                    tag,
+                    "Set button type to button, submit, or reset."
+                ))
+            }
+            for tag in captures(#"(?i)(<a\b[^>]*>)"#, in: line) {
+                let href = firstCapture(#"(?i)\bhref\s*=\s*['"]([^'"]*)['"]"#, in: tag)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if href.isEmpty || href == "#" || href.lowercased() == "javascript:void(0)" {
+                    findings.append(finding(
+                        "screen.link-target-empty",
+                        "low",
+                        "screen_quality",
+                        "Link target is empty or placeholder",
+                        displayPath,
+                        lineNumber,
+                        tag,
+                        "Use a real href or a button for actions."
+                    ))
+                }
+            }
+            if matches(#"(?i)\b(password|passwd|secret|api[_-]?key|access[_-]?token)\s*[:=]\s*['"][^'"]{6,}"#, line) {
+                findings.append(finding(
+                    "screen.sensitive-text-exposed",
+                    "high",
+                    "screen_quality",
+                    "Screen source appears to expose sensitive text",
+                    displayPath,
+                    lineNumber,
+                    redact(line),
+                    "Remove secrets and sensitive values from client-rendered source."
+                ))
+            }
+            if matches(#"(?i)(/var/(log|www|lib)|/etc/[A-Za-z0-9_.-]+|[A-Z]:\\(?:Users|Windows|Program Files)\\)"#, line) {
+                findings.append(finding(
+                    "screen.system-path-exposed",
+                    "medium",
+                    "screen_quality",
+                    "Screen source exposes a system path",
+                    displayPath,
+                    lineNumber,
+                    line,
+                    "Replace internal system paths with user-safe messages."
+                ))
+            }
+        }
+
         return findings
     }
 
@@ -2380,6 +2511,14 @@ private func matches(_ pattern: String, _ text: String) -> Bool {
     NativeRegexCache.shared.matches(pattern, text)
 }
 
+private func captures(_ pattern: String, in text: String) -> [String] {
+    NativeRegexCache.shared.captures(pattern, text)
+}
+
+private func firstCapture(_ pattern: String, in text: String) -> String? {
+    captures(pattern, in: text).first
+}
+
 private final class NativeRegexCache {
     static let shared = NativeRegexCache()
 
@@ -2390,6 +2529,18 @@ private final class NativeRegexCache {
         guard let regex = regex(for: pattern) else { return false }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.firstMatch(in: text, range: range) != nil
+    }
+
+    func captures(_ pattern: String, _ text: String) -> [String] {
+        guard let regex = regex(for: pattern) else { return [] }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.matches(in: text, range: range).compactMap { match in
+            guard match.numberOfRanges > 1,
+                  let capturedRange = Range(match.range(at: 1), in: text) else {
+                return nil
+            }
+            return String(text[capturedRange])
+        }
     }
 
     private func regex(for pattern: String) -> NSRegularExpression? {
@@ -2735,12 +2886,14 @@ private extension NativeSecurityScanner {
         case (.ko, "configuration"): return "설정"
         case (.ko, "code"): return "코드 패턴"
         case (.ko, "prevention"): return "예방 가드레일"
+        case (.ko, "screen_quality"): return "화면 품질"
         case (.ko, "host"): return "호스트 보안 상태"
         case (.en, "secrets"): return "Secrets"
         case (.en, "dependencies"): return "Dependencies"
         case (.en, "configuration"): return "Configuration"
         case (.en, "code"): return "Code Pattern"
         case (.en, "prevention"): return "Prevention Guardrails"
+        case (.en, "screen_quality"): return "Screen Quality"
         case (.en, "host"): return "Host Posture"
         default: return category
         }
@@ -2755,6 +2908,14 @@ private extension NativeSecurityScanner {
         case "secret.openai-key": return "Possible API key found"
         case "secret.slack-token": return "Possible Slack token found"
         case "secret.generic-assignment": return "Possible hard-coded secret assignment"
+        case "screen.html-lang-missing": return "HTML language is not declared"
+        case "screen.viewport-missing": return "Responsive viewport meta tag is missing"
+        case "screen.image-alt-missing": return "Image is missing alt text"
+        case "screen.input-label-missing": return "Input has no accessible label"
+        case "screen.button-type-missing": return "Button type is not explicit"
+        case "screen.link-target-empty": return "Link target is empty or placeholder"
+        case "screen.sensitive-text-exposed": return "Screen source appears to expose sensitive text"
+        case "screen.system-path-exposed": return "Screen source exposes a system path"
         case "prevention.security-policy-missing": return "Security policy is not documented"
         case "prevention.dependency-update-automation-missing": return "Dependency update automation is not configured"
         case "prevention.ci-security-scan-missing": return "CI security scan is not configured"
@@ -2900,6 +3061,22 @@ private extension NativeSecurityScanner {
             return "Revoke the token and review Slack app permissions and usage."
         case "secret.generic-assignment":
             return "Do not keep secret values in source code; inject them at runtime."
+        case "screen.html-lang-missing":
+            return "Add a lang attribute to the html element."
+        case "screen.viewport-missing":
+            return "Add a viewport meta tag for responsive layouts."
+        case "screen.image-alt-missing":
+            return "Add meaningful alt text or alt=\"\" for decorative images."
+        case "screen.input-label-missing":
+            return "Connect the input to a label or add aria-label."
+        case "screen.button-type-missing":
+            return "Set button type to button, submit, or reset."
+        case "screen.link-target-empty":
+            return "Use a real href or a button for actions."
+        case "screen.sensitive-text-exposed":
+            return "Remove secrets and sensitive values from client-rendered source."
+        case "screen.system-path-exposed":
+            return "Replace internal system paths with user-safe messages."
         case "prevention.security-policy-missing":
             return "Add SECURITY.md with supported versions, vulnerability reporting contact, and disclosure expectations."
         case "prevention.dependency-update-automation-missing":
