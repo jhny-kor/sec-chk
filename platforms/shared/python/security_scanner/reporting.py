@@ -41,6 +41,12 @@ TRANSLATIONS = {
         "filters": "Filters",
         "help": "Help",
         "dashboard": "Dashboard",
+        "screen_quality": "Screen Quality",
+        "screen_quality_title": "Screen Quality Scan",
+        "screen_quality_intro": "Check screen source separately from security findings: accessibility, standards, form controls, links, sensitive text, and system path exposure.",
+        "screen_quality_run": "Run Screen Quality",
+        "screen_quality_done": "Screen quality scan complete",
+        "screen_quality_note": "Uses only the screen_quality category. Choose a project folder with HTML, JSP, JS, TS, Vue, or React source.",
         "help_title": "Security Standards Help",
         "help_intro": "Review each selectable standard, what SecChk checks locally, and links to the official source.",
         "coverage_matrix": "Coverage Matrix",
@@ -165,6 +171,12 @@ TRANSLATIONS = {
         "filters": "필터",
         "help": "도움말",
         "dashboard": "대시보드",
+        "screen_quality": "화면 품질",
+        "screen_quality_title": "화면 품질 점검",
+        "screen_quality_intro": "보안 발견 항목과 분리해 화면 소스의 접근성, 웹표준, 폼 컨트롤, 링크, 민감정보 및 시스템 경로 노출을 점검합니다.",
+        "screen_quality_run": "화면 품질 점검",
+        "screen_quality_done": "화면 품질 점검 완료",
+        "screen_quality_note": "screen_quality 카테고리만 실행합니다. HTML, JSP, JS, TS, Vue, React 화면 소스가 있는 프로젝트 폴더를 선택하세요.",
         "help_title": "보안 점검 기준 도움말",
         "help_intro": "선택 가능한 보안 기준, 로컬 점검 범위, 공식 출처 링크를 확인합니다.",
         "coverage_matrix": "커버리지 매트릭스",
@@ -1136,6 +1148,11 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_LANG__": html.escape(str(labels["html_lang"]), quote=True),
         "__INITIAL_TITLE__": html.escape(str(labels["title"]), quote=True),
         "__INITIAL_HELP__": html.escape(str(labels["help"])),
+        "__INITIAL_SCREEN_QUALITY__": html.escape(str(labels["screen_quality"])),
+        "__INITIAL_SCREEN_QUALITY_TITLE__": html.escape(str(labels["screen_quality_title"])),
+        "__INITIAL_SCREEN_QUALITY_INTRO__": html.escape(str(labels["screen_quality_intro"])),
+        "__INITIAL_SCREEN_QUALITY_RUN__": html.escape(str(labels["screen_quality_run"])),
+        "__INITIAL_SCREEN_QUALITY_NOTE__": html.escape(str(labels["screen_quality_note"])),
         "__INITIAL_HELP_TITLE__": html.escape(str(labels["help_title"])),
         "__INITIAL_HELP_INTRO__": html.escape(str(labels["help_intro"])),
         "__INITIAL_FILTERS__": html.escape(str(labels["filters"]), quote=True),
@@ -1389,6 +1406,13 @@ HTML_TEMPLATE = """<!doctype html>
       display: flex;
       align-items: flex-start;
       gap: 14px;
+    }
+
+    .topbar-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     .topbar-action {
@@ -1984,7 +2008,7 @@ HTML_TEMPLATE = """<!doctype html>
       .shell { width: min(100% - 20px, 1440px); }
       .topbar { align-items: flex-start; flex-direction: column; padding: 16px 0; gap: 8px; }
       .header-side { width: 100%; padding-top: 34px; flex-wrap: wrap; }
-      .topbar-action { position: absolute; top: 16px; right: 96px; }
+      .topbar-actions { position: absolute; top: 16px; right: 96px; }
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
       .metrics, .filters, .scan-form, .scan-standard-form, .scan-web-form { grid-template-columns: 1fr; }
@@ -2006,7 +2030,10 @@ HTML_TEMPLATE = """<!doctype html>
           <button id="lang-ko" type="button">KO</button>
           <button id="lang-en" type="button">EN</button>
         </div>
-        <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
+        <div class="topbar-actions">
+          <button id="screen-quality-toggle" class="topbar-action" type="button">__INITIAL_SCREEN_QUALITY__</button>
+          <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
+        </div>
         <div class="meta">
           <div id="generated-line"></div>
           <div id="summary-line"></div>
@@ -2111,6 +2138,22 @@ HTML_TEMPLATE = """<!doctype html>
       </section>
     </div>
 
+    <section id="screen-quality-view" class="help-view" hidden>
+      <div class="help-heading">
+        <h2 id="screen-quality-title">__INITIAL_SCREEN_QUALITY_TITLE__</h2>
+        <p id="screen-quality-intro">__INITIAL_SCREEN_QUALITY_INTRO__</p>
+      </div>
+      <section class="panel scan-panel">
+        <div class="scan-form">
+          <input id="screen-quality-path" class="path-display" type="text" autocomplete="off" readonly aria-readonly="true" placeholder="__INITIAL_SCAN_PATH_PLACEHOLDER__">
+          <button id="screen-quality-choose" type="button">__INITIAL_CHOOSE_FOLDER__</button>
+          <button id="screen-quality-run" type="button">__INITIAL_SCREEN_QUALITY_RUN__</button>
+        </div>
+        <p id="screen-quality-note" class="scan-note">__INITIAL_SCREEN_QUALITY_NOTE__</p>
+        <div id="screen-quality-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
+      </section>
+    </section>
+
     <section id="help-view" class="help-view" hidden>
       <div class="help-heading">
         <h2 id="help-title">__INITIAL_HELP_TITLE__</h2>
@@ -2150,12 +2193,18 @@ HTML_TEMPLATE = """<!doctype html>
       scanRunning: false,
       scanStandard: (payload.scan && payload.scan.standard) || "local",
       scanStandardCategory: (payload.scan && payload.scan.standard_category) || "all",
-      view: location.hash === "#help" ? "help" : "dashboard",
+      view: initialView(),
       helpRenderedLanguage: "",
     };
 
     function byId(id) {
       return document.getElementById(id);
+    }
+
+    function initialView() {
+      if (location.hash === "#help") return "help";
+      if (location.hash === "#screen-quality") return "screen-quality";
+      return "dashboard";
     }
 
     function escapeText(value) {
@@ -2270,6 +2319,14 @@ HTML_TEMPLATE = """<!doctype html>
       setText("dashboard-title", activeLabels.title);
       setText("help-title", activeLabels.help_title);
       setText("help-intro", activeLabels.help_intro);
+      setText("screen-quality-title", activeLabels.screen_quality_title);
+      setText("screen-quality-intro", activeLabels.screen_quality_intro);
+      setText("screen-quality-note", activeLabels.screen_quality_note);
+      byId("screen-quality-path").placeholder = activeLabels.scan_path_placeholder;
+      setText("screen-quality-choose", activeLabels.choose_folder);
+      setText("screen-quality-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.screen_quality_run);
+      byId("screen-quality-choose").disabled = state.scanRunning;
+      byId("screen-quality-run").disabled = state.scanRunning;
       setText("generated-line", `${activeLabels.generated} ${payload.generated_display}`);
       setText(
         "summary-line",
@@ -2313,6 +2370,9 @@ HTML_TEMPLATE = """<!doctype html>
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
       scanStatus.className = `scan-status ${state.scanStatusClass}`;
+      const screenQualityStatus = byId("screen-quality-status");
+      screenQualityStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
+      screenQualityStatus.className = `scan-status ${state.scanStatusClass}`;
       setText("risk-score-note", activeLabels.risk_score_formula);
       byId("search").placeholder = activeLabels.search_placeholder;
       setText("reset", activeLabels.reset);
@@ -2505,11 +2565,16 @@ HTML_TEMPLATE = """<!doctype html>
     }
 
     function renderView() {
+      const isDashboard = state.view === "dashboard";
       const isHelp = state.view === "help";
-      byId("dashboard-view").hidden = isHelp;
+      const isScreenQuality = state.view === "screen-quality";
+      byId("dashboard-view").hidden = !isDashboard;
+      byId("screen-quality-view").hidden = !isScreenQuality;
       byId("help-view").hidden = !isHelp;
       setText("help-toggle", isHelp ? labels().dashboard : labels().help);
       byId("help-toggle").setAttribute("aria-pressed", isHelp ? "true" : "false");
+      setText("screen-quality-toggle", isScreenQuality ? labels().dashboard : labels().screen_quality);
+      byId("screen-quality-toggle").setAttribute("aria-pressed", isScreenQuality ? "true" : "false");
     }
 
     function coverageStatus(level, activeLabels) {
@@ -2646,6 +2711,7 @@ HTML_TEMPLATE = """<!doctype html>
           return;
         }
         byId("scan-path").value = result.path || "";
+        byId("screen-quality-path").value = result.path || "";
         state.scanStatus = `${activeLabels.folder_selected}: ${result.path || ""}`;
         state.scanStatusClass = "ok";
         render();
@@ -2735,6 +2801,56 @@ HTML_TEMPLATE = """<!doctype html>
         state.scanRunning = false;
         state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}`;
         state.scanStatusClass = "ok";
+        applyPayload(nextPayload);
+      } catch (error) {
+        state.scanRunning = false;
+        state.scanStatus = `${activeLabels.scan_status_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
+        state.scanStatusClass = "error";
+        render();
+      }
+    }
+
+    async function runScreenQualityScan() {
+      const activeLabels = labels();
+      const path = (byId("screen-quality-path").value || byId("scan-path").value || "").trim();
+      if (!path) {
+        state.scanStatus = activeLabels.scan_path_placeholder;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+
+      state.scanRunning = true;
+      state.scanStatus = activeLabels.scan_status_running;
+      state.scanStatusClass = "";
+      render();
+
+      try {
+        const response = await fetch(apiEndpoint("/api/scan"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path,
+            language: state.language,
+            discover_projects: byId("scan-discover").checked,
+            discovery_depth: Number(byId("scan-depth").value || 0),
+            categories: ["screen_quality"],
+            standard: "local",
+            standard_category: "screen_quality",
+            min_severity: "low",
+            enable_osv: false,
+            include_host: false,
+          }),
+        });
+        const nextPayload = await parseJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(nextPayload.error || activeLabels.scan_status_failed);
+        }
+        state.scanRunning = false;
+        state.scanStatus = `${labels().screen_quality_done}: ${nextPayload.scan.path || path}`;
+        state.scanStatusClass = "ok";
+        byId("scan-path").value = nextPayload.scan.path || path;
+        byId("screen-quality-path").value = nextPayload.scan.path || path;
         applyPayload(nextPayload);
       } catch (error) {
         state.scanRunning = false;
@@ -2848,6 +2964,12 @@ HTML_TEMPLATE = """<!doctype html>
     byId("web-scan-run").addEventListener("click", () => {
       runWebScan();
     });
+    byId("screen-quality-choose").addEventListener("click", () => {
+      chooseDirectory();
+    });
+    byId("screen-quality-run").addEventListener("click", () => {
+      runScreenQualityScan();
+    });
     byId("prevention-apply-toolkit").addEventListener("click", () => {
       runPreventionAction("toolkit");
     });
@@ -2869,7 +2991,16 @@ HTML_TEMPLATE = """<!doctype html>
       state.view = state.view === "help" ? "dashboard" : "help";
       if (state.view === "help") {
         location.hash = "help";
-      } else if (location.hash === "#help") {
+      } else if (location.hash === "#help" || location.hash === "#screen-quality") {
+        history.replaceState(null, document.title, location.href.split("#")[0]);
+      }
+      render();
+    });
+    byId("screen-quality-toggle").addEventListener("click", () => {
+      state.view = state.view === "screen-quality" ? "dashboard" : "screen-quality";
+      if (state.view === "screen-quality") {
+        location.hash = "screen-quality";
+      } else if (location.hash === "#help" || location.hash === "#screen-quality") {
         history.replaceState(null, document.title, location.href.split("#")[0]);
       }
       render();
@@ -2883,7 +3014,7 @@ HTML_TEMPLATE = """<!doctype html>
       render();
     });
     window.addEventListener("hashchange", () => {
-      state.view = location.hash === "#help" ? "help" : "dashboard";
+      state.view = initialView();
       render();
     });
 

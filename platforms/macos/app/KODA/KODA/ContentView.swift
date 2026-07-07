@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var fixPlans: [SecurityFixPlan] = []
     @State private var showScoreHistory = false
     @State private var showMainHelp = false
+    @State private var showScreenQuality = false
     @State private var showProjectProfiles = false
     @State private var showThreatModelWizard = false
     @State private var showComplianceDashboard = false
@@ -22,6 +23,16 @@ struct ContentView: View {
             if showMainHelp {
                 MainHelpScreen(language: $language) {
                     showMainHelp = false
+                }
+            } else if showScreenQuality {
+                ScreenQualityScreen(
+                    scanner: scanner,
+                    language: $language
+                ) {
+                    showScreenQuality = false
+                } onSelectReport: { report in
+                    activeReport = report
+                    activeHelpGuide = nil
                 }
             } else if let activeHelpGuide {
                 HelpGuideScreen(
@@ -158,6 +169,14 @@ struct ContentView: View {
             }
 
             Spacer()
+
+            Button {
+                showScreenQuality = true
+            } label: {
+                Label(language.screenQualityTitle, systemImage: "doc.text.magnifyingglass")
+            }
+            .buttonStyle(.borderless)
+            .disabled(scanner.isRunning)
 
             Menu {
                 Menu {
@@ -800,6 +819,242 @@ private struct MainHelpScreen: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct ScreenQualityScreen: View {
+    @ObservedObject var scanner: ScannerBridge
+    @Binding var language: AppLanguage
+    let onBack: () -> Void
+    let onSelectReport: (ScanReportItem) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                KODAScreenTopBar(language: $language, onBack: onBack) {
+                    Text(language.screenQualityTitle)
+                        .font(.title.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                } actions: {
+                    EmptyView()
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 16) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 38, weight: .semibold))
+                            .foregroundStyle(.blue)
+                            .frame(width: 48, height: 48)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(language.screenQualityHeadline)
+                                .font(.title2.weight(.bold))
+                            Text(language.screenQualityDescription)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer()
+                    }
+
+                    targetControls(maxHeight: min(110, max(66, proxy.size.height * 0.14)))
+                    statusRow
+                }
+                .padding(.horizontal, min(34, max(20, proxy.size.width * 0.035)))
+                .padding(.vertical, 18)
+
+                Divider()
+
+                resultSection(width: proxy.size.width)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func resultSection(width: CGFloat) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(language.screenQualityResultTitle)
+                        .font(.title3.weight(.bold))
+                    Text(language.screenQualityResultSubtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let report = scanner.screenQualityReportItems.first(where: \.isOverall) {
+                    Button {
+                        onSelectReport(report)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundStyle(.blue)
+                                    .frame(width: 34, height: 34)
+
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(language.screenQualityTitle)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text(report.badge(language: language))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.blue)
+                                }
+
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(language.screenQualityReportDescription)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            HStack(spacing: 12) {
+                                Label(language.findingCountText(report.findingCount), systemImage: "list.bullet.rectangle")
+                                Label(language.riskScoreText(report.riskScore), systemImage: "gauge.with.dots.needle.50percent")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .frame(maxWidth: min(420, max(280, width * 0.42)), minHeight: 150, alignment: .topLeading)
+                        .background(KODATheme.cardBackground)
+                        .overlay(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.blue)
+                                .frame(width: 4)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    HStack(spacing: 12) {
+                        Image(systemName: "play.circle")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(language.screenQualityRunTitle)
+                                .font(.headline)
+                            Text(language.screenQualityEmptyResult)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(KODATheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                    }
+                }
+            }
+            .padding(22)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func targetControls(maxHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(language.targetsTitle)
+                    .font(.headline)
+
+                Spacer()
+
+                Button(language.chooseFolderTitle) {
+                    scanner.chooseFolder(language: language)
+                }
+                .disabled(scanner.isRunning)
+
+                Button(language.uploadFilesTitle) {
+                    scanner.chooseFiles(language: language)
+                }
+                .disabled(scanner.isRunning)
+
+                Button(language.clearSelectionTitle) {
+                    scanner.clearSelection()
+                }
+                .disabled(!scanner.hasSelection || scanner.isRunning)
+
+                Button(scanner.isRunning ? language.runningTitle : language.screenQualityRunTitle) {
+                    scanner.runScreenQualityScan(language: language)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!scanner.hasSelection || scanner.isRunning)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if scanner.selectedTargets.isEmpty {
+                        Text(language.screenQualityNoTargets)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(KODATheme.insetBackground.opacity(0.65))
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                    } else {
+                        ForEach(scanner.selectedTargets, id: \.path) { target in
+                            HStack(spacing: 8) {
+                                Image(systemName: target.hasDirectoryPath ? "folder" : "doc")
+                                    .foregroundStyle(.secondary)
+                                Text(target.path)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(KODATheme.insetBackground.opacity(0.78))
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                        }
+                    }
+                }
+                .padding(8)
+            }
+            .frame(maxHeight: maxHeight)
+            .background(KODATheme.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(scanner.statusColor)
+                .frame(width: 8, height: 8)
+
+            Text(scanner.statusMessage(language: language))
+                .foregroundStyle(scanner.statusColor)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+
+            if !scanner.detailMessage(language: language).isEmpty {
+                Text(scanner.detailMessage(language: language))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .textSelection(.enabled)
+            }
+
+            Spacer()
+        }
+        .font(.callout)
     }
 }
 
@@ -2146,6 +2401,73 @@ private struct RemediationFindingCard: View {
 
     private var fallbackRecommendation: String {
         language == .ko ? "항목의 근거를 검토하고 안전한 설정 또는 코드 패턴으로 수정하세요." : "Review the evidence and replace it with a safe configuration or code pattern."
+    }
+}
+
+private extension AppLanguage {
+    var screenQualityTitle: String {
+        switch self {
+        case .ko: return "화면 품질"
+        case .en: return "Screen Quality"
+        }
+    }
+
+    var screenQualityHeadline: String {
+        switch self {
+        case .ko: return "보안 점검과 분리된 화면 소스 품질 점검"
+        case .en: return "Screen source quality checks separated from security scanning"
+        }
+    }
+
+    var screenQualityDescription: String {
+        switch self {
+        case .ko:
+            return "HTML, JSP, JS, TS, Vue, React 화면 소스에서 접근성, 웹표준, 입력폼, 버튼, 링크, 민감정보 및 시스템 경로 노출 항목을 점검합니다."
+        case .en:
+            return "Checks HTML, JSP, JS, TS, Vue, and React screen source for accessibility, standards, forms, buttons, links, sensitive text, and system path exposure."
+        }
+    }
+
+    var screenQualityRunTitle: String {
+        switch self {
+        case .ko: return "화면 품질 점검"
+        case .en: return "Run Screen Quality"
+        }
+    }
+
+    var screenQualityNoTargets: String {
+        switch self {
+        case .ko: return "화면 소스가 있는 폴더나 파일을 선택하세요."
+        case .en: return "Choose folders or files containing screen source."
+        }
+    }
+
+    var screenQualityResultTitle: String {
+        switch self {
+        case .ko: return "화면 품질 점검결과"
+        case .en: return "Screen Quality Results"
+        }
+    }
+
+    var screenQualityResultSubtitle: String {
+        switch self {
+        case .ko: return "보안 기준 카드와 분리된 화면 소스 품질 리포트입니다."
+        case .en: return "A screen source quality report separated from security standard cards."
+        }
+    }
+
+    var screenQualityReportDescription: String {
+        switch self {
+        case .ko: return "접근성, 웹표준, 버튼, 링크, 폼, 노출 위험만 모아 확인합니다."
+        case .en: return "Review only accessibility, standards, buttons, links, forms, and exposure risks."
+        }
+    }
+
+    var screenQualityEmptyResult: String {
+        switch self {
+        case .ko: return "대상을 선택하고 화면 품질 점검을 실행하면 리포트 카드가 표시됩니다."
+        case .en: return "Choose a target and run screen quality to show the report card."
+        }
     }
 }
 

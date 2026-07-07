@@ -46,6 +46,8 @@ final class ScannerBridge: ObservableObject {
     @Published var selectedTargets: [URL] = []
     @Published var reportURL: URL?
     @Published var reportItems: [ScanReportItem] = []
+    @Published var screenQualityReportURL: URL?
+    @Published var screenQualityReportItems: [ScanReportItem] = []
     @Published var isRunning = false
     @Published private var statusMessageKO = "점검할 폴더나 파일을 선택하세요."
     @Published private var statusMessageEN = "Choose folders or files to scan."
@@ -115,6 +117,8 @@ final class ScannerBridge: ObservableObject {
         selectedTargets = []
         reportURL = nil
         reportItems = []
+        screenQualityReportURL = nil
+        screenQualityReportItems = []
         setDetail(ko: "", en: "")
         setStatus(ko: "점검할 폴더나 파일을 선택하세요.", en: "Choose folders or files to scan.")
         statusColor = .secondary
@@ -124,6 +128,8 @@ final class ScannerBridge: ObservableObject {
         selectedTargets.removeAll { $0.path == url.path }
         reportURL = nil
         reportItems = []
+        screenQualityReportURL = nil
+        screenQualityReportItems = []
         setDetail(ko: "", en: "")
 
         if selectedTargets.isEmpty {
@@ -191,6 +197,45 @@ final class ScannerBridge: ObservableObject {
                     recordScoreSnapshot(snapshot)
                 }
                 setStatus(ko: "점검 완료: \(output.path)", en: "Scan complete: \(output.path)")
+                statusColor = .green
+            } else {
+                setStatus(ko: result.messageKO, en: result.messageEN)
+                statusColor = .red
+            }
+        }
+    }
+
+    func runScreenQualityScan(language: AppLanguage) {
+        let targets = selectedTargets
+        guard !targets.isEmpty else {
+            setStatus(
+                ko: "먼저 화면 소스가 있는 폴더나 파일을 선택하세요.",
+                en: "Choose folders or files containing screen source before scanning."
+            )
+            statusColor = .red
+            return
+        }
+
+        isRunning = true
+        screenQualityReportURL = nil
+        screenQualityReportItems = []
+        setDetail(ko: "", en: "")
+        setStatus(
+            ko: "화면 품질 점검을 실행하고 있습니다.",
+            en: "Running screen quality scan."
+        )
+        statusColor = .secondary
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.runScreenQualityScanCommand(targets: targets)
+            }.value
+            isRunning = false
+            setDetail(ko: result.detailKO, en: result.detailEN)
+            if result.exitCode == 0, let output = result.reportURL {
+                screenQualityReportURL = output
+                screenQualityReportItems = result.reportItems
+                setStatus(ko: "화면 품질 점검 완료: \(output.path)", en: "Screen quality scan complete: \(output.path)")
                 statusColor = .green
             } else {
                 setStatus(ko: result.messageKO, en: result.messageEN)
@@ -1356,6 +1401,51 @@ final class ScannerBridge: ObservableObject {
                 reportURL: nil,
                 messageKO: "스캐너 실행에 실패했습니다.",
                 messageEN: "Scanner failed.",
+                detailKO: error.localizedDescription,
+                detailEN: error.localizedDescription,
+                reportItems: [],
+                scoreSnapshot: nil
+            )
+        }
+    }
+
+    private nonisolated static func runScreenQualityScanCommand(targets: [URL]) -> ScanResult {
+        let scanner = NativeSecurityScanner()
+        let accessedTargets = targets.filter { $0.startAccessingSecurityScopedResource() }
+        defer {
+            accessedTargets.forEach { $0.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let rawResult = try scanner.scan(targets: targets)
+            let findings = rawResult.findings.filter { $0.category == "screen_quality" }
+            let result = NativeScanResult(
+                findings: findings,
+                warnings: rawResult.warnings,
+                targetCount: rawResult.targetCount,
+                scannedFileCount: rawResult.scannedFileCount,
+                generatedAt: rawResult.generatedAt
+            )
+            let overallFiles = try writeReportFiles(result: result, scanner: scanner, prefix: "KODA-screen-quality-dashboard")
+            let reportItems = try buildReportItems(result: result, scanner: scanner, overallFiles: overallFiles)
+            let warningTextKO = result.warnings.isEmpty ? "" : "\n경고:\n" + result.warnings.joined(separator: "\n")
+            let warningTextEN = result.warnings.isEmpty ? "" : "\nWarnings:\n" + result.warnings.joined(separator: "\n")
+            return ScanResult(
+                exitCode: 0,
+                reportURL: overallFiles.koHTMLURL,
+                messageKO: "화면 품질 점검 완료",
+                messageEN: "Screen quality scan complete",
+                detailKO: "스캔 파일 \(result.scannedFileCount)개, 화면 품질 발견 항목 \(result.findings.count)건\(warningTextKO)",
+                detailEN: "Scanned files \(result.scannedFileCount), screen quality findings \(result.findings.count)\(warningTextEN)",
+                reportItems: reportItems,
+                scoreSnapshot: nil
+            )
+        } catch {
+            return ScanResult(
+                exitCode: 2,
+                reportURL: nil,
+                messageKO: "화면 품질 점검에 실패했습니다.",
+                messageEN: "Screen quality scan failed.",
                 detailKO: error.localizedDescription,
                 detailEN: error.localizedDescription,
                 reportItems: [],
