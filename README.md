@@ -1,5 +1,17 @@
 # KODA Platform Index
 
+<p align="center">
+  <img src="docs/assets/readme/koda-readme-hero.png" alt="KODA local security scanner overview" width="100%">
+</p>
+
+<p align="center">
+  <strong>Offline-first local security and quality scanner for project source, configuration, dependencies, host posture, and screen quality.</strong>
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/koda-architecture-overview.png" alt="KODA scanner architecture and output flow" width="100%">
+</p>
+
 KODA is organized as a platform-first local security and quality scanner. The macOS app keeps its native Swift scanner, while Linux, Windows, CI, and server deployments use the shared Python engine under `platforms/shared/python/`.
 
 | Area | Path | Notes |
