@@ -60,6 +60,16 @@ koda manifest compare --baseline reports/approved-manifest.json --target /app/cu
 
 For a full example, see `examples/deploy-gate.sh`.
 
+## GitLab CI
+
+Use `examples/gitlab-ci.yml` as a starter job. It installs KODA locally in the
+job workspace, scans only merge-request changes when a target branch is
+available, writes a full HTML report, and writes `reports/koda-host.json` for
+the runner host posture.
+
+Set `KODA_DEPLOY_DIR` when the job also has access to a staged deployment
+directory and should run `koda deploy-check`.
+
 ## Closed-Network Defaults
 
 - Default scans are local and offline.

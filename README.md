@@ -44,6 +44,7 @@ Detailed install guides:
 - macOS: `docs/install/macos.md`
 - Linux: `docs/install/linux.md`
 - Windows: `docs/install/windows.md`
+- Report contract: `docs/report-contract.md`
 
 Read-only security scanner for local project folders. It scans configured paths, can auto-discover project roots under a parent folder, and runs selected vulnerability categories without installing dependencies. The default scan is offline; OSV/CVE and KEV/EPSS dependency intelligence is opt-in because it queries external security feeds.
 

@@ -7,6 +7,11 @@ fail_on="${KODA_FAIL_ON:-high}"
 
 mkdir -p "$report_dir"
 
+koda host-scan \
+  --format json \
+  --output "$report_dir/koda-host.json" \
+  --min-severity info
+
 gate_status=0
 koda deploy-check \
   --target "$deploy_dir" \
