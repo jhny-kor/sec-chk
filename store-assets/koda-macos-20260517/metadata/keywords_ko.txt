@@ -1,1 +1,0 @@
-보안,취약점,스캐너,SBOM,VEX,OWASP,CWE,ISMS-P,시큐어코딩

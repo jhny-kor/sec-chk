@@ -1,5 +1,0 @@
-KODA는 로컬 프로젝트 보안을 빠르게 점검하는 macOS 앱입니다. 폴더, 여러 파일, zip/jar/war/tar/tar.gz/tgz/gz 압축파일을 선택하면 비밀값, 의존성, 설정, 코드 패턴, 예방 가드레일을 읽기 전용으로 분석합니다.
-
-점검 결과는 한국어/영어 리포트, 위험 점수, 심각도 분포, 발견 항목별 근거와 조치 가이드로 정리됩니다. OWASP Top 10, CWE/SANS Top 25, KISA 시큐어코딩, ISMS-P 개발보안, NIST SSDF, OWASP ASVS/WSTG, OpenSSF Scorecard, SLSA/Sigstore, SBOM/VEX 기준 등 다양한 보안 기준별 관점으로 결과를 확인할 수 있습니다.
-
-KODA는 기본 스캔을 로컬에서 수행하며, 사용자가 선택한 파일과 폴더만 점검합니다. 보안 정책, Dependabot, CI 보안 점검, CODEOWNERS, .dockerignore, SBOM/VEX, ZAP DAST 계획 등 릴리스 전 예방 가드레일 준비 상태도 함께 보여주어 개발팀이 조치 우선순위를 잡는 데 도움을 줍니다.
