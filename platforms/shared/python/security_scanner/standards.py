@@ -456,7 +456,7 @@ LOCAL_STANDARD = SecurityStandard(
     (
         StandardCategory(
             DEFAULT_STANDARD_CATEGORY,
-            {"en": "All local checks", "ko": "모든 로컬 점검"},
+            {"en": "All local security checks", "ko": "모든 로컬 보안 점검"},
             scanner_categories=DEFAULT_CATEGORIES,
         ),
         StandardCategory(

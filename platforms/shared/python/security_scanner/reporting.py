@@ -76,7 +76,7 @@ TRANSLATIONS = {
         "scan_standard_category": "Standard Category",
         "scan_path_placeholder": "No folder selected",
         "choose_folder": "Choose Folder",
-        "scan_now": "Scan",
+        "scan_now": "Security Scan",
         "web_scan_title": "Scan Website (Live)",
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "Scan URL",
@@ -206,7 +206,7 @@ TRANSLATIONS = {
         "scan_standard_category": "기준 카테고리",
         "scan_path_placeholder": "선택된 폴더 없음",
         "choose_folder": "폴더 선택",
-        "scan_now": "점검 실행",
+        "scan_now": "보안 점검",
         "web_scan_title": "웹사이트 점검 (실시간)",
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "URL 점검",
@@ -2031,7 +2031,6 @@ HTML_TEMPLATE = """<!doctype html>
           <button id="lang-en" type="button">EN</button>
         </div>
         <div class="topbar-actions">
-          <button id="screen-quality-toggle" class="topbar-action" type="button">__INITIAL_SCREEN_QUALITY__</button>
           <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
         </div>
         <div class="meta">
@@ -2058,6 +2057,7 @@ HTML_TEMPLATE = """<!doctype html>
           <input id="scan-depth" type="number" min="0" max="20" value="2">
         </label>
         <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
+        <button id="screen-quality-run" type="button">__INITIAL_SCREEN_QUALITY_RUN__</button>
       </div>
       <div class="scan-web-form">
         <span id="web-scan-title" class="scan-web-title">__INITIAL_WEB_SCAN_TITLE__</span>
@@ -2138,22 +2138,6 @@ HTML_TEMPLATE = """<!doctype html>
       </section>
     </div>
 
-    <section id="screen-quality-view" class="help-view" hidden>
-      <div class="help-heading">
-        <h2 id="screen-quality-title">__INITIAL_SCREEN_QUALITY_TITLE__</h2>
-        <p id="screen-quality-intro">__INITIAL_SCREEN_QUALITY_INTRO__</p>
-      </div>
-      <section class="panel scan-panel">
-        <div class="scan-form">
-          <input id="screen-quality-path" class="path-display" type="text" autocomplete="off" readonly aria-readonly="true" placeholder="__INITIAL_SCAN_PATH_PLACEHOLDER__">
-          <button id="screen-quality-choose" type="button">__INITIAL_CHOOSE_FOLDER__</button>
-          <button id="screen-quality-run" type="button">__INITIAL_SCREEN_QUALITY_RUN__</button>
-        </div>
-        <p id="screen-quality-note" class="scan-note">__INITIAL_SCREEN_QUALITY_NOTE__</p>
-        <div id="screen-quality-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
-      </section>
-    </section>
-
     <section id="help-view" class="help-view" hidden>
       <div class="help-heading">
         <h2 id="help-title">__INITIAL_HELP_TITLE__</h2>
@@ -2203,7 +2187,6 @@ HTML_TEMPLATE = """<!doctype html>
 
     function initialView() {
       if (location.hash === "#help") return "help";
-      if (location.hash === "#screen-quality") return "screen-quality";
       return "dashboard";
     }
 
@@ -2277,7 +2260,7 @@ HTML_TEMPLATE = """<!doctype html>
     }
 
     function firstSupportedCategory(standard) {
-      return (standard.categories || []).find((category) => category.supported) || null;
+      return (standard.categories || []).find((category) => category.supported && category.id !== "screen_quality") || null;
     }
 
     function targetDisplay(target) {
@@ -2319,14 +2302,6 @@ HTML_TEMPLATE = """<!doctype html>
       setText("dashboard-title", activeLabels.title);
       setText("help-title", activeLabels.help_title);
       setText("help-intro", activeLabels.help_intro);
-      setText("screen-quality-title", activeLabels.screen_quality_title);
-      setText("screen-quality-intro", activeLabels.screen_quality_intro);
-      setText("screen-quality-note", activeLabels.screen_quality_note);
-      byId("screen-quality-path").placeholder = activeLabels.scan_path_placeholder;
-      setText("screen-quality-choose", activeLabels.choose_folder);
-      setText("screen-quality-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.screen_quality_run);
-      byId("screen-quality-choose").disabled = state.scanRunning;
-      byId("screen-quality-run").disabled = state.scanRunning;
       setText("generated-line", `${activeLabels.generated} ${payload.generated_display}`);
       setText(
         "summary-line",
@@ -2346,7 +2321,9 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-host-note", activeLabels.host_note);
       setText("sbom-download", activeLabels.download_sbom);
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
+      setText("screen-quality-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.screen_quality_run);
       byId("scan-run").disabled = state.scanRunning;
+      byId("screen-quality-run").disabled = state.scanRunning;
       byId("scan-choose").disabled = state.scanRunning;
       setText("web-scan-title", activeLabels.web_scan_title);
       byId("web-url").placeholder = activeLabels.web_url_placeholder;
@@ -2370,9 +2347,6 @@ HTML_TEMPLATE = """<!doctype html>
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
       scanStatus.className = `scan-status ${state.scanStatusClass}`;
-      const screenQualityStatus = byId("screen-quality-status");
-      screenQualityStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
-      screenQualityStatus.className = `scan-status ${state.scanStatusClass}`;
       setText("risk-score-note", activeLabels.risk_score_formula);
       byId("search").placeholder = activeLabels.search_placeholder;
       setText("reset", activeLabels.reset);
@@ -2401,17 +2375,19 @@ HTML_TEMPLATE = """<!doctype html>
       const standard = currentStandard();
       if (!standard) return;
       const selectedCategory = currentStandardCategory();
-      if (!selectedCategory || !selectedCategory.supported) {
+      if (!selectedCategory || !selectedCategory.supported || selectedCategory.id === "screen_quality") {
         const fallback = firstSupportedCategory(standard);
         state.scanStandardCategory = fallback ? fallback.id : "all";
       }
       fillSelectOptions(
         byId("scan-standard-category"),
-        (standard.categories || []).map((category) => ({
-          value: category.id,
-          label: category.supported ? labelFor(category) : `${labelFor(category)} (${labels().scan_category_not_supported})`,
-          disabled: !category.supported,
-        })),
+        (standard.categories || [])
+          .filter((category) => category.id !== "screen_quality")
+          .map((category) => ({
+            value: category.id,
+            label: category.supported ? labelFor(category) : `${labelFor(category)} (${labels().scan_category_not_supported})`,
+            disabled: !category.supported,
+          })),
         state.scanStandardCategory
       );
     }
@@ -2567,14 +2543,10 @@ HTML_TEMPLATE = """<!doctype html>
     function renderView() {
       const isDashboard = state.view === "dashboard";
       const isHelp = state.view === "help";
-      const isScreenQuality = state.view === "screen-quality";
       byId("dashboard-view").hidden = !isDashboard;
-      byId("screen-quality-view").hidden = !isScreenQuality;
       byId("help-view").hidden = !isHelp;
       setText("help-toggle", isHelp ? labels().dashboard : labels().help);
       byId("help-toggle").setAttribute("aria-pressed", isHelp ? "true" : "false");
-      setText("screen-quality-toggle", isScreenQuality ? labels().dashboard : labels().screen_quality);
-      byId("screen-quality-toggle").setAttribute("aria-pressed", isScreenQuality ? "true" : "false");
     }
 
     function coverageStatus(level, activeLabels) {
@@ -2711,7 +2683,6 @@ HTML_TEMPLATE = """<!doctype html>
           return;
         }
         byId("scan-path").value = result.path || "";
-        byId("screen-quality-path").value = result.path || "";
         state.scanStatus = `${activeLabels.folder_selected}: ${result.path || ""}`;
         state.scanStatusClass = "ok";
         render();
@@ -2812,7 +2783,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     async function runScreenQualityScan() {
       const activeLabels = labels();
-      const path = (byId("screen-quality-path").value || byId("scan-path").value || "").trim();
+      const path = byId("scan-path").value.trim();
       if (!path) {
         state.scanStatus = activeLabels.scan_path_placeholder;
         state.scanStatusClass = "error";
@@ -2850,7 +2821,6 @@ HTML_TEMPLATE = """<!doctype html>
         state.scanStatus = `${labels().screen_quality_done}: ${nextPayload.scan.path || path}`;
         state.scanStatusClass = "ok";
         byId("scan-path").value = nextPayload.scan.path || path;
-        byId("screen-quality-path").value = nextPayload.scan.path || path;
         applyPayload(nextPayload);
       } catch (error) {
         state.scanRunning = false;
@@ -2964,9 +2934,6 @@ HTML_TEMPLATE = """<!doctype html>
     byId("web-scan-run").addEventListener("click", () => {
       runWebScan();
     });
-    byId("screen-quality-choose").addEventListener("click", () => {
-      chooseDirectory();
-    });
     byId("screen-quality-run").addEventListener("click", () => {
       runScreenQualityScan();
     });
@@ -2991,16 +2958,7 @@ HTML_TEMPLATE = """<!doctype html>
       state.view = state.view === "help" ? "dashboard" : "help";
       if (state.view === "help") {
         location.hash = "help";
-      } else if (location.hash === "#help" || location.hash === "#screen-quality") {
-        history.replaceState(null, document.title, location.href.split("#")[0]);
-      }
-      render();
-    });
-    byId("screen-quality-toggle").addEventListener("click", () => {
-      state.view = state.view === "screen-quality" ? "dashboard" : "screen-quality";
-      if (state.view === "screen-quality") {
-        location.hash = "screen-quality";
-      } else if (location.hash === "#help" || location.hash === "#screen-quality") {
+      } else if (location.hash === "#help") {
         history.replaceState(null, document.title, location.href.split("#")[0]);
       }
       render();

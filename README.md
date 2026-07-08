@@ -78,6 +78,8 @@ Install quickly:
 - `prevention`: preventive guardrails such as `SECURITY.md`, KODA pre-commit gates, Dependabot/Renovate, CI security scanning, SAST readiness, OpenSSF Scorecard posture, GitHub Actions token/action hygiene, CODEOWNERS, repository security settings checklists, `.env` ignore/example hygiene, `.dockerignore`, SBOM/VEX readiness, Dependency-Track handoff, ZAP DAST planning, threat modeling, secret rotation, API security plans, OWASP SCVS component verification plans, privacy data maps, security roadmaps, evidence registers, exception owner/reason/expiry governance, security headers baselines, container hardening baselines, Cloud/IaC security plans, AI/LLM security planning, mobile security planning, NIST CSF 2.0 profiles, NIST SSDF workflow evidence, CISA Secure by Design planning, CISA secure software development attestation, SLSA/Sigstore release provenance, and committed binary artifacts.
 - `screen_quality`: static screen-source quality checks for HTML/JSP/CLX/JS/Vue/React markup, including language and viewport metadata, image alt text, input labels, explicit button types, placeholder links, sensitive text exposure, and leaked system paths.
 
+Security scans run `secrets`, `dependencies`, `configuration`, `code`, and `prevention` by default. Run `screen_quality` from the separate screen quality button or by selecting that category explicitly.
+
 ## Quick Start
 
 Run it like a local app:
@@ -156,7 +158,7 @@ Copy `scanner_config.example.json` and edit the `targets` list:
       "path": ".",
       "discover_projects": false,
       "discovery_depth": 2,
-      "categories": ["secrets", "dependencies", "configuration", "code", "prevention", "screen_quality"],
+      "categories": ["secrets", "dependencies", "configuration", "code", "prevention"],
       "exclude_globs": ["**/.git/**", "**/node_modules/**"],
       "max_file_size_bytes": 524288
     }
@@ -338,6 +340,8 @@ Security-standard selections are mapping profiles over the local rules. The dash
 - `prevention`: `SECURITY.md`, KODA pre-commit 차단, Dependabot/Renovate, CI 보안 점검, SAST workflow, OpenSSF Scorecard 상태, GitHub Actions 토큰/액션 위생, CODEOWNERS, 저장소 보안 설정 체크리스트, `.env` ignore/example 위생, `.dockerignore`, SBOM/VEX 준비성, Dependency-Track 인수인계, ZAP DAST 계획, 위협 모델, 비밀값 로테이션, API 보안 계획, OWASP SCVS 구성요소 검증 계획, 개인정보 데이터 맵, 보안 로드맵, 보안 증적 대장, 예외 owner/reason/expiry 관리, 보안 헤더 기준, 컨테이너 하드닝 기준, Cloud/IaC 보안 계획, AI/LLM 보안 계획, 모바일 보안 계획, NIST CSF 2.0 프로파일, NIST SSDF workflow 증적, CISA Secure by Design 예방 계획, CISA 보안 소프트웨어 개발 증명 체크리스트, SLSA/Sigstore 릴리스 출처 증명, 저장소에 포함된 바이너리 산출물 같은 예방 가드레일
 - `screen_quality`: HTML/JSP/CLX/JS/Vue/React 화면 소스의 lang/viewport, 이미지 alt, 입력 label, 버튼 type, 임시 링크, 민감정보 노출, 시스템 경로 노출 같은 정적 화면품질 항목
 
+보안점검은 기본적으로 `secrets`, `dependencies`, `configuration`, `code`, `prevention`만 실행합니다. 화면품질은 별도 화면 품질 버튼 또는 `screen_quality` 카테고리 명시 실행으로 점검합니다.
+
 ### 빠른 시작
 
 로컬 프로그램처럼 실행하려면:
@@ -414,7 +418,7 @@ SEC_CHK_TARGET=/path/to/projects PYTHONPATH=platforms/shared/python python3 -m s
       "path": ".",
       "discover_projects": false,
       "discovery_depth": 2,
-      "categories": ["secrets", "dependencies", "configuration", "code", "prevention", "screen_quality"],
+      "categories": ["secrets", "dependencies", "configuration", "code", "prevention"],
       "exclude_globs": ["**/.git/**", "**/node_modules/**"],
       "max_file_size_bytes": 524288
     }

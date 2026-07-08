@@ -4,13 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# File-based checks run once per scanned file (see scanner.CHECKS).
-FILE_CATEGORIES = ("secrets", "dependencies", "configuration", "code", "prevention", "screen_quality")
-# Host/endpoint checks query the local machine's security posture once per scan.
-# They are opt-in: not part of DEFAULT_CATEGORIES so existing repo scans are unchanged.
+SECURITY_CATEGORIES = ("secrets", "dependencies", "configuration", "code", "prevention")
+FILE_CATEGORIES = SECURITY_CATEGORIES + ("screen_quality",)
 HOST_CATEGORIES = ("host",)
 CATEGORIES = FILE_CATEGORIES + HOST_CATEGORIES
-DEFAULT_CATEGORIES = FILE_CATEGORIES
+DEFAULT_CATEGORIES = SECURITY_CATEGORIES
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 SEVERITY_RANK = {severity: index for index, severity in enumerate(SEVERITIES)}
 

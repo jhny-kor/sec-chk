@@ -217,6 +217,8 @@ final class ScannerBridge: ObservableObject {
         }
 
         isRunning = true
+        reportURL = nil
+        reportItems = []
         screenQualityReportURL = nil
         screenQualityReportItems = []
         setDetail(ko: "", en: "")
@@ -233,6 +235,8 @@ final class ScannerBridge: ObservableObject {
             isRunning = false
             setDetail(ko: result.detailKO, en: result.detailEN)
             if result.exitCode == 0, let output = result.reportURL {
+                reportURL = output
+                reportItems = result.reportItems
                 screenQualityReportURL = output
                 screenQualityReportItems = result.reportItems
                 setStatus(ko: "화면 품질 점검 완료: \(output.path)", en: "Screen quality scan complete: \(output.path)")
@@ -1417,15 +1421,7 @@ final class ScannerBridge: ObservableObject {
         }
 
         do {
-            let rawResult = try scanner.scan(targets: targets)
-            let findings = rawResult.findings.filter { $0.category == "screen_quality" }
-            let result = NativeScanResult(
-                findings: findings,
-                warnings: rawResult.warnings,
-                targetCount: rawResult.targetCount,
-                scannedFileCount: rawResult.scannedFileCount,
-                generatedAt: rawResult.generatedAt
-            )
+            let result = try scanner.scan(targets: targets, screenQualityOnly: true)
             let overallFiles = try writeReportFiles(result: result, scanner: scanner, prefix: "KODA-screen-quality-dashboard")
             let reportItems = try buildReportItems(result: result, scanner: scanner, overallFiles: overallFiles)
             let warningTextKO = result.warnings.isEmpty ? "" : "\n경고:\n" + result.warnings.joined(separator: "\n")

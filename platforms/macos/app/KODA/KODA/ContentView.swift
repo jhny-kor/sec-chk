@@ -12,7 +12,6 @@ struct ContentView: View {
     @State private var fixPlans: [SecurityFixPlan] = []
     @State private var showScoreHistory = false
     @State private var showMainHelp = false
-    @State private var showScreenQuality = false
     @State private var showProjectProfiles = false
     @State private var showThreatModelWizard = false
     @State private var showComplianceDashboard = false
@@ -23,16 +22,6 @@ struct ContentView: View {
             if showMainHelp {
                 MainHelpScreen(language: $language) {
                     showMainHelp = false
-                }
-            } else if showScreenQuality {
-                ScreenQualityScreen(
-                    scanner: scanner,
-                    language: $language
-                ) {
-                    showScreenQuality = false
-                } onSelectReport: { report in
-                    activeReport = report
-                    activeHelpGuide = nil
                 }
             } else if let activeHelpGuide {
                 HelpGuideScreen(
@@ -169,14 +158,6 @@ struct ContentView: View {
             }
 
             Spacer()
-
-            Button {
-                showScreenQuality = true
-            } label: {
-                Label(language.screenQualityTitle, systemImage: "doc.text.magnifyingglass")
-            }
-            .buttonStyle(.borderless)
-            .disabled(scanner.isRunning)
 
             Menu {
                 Menu {
@@ -496,6 +477,12 @@ struct ContentView: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .disabled(!scanner.hasSelection || scanner.isRunning)
+
+                Button(scanner.isRunning ? language.runningTitle : language.screenQualityRunTitle) {
+                    scanner.runScreenQualityScan(language: language)
+                }
+                .buttonStyle(.bordered)
                 .disabled(!scanner.hasSelection || scanner.isRunning)
 
                 Menu {

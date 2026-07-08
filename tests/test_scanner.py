@@ -1260,6 +1260,22 @@ GEM
             self.assertEqual(payload["scan"]["standard"], "local")
             self.assertEqual(payload["scan"]["standard_category"], "screen_quality")
 
+    def test_dashboard_payload_default_security_scan_excludes_screen_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "screen.clx").write_text("<button>Save</button>\n", encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                language="ko",
+                discover_projects=False,
+            )
+
+            categories = {finding["category"] for finding in payload["findings_by_language"]["en"]}
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertNotIn("screen_quality", categories)
+            self.assertNotIn("screen.button-type-missing", rule_ids)
+
     def test_injection_standard_profile_runs_code_pattern_rules(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1901,7 +1917,6 @@ GEM
         self.assertNotIn("scanner.openReport", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("showMainHelp", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("MainHelpScreen", koda_content_view.read_text(encoding="utf-8"))
-        self.assertIn("showScreenQuality", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("ScreenQualityScreen", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("runScreenQualityScan(language: language)", koda_content_view.read_text(encoding="utf-8"))
         self.assertIn("screenQualityReportItems", koda_bridge.read_text(encoding="utf-8"))
@@ -2132,10 +2147,10 @@ GEM
         self.assertIn('id="scan-standard"', html)
         self.assertIn('id="scan-standard-category"', html)
         self.assertIn('id="scan-run"', html)
-        self.assertIn('id="screen-quality-toggle"', html)
-        self.assertIn('id="screen-quality-view"', html)
         self.assertIn('id="screen-quality-run"', html)
-        self.assertIn('"#screen-quality"', html)
+        self.assertNotIn('id="screen-quality-toggle"', html)
+        self.assertNotIn('id="screen-quality-view"', html)
+        self.assertNotIn('"#screen-quality"', html)
         self.assertIn('categories: ["screen_quality"]', html)
         self.assertIn('id="scan-osv"', html)
         self.assertIn('id="sbom-download"', html)
@@ -2165,7 +2180,8 @@ GEM
         self.assertIn("NIST CSF 2.0", html)
         self.assertIn("소프트웨어 개발보안 49", html)
         self.assertIn("ISMS-P 2.8 개발보안", html)
-        self.assertIn("점검 실행", html)
+        self.assertIn("보안 점검", html)
+        self.assertIn("화면 품질 점검", html)
 
     def test_sarif_report_contains_rule_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

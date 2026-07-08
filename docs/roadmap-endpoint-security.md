@@ -113,7 +113,7 @@ platforms/shared/python/security_scanner/
 ### Phase 0 — 기반 (G1·G2·G3·G7 해소) — ✅ 완료 (2026-06-07)
 - [x] `checks/host/runner.py` 안전 명령 러너 (allowlist·timeout·실패 격리).
 - [x] `Finding`에 `resource` 필드 추가 + `host_finding()`가 `path`에 미러링 → 리포트/SARIF/diff/ignore 호환.
-- [x] `models`에 `FILE_CATEGORIES`/`HOST_CATEGORIES`/`CATEGORIES`/`DEFAULT_CATEGORIES` 분리 → `host`는 **opt-in**(기본 스캔 불변). `scanner._scan_host()` 1회 실행 경로.
+- [x] `models`에 보안 기본 카테고리/파일 카테고리/호스트 카테고리 분리 → `host`와 `screen_quality`는 **opt-in**(보안 기본 스캔 불변). `scanner._scan_host()` 1회 실행 경로.
 - [x] OS 분기(`checks/host/__init__.py` 디스패처) + 미지원 OS graceful skip(경고만).
 - [x] CLI `host-scan` 명령 + 서버/대시보드 기본값을 `DEFAULT_CATEGORIES`로 (host 미포함).
 - [x] 테스트 9종 추가(allowlist 우회 차단, 미지원 OS, 프로브 실패 격리, opt-in 보장 등) — 전체 73 테스트 통과.

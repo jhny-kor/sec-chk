@@ -9,6 +9,9 @@ struct KODAApp: App {
 
     init() {
         runHeadlessScanIfRequested()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            KODAWindowCoordinator.shared.ensureMainWindowVisibleAfterLaunch()
+        }
     }
 
     var body: some Scene {
@@ -94,17 +97,23 @@ private final class KODAAppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
 
-        KODAWindowCoordinator.shared.showMainWindow()
+        DispatchQueue.main.async {
+            KODAWindowCoordinator.shared.showMainWindow()
+        }
         return false
     }
 }
 
-@MainActor
 private final class KODAWindowCoordinator {
     static let shared = KODAWindowCoordinator()
     static let mainWindowID = "main-window"
 
     private var openMainWindow: (() -> Void)?
+    private var fallbackWindow: NSWindow?
+
+    func ensureMainWindowVisibleAfterLaunch() {
+        showMainWindow()
+    }
 
     func register(openWindow: OpenWindowAction) {
         openMainWindow = {
@@ -117,7 +126,12 @@ private final class KODAWindowCoordinator {
             return
         }
 
-        openMainWindow?()
+        guard let openMainWindow else {
+            showFallbackWindow()
+            return
+        }
+
+        openMainWindow()
         DispatchQueue.main.async {
             _ = self.focusMainWindow()
         }
@@ -128,13 +142,49 @@ private final class KODAWindowCoordinator {
         NSApp.activate(ignoringOtherApps: true)
 
         guard let window = NSApp.windows.first(where: { window in
-            window.identifier?.rawValue == Self.mainWindowID || window.title == "KODA"
+            window.identifier?.rawValue == Self.mainWindowID
+                || window.title == "KODA"
+                || (window.styleMask.contains(.titled) && window.canBecomeMain)
         }) else {
             return false
         }
 
         window.makeKeyAndOrderFront(nil)
         return true
+    }
+
+    private func showFallbackWindow() {
+        if let fallbackWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            fallbackWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: initialWindowFrame(),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.identifier = NSUserInterfaceItemIdentifier(Self.mainWindowID)
+        window.title = "KODA"
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: ContentView().frame(minWidth: 1024, minHeight: 720))
+        fallbackWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func initialWindowFrame() -> NSRect {
+        guard let screen = NSScreen.main else {
+            return NSRect(x: 100, y: 100, width: 1440, height: 960)
+        }
+        let visible = screen.visibleFrame
+        let width = min(visible.width * 0.85, 1700)
+        let height = min(visible.height * 0.85, 1100)
+        let originX = visible.minX + (visible.width - width) / 2
+        let originY = visible.minY + (visible.height - height) / 2
+        return NSRect(x: originX, y: originY, width: width, height: height)
     }
 }
 

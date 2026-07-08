@@ -191,7 +191,7 @@ final class NativeSecurityScanner {
         self.fileManager = fileManager
     }
 
-    func scan(targets: [URL]) throws -> NativeScanResult {
+    func scan(targets: [URL], screenQualityOnly: Bool = false) throws -> NativeScanResult {
         let temporaryRoot = fileManager.temporaryDirectory.appendingPathComponent("KODA-native-scan-\(UUID().uuidString)")
         try fileManager.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
         defer {
@@ -219,12 +219,15 @@ final class NativeSecurityScanner {
                         extractedRoot,
                         targetName: targetName,
                         originalRoot: extractedRoot,
+                        screenQualityOnly: screenQualityOnly,
                         findings: &findings,
                         warnings: &warnings,
                         scannedFileCount: &scannedFileCount,
                         scannedFileURLs: &scannedFileURLs
                     )
-                    appendFindings(checkPrevention(root: extractedRoot, files: scannedFileURLs), targetName: targetName, findings: &findings)
+                    if !screenQualityOnly {
+                        appendFindings(checkPrevention(root: extractedRoot, files: scannedFileURLs), targetName: targetName, findings: &findings)
+                    }
                 } catch {
                     warnings.append(error.localizedDescription)
                 }
@@ -241,17 +244,21 @@ final class NativeSecurityScanner {
                     resolvedTarget,
                     targetName: targetName,
                     originalRoot: resolvedTarget,
+                    screenQualityOnly: screenQualityOnly,
                     findings: &findings,
                     warnings: &warnings,
                     scannedFileCount: &scannedFileCount,
                     scannedFileURLs: &scannedFileURLs
                 )
-                appendFindings(checkPrevention(root: resolvedTarget, files: scannedFileURLs), targetName: targetName, findings: &findings)
+                if !screenQualityOnly {
+                    appendFindings(checkPrevention(root: resolvedTarget, files: scannedFileURLs), targetName: targetName, findings: &findings)
+                }
             } else {
                 scanFile(
                     resolvedTarget,
                     targetName: targetName,
                     root: resolvedTarget.deletingLastPathComponent(),
+                    screenQualityOnly: screenQualityOnly,
                     findings: &findings,
                     scannedFileCount: &scannedFileCount
                 )
@@ -1134,6 +1141,7 @@ final class NativeSecurityScanner {
         _ root: URL,
         targetName: String,
         originalRoot: URL,
+        screenQualityOnly: Bool,
         findings: inout [NativeFinding],
         warnings: inout [String],
         scannedFileCount: inout Int,
@@ -1163,6 +1171,7 @@ final class NativeSecurityScanner {
                         extractedRoot,
                         targetName: targetName,
                         originalRoot: extractedRoot,
+                        screenQualityOnly: screenQualityOnly,
                         findings: &findings,
                         warnings: &warnings,
                         scannedFileCount: &scannedFileCount,
@@ -1180,6 +1189,7 @@ final class NativeSecurityScanner {
                 item,
                 targetName: targetName,
                 root: originalRoot,
+                screenQualityOnly: screenQualityOnly,
                 findings: &findings,
                 scannedFileCount: &scannedFileCount
             )
@@ -1190,11 +1200,12 @@ final class NativeSecurityScanner {
         _ file: URL,
         targetName: String,
         root: URL,
+        screenQualityOnly: Bool,
         findings: inout [NativeFinding],
         scannedFileCount: inout Int
     ) {
         let displayPath = relativePath(file, root: root)
-        var localFindings = checkFileMetadata(file: file, displayPath: displayPath)
+        var localFindings = screenQualityOnly ? [] : checkFileMetadata(file: file, displayPath: displayPath)
 
         guard let lines = readTextLines(file) else {
             appendFindings(localFindings, targetName: targetName, findings: &findings)
@@ -1202,12 +1213,15 @@ final class NativeSecurityScanner {
         }
 
         scannedFileCount += 1
-        localFindings +=
-            checkSecrets(lines: lines, file: file, displayPath: displayPath)
-            + checkDependencies(lines: lines, file: file, root: root, displayPath: displayPath)
-            + checkConfiguration(lines: lines, file: file, displayPath: displayPath)
-            + checkCode(lines: lines, file: file, displayPath: displayPath)
-            + checkScreenQuality(lines: lines, file: file, displayPath: displayPath)
+        if screenQualityOnly {
+            localFindings += checkScreenQuality(lines: lines, file: file, displayPath: displayPath)
+        } else {
+            localFindings +=
+                checkSecrets(lines: lines, file: file, displayPath: displayPath)
+                + checkDependencies(lines: lines, file: file, root: root, displayPath: displayPath)
+                + checkConfiguration(lines: lines, file: file, displayPath: displayPath)
+                + checkCode(lines: lines, file: file, displayPath: displayPath)
+        }
 
         appendFindings(localFindings, targetName: targetName, findings: &findings)
     }
