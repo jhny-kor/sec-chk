@@ -1241,6 +1241,25 @@ GEM
             self.assertEqual(payload["scan"]["standard"], "owasp-top-10-2021")
             self.assertEqual(payload["scan"]["standard_category"], "a06-vulnerable-outdated-components")
 
+    def test_dashboard_payload_can_scan_local_screen_quality_category(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "screen.clx").write_text("<button>Save</button>\n", encoding="utf-8")
+
+            payload = scan_directory_payload(
+                str(root),
+                language="ko",
+                discover_projects=False,
+                standard="local",
+                standard_category="screen_quality",
+                categories=("screen_quality",),
+            )
+
+            rule_ids = {finding["rule_id"] for finding in payload["findings_by_language"]["en"]}
+            self.assertIn("screen.button-type-missing", rule_ids)
+            self.assertEqual(payload["scan"]["standard"], "local")
+            self.assertEqual(payload["scan"]["standard_category"], "screen_quality")
+
     def test_injection_standard_profile_runs_code_pattern_rules(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

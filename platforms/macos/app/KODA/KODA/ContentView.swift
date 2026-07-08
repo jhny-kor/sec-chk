@@ -2422,9 +2422,9 @@ private extension AppLanguage {
     var screenQualityDescription: String {
         switch self {
         case .ko:
-            return "HTML, JSP, JS, TS, Vue, React 화면 소스에서 접근성, 웹표준, 입력폼, 버튼, 링크, 민감정보 및 시스템 경로 노출 항목을 점검합니다."
+            return "HTML, JSP, CLX, JS, TS, Vue, React 화면 소스에서 접근성, 웹표준, 입력폼, 버튼, 링크, 민감정보 및 시스템 경로 노출 항목을 점검합니다."
         case .en:
-            return "Checks HTML, JSP, JS, TS, Vue, and React screen source for accessibility, standards, forms, buttons, links, sensitive text, and system path exposure."
+            return "Checks HTML, JSP, CLX, JS, TS, Vue, and React screen source for accessibility, standards, forms, buttons, links, sensitive text, and system path exposure."
         }
     }
 

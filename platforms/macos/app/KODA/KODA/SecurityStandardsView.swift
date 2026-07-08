@@ -2526,7 +2526,7 @@ enum SecurityStandardCatalog {
                 category("dependencies", "의존성", "고정되지 않은 버전, 락파일 누락, 안전하지 않은 소스를 확인합니다."),
                 category("configuration", "설정", ".env, debug, 권한 상승 컨테이너 설정을 확인합니다."),
                 category("code", "코드 패턴", "XSS, SQL injection, command injection, path traversal 등을 확인합니다."),
-                category("screen_quality", "화면 품질", "HTML/JSP/Vue/React 화면 소스의 접근성, 반응형, 링크, 노출 위험을 확인합니다."),
+                category("screen_quality", "화면 품질", "HTML/JSP/CLX/JS/Vue/React 화면 소스의 접근성, 반응형, 링크, 노출 위험을 확인합니다."),
                 category("prevention", "예방 가드레일", "SECURITY.md, 의존성 자동 업데이트, CI 보안 점검, SBOM 준비성을 확인합니다."),
                 category("api-security", "API 보안", "API 인증, 객체/기능 권한, mass assignment, rate limit, 외부 API timeout을 확인합니다."),
                 category("auth-session", "인증 및 세션", "JWT 검증, none 알고리즘, 긴 세션 만료, 쿠키/CSRF 설정을 확인합니다."),

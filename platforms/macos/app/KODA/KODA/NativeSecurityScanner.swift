@@ -1698,7 +1698,7 @@ final class NativeSecurityScanner {
     }
 
     private func checkScreenQuality(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
-        let screenExtensions: Set<String> = ["html", "htm", "jsp", "jspx", "vue", "jsx", "tsx"]
+        let screenExtensions: Set<String> = ["html", "htm", "jsp", "jspx", "clx", "js", "vue", "jsx", "tsx"]
         let htmlExtensions: Set<String> = ["html", "htm", "jsp", "jspx"]
         let suffix = file.pathExtension.lowercased()
         guard screenExtensions.contains(suffix) else { return [] }

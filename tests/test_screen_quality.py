@@ -48,6 +48,20 @@ class ScreenQualityTests(unittest.TestCase):
             self.assertIn("screen.sensitive-text-exposed", rule_ids)
             self.assertIn("screen.system-path-exposed", rule_ids)
 
+    def test_screen_quality_includes_clx_and_js_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "form.clx").write_text("<button>Save</button>\n", encoding="utf-8")
+            (root / "view.js").write_text('const apiKey = "secret-123456";\n', encoding="utf-8")
+
+            findings = SecurityScanner(
+                ScannerConfig(targets=(TargetConfig(name="screen", path=root, categories=("screen_quality",)),))
+            ).scan()
+            rule_ids = {finding.rule_id for finding in findings}
+
+            self.assertIn("screen.button-type-missing", rule_ids)
+            self.assertIn("screen.sensitive-text-exposed", rule_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

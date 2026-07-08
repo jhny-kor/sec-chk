@@ -7,7 +7,7 @@ from ..models import Finding, TargetConfig
 from .common import read_text_lines
 
 
-SCREEN_FILE_SUFFIXES = {".html", ".htm", ".jsp", ".jspx", ".vue", ".jsx", ".tsx"}
+SCREEN_FILE_SUFFIXES = {".html", ".htm", ".jsp", ".jspx", ".clx", ".js", ".vue", ".jsx", ".tsx"}
 HTML_LIKE_SUFFIXES = {".html", ".htm", ".jsp", ".jspx"}
 IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 INPUT_TAG_RE = re.compile(r"<input\b[^>]*>", re.IGNORECASE)
