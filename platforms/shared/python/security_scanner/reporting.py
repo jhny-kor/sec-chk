@@ -21,6 +21,7 @@ from .standards import (
     PREVENTION_RULE_IDS,
     SCREEN_QUALITY_RULE_IDS,
     SECRET_RULE_IDS,
+    SECURITY_STANDARDS,
     rule_standard_mappings_payload,
     standards_payload,
 )
@@ -1132,12 +1133,14 @@ def filter_disabled_rules(findings: list[Finding], disabled_rules: object) -> li
 
 # --- Rule catalog (single source for the Settings popup on web + macOS) ---------
 
-_SECURITY_RULE_GROUPS = (
-    ("secrets", SECRET_RULE_IDS),
-    ("dependencies", DEPENDENCY_RULE_IDS),
-    ("configuration", CONFIGURATION_RULE_IDS),
-    ("code", CODE_PATTERN_RULE_IDS),
-    ("prevention", PREVENTION_RULE_IDS),
+# Master set of toggleable file-scan security rules. Standard groups list only
+# these (host-only / evidence-only mappings are excluded from the toggle list).
+_KNOWN_SECURITY_RULE_IDS = frozenset(
+    SECRET_RULE_IDS
+    + DEPENDENCY_RULE_IDS
+    + CONFIGURATION_RULE_IDS
+    + CODE_PATTERN_RULE_IDS
+    + PREVENTION_RULE_IDS
 )
 
 _QUALITY_RULE_GROUPS = (("screen_quality", SCREEN_QUALITY_RULE_IDS),)
@@ -1168,23 +1171,51 @@ def _catalog_rule(rule_id: str, language: str) -> dict[str, str]:
     return {"id": rule_id, "title": _humanize_rule_id(rule_id), "description": ""}
 
 
+def _standard_rule_ids(standard: object) -> list[str]:
+    """Deduplicated toggleable rule ids a standard maps to, in first-seen order."""
+    seen: list[str] = []
+    for category in standard.categories:
+        for rule_id in category.rule_ids:
+            if rule_id in _KNOWN_SECURITY_RULE_IDS and rule_id not in seen:
+                seen.append(rule_id)
+    return seen
+
+
 def build_rule_catalog(language: str = "ko") -> list[dict[str, object]]:
-    """Grouped rule catalog for the Settings popup: security groups + quality group."""
+    """Grouped rule catalog for the Settings popup.
+
+    Security rules are grouped by standard (기준별) -- e.g. "소프트웨어 개발보안 49" --
+    listing each standard's own rules. Quality rules stay grouped by category.
+    """
     labels = _labels(language)
     category_labels = labels.get("category_labels", {})
     if not isinstance(category_labels, dict):
         category_labels = {}
     groups: list[dict[str, object]] = []
-    for kind, spec in (("security", _SECURITY_RULE_GROUPS), ("quality", _QUALITY_RULE_GROUPS)):
-        for key, rule_ids in spec:
-            groups.append(
-                {
-                    "key": key,
-                    "kind": kind,
-                    "label": str(category_labels.get(key, key)),
-                    "rules": [_catalog_rule(rule_id, language) for rule_id in rule_ids],
-                }
-            )
+
+    for standard in SECURITY_STANDARDS:
+        rule_ids = _standard_rule_ids(standard)
+        if not rule_ids:
+            continue
+        label = standard.labels.get(language) or standard.labels.get("en") or standard.id
+        groups.append(
+            {
+                "key": standard.id,
+                "kind": "security",
+                "label": str(label),
+                "rules": [_catalog_rule(rule_id, language) for rule_id in rule_ids],
+            }
+        )
+
+    for key, rule_ids in _QUALITY_RULE_GROUPS:
+        groups.append(
+            {
+                "key": key,
+                "kind": "quality",
+                "label": str(category_labels.get(key, key)),
+                "rules": [_catalog_rule(rule_id, language) for rule_id in rule_ids],
+            }
+        )
     return groups
 
 
