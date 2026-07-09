@@ -3236,6 +3236,11 @@
           "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다."
         },
         {
+          "id": "code.csrf-disabled",
+          "title": "CSRF 보호 비활성화 의심",
+          "description": "라우트 또는 애플리케이션에서 CSRF 보호를 비활성화하는 패턴입니다."
+        },
+        {
           "id": "secret.private-key",
           "title": "개인 키 자료",
           "description": "개인 키로 보이는 값이 로컬 프로젝트 파일에 포함되어 있습니다."
@@ -3291,6 +3296,41 @@
           "description": "HTTP 다운로드는 이미지 빌드 중 전송 경로에서 변조될 수 있습니다."
         },
         {
+          "id": "code.auth-disabled-endpoint",
+          "title": "인증 또는 인가 우회 설정 의심",
+          "description": "엔드포인트나 핸들러에서 인증 또는 인가를 명시적으로 우회하는 패턴입니다."
+        },
+        {
+          "id": "code.api-route-missing-auth",
+          "title": "민감 API 라우트에 인증 가드가 보이지 않음",
+          "description": "관리자, 사용자, 계정, 결제 등 민감 API 라우트가 명시적 인증/인가 가드 없이 선언된 것으로 보입니다."
+        },
+        {
+          "id": "code.weak-hash",
+          "title": "약한 해시 알고리즘 사용 의심",
+          "description": "비밀번호, 서명, 무결성 확인에 부적절할 수 있는 MD5 또는 SHA-1 사용 패턴입니다."
+        },
+        {
+          "id": "code.jwt-verification-disabled",
+          "title": "JWT 서명 검증이 비활성화된 것으로 보임",
+          "description": "JWT decode 또는 검증 설정에서 서명 검증이 꺼져 있을 수 있습니다."
+        },
+        {
+          "id": "code.jwt-none-algorithm",
+          "title": "JWT none 알고리즘 허용 의심",
+          "description": "JWT 설정이 서명 없는 none 알고리즘을 허용할 수 있습니다."
+        },
+        {
+          "id": "code.insecure-cookie-settings",
+          "title": "안전하지 않은 쿠키 설정",
+          "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.session-long-expiry",
+          "title": "세션 또는 토큰 만료 시간이 과도함",
+          "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
+        },
+        {
           "id": "code.insecure-temp-file",
           "title": "안전하지 않은 임시 파일 사용",
           "description": "예측 가능한 임시 파일명 또는 직접 지정한 /tmp 경로를 파일 작업에 사용하는 패턴입니다."
@@ -3329,6 +3369,16 @@
           "id": "code.public-bind-all-interfaces",
           "title": "모든 인터페이스 바인딩",
           "description": "서비스가 모든 네트워크 인터페이스에서 수신하도록 설정된 패턴입니다."
+        },
+        {
+          "id": "code.logging-sensitive-data",
+          "title": "민감정보 로깅 의심",
+          "description": "로그 또는 콘솔 출력에 자격 증명, 토큰, 세션, 쿠키 정보가 포함될 수 있는 패턴입니다."
+        },
+        {
+          "id": "code.pii-logging",
+          "title": "개인정보 로깅 의심",
+          "description": "로그 또는 콘솔 출력에 이메일, 전화번호, 주소, 주민번호 등 개인정보 필드가 포함될 수 있습니다."
         },
         {
           "id": "dependency.remote-shell-script",
@@ -3393,6 +3443,11 @@
           "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다."
         },
         {
+          "id": "code.csrf-disabled",
+          "title": "CSRF 보호 비활성화 의심",
+          "description": "라우트 또는 애플리케이션에서 CSRF 보호를 비활성화하는 패턴입니다."
+        },
+        {
           "id": "secret.private-key",
           "title": "개인 키 자료",
           "description": "개인 키로 보이는 값이 로컬 프로젝트 파일에 포함되어 있습니다."
@@ -3448,6 +3503,41 @@
           "description": "HTTP 다운로드는 이미지 빌드 중 전송 경로에서 변조될 수 있습니다."
         },
         {
+          "id": "code.auth-disabled-endpoint",
+          "title": "인증 또는 인가 우회 설정 의심",
+          "description": "엔드포인트나 핸들러에서 인증 또는 인가를 명시적으로 우회하는 패턴입니다."
+        },
+        {
+          "id": "code.api-route-missing-auth",
+          "title": "민감 API 라우트에 인증 가드가 보이지 않음",
+          "description": "관리자, 사용자, 계정, 결제 등 민감 API 라우트가 명시적 인증/인가 가드 없이 선언된 것으로 보입니다."
+        },
+        {
+          "id": "code.weak-hash",
+          "title": "약한 해시 알고리즘 사용 의심",
+          "description": "비밀번호, 서명, 무결성 확인에 부적절할 수 있는 MD5 또는 SHA-1 사용 패턴입니다."
+        },
+        {
+          "id": "code.jwt-verification-disabled",
+          "title": "JWT 서명 검증이 비활성화된 것으로 보임",
+          "description": "JWT decode 또는 검증 설정에서 서명 검증이 꺼져 있을 수 있습니다."
+        },
+        {
+          "id": "code.jwt-none-algorithm",
+          "title": "JWT none 알고리즘 허용 의심",
+          "description": "JWT 설정이 서명 없는 none 알고리즘을 허용할 수 있습니다."
+        },
+        {
+          "id": "code.insecure-cookie-settings",
+          "title": "안전하지 않은 쿠키 설정",
+          "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.session-long-expiry",
+          "title": "세션 또는 토큰 만료 시간이 과도함",
+          "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
+        },
+        {
           "id": "code.insecure-temp-file",
           "title": "안전하지 않은 임시 파일 사용",
           "description": "예측 가능한 임시 파일명 또는 직접 지정한 /tmp 경로를 파일 작업에 사용하는 패턴입니다."
@@ -3486,6 +3576,16 @@
           "id": "code.public-bind-all-interfaces",
           "title": "모든 인터페이스 바인딩",
           "description": "서비스가 모든 네트워크 인터페이스에서 수신하도록 설정된 패턴입니다."
+        },
+        {
+          "id": "code.logging-sensitive-data",
+          "title": "민감정보 로깅 의심",
+          "description": "로그 또는 콘솔 출력에 자격 증명, 토큰, 세션, 쿠키 정보가 포함될 수 있는 패턴입니다."
+        },
+        {
+          "id": "code.pii-logging",
+          "title": "개인정보 로깅 의심",
+          "description": "로그 또는 콘솔 출력에 이메일, 전화번호, 주소, 주민번호 등 개인정보 필드가 포함될 수 있습니다."
         },
         {
           "id": "dependency.remote-shell-script",
@@ -3550,6 +3650,11 @@
           "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다."
         },
         {
+          "id": "code.csrf-disabled",
+          "title": "CSRF 보호 비활성화 의심",
+          "description": "라우트 또는 애플리케이션에서 CSRF 보호를 비활성화하는 패턴입니다."
+        },
+        {
           "id": "secret.private-key",
           "title": "개인 키 자료",
           "description": "개인 키로 보이는 값이 로컬 프로젝트 파일에 포함되어 있습니다."
@@ -3605,6 +3710,41 @@
           "description": "HTTP 다운로드는 이미지 빌드 중 전송 경로에서 변조될 수 있습니다."
         },
         {
+          "id": "code.auth-disabled-endpoint",
+          "title": "인증 또는 인가 우회 설정 의심",
+          "description": "엔드포인트나 핸들러에서 인증 또는 인가를 명시적으로 우회하는 패턴입니다."
+        },
+        {
+          "id": "code.api-route-missing-auth",
+          "title": "민감 API 라우트에 인증 가드가 보이지 않음",
+          "description": "관리자, 사용자, 계정, 결제 등 민감 API 라우트가 명시적 인증/인가 가드 없이 선언된 것으로 보입니다."
+        },
+        {
+          "id": "code.weak-hash",
+          "title": "약한 해시 알고리즘 사용 의심",
+          "description": "비밀번호, 서명, 무결성 확인에 부적절할 수 있는 MD5 또는 SHA-1 사용 패턴입니다."
+        },
+        {
+          "id": "code.jwt-verification-disabled",
+          "title": "JWT 서명 검증이 비활성화된 것으로 보임",
+          "description": "JWT decode 또는 검증 설정에서 서명 검증이 꺼져 있을 수 있습니다."
+        },
+        {
+          "id": "code.jwt-none-algorithm",
+          "title": "JWT none 알고리즘 허용 의심",
+          "description": "JWT 설정이 서명 없는 none 알고리즘을 허용할 수 있습니다."
+        },
+        {
+          "id": "code.insecure-cookie-settings",
+          "title": "안전하지 않은 쿠키 설정",
+          "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.session-long-expiry",
+          "title": "세션 또는 토큰 만료 시간이 과도함",
+          "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
+        },
+        {
           "id": "code.insecure-temp-file",
           "title": "안전하지 않은 임시 파일 사용",
           "description": "예측 가능한 임시 파일명 또는 직접 지정한 /tmp 경로를 파일 작업에 사용하는 패턴입니다."
@@ -3643,6 +3783,16 @@
           "id": "code.public-bind-all-interfaces",
           "title": "모든 인터페이스 바인딩",
           "description": "서비스가 모든 네트워크 인터페이스에서 수신하도록 설정된 패턴입니다."
+        },
+        {
+          "id": "code.logging-sensitive-data",
+          "title": "민감정보 로깅 의심",
+          "description": "로그 또는 콘솔 출력에 자격 증명, 토큰, 세션, 쿠키 정보가 포함될 수 있는 패턴입니다."
+        },
+        {
+          "id": "code.pii-logging",
+          "title": "개인정보 로깅 의심",
+          "description": "로그 또는 콘솔 출력에 이메일, 전화번호, 주소, 주민번호 등 개인정보 필드가 포함될 수 있습니다."
         },
         {
           "id": "dependency.remote-shell-script",
@@ -11738,6 +11888,11 @@
           "description": ""
         },
         {
+          "id": "code.csrf-disabled",
+          "title": "Csrf disabled",
+          "description": ""
+        },
+        {
           "id": "secret.private-key",
           "title": "Private key",
           "description": ""
@@ -11793,6 +11948,41 @@
           "description": ""
         },
         {
+          "id": "code.auth-disabled-endpoint",
+          "title": "Auth disabled endpoint",
+          "description": ""
+        },
+        {
+          "id": "code.api-route-missing-auth",
+          "title": "Api route missing auth",
+          "description": ""
+        },
+        {
+          "id": "code.weak-hash",
+          "title": "Weak hash",
+          "description": ""
+        },
+        {
+          "id": "code.jwt-verification-disabled",
+          "title": "Jwt verification disabled",
+          "description": ""
+        },
+        {
+          "id": "code.jwt-none-algorithm",
+          "title": "Jwt none algorithm",
+          "description": ""
+        },
+        {
+          "id": "code.insecure-cookie-settings",
+          "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.session-long-expiry",
+          "title": "Session long expiry",
+          "description": ""
+        },
+        {
           "id": "code.insecure-temp-file",
           "title": "Insecure temp file",
           "description": ""
@@ -11830,6 +12020,16 @@
         {
           "id": "code.public-bind-all-interfaces",
           "title": "Public bind all interfaces",
+          "description": ""
+        },
+        {
+          "id": "code.logging-sensitive-data",
+          "title": "Logging sensitive data",
+          "description": ""
+        },
+        {
+          "id": "code.pii-logging",
+          "title": "Pii logging",
           "description": ""
         },
         {
@@ -11895,6 +12095,11 @@
           "description": ""
         },
         {
+          "id": "code.csrf-disabled",
+          "title": "Csrf disabled",
+          "description": ""
+        },
+        {
           "id": "secret.private-key",
           "title": "Private key",
           "description": ""
@@ -11950,6 +12155,41 @@
           "description": ""
         },
         {
+          "id": "code.auth-disabled-endpoint",
+          "title": "Auth disabled endpoint",
+          "description": ""
+        },
+        {
+          "id": "code.api-route-missing-auth",
+          "title": "Api route missing auth",
+          "description": ""
+        },
+        {
+          "id": "code.weak-hash",
+          "title": "Weak hash",
+          "description": ""
+        },
+        {
+          "id": "code.jwt-verification-disabled",
+          "title": "Jwt verification disabled",
+          "description": ""
+        },
+        {
+          "id": "code.jwt-none-algorithm",
+          "title": "Jwt none algorithm",
+          "description": ""
+        },
+        {
+          "id": "code.insecure-cookie-settings",
+          "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.session-long-expiry",
+          "title": "Session long expiry",
+          "description": ""
+        },
+        {
           "id": "code.insecure-temp-file",
           "title": "Insecure temp file",
           "description": ""
@@ -11987,6 +12227,16 @@
         {
           "id": "code.public-bind-all-interfaces",
           "title": "Public bind all interfaces",
+          "description": ""
+        },
+        {
+          "id": "code.logging-sensitive-data",
+          "title": "Logging sensitive data",
+          "description": ""
+        },
+        {
+          "id": "code.pii-logging",
+          "title": "Pii logging",
           "description": ""
         },
         {
@@ -12052,6 +12302,11 @@
           "description": ""
         },
         {
+          "id": "code.csrf-disabled",
+          "title": "Csrf disabled",
+          "description": ""
+        },
+        {
           "id": "secret.private-key",
           "title": "Private key",
           "description": ""
@@ -12107,6 +12362,41 @@
           "description": ""
         },
         {
+          "id": "code.auth-disabled-endpoint",
+          "title": "Auth disabled endpoint",
+          "description": ""
+        },
+        {
+          "id": "code.api-route-missing-auth",
+          "title": "Api route missing auth",
+          "description": ""
+        },
+        {
+          "id": "code.weak-hash",
+          "title": "Weak hash",
+          "description": ""
+        },
+        {
+          "id": "code.jwt-verification-disabled",
+          "title": "Jwt verification disabled",
+          "description": ""
+        },
+        {
+          "id": "code.jwt-none-algorithm",
+          "title": "Jwt none algorithm",
+          "description": ""
+        },
+        {
+          "id": "code.insecure-cookie-settings",
+          "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.session-long-expiry",
+          "title": "Session long expiry",
+          "description": ""
+        },
+        {
           "id": "code.insecure-temp-file",
           "title": "Insecure temp file",
           "description": ""
@@ -12144,6 +12434,16 @@
         {
           "id": "code.public-bind-all-interfaces",
           "title": "Public bind all interfaces",
+          "description": ""
+        },
+        {
+          "id": "code.logging-sensitive-data",
+          "title": "Logging sensitive data",
+          "description": ""
+        },
+        {
+          "id": "code.pii-logging",
+          "title": "Pii logging",
           "description": ""
         },
         {

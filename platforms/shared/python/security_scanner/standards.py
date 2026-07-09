@@ -689,12 +689,13 @@ _SW_DEV_SECURITY_CATEGORIES = (
         "input-validation-expression",
         {"en": "Input Data Validation and Representation", "ko": "입력데이터 검증 및 표현"},
         scanner_categories=("code",),
-        rule_ids=INPUT_VALIDATION_RULE_IDS,
+        # + CSRF (크로스사이트 요청 위조) belongs to this type in the KISA guide.
+        rule_ids=INPUT_VALIDATION_RULE_IDS + ("code.csrf-disabled",),
     ),
     StandardCategory(
         "security-features",
         {"en": "Security Features", "ko": "보안기능"},
-        scanner_categories=("secrets", "configuration", "dependencies"),
+        scanner_categories=("secrets", "configuration", "dependencies", "code"),
         rule_ids=SECRET_RULE_IDS
         + (
             "config.env-file-present",
@@ -702,6 +703,16 @@ _SW_DEV_SECURITY_CATEGORIES = (
             "dependency.node-insecure-url",
             "dependency.python-insecure-url",
             "config.docker-add-http",
+            # Authentication / authorization (적절한 인증 없는 중요기능 허용, 부적절한 인가)
+            "code.auth-disabled-endpoint",
+            "code.api-route-missing-auth",
+            # Weak cryptography / hashing (취약한 암호화 알고리즘, 솔트 없는 해시)
+            "code.weak-hash",
+            "code.jwt-verification-disabled",
+            "code.jwt-none-algorithm",
+            # Cookie / session security (하드디스크 저장 쿠키, 세션 관리)
+            "code.insecure-cookie-settings",
+            "code.session-long-expiry",
         ),
     ),
     StandardCategory(
@@ -726,7 +737,8 @@ _SW_DEV_SECURITY_CATEGORIES = (
         "encapsulation",
         {"en": "Encapsulation", "ko": "캡슐화"},
         scanner_categories=("code",),
-        rule_ids=ENCAPSULATION_RULE_IDS,
+        # + information exposure (시스템/중요 데이터 정보 노출) fits this type.
+        rule_ids=ENCAPSULATION_RULE_IDS + ("code.logging-sensitive-data", "code.pii-logging"),
     ),
     StandardCategory(
         "api-misuse",
