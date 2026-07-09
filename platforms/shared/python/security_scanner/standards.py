@@ -157,6 +157,17 @@ PREVENTION_RULE_IDS = (
     "prevention.cloud-iac-security-plan-missing",
 )
 
+SCREEN_QUALITY_RULE_IDS = (
+    "screen.html-lang-missing",
+    "screen.viewport-missing",
+    "screen.image-alt-missing",
+    "screen.input-label-missing",
+    "screen.button-type-missing",
+    "screen.link-target-empty",
+    "screen.sensitive-text-exposed",
+    "screen.system-path-exposed",
+)
+
 ACCESS_CONTROL_RULE_IDS = (
     "code.auth-disabled-endpoint",
     "code.api-route-missing-auth",

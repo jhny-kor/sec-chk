@@ -11,7 +11,16 @@ from urllib.parse import urlparse
 
 from .config import expand_path
 from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, ScannerConfig, TargetConfig
-from .reporting import build_dashboard_payload, filter_by_min_severity, render_html
+from .reporting import (
+    build_dashboard_payload,
+    build_rule_catalog,
+    filter_by_min_severity,
+    filter_disabled_rules,
+    render_html,
+    render_hwpx,
+    render_markdown_from_payload,
+    render_xlsx,
+)
 from .scanner import SecurityScanner
 from .standards import (
     DEFAULT_STANDARD,
@@ -65,6 +74,7 @@ def scan_directory_payload(
     base_dir: Path | None = None,
     enable_osv: bool = False,
     include_host: bool = False,
+    disabled_rules: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -104,6 +114,7 @@ def scan_directory_payload(
         host_findings = [item for item in raw_findings if item.category == "host"]
         findings = findings + [item for item in host_findings if item not in findings]
     findings = filter_by_min_severity(findings, min_severity)
+    findings = filter_disabled_rules(findings, disabled_rules)
     effective_targets = scanner.effective_targets or config.targets
     target_names = tuple(item.name for item in effective_targets)
     target_paths = {item.name: str(item.path) for item in effective_targets}
@@ -199,11 +210,15 @@ def _handler(language: str):
             if path == "/api/health":
                 self._send_json({"ok": True})
                 return
+            if path == "/api/rules":
+                lang = _choice_value_query(urlparse(self.path).query, "lang", {"en", "ko"}, language)
+                self._send_json({"groups": build_rule_catalog(lang)})
+                return
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
-            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/select-directory", "/api/prevention-kit"}:
+            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/select-directory", "/api/prevention-kit", "/api/export"}:
                 self.send_response(HTTPStatus.NO_CONTENT)
                 self._send_cors_headers()
                 self.send_header("Content-Length", "0")
@@ -221,6 +236,9 @@ def _handler(language: str):
                 return
             if path == "/api/prevention-kit":
                 self._handle_prevention_kit()
+                return
+            if path == "/api/export":
+                self._handle_export()
                 return
             if path != "/api/scan":
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -245,6 +263,7 @@ def _handler(language: str):
                     max_file_size_bytes=int(request.get("max_file_size_bytes", 524288)),
                     enable_osv=bool(request.get("enable_osv", False)),
                     include_host=bool(request.get("include_host", False)),
+                    disabled_rules=_disabled_rules_value(request),
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
@@ -277,6 +296,30 @@ def _handler(language: str):
                 return
             self._send_json(payload)
 
+        def _handle_export(self) -> None:
+            try:
+                request = self._read_json(max_bytes=4_194_304)
+                report_format = _choice_value(request, "format", {"md", "markdown", "xlsx", "hwpx"}, "md")
+                lang = _choice_value(request, "language", {"en", "ko"}, language)
+                payload = request.get("payload")
+                if not isinstance(payload, dict):
+                    raise ValueError("'payload' must be an object")
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            if report_format in {"md", "markdown"}:
+                body = render_markdown_from_payload(payload, lang).encode("utf-8")
+                content_type, extension = "text/markdown; charset=utf-8", "md"
+            elif report_format == "xlsx":
+                body = render_xlsx(payload, lang)
+                content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                extension = "xlsx"
+            else:
+                body = render_hwpx(payload, lang)
+                content_type, extension = "application/hwp+zip", "hwpx"
+            self._send_bytes(body, content_type, f"koda-report.{extension}")
+
         def _handle_select_directory(self) -> None:
             try:
                 request = self._read_json(required=False)
@@ -292,13 +335,13 @@ def _handler(language: str):
         def log_message(self, format: str, *args: object) -> None:
             print(f"{self.address_string()} - {format % args}")
 
-        def _read_json(self, *, required: bool = True) -> dict[str, Any]:
+        def _read_json(self, *, required: bool = True, max_bytes: int = 32768) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0"))
             if content_length <= 0:
                 if required:
                     raise ValueError("Missing JSON body")
                 return {}
-            if content_length > 32768:
+            if content_length > max_bytes:
                 raise ValueError("JSON body is too large")
             data = json.loads(self.rfile.read(content_length).decode("utf-8"))
             if not isinstance(data, dict):
@@ -318,6 +361,15 @@ def _handler(language: str):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self._send_cors_headers()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_bytes(self, body: bytes, content_type: str, filename: str) -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -461,6 +513,23 @@ def _choice_value(request: dict[str, Any], key: str, choices: set[str], default:
     if normalized not in choices:
         raise ValueError(f"Unsupported {key}: {value}")
     return normalized
+
+
+def _choice_value_query(query: str, key: str, choices: set[str], default: str) -> str:
+    from urllib.parse import parse_qs
+
+    values = parse_qs(query).get(key)
+    if not values:
+        return default
+    normalized = values[0].lower()
+    return normalized if normalized in choices else default
+
+
+def _disabled_rules_value(request: dict[str, Any]) -> tuple[str, ...]:
+    value = request.get("disabled_rules", ())
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(str(item) for item in value if isinstance(item, str))
 
 
 def _categories_value(request: dict[str, Any]) -> tuple[str, ...]:

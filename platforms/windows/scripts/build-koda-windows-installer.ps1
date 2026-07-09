@@ -141,6 +141,9 @@ $pyInstallerArgs = @(
     "--workpath", $workPath,
     "--specpath", $specPath,
     "--paths", $SharedPythonRoot,
+    # Bundle the 한글(HWPX) report template so the /api/export hwpx download works
+    # in the frozen app (read at runtime via security_scanner/assets/).
+    "--add-data", ((Join-Path $SharedPythonRoot "security_scanner\assets\koda-hwpx-template.hwpx") + ";security_scanner\assets"),
     # Host posture, inventory, EOL, and CPE modules are imported lazily, so they
     # must be force-collected or PyInstaller's static analysis drops them.
     "--collect-submodules", "security_scanner",

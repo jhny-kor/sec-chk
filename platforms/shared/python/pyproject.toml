@@ -18,5 +18,8 @@ sec-chk = "security_scanner.cli:main"
 include = ["security_scanner", "security_scanner.*"]
 exclude = ["packaging", "platforms", "tests"]
 
+[tool.setuptools.package-data]
+security_scanner = ["assets/*.hwpx"]
+
 [tool.unittest]
 testpaths = ["tests"]

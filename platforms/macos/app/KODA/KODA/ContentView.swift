@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var fixPlans: [SecurityFixPlan] = []
     @State private var showScoreHistory = false
     @State private var showMainHelp = false
+    @State private var showSettings = false
     @State private var showProjectProfiles = false
     @State private var showThreatModelWizard = false
     @State private var showComplianceDashboard = false
@@ -65,6 +66,11 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 860, minHeight: 640)
+        .sheet(isPresented: $showSettings) {
+            SettingsView(language: $language) {
+                showSettings = false
+            }
+        }
         .sheet(isPresented: $showFixWizard) {
             SecurityFixWizardSheet(
                 plans: fixPlans,
@@ -437,6 +443,13 @@ struct ContentView: View {
                 showMainHelp = true
             } label: {
                 Label(language.helpTitle, systemImage: "questionmark.circle")
+            }
+            .buttonStyle(.borderless)
+
+            Button {
+                showSettings = true
+            } label: {
+                Label(language == .ko ? "설정" : "Settings", systemImage: "gearshape")
             }
             .buttonStyle(.borderless)
 

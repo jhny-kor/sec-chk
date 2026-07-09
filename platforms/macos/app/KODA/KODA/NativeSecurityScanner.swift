@@ -270,14 +270,17 @@ final class NativeSecurityScanner {
             }
         }
 
+        let disabledRules = KodaRuleSettings.disabledIDs()
         return NativeScanResult(
-            findings: findings.sorted { left, right in
-                let leftRank = severityRank(left.severity)
-                let rightRank = severityRank(right.severity)
-                if leftRank != rightRank { return leftRank > rightRank }
-                if left.path != right.path { return left.path < right.path }
-                return (left.line ?? 0) < (right.line ?? 0)
-            },
+            findings: findings
+                .filter { disabledRules.isEmpty || !disabledRules.contains($0.ruleID) }
+                .sorted { left, right in
+                    let leftRank = severityRank(left.severity)
+                    let rightRank = severityRank(right.severity)
+                    if leftRank != rightRank { return leftRank > rightRank }
+                    if left.path != right.path { return left.path < right.path }
+                    return (left.line ?? 0) < (right.line ?? 0)
+                },
             warnings: warnings,
             targetCount: targets.count,
             scannedFileCount: scannedFileCount,

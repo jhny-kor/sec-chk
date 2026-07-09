@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import html
+import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +12,18 @@ from . import __version__
 from .dependency_inventory import component_payload
 from .models import DependencyComponent, Finding, SEVERITIES, SEVERITY_RANK
 from .sbom import cyclonedx_payload, render_cyclonedx
-from .standards import DEFAULT_STANDARD, DEFAULT_STANDARD_CATEGORY, rule_standard_mappings_payload, standards_payload
+from .standards import (
+    CODE_PATTERN_RULE_IDS,
+    CONFIGURATION_RULE_IDS,
+    DEFAULT_STANDARD,
+    DEFAULT_STANDARD_CATEGORY,
+    DEPENDENCY_RULE_IDS,
+    PREVENTION_RULE_IDS,
+    SCREEN_QUALITY_RULE_IDS,
+    SECRET_RULE_IDS,
+    rule_standard_mappings_payload,
+    standards_payload,
+)
 from .vex import render_cyclonedx_vex
 
 
@@ -64,6 +77,19 @@ TRANSLATIONS = {
         "no_related_standards": "No standard mapping recorded.",
         "dependency_components": "Components",
         "download_sbom": "Download SBOM",
+        "settings": "Settings",
+        "settings_title": "Check rule settings",
+        "settings_intro": "Turn individual rules on or off. Disabled rules are excluded from scan results.",
+        "settings_tab_security": "Security check",
+        "settings_tab_quality": "Quality check",
+        "settings_loading": "Loading rules…",
+        "settings_reset": "Enable all",
+        "download_report": "Download report",
+        "download_md": "Markdown",
+        "download_xlsx": "Excel (xlsx)",
+        "download_hwpx": "Hangul (hwpx)",
+        "download_pdf": "PDF (print)",
+        "download_report_empty": "Run a scan first to download a report.",
         "sbom_unavailable": "No dependency components available for SBOM.",
         "osv_toggle": "OSV/CVE + KEV/EPSS lookup",
         "osv_network_note": "Queries exact dependency versions through OSV.dev and enriches CVEs with CISA KEV and FIRST EPSS priority data.",
@@ -194,6 +220,19 @@ TRANSLATIONS = {
         "no_related_standards": "연결된 기준 매핑이 없습니다.",
         "dependency_components": "컴포넌트",
         "download_sbom": "SBOM 다운로드",
+        "settings": "설정",
+        "settings_title": "점검 규칙 설정",
+        "settings_intro": "규칙을 개별적으로 켜거나 끌 수 있습니다. 끈 규칙은 점검 결과에서 제외됩니다.",
+        "settings_tab_security": "보안점검",
+        "settings_tab_quality": "품질점검",
+        "settings_loading": "규칙을 불러오는 중…",
+        "settings_reset": "모두 사용",
+        "download_report": "결과 다운로드",
+        "download_md": "마크다운",
+        "download_xlsx": "엑셀 (xlsx)",
+        "download_hwpx": "한글 (hwpx)",
+        "download_pdf": "PDF (인쇄)",
+        "download_report_empty": "먼저 점검을 실행한 뒤 결과를 다운로드하세요.",
         "sbom_unavailable": "SBOM으로 내보낼 의존성 컴포넌트가 없습니다.",
         "osv_toggle": "OSV/CVE + KEV/EPSS 조회",
         "osv_network_note": "정확한 의존성 버전을 OSV.dev로 조회하고 CVE에 CISA KEV와 FIRST EPSS 우선순위 정보를 덧붙입니다.",
@@ -1083,6 +1122,262 @@ def render_sarif(findings: list[Finding]) -> str:
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
+def filter_disabled_rules(findings: list[Finding], disabled_rules: object) -> list[Finding]:
+    """Drop findings whose rule_id the user turned off in Settings (post-scan filter)."""
+    disabled = {str(item) for item in disabled_rules} if disabled_rules else set()
+    if not disabled:
+        return findings
+    return [finding for finding in findings if finding.rule_id not in disabled]
+
+
+# --- Rule catalog (single source for the Settings popup on web + macOS) ---------
+
+_SECURITY_RULE_GROUPS = (
+    ("secrets", SECRET_RULE_IDS),
+    ("dependencies", DEPENDENCY_RULE_IDS),
+    ("configuration", CONFIGURATION_RULE_IDS),
+    ("code", CODE_PATTERN_RULE_IDS),
+    ("prevention", PREVENTION_RULE_IDS),
+)
+
+_QUALITY_RULE_GROUPS = (("screen_quality", SCREEN_QUALITY_RULE_IDS),)
+
+# screen.* rules are not in RULE_TRANSLATIONS_KO; keep their KO titles here.
+_SCREEN_KO_META = {
+    "screen.html-lang-missing": {"title": "HTML 언어가 선언되지 않음", "description": "html 요소에 lang 속성이 없으면 접근성과 검색 처리가 저하됩니다."},
+    "screen.viewport-missing": {"title": "반응형 viewport 메타 태그가 없음", "description": "viewport 메타 태그가 없으면 모바일 화면 대응이 어렵습니다."},
+    "screen.image-alt-missing": {"title": "이미지에 대체 텍스트가 없음", "description": "alt 텍스트가 없으면 스크린리더 사용자가 이미지를 이해할 수 없습니다."},
+    "screen.input-label-missing": {"title": "입력 필드에 접근 가능한 레이블이 없음", "description": "레이블이 없는 입력은 보조 기술에서 용도를 알 수 없습니다."},
+    "screen.button-type-missing": {"title": "버튼 type이 명시되지 않음", "description": "type이 없는 버튼은 폼에서 의도치 않게 submit될 수 있습니다."},
+    "screen.link-target-empty": {"title": "링크 대상이 비어 있거나 자리표시자임", "description": "빈 href 링크는 키보드/스크린리더 탐색을 방해합니다."},
+    "screen.sensitive-text-exposed": {"title": "화면 소스에 민감 텍스트가 노출됨", "description": "클라이언트 렌더링 소스에 비밀값이나 민감 정보가 남아 있습니다."},
+    "screen.system-path-exposed": {"title": "화면 소스에 시스템 경로가 노출됨", "description": "내부 시스템 경로가 사용자 화면 소스에 드러나 있습니다."},
+}
+
+
+def _humanize_rule_id(rule_id: str) -> str:
+    tail = rule_id.split(".", 1)[-1]
+    return tail.replace("-", " ").replace("_", " ").strip().capitalize() or rule_id
+
+
+def _catalog_rule(rule_id: str, language: str) -> dict[str, str]:
+    if language == "ko":
+        meta = RULE_TRANSLATIONS_KO.get(rule_id) or _SCREEN_KO_META.get(rule_id)
+        if meta:
+            return {"id": rule_id, "title": str(meta["title"]), "description": str(meta.get("description", ""))}
+    return {"id": rule_id, "title": _humanize_rule_id(rule_id), "description": ""}
+
+
+def build_rule_catalog(language: str = "ko") -> list[dict[str, object]]:
+    """Grouped rule catalog for the Settings popup: security groups + quality group."""
+    labels = _labels(language)
+    category_labels = labels.get("category_labels", {})
+    if not isinstance(category_labels, dict):
+        category_labels = {}
+    groups: list[dict[str, object]] = []
+    for kind, spec in (("security", _SECURITY_RULE_GROUPS), ("quality", _QUALITY_RULE_GROUPS)):
+        for key, rule_ids in spec:
+            groups.append(
+                {
+                    "key": key,
+                    "kind": kind,
+                    "label": str(category_labels.get(key, key)),
+                    "rules": [_catalog_rule(rule_id, language) for rule_id in rule_ids],
+                }
+            )
+    return groups
+
+
+# --- Downloadable exports built from the dashboard payload (stdlib only) --------
+
+_EXPORT_COLUMNS = {
+    "en": ("Severity", "Category", "Rule", "Title", "Path", "Line", "Recommendation"),
+    "ko": ("심각도", "분류", "룰", "제목", "경로", "줄", "권장 조치"),
+}
+
+
+def _finding_from_payload(item: dict[str, object]) -> Finding:
+    severity = str(item.get("severity", "info"))
+    if severity not in SEVERITIES:
+        severity = "info"
+    line = item.get("line")
+    return Finding(
+        rule_id=str(item.get("rule_id", "")),
+        category=str(item.get("category", "")),
+        severity=severity,
+        title=str(item.get("title", "")),
+        path=Path(str(item.get("path", "."))),
+        target=str(item.get("target", "")),
+        line=int(line) if isinstance(line, int) else None,
+        evidence=str(item.get("evidence", "")),
+        description=str(item.get("description", "")),
+        recommendation=str(item.get("recommendation", "")),
+        resource=str(item.get("resource", "")),
+    )
+
+
+def render_markdown_from_payload(payload: dict[str, object], language: str = "ko") -> str:
+    findings = [_finding_from_payload(item) for item in _payload_findings(payload)]
+    target_names = tuple(sorted({finding.target for finding in findings if finding.target}))
+    return render_markdown(findings, target_names, language)
+
+
+def _payload_findings(payload: dict[str, object]) -> list[dict[str, object]]:
+    findings = payload.get("findings", [])
+    return [item for item in findings if isinstance(item, dict)]
+
+
+def _col_ref(index: int) -> str:
+    ref = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        ref = chr(65 + remainder) + ref
+    return ref
+
+
+def _xlsx_cell(row: int, col: int, value: object) -> str:
+    ref = f"{_col_ref(col)}{row}"
+    text = html.escape("" if value is None else str(value))
+    return f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>'
+
+
+def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
+    """Minimal but valid .xlsx (inlineStr cells, no shared-strings table)."""
+    headers = _EXPORT_COLUMNS.get(language, _EXPORT_COLUMNS["en"])
+    rows: list[list[object]] = [list(headers)]
+    for item in _payload_findings(payload):
+        rows.append(
+            [
+                item.get("severity", ""),
+                item.get("category", ""),
+                item.get("rule_id", ""),
+                item.get("title", ""),
+                item.get("path", ""),
+                item.get("line", ""),
+                item.get("recommendation", ""),
+            ]
+        )
+
+    sheet_rows = []
+    for r_index, row in enumerate(rows, start=1):
+        cells = "".join(_xlsx_cell(r_index, c_index, value) for c_index, value in enumerate(row))
+        sheet_rows.append(f'<row r="{r_index}">{cells}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        "</Types>"
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+    workbook = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Findings" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    )
+    workbook_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        "</Relationships>"
+    )
+    members = {
+        "[Content_Types].xml": content_types,
+        "_rels/.rels": root_rels,
+        "xl/workbook.xml": workbook,
+        "xl/_rels/workbook.xml.rels": workbook_rels,
+        "xl/worksheets/sheet1.xml": sheet_xml,
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+_HWPX_TEMPLATE_PATH = Path(__file__).resolve().parent / "assets" / "koda-hwpx-template.hwpx"
+
+
+def _hwpx_paragraph(text: str, char_pr: str, para_pr: str, para_id: int, *, sec_pr: str = "") -> str:
+    runs = f'<hp:run charPrIDRef="9">{sec_pr}</hp:run>' if sec_pr else ""
+    runs += f'<hp:run charPrIDRef="{char_pr}"><hp:t>{html.escape(text)}</hp:t></hp:run>'
+    return (
+        f'<hp:p id="{para_id}" paraPrIDRef="{para_pr}" styleIDRef="0" '
+        f'pageBreak="0" columnBreak="0" merged="0">{runs}</hp:p>'
+    )
+
+
+def render_hwpx(payload: dict[str, object], language: str = "ko") -> bytes:
+    """Fill the bundled 한글(HWPX) template with the scan findings (stdlib zip only)."""
+    labels = _labels(language)
+    severity_labels = labels.get("severity_labels", {})
+    if not isinstance(severity_labels, dict):
+        severity_labels = {}
+    template_bytes = _HWPX_TEMPLATE_PATH.read_bytes()
+    with zipfile.ZipFile(io.BytesIO(template_bytes)) as archive:
+        members = [(info.filename, archive.read(info.filename)) for info in archive.infolist()]
+    section = next(data for name, data in members if name == "Contents/section0.xml").decode("utf-8")
+
+    prefix = section[: section.find("<hp:p")]
+    sec_pr = section[section.find("<hp:secPr") : section.find("</hp:secPr>") + len("</hp:secPr>")]
+
+    generated_at, generated_display = _generated_at()
+    findings = _payload_findings(payload)
+    para_id = 1000
+    paragraphs = [_hwpx_paragraph(str(labels.get("report_heading", "Report")), "12", "21", para_id, sec_pr=sec_pr)]
+    para_id += 1
+    paragraphs.append(_hwpx_paragraph(f"{labels.get('generated', 'Generated')}: {generated_display}", "16", "25", para_id))
+    para_id += 1
+    paragraphs.append(_hwpx_paragraph(f"{labels.get('total_findings', 'Findings')}: {len(findings)}", "16", "25", para_id))
+
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for item in findings:
+        grouped[str(item.get("category", ""))].append(item)
+    for category in sorted(grouped):
+        para_id += 1
+        paragraphs.append(_hwpx_paragraph(_category_label(category, language), "17", "24", para_id))
+        for item in grouped[category]:
+            severity = str(item.get("severity", ""))
+            sev_label = str(severity_labels.get(severity, severity))
+            location = str(item.get("path", ""))
+            line = item.get("line")
+            if line:
+                location = f"{location}:{line}"
+            recommendation = str(item.get("recommendation", "")).strip()
+            text = f"[{sev_label}] {item.get('title', '')} · {location}"
+            if recommendation:
+                text += f" · {recommendation}"
+            para_id += 1
+            paragraphs.append(_hwpx_paragraph(text, "16", "25", para_id))
+
+    new_section = (prefix + "".join(paragraphs) + "</hs:sec>").encode("utf-8")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in members:
+            if name.startswith("Preview/"):
+                continue  # stale template thumbnail; 한글 regenerates on save
+            if name == "Contents/section0.xml":
+                data = new_section
+            compress = zipfile.ZIP_STORED if name == "mimetype" else zipfile.ZIP_DEFLATED
+            archive.writestr(name, data, compress_type=compress)
+    return buffer.getvalue()
+
+
 def render_html(
     findings: list[Finding],
     target_names: tuple[str, ...] = (),
@@ -1830,6 +2125,101 @@ HTML_TEMPLATE = """<!doctype html>
       display: none;
     }
 
+    .report-download {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .report-download-btn {
+      cursor: pointer;
+    }
+    .settings-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .settings-tab {
+      cursor: pointer;
+      border: 1px solid var(--border, #cbd5e1);
+      background: transparent;
+      border-radius: 999px;
+      padding: 6px 16px;
+      font-weight: 600;
+    }
+    .settings-tab.active {
+      background: var(--accent, #2563eb);
+      color: #fff;
+      border-color: transparent;
+    }
+    .settings-reset {
+      margin-left: auto;
+      cursor: pointer;
+    }
+    .settings-groups {
+      display: grid;
+      gap: 14px;
+    }
+    .settings-group {
+      border: 1px solid var(--border, #e2e8f0);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .settings-group > summary {
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .settings-rule {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 2px;
+      border-top: 1px solid var(--border, #eef2f7);
+    }
+    .settings-rule:first-of-type { border-top: none; }
+    .settings-rule-text { display: grid; gap: 2px; }
+    .settings-rule-title { font-weight: 600; }
+    .settings-rule-id { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+    .settings-rule-desc { font-size: 13px; color: var(--muted); }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 42px;
+      height: 24px;
+      flex: none;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch .track {
+      position: absolute;
+      inset: 0;
+      background: #cbd5e1;
+      border-radius: 999px;
+      transition: background 0.15s;
+    }
+    .switch .track::before {
+      content: "";
+      position: absolute;
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.15s;
+    }
+    .switch input:checked + .track { background: var(--accent, #2563eb); }
+    .switch input:checked + .track::before { transform: translateX(18px); }
+
+    @media print {
+      header, #scan-panel, #filters-panel, #help-view, #settings-view,
+      .topbar-actions, .language-toggle, .report-download, #scan-status { display: none !important; }
+      body { background: #fff; color: #000; }
+    }
+
     .help-heading {
       display: grid;
       gap: 6px;
@@ -2032,6 +2422,7 @@ HTML_TEMPLATE = """<!doctype html>
         </div>
         <div class="topbar-actions">
           <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
+          <button id="settings-toggle" class="topbar-action" type="button">⚙ 설정</button>
         </div>
         <div class="meta">
           <div id="generated-line"></div>
@@ -2095,6 +2486,14 @@ HTML_TEMPLATE = """<!doctype html>
         <span id="scan-osv-note" class="scan-note"></span>
         <span id="scan-host-note" class="scan-note"></span>
       </div>
+      <div class="report-download" id="report-download">
+        <span id="report-download-label" class="scan-web-title"></span>
+        <button id="download-md" class="report-download-btn" type="button" data-format="md"></button>
+        <button id="download-xlsx" class="report-download-btn" type="button" data-format="xlsx"></button>
+        <button id="download-hwpx" class="report-download-btn" type="button" data-format="hwpx"></button>
+        <button id="download-pdf" class="report-download-btn" type="button" data-format="pdf"></button>
+        <span id="report-download-note" class="scan-note"></span>
+      </div>
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
 
@@ -2157,6 +2556,19 @@ HTML_TEMPLATE = """<!doctype html>
       </div>
       <div id="standards-help" class="standards-help"></div>
     </section>
+
+    <section id="settings-view" class="help-view" hidden>
+      <div class="help-heading">
+        <h2 id="settings-title"></h2>
+        <p id="settings-intro"></p>
+      </div>
+      <div class="settings-tabs" role="tablist">
+        <button id="settings-tab-security" class="settings-tab active" type="button" data-kind="security"></button>
+        <button id="settings-tab-quality" class="settings-tab" type="button" data-kind="quality"></button>
+        <button id="settings-reset" class="settings-reset" type="button"></button>
+      </div>
+      <div id="settings-groups" class="settings-groups"></div>
+    </section>
   </main>
 
   <script id="findings-data" type="application/json">__DATA__</script>
@@ -2179,10 +2591,32 @@ HTML_TEMPLATE = """<!doctype html>
       scanStandardCategory: (payload.scan && payload.scan.standard_category) || "all",
       view: initialView(),
       helpRenderedLanguage: "",
+      settingsTab: "security",
+      settingsCatalog: null,
+      settingsRenderedKey: "",
+      disabledRules: loadDisabledRules(),
     };
 
     function byId(id) {
       return document.getElementById(id);
+    }
+
+    function loadDisabledRules() {
+      try {
+        const raw = window.localStorage.getItem("koda.disabledRules");
+        const list = raw ? JSON.parse(raw) : [];
+        return new Set(Array.isArray(list) ? list.map(String) : []);
+      } catch (error) {
+        return new Set();
+      }
+    }
+
+    function saveDisabledRules() {
+      try {
+        window.localStorage.setItem("koda.disabledRules", JSON.stringify(Array.from(state.disabledRules)));
+      } catch (error) {
+        /* localStorage unavailable: keep in-memory only */
+      }
     }
 
     function initialView() {
@@ -2320,6 +2754,21 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-host-label", activeLabels.host_toggle);
       setText("scan-host-note", activeLabels.host_note);
       setText("sbom-download", activeLabels.download_sbom);
+      setText("report-download-label", activeLabels.download_report);
+      setText("download-md", activeLabels.download_md);
+      setText("download-xlsx", activeLabels.download_xlsx);
+      setText("download-hwpx", activeLabels.download_hwpx);
+      setText("download-pdf", activeLabels.download_pdf);
+      setText("settings-title", activeLabels.settings_title);
+      setText("settings-intro", activeLabels.settings_intro);
+      setText("settings-tab-security", activeLabels.settings_tab_security);
+      setText("settings-tab-quality", activeLabels.settings_tab_quality);
+      setText("settings-reset", activeLabels.settings_reset);
+      const hasFindings = (findings() || []).length > 0;
+      byId("report-download").querySelectorAll(".report-download-btn").forEach((btn) => {
+        btn.disabled = !hasFindings;
+      });
+      setText("report-download-note", hasFindings ? "" : activeLabels.download_report_empty);
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
       setText("screen-quality-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.screen_quality_run);
       byId("scan-run").disabled = state.scanRunning;
@@ -2543,10 +2992,105 @@ HTML_TEMPLATE = """<!doctype html>
     function renderView() {
       const isDashboard = state.view === "dashboard";
       const isHelp = state.view === "help";
+      const isSettings = state.view === "settings";
       byId("dashboard-view").hidden = !isDashboard;
       byId("help-view").hidden = !isHelp;
+      byId("settings-view").hidden = !isSettings;
       setText("help-toggle", isHelp ? labels().dashboard : labels().help);
       byId("help-toggle").setAttribute("aria-pressed", isHelp ? "true" : "false");
+      setText("settings-toggle", isSettings ? labels().dashboard : `⚙ ${labels().settings}`);
+      byId("settings-toggle").setAttribute("aria-pressed", isSettings ? "true" : "false");
+      if (isSettings) {
+        renderSettings();
+      }
+    }
+
+    async function renderSettings() {
+      const activeLabels = labels();
+      const language = state.language;
+      if (!state.settingsCatalog || state.settingsCatalog.language !== language) {
+        byId("settings-groups").innerHTML = `<p>${escapeText(activeLabels.settings_loading)}</p>`;
+        try {
+          const response = await fetch(apiEndpoint(`/api/rules?lang=${encodeURIComponent(language)}`));
+          const data = await parseJsonResponse(response);
+          if (!response.ok) throw new Error(data.error || activeLabels.scan_status_failed);
+          state.settingsCatalog = { language, groups: data.groups || [] };
+        } catch (error) {
+          byId("settings-groups").innerHTML = `<p>${escapeText(userFacingApiError(error, activeLabels.server_required))}</p>`;
+          return;
+        }
+      }
+
+      byId("settings-tab-security").classList.toggle("active", state.settingsTab === "security");
+      byId("settings-tab-quality").classList.toggle("active", state.settingsTab === "quality");
+
+      const groups = state.settingsCatalog.groups.filter((group) => group.kind === state.settingsTab);
+      byId("settings-groups").innerHTML = groups.map((group) => {
+        const rules = group.rules.map((rule) => {
+          const enabled = !state.disabledRules.has(rule.id);
+          const desc = rule.description ? `<span class="settings-rule-desc">${escapeText(rule.description)}</span>` : "";
+          return `<div class="settings-rule">
+            <div class="settings-rule-text">
+              <span class="settings-rule-title">${escapeText(rule.title)}</span>
+              <span class="settings-rule-id">${escapeText(rule.id)}</span>
+              ${desc}
+            </div>
+            <label class="switch">
+              <input type="checkbox" data-rule="${escapeText(rule.id)}" ${enabled ? "checked" : ""}>
+              <span class="track"></span>
+            </label>
+          </div>`;
+        }).join("");
+        return `<details class="settings-group" open>
+          <summary>${escapeText(group.label)} (${group.rules.length})</summary>
+          ${rules}
+        </details>`;
+      }).join("");
+
+      byId("settings-groups").querySelectorAll("input[data-rule]").forEach((input) => {
+        input.addEventListener("change", () => {
+          const ruleId = input.getAttribute("data-rule");
+          if (input.checked) {
+            state.disabledRules.delete(ruleId);
+          } else {
+            state.disabledRules.add(ruleId);
+          }
+          saveDisabledRules();
+        });
+      });
+    }
+
+    async function downloadReport(format) {
+      const activeLabels = labels();
+      const items = findings() || [];
+      if (!items.length) return;
+      if (format === "pdf") {
+        window.print();
+        return;
+      }
+      try {
+        const response = await fetch(apiEndpoint("/api/export"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format, language: state.language, payload: { findings: items } }),
+        });
+        if (!response.ok) {
+          const error = await parseJsonResponse(response);
+          throw new Error(error.error || activeLabels.scan_status_failed);
+        }
+        const blob = await response.blob();
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `koda-report.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(link.href);
+      } catch (error) {
+        state.scanStatus = `${activeLabels.scan_status_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
+        state.scanStatusClass = "error";
+        render();
+      }
     }
 
     function coverageStatus(level, activeLabels) {
@@ -2722,6 +3266,7 @@ HTML_TEMPLATE = """<!doctype html>
             min_severity: "low",
             enable_osv: byId("scan-osv").checked,
             include_host: byId("scan-host").checked,
+            disabled_rules: Array.from(state.disabledRules),
           }),
         });
         const nextPayload = await parseJsonResponse(response);
@@ -2811,6 +3356,7 @@ HTML_TEMPLATE = """<!doctype html>
             min_severity: "low",
             enable_osv: false,
             include_host: false,
+            disabled_rules: Array.from(state.disabledRules),
           }),
         });
         const nextPayload = await parseJsonResponse(response);
@@ -2962,6 +3508,26 @@ HTML_TEMPLATE = """<!doctype html>
         history.replaceState(null, document.title, location.href.split("#")[0]);
       }
       render();
+    });
+    byId("settings-toggle").addEventListener("click", () => {
+      state.view = state.view === "settings" ? "dashboard" : "settings";
+      render();
+    });
+    byId("settings-tab-security").addEventListener("click", () => {
+      state.settingsTab = "security";
+      renderSettings();
+    });
+    byId("settings-tab-quality").addEventListener("click", () => {
+      state.settingsTab = "quality";
+      renderSettings();
+    });
+    byId("settings-reset").addEventListener("click", () => {
+      state.disabledRules.clear();
+      saveDisabledRules();
+      renderSettings();
+    });
+    byId("report-download").querySelectorAll(".report-download-btn").forEach((btn) => {
+      btn.addEventListener("click", () => downloadReport(btn.getAttribute("data-format")));
     });
     byId("lang-ko").addEventListener("click", () => {
       state.language = "ko";

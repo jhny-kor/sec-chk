@@ -9,12 +9,14 @@ enum ReportExportFormat: String, CaseIterable, Hashable {
     case html
     case markdown
     case pdf
+    case xlsx
 
     var fileExtension: String {
         switch self {
         case .html: return "html"
         case .markdown: return "md"
         case .pdf: return "pdf"
+        case .xlsx: return "xlsx"
         }
     }
 
@@ -26,6 +28,8 @@ enum ReportExportFormat: String, CaseIterable, Hashable {
             return UTType(filenameExtension: "md") ?? .plainText
         case .pdf:
             return .pdf
+        case .xlsx:
+            return UTType(filenameExtension: "xlsx") ?? .data
         }
     }
 
@@ -34,9 +38,11 @@ enum ReportExportFormat: String, CaseIterable, Hashable {
         case (.ko, .html): return "HTML 다운로드"
         case (.ko, .markdown): return "MD 다운로드"
         case (.ko, .pdf): return "PDF 다운로드"
+        case (.ko, .xlsx): return "XLSX 다운로드"
         case (.en, .html): return "Download HTML"
         case (.en, .markdown): return "Download MD"
         case (.en, .pdf): return "Download PDF"
+        case (.en, .xlsx): return "Download XLSX"
         }
     }
 }
@@ -306,7 +312,6 @@ final class ScannerBridge: ObservableObject {
     }
 
     func export(_ report: ScanReportItem, as format: ReportExportFormat, language: AppLanguage) {
-        let source = report.url(format: format, language: language)
         let masked = maskReportExports
         let panel = NSSavePanel()
         panel.allowedContentTypes = [format.contentType]
@@ -324,10 +329,13 @@ final class ScannerBridge: ObservableObject {
             if FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.removeItem(at: destination)
             }
-            if masked {
+            if format == .xlsx {
+                // xlsx has no pre-generated file; build it on demand from the findings.
+                try NativeXlsxExporter.write(findings: report.findings, language: language, to: destination)
+            } else if masked {
                 try Self.writeSanitizedReport(report, as: format, language: language, to: destination)
             } else {
-                try FileManager.default.copyItem(at: source, to: destination)
+                try FileManager.default.copyItem(at: report.url(format: format, language: language), to: destination)
             }
             setStatus(
                 ko: "\(masked ? "마스킹된 " : "")\(format.fileExtension.uppercased()) 저장 완료: \(destination.path)",
@@ -2419,6 +2427,8 @@ final class ScannerBridge: ObservableObject {
             try scanner.writeMarkdownReport(sanitized, to: destination, language: language)
         case .pdf:
             try scanner.writePDFReport(sanitized, to: destination, language: language)
+        case .xlsx:
+            try NativeXlsxExporter.write(findings: sanitized.findings, language: language, to: destination)
         }
     }
 
@@ -2680,6 +2690,10 @@ struct ScanReportItem: Identifiable, Hashable {
         case (.en, .html): return files.enHTMLURL
         case (.en, .markdown): return files.enMarkdownURL
         case (.en, .pdf): return files.enPDFURL
+        // xlsx has no pre-generated file; export() builds it from findings and
+        // never calls url() for xlsx. These keep the switch exhaustive.
+        case (.ko, .xlsx): return files.koMarkdownURL
+        case (.en, .xlsx): return files.enMarkdownURL
         }
     }
 
