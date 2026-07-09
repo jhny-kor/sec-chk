@@ -58,7 +58,7 @@ TRANSLATIONS = {
         "screen_quality": "Screen Quality",
         "screen_quality_title": "Screen Quality Scan",
         "screen_quality_intro": "Check screen source separately from security findings: accessibility, standards, form controls, links, sensitive text, and system path exposure.",
-        "screen_quality_run": "Run Screen Quality",
+        "screen_quality_run": "Quality Check",
         "screen_quality_done": "Screen quality scan complete",
         "screen_quality_note": "Uses only the screen_quality category. Choose a project folder with HTML, JSP, CLX, JS, TS, Vue, or React source.",
         "help_title": "Security Standards Help",
@@ -86,6 +86,8 @@ TRANSLATIONS = {
         "settings_loading": "Loading rules…",
         "settings_reset": "Enable all",
         "download_report": "Download report",
+        "download_format_prompt": "Choose a format to save",
+        "download_cancel": "Cancel",
         "download_md": "Markdown",
         "download_xlsx": "Excel (xlsx)",
         "download_hwpx": "Hangul (hwpx)",
@@ -201,7 +203,7 @@ TRANSLATIONS = {
         "screen_quality": "화면 품질",
         "screen_quality_title": "화면 품질 점검",
         "screen_quality_intro": "보안 발견 항목과 분리해 화면 소스의 접근성, 웹표준, 폼 컨트롤, 링크, 민감정보 및 시스템 경로 노출을 점검합니다.",
-        "screen_quality_run": "화면 품질 점검",
+        "screen_quality_run": "품질점검",
         "screen_quality_done": "화면 품질 점검 완료",
         "screen_quality_note": "screen_quality 카테고리만 실행합니다. HTML, JSP, CLX, JS, TS, Vue, React 화면 소스가 있는 프로젝트 폴더를 선택하세요.",
         "help_title": "보안 점검 기준 도움말",
@@ -228,7 +230,9 @@ TRANSLATIONS = {
         "settings_tab_quality": "품질점검",
         "settings_loading": "규칙을 불러오는 중…",
         "settings_reset": "모두 사용",
-        "download_report": "결과 다운로드",
+        "download_report": "보고서 다운로드",
+        "download_format_prompt": "저장할 형식을 선택하세요",
+        "download_cancel": "취소",
         "download_md": "마크다운",
         "download_xlsx": "엑셀 (xlsx)",
         "download_hwpx": "한글 (hwpx)",
@@ -2156,6 +2160,14 @@ HTML_TEMPLATE = """<!doctype html>
       display: none;
     }
 
+    .scan-run-row {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 10px;
+    }
+    .scan-run-row > button {
+      flex: 1 1 0;
+    }
     .report-download {
       display: flex;
       flex-wrap: wrap;
@@ -2163,7 +2175,39 @@ HTML_TEMPLATE = """<!doctype html>
       gap: 8px;
       margin-top: 10px;
     }
+    #report-download-open {
+      cursor: pointer;
+      font-weight: 600;
+    }
     .report-download-btn {
+      cursor: pointer;
+    }
+    .download-dialog {
+      border: 1px solid var(--border, #cbd5e1);
+      border-radius: 12px;
+      padding: 18px;
+      min-width: 280px;
+      color: inherit;
+      background: var(--panel, #ffffff);
+    }
+    .download-dialog::backdrop {
+      background: rgba(15, 23, 42, 0.45);
+    }
+    .download-dialog-title {
+      margin: 0 0 12px;
+      font-weight: 700;
+    }
+    .download-dialog-formats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .download-dialog-formats .report-download-btn {
+      width: 100%;
+    }
+    .download-dialog-cancel {
+      margin-top: 12px;
+      width: 100%;
       cursor: pointer;
     }
     .settings-tabs {
@@ -2175,9 +2219,10 @@ HTML_TEMPLATE = """<!doctype html>
     .settings-tab {
       cursor: pointer;
       border: 1px solid var(--border, #cbd5e1);
-      background: transparent;
+      background: rgba(148, 163, 184, 0.22);
+      color: inherit;
       border-radius: 999px;
-      padding: 6px 16px;
+      padding: 6px 18px;
       font-weight: 600;
     }
     .settings-tab.active {
@@ -2478,8 +2523,10 @@ HTML_TEMPLATE = """<!doctype html>
           <span id="scan-depth-label">__INITIAL_DISCOVERY_DEPTH__</span>
           <input id="scan-depth" type="number" min="0" max="20" value="2">
         </label>
-        <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
-        <button id="screen-quality-run" type="button">__INITIAL_SCREEN_QUALITY_RUN__</button>
+        <div class="scan-run-row">
+          <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
+          <button id="screen-quality-run" type="button">__INITIAL_SCREEN_QUALITY_RUN__</button>
+        </div>
       </div>
       <div class="scan-web-form">
         <span id="web-scan-title" class="scan-web-title">__INITIAL_WEB_SCAN_TITLE__</span>
@@ -2518,13 +2565,19 @@ HTML_TEMPLATE = """<!doctype html>
         <span id="scan-host-note" class="scan-note"></span>
       </div>
       <div class="report-download" id="report-download">
-        <span id="report-download-label" class="scan-web-title"></span>
-        <button id="download-md" class="report-download-btn" type="button" data-format="md"></button>
-        <button id="download-xlsx" class="report-download-btn" type="button" data-format="xlsx"></button>
-        <button id="download-hwpx" class="report-download-btn" type="button" data-format="hwpx"></button>
-        <button id="download-pdf" class="report-download-btn" type="button" data-format="pdf"></button>
+        <button id="report-download-open" type="button"></button>
         <span id="report-download-note" class="scan-note"></span>
       </div>
+      <dialog id="download-dialog" class="download-dialog">
+        <p id="download-dialog-title" class="download-dialog-title"></p>
+        <div class="download-dialog-formats">
+          <button class="report-download-btn" type="button" data-format="md"></button>
+          <button class="report-download-btn" type="button" data-format="xlsx"></button>
+          <button class="report-download-btn" type="button" data-format="hwpx"></button>
+          <button class="report-download-btn" type="button" data-format="pdf"></button>
+        </div>
+        <button id="download-dialog-cancel" type="button" class="download-dialog-cancel"></button>
+      </dialog>
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
 
@@ -2785,20 +2838,25 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-host-label", activeLabels.host_toggle);
       setText("scan-host-note", activeLabels.host_note);
       setText("sbom-download", activeLabels.download_sbom);
-      setText("report-download-label", activeLabels.download_report);
-      setText("download-md", activeLabels.download_md);
-      setText("download-xlsx", activeLabels.download_xlsx);
-      setText("download-hwpx", activeLabels.download_hwpx);
-      setText("download-pdf", activeLabels.download_pdf);
+      setText("report-download-open", activeLabels.download_report);
+      setText("download-dialog-title", activeLabels.download_format_prompt);
+      setText("download-dialog-cancel", activeLabels.download_cancel);
+      const formatLabels = {
+        md: activeLabels.download_md,
+        xlsx: activeLabels.download_xlsx,
+        hwpx: activeLabels.download_hwpx,
+        pdf: activeLabels.download_pdf,
+      };
+      document.querySelectorAll("#download-dialog .report-download-btn").forEach((btn) => {
+        btn.textContent = formatLabels[btn.getAttribute("data-format")] || "";
+      });
       setText("settings-title", activeLabels.settings_title);
       setText("settings-intro", activeLabels.settings_intro);
       setText("settings-tab-security", activeLabels.settings_tab_security);
       setText("settings-tab-quality", activeLabels.settings_tab_quality);
       setText("settings-reset", activeLabels.settings_reset);
       const hasFindings = (findings() || []).length > 0;
-      byId("report-download").querySelectorAll(".report-download-btn").forEach((btn) => {
-        btn.disabled = !hasFindings;
-      });
+      byId("report-download-open").disabled = !hasFindings;
       setText("report-download-note", hasFindings ? "" : activeLabels.download_report_empty);
       setText("scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.scan_now);
       setText("screen-quality-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.screen_quality_run);
@@ -3557,8 +3615,27 @@ HTML_TEMPLATE = """<!doctype html>
       saveDisabledRules();
       renderSettings();
     });
-    byId("report-download").querySelectorAll(".report-download-btn").forEach((btn) => {
-      btn.addEventListener("click", () => downloadReport(btn.getAttribute("data-format")));
+    byId("report-download-open").addEventListener("click", () => {
+      if ((findings() || []).length === 0) return;
+      const dialog = byId("download-dialog");
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      }
+    });
+    function closeDownloadDialog() {
+      const dialog = byId("download-dialog");
+      if (typeof dialog.close === "function") {
+        dialog.close();
+      } else {
+        dialog.removeAttribute("open");
+      }
+    }
+    byId("download-dialog-cancel").addEventListener("click", closeDownloadDialog);
+    document.querySelectorAll("#download-dialog .report-download-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        closeDownloadDialog();
+        downloadReport(btn.getAttribute("data-format"));
+      });
     });
     byId("lang-ko").addEventListener("click", () => {
       state.language = "ko";
