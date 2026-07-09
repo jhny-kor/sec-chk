@@ -87,6 +87,8 @@ TRANSLATIONS = {
         "settings_reset": "Enable all",
         "download_report": "Download report",
         "download_format_prompt": "Choose a format to save",
+        "download_standard_label": "Standard",
+        "download_all": "All findings",
         "download_cancel": "Cancel",
         "download_md": "Markdown",
         "download_xlsx": "Excel (xlsx)",
@@ -232,6 +234,8 @@ TRANSLATIONS = {
         "settings_reset": "모두 사용",
         "download_report": "보고서 다운로드",
         "download_format_prompt": "저장할 형식을 선택하세요",
+        "download_standard_label": "기준",
+        "download_all": "전체",
         "download_cancel": "취소",
         "download_md": "마크다운",
         "download_xlsx": "엑셀 (xlsx)",
@@ -2197,6 +2201,17 @@ HTML_TEMPLATE = """<!doctype html>
       margin: 0 0 12px;
       font-weight: 700;
     }
+    .download-dialog-standard {
+      display: grid;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .download-dialog-standard select {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border, #cbd5e1);
+    }
     .download-dialog-formats {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -2570,6 +2585,10 @@ HTML_TEMPLATE = """<!doctype html>
       </div>
       <dialog id="download-dialog" class="download-dialog">
         <p id="download-dialog-title" class="download-dialog-title"></p>
+        <label class="download-dialog-standard">
+          <span id="download-standard-label"></span>
+          <select id="download-standard"></select>
+        </label>
         <div class="download-dialog-formats">
           <button class="report-download-btn" type="button" data-format="md"></button>
           <button class="report-download-btn" type="button" data-format="xlsx"></button>
@@ -2840,6 +2859,7 @@ HTML_TEMPLATE = """<!doctype html>
       setText("sbom-download", activeLabels.download_sbom);
       setText("report-download-open", activeLabels.download_report);
       setText("download-dialog-title", activeLabels.download_format_prompt);
+      setText("download-standard-label", activeLabels.download_standard_label);
       setText("download-dialog-cancel", activeLabels.download_cancel);
       const formatLabels = {
         md: activeLabels.download_md,
@@ -3149,10 +3169,50 @@ HTML_TEMPLATE = """<!doctype html>
       });
     }
 
-    async function downloadReport(format) {
+    function selectedDownloadStandard() {
+      const select = byId("download-standard");
+      return select ? select.value : "all";
+    }
+
+    function findingsForStandard(standardId) {
+      const items = findings() || [];
+      if (!standardId || standardId === "all") return items;
+      const mappings = ruleMappings();
+      return items.filter((finding) =>
+        (mappings[finding.rule_id] || []).some((mapping) => mapping.standard_id === standardId)
+      );
+    }
+
+    function populateDownloadStandards() {
       const activeLabels = labels();
       const items = findings() || [];
+      const mappings = ruleMappings();
+      const counts = {};
+      for (const finding of items) {
+        for (const mapping of mappings[finding.rule_id] || []) {
+          counts[mapping.standard_id] = (counts[mapping.standard_id] || 0) + 1;
+        }
+      }
+      const select = byId("download-standard");
+      const previous = select.value;
+      let optionsHtml = `<option value="all">${escapeText(activeLabels.download_all)} (${items.length})</option>`;
+      for (const standard of standardDefinitions()) {
+        if (!counts[standard.id]) continue;
+        const label = (standard.labels && (standard.labels[state.language] || standard.labels.en)) || standard.id;
+        optionsHtml += `<option value="${escapeText(standard.id)}">${escapeText(label)} (${counts[standard.id]})</option>`;
+      }
+      select.innerHTML = optionsHtml;
+      if (previous && [...select.options].some((option) => option.value === previous)) {
+        select.value = previous;
+      }
+    }
+
+    async function downloadReport(format) {
+      const activeLabels = labels();
+      const standardId = selectedDownloadStandard();
+      const items = findingsForStandard(standardId);
       if (!items.length) return;
+      const suffix = standardId && standardId !== "all" ? `-${standardId}` : "";
       if (format === "pdf") {
         window.print();
         return;
@@ -3170,7 +3230,7 @@ HTML_TEMPLATE = """<!doctype html>
         const blob = await response.blob();
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
-        link.download = `koda-report.${format}`;
+        link.download = `koda-report${suffix}.${format}`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -3617,6 +3677,7 @@ HTML_TEMPLATE = """<!doctype html>
     });
     byId("report-download-open").addEventListener("click", () => {
       if ((findings() || []).length === 0) return;
+      populateDownloadStandards();
       const dialog = byId("download-dialog");
       if (typeof dialog.showModal === "function") {
         dialog.showModal();
