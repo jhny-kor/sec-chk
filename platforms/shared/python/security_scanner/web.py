@@ -14,13 +14,19 @@ network fetch so they can be unit tested without a live server.
 
 from __future__ import annotations
 
+import http.cookiejar
+import re
 import socket
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 
 from .models import Finding
@@ -29,76 +35,139 @@ _USER_AGENT = "KODA-web-scanner (+https://github.com/jhny-kor/koda)"
 # Certificates expiring within this window are surfaced before they break TLS.
 _CERT_EXPIRY_WARN_DAYS = 21
 _WEAK_TLS_VERSIONS = {"SSLv2", "SSLv3", "TLSv1", "TLSv1.1"}
+# Only parse HTML bodies below this size for links (crawl); larger responses are
+# still analyzed for headers but not followed.
+_MAX_BODY_BYTES = 2 * 1024 * 1024
+_USER_FIELD_RE = re.compile(r"user|email|login|\bid\b|userid|username", re.IGNORECASE)
+_PASS_FIELD_RE = re.compile(r"pass|pwd", re.IGNORECASE)
 
 
-def check_web(url: str, *, timeout: float = 15.0) -> tuple[list[Finding], list[str]]:
-    """Run all live web checks against ``url``.
+def check_web(
+    url: str,
+    *,
+    timeout: float = 15.0,
+    opener: urllib.request.OpenerDirector | None = None,
+    extra_headers: Mapping[str, str] | None = None,
+) -> tuple[list[Finding], list[str]]:
+    """Run all live web checks against a single ``url``.
 
-    Returns ``(findings, warnings)``. Network failures degrade to a warning (and,
-    for a TLS handshake failure, a finding) instead of raising, so one broken
-    probe never aborts the scan.
+    Returns ``(findings, warnings)``. Thin wrapper over :func:`crawl_web` with a
+    one-page budget, so single-page behaviour and crawl share one code path.
     """
 
-    parsed = urllib.parse.urlparse(url)
+    findings, warnings, _ = crawl_web(
+        url,
+        timeout=timeout,
+        max_pages=1,
+        max_depth=0,
+        delay=0.0,
+        opener=opener,
+        extra_headers=extra_headers,
+    )
+    return findings, warnings
+
+
+def crawl_web(
+    seed_url: str,
+    *,
+    timeout: float = 15.0,
+    max_pages: int = 50,
+    max_depth: int = 3,
+    delay: float = 0.3,
+    opener: urllib.request.OpenerDirector | None = None,
+    extra_headers: Mapping[str, str] | None = None,
+) -> tuple[list[Finding], list[str], int]:
+    """Crawl same-host pages from ``seed_url`` and run web checks on each.
+
+    Breadth-first over links that stay on the seed's host, bounded by
+    ``max_pages`` and ``max_depth`` with a ``delay`` between requests. Header,
+    cookie and CORS checks run per page; TLS is checked once per host. Findings
+    that repeat across pages (e.g. a missing CSP header) are collapsed to one
+    representative each. Returns ``(findings, warnings, pages_scanned)``.
+    """
+
+    parsed = urllib.parse.urlparse(seed_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return [], [f"Web scan skipped: not an http(s) URL: {url}"]
+        return [], [f"Web scan skipped: not an http(s) URL: {seed_url}"], 0
 
     target = parsed.netloc
+    if opener is None:
+        opener = urllib.request.build_opener()
+    headers = {"User-Agent": _USER_AGENT}
+    if extra_headers:
+        headers.update(extra_headers)
+
     warnings: list[str] = []
+    collected: list[Finding] = []
+    tls_checked_hosts: set[str] = set()
+    visited: set[str] = set()
+    queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
+    pages_scanned = 0
 
-    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT}, method="GET")
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            final_url = response.geturl()
-            header_items = list(response.headers.items())
-            set_cookies = response.headers.get_all("Set-Cookie") or []
-    except urllib.error.HTTPError as exc:
-        # An error status still carries the response headers we want to inspect.
-        final_url = url
-        header_items = list(exc.headers.items()) if exc.headers else []
-        set_cookies = exc.headers.get_all("Set-Cookie") if exc.headers else []
-    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
-        reason = getattr(exc, "reason", exc)
-        return (
-            [
-                _finding(
-                    "web.connection-failed",
-                    "info",
-                    "Website could not be reached",
-                    url,
-                    target=target,
-                    evidence=str(reason),
-                    recommendation="Confirm the URL, that the service is running, and that TLS is valid.",
+    while queue and pages_scanned < max_pages:
+        current, depth = queue.popleft()
+        canonical = _canonical(current)
+        if canonical in visited:
+            continue
+        visited.add(canonical)
+
+        if pages_scanned and delay:
+            time.sleep(delay)
+
+        fetched = _fetch(opener, current, headers, timeout)
+        if fetched is None:
+            # Only the seed's unreachability is worth a finding; sub-pages degrade
+            # to a warning so one dead link never dominates the report.
+            if pages_scanned == 0:
+                collected.append(
+                    _finding(
+                        "web.connection-failed",
+                        "info",
+                        "Website could not be reached",
+                        current,
+                        target=target,
+                        evidence="request failed",
+                        recommendation="Confirm the URL, that the service is running, and that TLS is valid.",
+                    )
                 )
-            ],
-            [f"Web scan could not reach {url}: {reason}"],
-        )
+            warnings.append(f"Web scan could not reach {current}")
+            continue
 
-    findings = analyze_response(final_url, header_items, set_cookies, target=target)
+        final_url, header_items, set_cookies, body = fetched
+        pages_scanned += 1
 
-    if parsed.scheme == "http" and urllib.parse.urlparse(final_url).scheme != "https":
-        findings.append(
-            _finding(
-                "web.no-https-redirect",
-                "medium",
-                "HTTP is not redirected to HTTPS",
-                final_url,
-                target=target,
-                evidence=f"GET {url} did not upgrade to https (final URL {final_url}).",
-                recommendation="Redirect all HTTP traffic to HTTPS and serve HSTS on the HTTPS response.",
+        collected.extend(analyze_response(final_url, header_items, set_cookies, target=target))
+
+        if urllib.parse.urlparse(current).scheme == "http" and urllib.parse.urlparse(final_url).scheme != "https":
+            collected.append(
+                _finding(
+                    "web.no-https-redirect",
+                    "medium",
+                    "HTTP is not redirected to HTTPS",
+                    final_url,
+                    target=target,
+                    evidence=f"GET {current} did not upgrade to https (final URL {final_url}).",
+                    recommendation="Redirect all HTTP traffic to HTTPS and serve HSTS on the HTTPS response.",
+                )
             )
-        )
 
-    final = urllib.parse.urlparse(final_url)
-    if final.scheme == "https" and final.hostname:
-        tls_findings, tls_warnings = check_tls(
-            final.hostname, final.port or 443, timeout=timeout, target=target, url=final_url
-        )
-        findings.extend(tls_findings)
-        warnings.extend(tls_warnings)
+        final = urllib.parse.urlparse(final_url)
+        if final.scheme == "https" and final.hostname and final.hostname not in tls_checked_hosts:
+            tls_checked_hosts.add(final.hostname)
+            tls_findings, tls_warnings = check_tls(
+                final.hostname, final.port or 443, timeout=timeout, target=target, url=final_url
+            )
+            collected.extend(tls_findings)
+            warnings.extend(tls_warnings)
 
+        if depth < max_depth and body:
+            for link in _extract_links(final_url, body):
+                if _same_host(seed_url, link) and _canonical(link) not in visited:
+                    queue.append((link, depth + 1))
+
+    findings = _dedupe_findings(collected)
     findings.sort(key=lambda finding: finding.sort_key())
-    return findings, warnings
+    return findings, warnings, pages_scanned
 
 
 def analyze_response(
@@ -419,6 +488,228 @@ def _lower_headers(headers: Mapping[str, str] | Iterable[tuple[str, str]]) -> di
         # Preserve the first value; join duplicates so evidence stays informative.
         lowered[key] = f"{lowered[key]}, {value}" if key in lowered else value
     return lowered
+
+
+# --- crawling / auth helpers ------------------------------------------------
+
+
+def _fetch(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    headers: Mapping[str, str],
+    timeout: float,
+) -> tuple[str, list[tuple[str, str]], list[str], bytes] | None:
+    """Fetch ``url`` returning ``(final_url, header_items, set_cookies, body)``.
+
+    ``body`` is the response bytes for html responses under ``_MAX_BODY_BYTES``
+    (empty otherwise, so non-html/large pages are analyzed but not crawled).
+    Returns ``None`` on a connection-level failure so the caller can degrade.
+    """
+
+    request = urllib.request.Request(url, headers=dict(headers), method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            final_url = response.geturl()
+            header_items = list(response.headers.items())
+            set_cookies = response.headers.get_all("Set-Cookie") or []
+            body = _read_html_body(response)
+            return final_url, header_items, set_cookies, body
+    except urllib.error.HTTPError as exc:
+        # An error status still carries the response headers we want to inspect.
+        header_items = list(exc.headers.items()) if exc.headers else []
+        set_cookies = exc.headers.get_all("Set-Cookie") if exc.headers else []
+        return url, header_items, set_cookies, b""
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return None
+
+
+def _read_html_body(response) -> bytes:
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if "html" not in content_type:
+        return b""
+    return response.read(_MAX_BODY_BYTES)
+
+
+class _LinkParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "a":
+            return
+        for name, value in attrs:
+            if name == "href" and value:
+                self.hrefs.append(value)
+
+
+def _extract_links(base_url: str, body: bytes) -> set[str]:
+    parser = _LinkParser()
+    try:
+        parser.feed(body.decode("utf-8", "replace"))
+    except Exception:
+        return set()
+    links: set[str] = set()
+    for href in parser.hrefs:
+        absolute = urllib.parse.urljoin(base_url, href)
+        links.add(urllib.parse.urldefrag(absolute).url)
+    return links
+
+
+def _same_host(seed_url: str, candidate: str) -> bool:
+    seed = urllib.parse.urlparse(seed_url)
+    other = urllib.parse.urlparse(candidate)
+    return other.scheme in {"http", "https"} and other.netloc == seed.netloc
+
+
+def _canonical(url: str) -> str:
+    """Strip the fragment so ``/a`` and ``/a#x`` are not scanned twice."""
+    return urllib.parse.urldefrag(url).url
+
+
+def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
+    """Collapse repeats of the same rule to one representative.
+
+    A missing-CSP header appears on every page; keep the first occurrence and,
+    when it recurred, note how many pages were affected in the evidence.
+    """
+
+    seen: dict[tuple[str, str], Finding] = {}
+    counts: dict[tuple[str, str], int] = {}
+    for finding in findings:
+        key = (finding.rule_id, finding.target)
+        counts[key] = counts.get(key, 0) + 1
+        seen.setdefault(key, finding)
+
+    result: list[Finding] = []
+    for key, finding in seen.items():
+        count = counts[key]
+        if count > 1:
+            suffix = f"{count} page(s) affected"
+            evidence = f"{finding.evidence}; {suffix}" if finding.evidence else suffix
+            finding = replace(finding, evidence=evidence)
+        result.append(finding)
+    return result
+
+
+def build_auth_opener() -> urllib.request.OpenerDirector:
+    """Build a cookie-aware opener that keeps a form-login session across requests.
+
+    A pasted browser ``Cookie`` header is applied separately via the crawl's
+    ``extra_headers`` (see :func:`crawl_web`), so no login is needed to reuse an
+    existing session.
+    """
+
+    jar = http.cookiejar.CookieJar()
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+
+class _FormParser(HTMLParser):
+    """Collect the first <form> plus its <input> name/value pairs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_form = False
+        self.done = False
+        self.action = ""
+        self.method = "get"
+        self.fields: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        data = {name: (value or "") for name, value in attrs}
+        if tag == "form" and not self.done:
+            self.in_form = True
+            self.action = data.get("action", "")
+            self.method = (data.get("method") or "get").lower()
+        elif tag == "input" and self.in_form:
+            name = data.get("name")
+            if name:
+                self.fields[name] = data.get("value", "")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form" and self.in_form:
+            self.in_form = False
+            self.done = True
+
+
+def login(
+    opener: urllib.request.OpenerDirector,
+    login_url: str,
+    username: str,
+    password: str,
+    *,
+    user_field: str | None = None,
+    pass_field: str | None = None,
+    timeout: float = 15.0,
+) -> list[str]:
+    """Perform a best-effort form login, keeping the session in ``opener``'s jar.
+
+    Parses the login form (preserving hidden/CSRF inputs), fills the username and
+    password fields (auto-detected by name when not given), and POSTs to the
+    form action. Failures degrade to a returned warning instead of raising; the
+    scan then proceeds unauthenticated.
+    """
+
+    warnings: list[str] = []
+    request = urllib.request.Request(login_url, headers={"User-Agent": _USER_AGENT})
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            page_url = response.geturl()
+            body = response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
+        return [f"Login page could not be loaded ({login_url}): {getattr(exc, 'reason', exc)}"]
+
+    parser = _FormParser()
+    parser.feed(body)
+    if not parser.done:
+        return [f"No login form found at {login_url}; scanning unauthenticated."]
+
+    user_key = user_field or _match_field(parser.fields, _USER_FIELD_RE)
+    pass_key = pass_field or _match_field(parser.fields, _PASS_FIELD_RE)
+    if not user_key or not pass_key:
+        return [f"Could not identify login fields at {login_url}; scanning unauthenticated."]
+
+    fields = dict(parser.fields)
+    fields[user_key] = username
+    fields[pass_key] = password
+    action_url = urllib.parse.urljoin(page_url, parser.action) if parser.action else page_url
+    cookies_before = _cookie_count(opener)
+
+    data = urllib.parse.urlencode(fields).encode("utf-8")
+    post = urllib.request.Request(
+        action_url,
+        data=data,
+        headers={"User-Agent": _USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with opener.open(post, timeout=timeout) as response:
+            final_url = response.geturl()
+    except urllib.error.HTTPError as exc:
+        final_url = exc.geturl() if hasattr(exc, "geturl") else action_url
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
+        return [f"Login POST failed ({action_url}): {getattr(exc, 'reason', exc)}"]
+
+    got_cookie = _cookie_count(opener) > cookies_before
+    redirected_away = _canonical(final_url) != _canonical(action_url)
+    if not (got_cookie or redirected_away):
+        warnings.append(f"Login may have failed at {login_url}; no session cookie set. Scanning may be unauthenticated.")
+    return warnings
+
+
+def _match_field(fields: Mapping[str, str], pattern: re.Pattern[str]) -> str | None:
+    for name in fields:
+        if pattern.search(name):
+            return name
+    return None
+
+
+def _cookie_count(opener: urllib.request.OpenerDirector) -> int:
+    for handler in opener.handlers:
+        jar = getattr(handler, "cookiejar", None)
+        if jar is not None:
+            return len(jar)
+    return 0
 
 
 def _finding(

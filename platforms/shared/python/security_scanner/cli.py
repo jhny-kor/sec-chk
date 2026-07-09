@@ -348,9 +348,38 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "web-scan":
-        from .web import check_web
+        from .web import build_auth_opener, crawl_web, login
 
-        findings, warnings = check_web(args.url, timeout=args.timeout)
+        extra_headers = _parse_headers(args.header)
+        opener = build_auth_opener()
+        warnings: list[str] = []
+        if args.login_url:
+            password = os.environ.get(args.password_env) if args.password_env else args.password
+            if not args.username or not password:
+                print("error: --login-url requires --username and --password/--password-env", file=sys.stderr)
+                return 2
+            warnings.extend(
+                login(
+                    opener,
+                    args.login_url,
+                    args.username,
+                    password,
+                    user_field=args.user_field,
+                    pass_field=args.pass_field,
+                    timeout=args.timeout,
+                )
+            )
+        crawl_findings, crawl_warnings, pages = crawl_web(
+            args.url,
+            timeout=args.timeout,
+            max_pages=args.max_pages if args.crawl else 1,
+            max_depth=args.max_depth if args.crawl else 0,
+            delay=args.delay,
+            opener=opener,
+            extra_headers=extra_headers or None,
+        )
+        findings = crawl_findings
+        warnings.extend(crawl_warnings)
         report = ReportConfig(
             format=args.format or "markdown",
             output=expand_path(str(args.output), Path.cwd()) if args.output else None,
@@ -371,7 +400,8 @@ def main(argv: list[str] | None = None) -> int:
         for warning in warnings:
             print(f"warning: {warning}", file=sys.stderr)
         print(
-            f"Web scan: {len(filtered_findings)} finding(s) at or above {report.min_severity} for {target_name}.",
+            f"Web scan: {len(filtered_findings)} finding(s) at or above {report.min_severity} "
+            f"for {target_name} across {pages} page(s).",
             file=sys.stderr,
         )
         if args.fail_on and _has_failure(filtered_findings, args.fail_on):
@@ -558,6 +588,23 @@ def build_parser() -> argparse.ArgumentParser:
     web_scan.add_argument("--min-severity", choices=SEVERITIES, help="minimum severity to include (default info)")
     web_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
     web_scan.add_argument("--timeout", type=float, default=15.0, help="per-request timeout in seconds")
+    web_scan.add_argument("--crawl", action="store_true", help="follow same-host links and scan sub-pages")
+    web_scan.add_argument("--max-pages", type=int, default=50, help="max pages to crawl (default 50)")
+    web_scan.add_argument("--max-depth", type=int, default=3, help="max link depth to crawl (default 3)")
+    web_scan.add_argument("--delay", type=float, default=0.3, help="seconds to wait between crawl requests (default 0.3)")
+    web_scan.add_argument("--login-url", help="URL of a login form to authenticate before scanning")
+    web_scan.add_argument("--username", help="username for form login")
+    web_scan.add_argument("--password", help="password for form login")
+    web_scan.add_argument("--password-env", help="env var holding the login password (preferred over --password)")
+    web_scan.add_argument("--user-field", help="login form field name for the username (auto-detected if omitted)")
+    web_scan.add_argument("--pass-field", help="login form field name for the password (auto-detected if omitted)")
+    web_scan.add_argument(
+        "--header",
+        action="append",
+        default=[],
+        metavar="'Name: value'",
+        help="extra request header, e.g. --header 'Cookie: session=...' (repeatable)",
+    )
 
     discover = subparsers.add_parser("discover", help="list project roots under a folder")
     discover.add_argument("--target", default=".", help="folder to inspect")
@@ -862,6 +909,16 @@ def _has_failure(findings, fail_on: str) -> bool:
 
     threshold = SEVERITY_RANK[fail_on]
     return any(SEVERITY_RANK[finding.severity] >= threshold for finding in findings)
+
+
+def _parse_headers(raw: list[str]) -> dict[str, str]:
+    """Parse ``--header 'Name: value'`` args into a dict. Malformed items skipped."""
+    headers: dict[str, str] = {}
+    for item in raw:
+        name, sep, value = item.partition(":")
+        if sep and name.strip():
+            headers[name.strip()] = value.strip()
+    return headers
 
 
 def json_dumps(payload: object) -> str:

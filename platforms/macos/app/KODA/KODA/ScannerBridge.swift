@@ -262,19 +262,20 @@ final class ScannerBridge: ObservableObject {
             : "Enter only an authorized URL. Read-only HTTP/TLS requests check security headers, cookies, CORS, and redirects."
         alert.addButton(withTitle: language == .ko ? "점검" : "Scan")
         alert.addButton(withTitle: language.cancelTitle)
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
-        input.placeholderString = "https://example.com"
-        alert.accessoryView = input
+
+        let form = WebScanAccessoryView(language: language)
+        alert.accessoryView = form
 
         guard alert.runModal() == .alertFirstButtonReturn else {
             return
         }
-        let targetURL = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetURL = form.urlValue
         guard Self.isHTTPURL(targetURL) else {
             setStatus(ko: "웹 점검 실패: http(s) URL만 입력할 수 있습니다.", en: "Web scan failed: enter an http(s) URL.")
             statusColor = .red
             return
         }
+        let options = form.options
 
         isRunning = true
         reportURL = nil
@@ -284,7 +285,7 @@ final class ScannerBridge: ObservableObject {
         statusColor = .secondary
 
         Task {
-            let result = await Self.runWebScanCommand(url: targetURL)
+            let result = await Self.runWebScanCommand(url: targetURL, options: options)
             isRunning = false
             setDetail(ko: result.detailKO, en: result.detailEN)
             if result.exitCode == 0, let output = result.reportURL {
@@ -1490,9 +1491,9 @@ final class ScannerBridge: ObservableObject {
         }
     }
 
-    private nonisolated static func runWebScanCommand(url: String) async -> ScanResult {
+    private nonisolated static func runWebScanCommand(url: String, options: NativeWebScanner.Options = .singlePage) async -> ScanResult {
         let scanner = NativeSecurityScanner()
-        let (findings, warnings) = await NativeWebScanner.scan(urlString: url)
+        let (findings, warnings, pagesScanned) = await NativeWebScanner.scan(urlString: url, options: options)
         let result = NativeScanResult(
             findings: findings,
             warnings: warnings,
@@ -1510,8 +1511,8 @@ final class ScannerBridge: ObservableObject {
                 reportURL: overallFiles.koHTMLURL,
                 messageKO: "웹 점검 완료",
                 messageEN: "Web scan complete",
-                detailKO: "웹 보안 항목 \(findings.count)건\(warningTextKO)",
-                detailEN: "web posture findings \(findings.count)\(warningTextEN)",
+                detailKO: "웹 보안 항목 \(findings.count)건 · \(pagesScanned)페이지 점검\(warningTextKO)",
+                detailEN: "web posture findings \(findings.count) · \(pagesScanned) page(s) scanned\(warningTextEN)",
                 reportItems: reportItems,
                 scoreSnapshot: SecurityScoreSnapshot(result: result, targets: [])
             )
@@ -4182,55 +4183,357 @@ private enum NativeWebScanner {
     private static let userAgent = "KODA-web-scanner (+https://github.com/jhny-kor)"
     private static let severityOrder = ["critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0]
 
-    static func scan(urlString: String, timeout: TimeInterval = 15) async -> (findings: [NativeFinding], warnings: [String]) {
-        guard let url = URL(string: urlString),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              url.host != nil else {
-            return ([], ["웹 점검 건너뜀: http(s) URL이 아닙니다: \(urlString)"])
-        }
+    /// Options controlling crawl breadth and authentication. Mirrors the Python
+    /// `crawl_web` / `login` parameters so both platforms behave the same.
+    struct Options {
+        var crawl = false
+        var maxPages = 50
+        var maxDepth = 3
+        var delay: TimeInterval = 0.3
+        var loginURL = ""
+        var username = ""
+        var password = ""
+        var userField = ""
+        var passField = ""
+        var extraHeaders: [String: String] = [:]
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = timeout
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        static let singlePage = Options()
+    }
+
+    /// A tiny same-host cookie jar so a form-login session survives across crawl
+    /// requests without touching the process-global `HTTPCookieStorage.shared`.
+    private final class CookieJar {
+        private(set) var cookies: [String: HTTPCookie] = [:]
+        func store(from response: HTTPURLResponse, url: URL) {
+            for cookie in HTTPCookie.cookies(withResponseHeaderFields: stringHeaders(response.allHeaderFields), for: url) {
+                cookies[cookie.name] = cookie
+            }
+        }
+        var header: String {
+            HTTPCookie.requestHeaderFields(with: Array(cookies.values))["Cookie"] ?? ""
+        }
+        var count: Int { cookies.count }
+    }
+
+    static func scan(
+        urlString: String,
+        options: Options = .singlePage,
+        timeout: TimeInterval = 15
+    ) async -> (findings: [NativeFinding], warnings: [String], pagesScanned: Int) {
+        guard let seed = URL(string: urlString),
+              let scheme = seed.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              seed.host != nil else {
+            return ([], ["웹 점검 건너뜀: http(s) URL이 아닙니다: \(urlString)"], 0)
+        }
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         let delegate = WebScanTLSDelegate()
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
+        let jar = CookieJar()
+        var warnings: [String] = []
+
+        if !options.loginURL.isEmpty {
+            warnings.append(contentsOf: await login(session: session, jar: jar, options: options, timeout: timeout))
+        }
+
+        var collected: [NativeFinding] = []
+        var visited: Set<String> = []
+        var tlsCheckedHosts: Set<String> = []
+        var queue: [(url: URL, depth: Int)] = [(seed, 0)]
+        var pagesScanned = 0
+        let maxPages = options.crawl ? max(1, options.maxPages) : 1
+        let maxDepth = options.crawl ? max(0, options.maxDepth) : 0
+
+        while !queue.isEmpty, pagesScanned < maxPages {
+            let (current, depth) = queue.removeFirst()
+            let key = canonical(current)
+            if visited.contains(key) { continue }
+            visited.insert(key)
+
+            if pagesScanned > 0, options.delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(options.delay * 1_000_000_000))
+            }
+
+            let fetched = await fetchPage(session: session, url: current, jar: jar, options: options, timeout: timeout)
+            switch fetched {
+            case .failure(let error):
+                if pagesScanned == 0 {
+                    collected.append(tlsOrConnectionFailure(urlString: current.absoluteString, error: error))
+                }
+                warnings.append("웹 점검 연결 실패 \(current.absoluteString): \(error.localizedDescription)")
+                continue
+            case .success(let page):
+                pagesScanned += 1
+                collected.append(contentsOf: analyze(url: page.finalURL.absoluteString, headers: page.headers, cookies: page.cookies))
+                if current.scheme?.lowercased() == "http", page.finalURL.scheme?.lowercased() != "https" {
+                    collected.append(finding(
+                        "web.no-https-redirect", "medium", "HTTP가 HTTPS로 리다이렉트되지 않음",
+                        page.finalURL.absoluteString,
+                        recommendation: "모든 HTTP 트래픽을 HTTPS로 리다이렉트하고 HTTPS 응답에 HSTS를 적용하세요."
+                    ))
+                }
+                if let host = page.finalURL.host, page.finalURL.scheme?.lowercased() == "https", !tlsCheckedHosts.contains(host) {
+                    tlsCheckedHosts.insert(host)
+                    collected.append(contentsOf: tlsFindings(
+                        url: page.finalURL.absoluteString,
+                        trust: delegate.serverTrust,
+                        version: delegate.negotiatedTLSVersion
+                    ))
+                }
+                if depth < maxDepth, !page.body.isEmpty {
+                    for link in extractLinks(base: page.finalURL, body: page.body) where sameHost(seed, link) && !visited.contains(canonical(link)) {
+                        if let linkURL = URL(string: link) { queue.append((linkURL, depth + 1)) }
+                    }
+                }
+            }
+        }
+
+        return (sortBySeverity(dedupe(collected)), warnings, pagesScanned)
+    }
+
+    private struct FetchedPage {
+        let finalURL: URL
+        let headers: [String: String]
+        let cookies: [HTTPCookie]
+        let body: String
+    }
+
+    private static func fetchPage(
+        session: URLSession,
+        url: URL,
+        jar: CookieJar,
+        options: Options,
+        timeout: TimeInterval
+    ) async -> Result<FetchedPage, Error> {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        applyAuthHeaders(to: &request, jar: jar, options: options)
         do {
-            let (_, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
-                return ([finding("web.connection-failed", "info", "HTTP 응답을 해석할 수 없습니다", urlString)],
-                        ["웹 점검: HTTP 응답이 아닙니다."])
+                return .failure(URLError(.cannotParseResponse))
             }
             let finalURL = http.url ?? url
-            let headers = loweredHeaders(http.allHeaderFields)
-            let cookies = HTTPCookie.cookies(withResponseHeaderFields: stringHeaders(http.allHeaderFields), for: finalURL)
-            var findings = analyze(url: finalURL.absoluteString, headers: headers, cookies: cookies)
-            if scheme == "http", finalURL.scheme?.lowercased() != "https" {
-                findings.append(finding(
-                    "web.no-https-redirect", "medium", "HTTP가 HTTPS로 리다이렉트되지 않음",
-                    finalURL.absoluteString,
-                    recommendation: "모든 HTTP 트래픽을 HTTPS로 리다이렉트하고 HTTPS 응답에 HSTS를 적용하세요."
-                ))
-            }
-            if finalURL.scheme?.lowercased() == "https" {
-                findings.append(contentsOf: tlsFindings(
-                    url: finalURL.absoluteString,
-                    trust: delegate.serverTrust,
-                    version: delegate.negotiatedTLSVersion
-                ))
-            }
-            return (sortBySeverity(findings), [])
+            jar.store(from: http, url: finalURL)
+            let contentType = (loweredHeaders(http.allHeaderFields)["content-type"] ?? "").lowercased()
+            let body = contentType.contains("html") ? String(decoding: data, as: UTF8.self) : ""
+            return .success(FetchedPage(
+                finalURL: finalURL,
+                headers: loweredHeaders(http.allHeaderFields),
+                cookies: HTTPCookie.cookies(withResponseHeaderFields: stringHeaders(http.allHeaderFields), for: finalURL),
+                body: body
+            ))
         } catch {
-            return ([tlsOrConnectionFailure(urlString: urlString, error: error)],
-                    ["웹 점검 연결 실패: \(error.localizedDescription)"])
+            return .failure(error)
         }
+    }
+
+    /// Best-effort form login: parse the login form (keeping hidden/CSRF inputs),
+    /// fill credentials, POST, and keep the session cookie in `jar`. Failures
+    /// degrade to a warning; the scan then proceeds unauthenticated.
+    private static func login(
+        session: URLSession,
+        jar: CookieJar,
+        options: Options,
+        timeout: TimeInterval
+    ) async -> [String] {
+        guard let loginURL = URL(string: options.loginURL) else {
+            return ["로그인 URL이 올바르지 않습니다: \(options.loginURL)"]
+        }
+        var getRequest = URLRequest(url: loginURL)
+        getRequest.timeoutInterval = timeout
+        getRequest.httpShouldHandleCookies = false
+        getRequest.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        applyAuthHeaders(to: &getRequest, jar: jar, options: options)
+
+        let pageURL: URL
+        let body: String
+        do {
+            let (data, response) = try await session.data(for: getRequest)
+            let http = response as? HTTPURLResponse
+            if let http { jar.store(from: http, url: http.url ?? loginURL) }
+            pageURL = http?.url ?? loginURL
+            body = String(decoding: data, as: UTF8.self)
+        } catch {
+            return ["로그인 페이지를 불러올 수 없습니다 (\(options.loginURL)): \(error.localizedDescription)"]
+        }
+
+        guard let form = parseLoginForm(body) else {
+            return ["\(options.loginURL)에서 로그인 폼을 찾지 못해 비인증으로 점검합니다."]
+        }
+        let userKey = options.userField.isEmpty ? matchField(form.fields.keys, pattern: "user|email|login|id|username") : options.userField
+        let passKey = options.passField.isEmpty ? matchField(form.fields.keys, pattern: "pass|pwd") : options.passField
+        guard let userKey, let passKey else {
+            return ["\(options.loginURL)에서 로그인 필드를 식별하지 못해 비인증으로 점검합니다."]
+        }
+
+        var fields = form.fields
+        fields[userKey] = options.username
+        fields[passKey] = options.password
+        let actionURL = form.action.isEmpty ? pageURL : (URL(string: form.action, relativeTo: pageURL)?.absoluteURL ?? pageURL)
+        let cookiesBefore = jar.count
+
+        var post = URLRequest(url: actionURL)
+        post.httpMethod = "POST"
+        post.timeoutInterval = timeout
+        post.httpShouldHandleCookies = false
+        post.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        post.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        applyAuthHeaders(to: &post, jar: jar, options: options)
+        post.httpBody = urlEncode(fields).data(using: .utf8)
+
+        let finalURL: URL
+        do {
+            let (_, response) = try await session.data(for: post)
+            let http = response as? HTTPURLResponse
+            if let http { jar.store(from: http, url: http.url ?? actionURL) }
+            finalURL = http?.url ?? actionURL
+        } catch {
+            return ["로그인 POST 실패 (\(actionURL.absoluteString)): \(error.localizedDescription)"]
+        }
+
+        let gotCookie = jar.count > cookiesBefore
+        let redirectedAway = canonical(finalURL) != canonical(actionURL)
+        if !(gotCookie || redirectedAway) {
+            return ["\(options.loginURL) 로그인이 실패했을 수 있습니다(세션 쿠키 없음). 비인증으로 점검될 수 있습니다."]
+        }
+        return []
+    }
+
+    private static func applyAuthHeaders(to request: inout URLRequest, jar: CookieJar, options: Options) {
+        for (name, value) in options.extraHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let jarHeader = jar.header
+        if !jarHeader.isEmpty {
+            // Merge a user-supplied Cookie header with jar cookies rather than clobbering.
+            let injected = options.extraHeaders.first { $0.key.lowercased() == "cookie" }?.value
+            let combined = [injected, jarHeader].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "; ")
+            request.setValue(combined, forHTTPHeaderField: "Cookie")
+        }
+    }
+
+    private struct LoginForm { let action: String; let fields: [String: String] }
+
+    /// Parse the first <form> and its <input> name/value pairs via regex (mirrors
+    /// the Python stdlib HTMLParser approach; no HTML library on the app side).
+    private static func parseLoginForm(_ html: String) -> LoginForm? {
+        guard let formRange = firstMatch(#"<form[^>]*>[\s\S]*?</form>"#, in: html) else { return nil }
+        let formHTML = String(html[formRange])
+        let action = attribute("action", in: firstTag("form", formHTML) ?? "") ?? ""
+        var fields: [String: String] = [:]
+        for inputTag in allTags("input", formHTML) {
+            guard let name = attribute("name", in: inputTag) else { continue }
+            fields[name] = attribute("value", in: inputTag) ?? ""
+        }
+        return LoginForm(action: action, fields: fields)
+    }
+
+    private static func extractLinks(base: URL, body: String) -> Set<String> {
+        var links: Set<String> = []
+        for anchor in allTags("a", body) {
+            guard let href = attribute("href", in: anchor), !href.isEmpty else { continue }
+            guard let resolved = URL(string: href, relativeTo: base)?.absoluteURL else { continue }
+            var components = URLComponents(url: resolved, resolvingAgainstBaseURL: false)
+            components?.fragment = nil
+            if let stripped = components?.url?.absoluteString { links.insert(stripped) }
+        }
+        return links
+    }
+
+    private static func sameHost(_ seed: URL, _ candidate: String) -> Bool {
+        guard let other = URL(string: candidate), let scheme = other.scheme?.lowercased() else { return false }
+        return ["http", "https"].contains(scheme) && other.host == seed.host
+    }
+
+    private static func canonical(_ url: URL) -> String {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.fragment = nil
+        return components?.url?.absoluteString ?? url.absoluteString
+    }
+
+    private static func canonical(_ urlString: String) -> String {
+        guard let url = URL(string: urlString) else { return urlString }
+        return canonical(url)
+    }
+
+    /// Collapse repeats of the same rule to one representative, noting the count.
+    private static func dedupe(_ findings: [NativeFinding]) -> [NativeFinding] {
+        var order: [String] = []
+        var first: [String: NativeFinding] = [:]
+        var counts: [String: Int] = [:]
+        for finding in findings {
+            let key = finding.ruleID
+            if first[key] == nil { first[key] = finding; order.append(key) }
+            counts[key, default: 0] += 1
+        }
+        return order.compactMap { key in
+            guard var finding = first[key] else { return nil }
+            if let count = counts[key], count > 1 {
+                let suffix = "\(count)개 페이지에서 발견"
+                finding.evidence = finding.evidence.isEmpty ? suffix : "\(finding.evidence); \(suffix)"
+            }
+            return finding
+        }
+    }
+
+    private static func matchField<S: Sequence>(_ names: S, pattern: String) -> String? where S.Element == String {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        for name in names {
+            let range = NSRange(name.startIndex..., in: name)
+            if regex.firstMatch(in: name, range: range) != nil { return name }
+        }
+        return nil
+    }
+
+    private static func urlEncode(_ fields: [String: String]) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return fields.map { key, value in
+            let k = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
+            let v = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+            return "\(k)=\(v)"
+        }.joined(separator: "&")
+    }
+
+    // --- small regex helpers for HTML tag/attribute extraction ---------------
+
+    private static func firstMatch(_ pattern: String, in text: String) -> Range<String.Index>? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range), let r = Range(match.range, in: text) else { return nil }
+        return r
+    }
+
+    private static func firstTag(_ tag: String, _ html: String) -> String? {
+        guard let range = firstMatch("<\(tag)[^>]*>", in: html) else { return nil }
+        return String(html[range])
+    }
+
+    private static func allTags(_ tag: String, _ html: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: "<\(tag)[^>]*>", options: [.caseInsensitive]) else { return [] }
+        let range = NSRange(html.startIndex..., in: html)
+        return regex.matches(in: html, range: range).compactMap { Range($0.range, in: html).map { String(html[$0]) } }
+    }
+
+    private static func attribute(_ name: String, in tag: String) -> String? {
+        // name="value" or name='value' or name=value
+        guard let regex = try? NSRegularExpression(pattern: "\(name)\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(tag.startIndex..., in: tag)
+        guard let match = regex.firstMatch(in: tag, range: range) else { return nil }
+        for groupIndex in [2, 3, 4] {
+            if let r = Range(match.range(at: groupIndex), in: tag) { return String(tag[r]) }
+        }
+        return nil
     }
 
     /// Pure header/cookie analysis (no network) so the logic mirrors the Python side.
@@ -4472,6 +4775,105 @@ private final class WebScanTLSDelegate: NSObject, URLSessionDelegate, URLSession
         if let transaction = metrics.transactionMetrics.last(where: { $0.negotiatedTLSProtocolVersion != nil }) {
             negotiatedTLSVersion = transaction.negotiatedTLSProtocolVersion
         }
+    }
+}
+
+/// Accessory form for the web-scan alert: URL plus optional crawl and login
+/// controls. Reads back into `NativeWebScanner.Options` for the scan.
+private final class WebScanAccessoryView: NSView {
+    private let urlField = NSTextField()
+    private let crawlCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let maxPagesField = NSTextField()
+    private let maxDepthField = NSTextField()
+    private let loginURLField = NSTextField()
+    private let userField = NSTextField()
+    private let passField = NSSecureTextField()
+    private let headersField = NSTextField()
+
+    init(language: AppLanguage) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
+        let ko = language == .ko
+        urlField.placeholderString = "https://example.com"
+        crawlCheck.title = ko ? "하위 페이지 크롤 (같은 호스트)" : "Crawl sub-pages (same host)"
+        maxPagesField.stringValue = "50"
+        maxDepthField.stringValue = "3"
+        loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
+        userField.placeholderString = ko ? "아이디" : "Username"
+        passField.placeholderString = ko ? "비밀번호" : "Password"
+        headersField.placeholderString = "Cookie: session=..."
+
+        func labeled(_ text: String, _ field: NSView) -> NSStackView {
+            let label = NSTextField(labelWithString: text)
+            label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            let row = NSStackView(views: [label, field])
+            row.orientation = .horizontal
+            row.distribution = .fill
+            return row
+        }
+
+        let nums = NSStackView(views: [
+            NSTextField(labelWithString: ko ? "최대 페이지" : "Max pages"), maxPagesField,
+            NSTextField(labelWithString: ko ? "최대 깊이" : "Max depth"), maxDepthField,
+        ])
+        nums.orientation = .horizontal
+
+        let stack = NSStackView(views: [
+            labeled("URL", urlField),
+            crawlCheck,
+            nums,
+            NSTextField(labelWithString: ko ? "로그인 (선택)" : "Login (optional)"),
+            loginURLField,
+            labeled(ko ? "아이디" : "User", userField),
+            labeled(ko ? "비번" : "Pass", passField),
+            NSTextField(labelWithString: ko ? "쿠키 / 헤더" : "Cookie / headers"),
+            headersField,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        for field in [urlField, loginURLField, headersField] {
+            field.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        }
+        maxPagesField.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        maxDepthField.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    var urlValue: String {
+        urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var options: NativeWebScanner.Options {
+        var opts = NativeWebScanner.Options()
+        opts.crawl = crawlCheck.state == .on
+        opts.maxPages = max(1, min(500, Int(maxPagesField.stringValue) ?? 50))
+        opts.maxDepth = max(0, min(20, Int(maxDepthField.stringValue) ?? 3))
+        opts.loginURL = loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        opts.username = userField.stringValue
+        opts.password = passField.stringValue
+        opts.extraHeaders = Self.parseHeaders(headersField.stringValue)
+        return opts
+    }
+
+    private static func parseHeaders(_ raw: String) -> [String: String] {
+        var headers: [String: String] = [:]
+        for line in raw.split(whereSeparator: \.isNewline) {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[..<colon].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { headers[name] = value }
+        }
+        return headers
     }
 }
 

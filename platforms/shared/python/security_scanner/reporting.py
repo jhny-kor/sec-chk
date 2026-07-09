@@ -112,6 +112,17 @@ TRANSLATIONS = {
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "Scan URL",
         "web_scan_note": "Checks live security headers, TLS, cookies, and CORS with read-only requests. Only scan sites you are authorized to test.",
+        "web_crawl_options": "Crawl & login options",
+        "web_crawl_enable": "Crawl sub-pages (same host)",
+        "web_max_pages": "Max pages",
+        "web_max_depth": "Max depth",
+        "web_login_legend": "Login (optional)",
+        "web_login_url": "Login form URL",
+        "web_login_user": "Username",
+        "web_login_pass": "Password",
+        "web_headers_label": "Cookie / headers (one 'Name: value' per line)",
+        "web_headers_placeholder": "Cookie: session=...",
+        "web_pages_scanned": "pages scanned",
         "prevention_kit_title": "Prevention Kit",
         "prevention_kit_note": "Writes baseline guardrails into the selected folder above.",
         "prevention_apply_toolkit": "Apply guardrail files",
@@ -259,6 +270,17 @@ TRANSLATIONS = {
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "URL 점검",
         "web_scan_note": "읽기 전용 요청으로 실시간 보안 헤더·TLS·쿠키·CORS를 점검합니다. 점검 권한이 있는 사이트에만 실행하세요.",
+        "web_crawl_options": "크롤·로그인 옵션",
+        "web_crawl_enable": "하위 페이지 크롤 (같은 호스트)",
+        "web_max_pages": "최대 페이지",
+        "web_max_depth": "최대 깊이",
+        "web_login_legend": "로그인 (선택)",
+        "web_login_url": "로그인 폼 URL",
+        "web_login_user": "아이디",
+        "web_login_pass": "비밀번호",
+        "web_headers_label": "쿠키 / 헤더 (한 줄에 'Name: value')",
+        "web_headers_placeholder": "Cookie: session=...",
+        "web_pages_scanned": "페이지 점검",
         "prevention_kit_title": "예방 키트",
         "prevention_kit_note": "위에서 선택한 폴더에 기본 예방 가드레일 파일을 생성합니다.",
         "prevention_apply_toolkit": "가드레일 파일 생성",
@@ -2546,6 +2568,23 @@ HTML_TEMPLATE = """<!doctype html>
       <div class="scan-web-form">
         <span id="web-scan-title" class="scan-web-title">__INITIAL_WEB_SCAN_TITLE__</span>
         <input id="web-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
+        <details class="scan-web-options">
+          <summary id="web-crawl-options-label"></summary>
+          <label class="scan-web-check"><input id="web-crawl" type="checkbox"> <span id="web-crawl-enable-label"></span></label>
+          <div class="scan-web-nums">
+            <label><span id="web-max-pages-label"></span> <input id="web-max-pages" type="number" min="1" max="500" value="50"></label>
+            <label><span id="web-max-depth-label"></span> <input id="web-max-depth" type="number" min="0" max="20" value="3"></label>
+          </div>
+          <fieldset class="scan-web-login">
+            <legend id="web-login-legend-label"></legend>
+            <label><span id="web-login-url-label"></span> <input id="web-login-url" type="url" autocomplete="off"></label>
+            <label><span id="web-login-user-label"></span> <input id="web-login-user" autocomplete="off"></label>
+            <label><span id="web-login-pass-label"></span> <input id="web-login-pass" type="password" autocomplete="off"></label>
+          </fieldset>
+          <label class="scan-web-headers"><span id="web-headers-label"></span>
+            <textarea id="web-headers" rows="2" autocomplete="off"></textarea>
+          </label>
+        </details>
         <button id="web-scan-run" type="button">__INITIAL_WEB_SCAN_NOW__</button>
         <span id="web-scan-note" class="scan-note"></span>
       </div>
@@ -2889,6 +2928,16 @@ HTML_TEMPLATE = """<!doctype html>
       byId("web-scan-run").disabled = state.scanRunning;
       byId("web-url").disabled = state.scanRunning;
       setText("web-scan-note", activeLabels.web_scan_note);
+      setText("web-crawl-options-label", activeLabels.web_crawl_options);
+      setText("web-crawl-enable-label", activeLabels.web_crawl_enable);
+      setText("web-max-pages-label", activeLabels.web_max_pages);
+      setText("web-max-depth-label", activeLabels.web_max_depth);
+      setText("web-login-legend-label", activeLabels.web_login_legend);
+      setText("web-login-url-label", activeLabels.web_login_url);
+      setText("web-login-user-label", activeLabels.web_login_user);
+      setText("web-login-pass-label", activeLabels.web_login_pass);
+      setText("web-headers-label", activeLabels.web_headers_label);
+      byId("web-headers").placeholder = activeLabels.web_headers_placeholder;
       setText("prevention-kit-title", activeLabels.prevention_kit_title);
       setText("prevention-kit-note", activeLabels.prevention_kit_note);
       setText("prevention-apply-toolkit", activeLabels.prevention_apply_toolkit);
@@ -3457,6 +3506,15 @@ HTML_TEMPLATE = """<!doctype html>
             url,
             language: state.language,
             min_severity: "info",
+            crawl: byId("web-crawl").checked,
+            max_pages: Number(byId("web-max-pages").value) || 50,
+            max_depth: Number(byId("web-max-depth").value) || 3,
+            auth: {
+              login_url: byId("web-login-url").value.trim(),
+              username: byId("web-login-user").value,
+              password: byId("web-login-pass").value,
+              headers: byId("web-headers").value,
+            },
           }),
         });
         const nextPayload = await parseJsonResponse(response);
@@ -3464,7 +3522,9 @@ HTML_TEMPLATE = """<!doctype html>
           throw new Error(nextPayload.error || activeLabels.scan_status_failed);
         }
         state.scanRunning = false;
-        state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}`;
+        const pages = nextPayload.pages_scanned;
+        const scanned = pages ? ` (${pages} ${labels().web_pages_scanned})` : "";
+        state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}${scanned}`;
         state.scanStatusClass = "ok";
         applyPayload(nextPayload);
       } catch (error) {

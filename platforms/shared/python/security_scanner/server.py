@@ -138,6 +138,11 @@ def web_scan_payload(
     language: str = "ko",
     min_severity: str = "info",
     timeout: float = 15.0,
+    crawl: bool = False,
+    max_pages: int = 50,
+    max_depth: int = 3,
+    delay: float = 0.3,
+    auth: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -145,12 +150,43 @@ def web_scan_payload(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("Enter an http(s) URL, e.g. https://example.com")
 
-    from .web import check_web
+    from .web import build_auth_opener, crawl_web, login
 
-    findings, warnings = check_web(url, timeout=timeout)
+    auth = auth or {}
+    extra_headers = _headers_from_text(str(auth.get("headers") or ""))
+    opener = build_auth_opener()
+    warnings: list[str] = []
+    login_url = str(auth.get("login_url") or "").strip()
+    if login_url:
+        username = str(auth.get("username") or "")
+        password = str(auth.get("password") or "")
+        if not username or not password:
+            raise ValueError("Form login requires both a username and a password.")
+        warnings.extend(
+            login(
+                opener,
+                login_url,
+                username,
+                password,
+                user_field=(str(auth.get("user_field")) or None) if auth.get("user_field") else None,
+                pass_field=(str(auth.get("pass_field")) or None) if auth.get("pass_field") else None,
+                timeout=timeout,
+            )
+        )
+
+    findings, crawl_warnings, pages = crawl_web(
+        url,
+        timeout=timeout,
+        max_pages=max_pages if crawl else 1,
+        max_depth=max_depth if crawl else 0,
+        delay=delay,
+        opener=opener,
+        extra_headers=extra_headers or None,
+    )
+    warnings.extend(crawl_warnings)
     findings = filter_by_min_severity(findings, min_severity)
     target_name = parsed.netloc
-    return build_dashboard_payload(
+    payload = build_dashboard_payload(
         findings,
         (target_name,),
         language,
@@ -158,6 +194,18 @@ def web_scan_payload(
         warnings=tuple(warnings),
         scan_path=url,
     )
+    payload["pages_scanned"] = pages
+    return payload
+
+
+def _headers_from_text(raw: str) -> dict[str, str]:
+    """Parse a textarea of ``Name: value`` lines (one per line) into a dict."""
+    headers: dict[str, str] = {}
+    for line in raw.splitlines():
+        name, sep, value = line.partition(":")
+        if sep and name.strip():
+            headers[name.strip()] = value.strip()
+    return headers
 
 
 PREVENTION_KIT_ACTIONS = {"toolkit", "hook", "ignore"}
@@ -274,10 +322,16 @@ def _handler(language: str):
         def _handle_web_scan(self) -> None:
             try:
                 request = self._read_json()
+                auth = request.get("auth") if isinstance(request.get("auth"), dict) else {}
                 payload = web_scan_payload(
                     _string_value(request, "url"),
                     language=_choice_value(request, "language", {"en", "ko"}, language),
                     min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "info"),
+                    crawl=bool(request.get("crawl")),
+                    max_pages=_bounded_int(request.get("max_pages"), default=50, low=1, high=500),
+                    max_depth=_bounded_int(request.get("max_depth"), default=3, low=0, high=20),
+                    delay=_bounded_float(request.get("delay"), default=0.3, low=0.0, high=10.0),
+                    auth=auth,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
@@ -503,6 +557,22 @@ def _string_value(request: dict[str, Any], key: str, *, default: str | None = No
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"'{key}' must be a non-empty string")
     return value
+
+
+def _bounded_int(value: object, *, default: int, low: int, high: int) -> int:
+    try:
+        result = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, result))
+
+
+def _bounded_float(value: object, *, default: float, low: float, high: float) -> float:
+    try:
+        result = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, result))
 
 
 def _choice_value(request: dict[str, Any], key: str, choices: set[str], default: str) -> str:
