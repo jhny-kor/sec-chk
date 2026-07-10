@@ -26,40 +26,85 @@ def zap_image() -> str:
     return image
 
 
-def zap_baseline_command(target_url: str, *, output_dir: str = "reports/zap", minutes: int = 1) -> str:
+# ZAP packaged-scan scripts. baseline = passive spider; full = active attack
+# scan; api = spec-driven (OpenAPI/GraphQL/SOAP) active scan.
+_ZAP_SCRIPTS = {"baseline": "zap-baseline.py", "full": "zap-full-scan.py", "api": "zap-api-scan.py"}
+ZAP_REPORT_PREFIX = {"baseline": "zap-baseline", "full": "zap-full-scan", "api": "zap-api-scan"}
+_ZAP_ACTIVE_MODES = {"full", "api"}
+_ZAP_MIN_LEVELS = {"PASS", "IGNORE", "INFO", "WARN", "FAIL"}
+_ZAP_API_FORMATS = {"openapi", "soap", "graphql"}
+_ZAP_SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def zap_scan_command(
+    target_url: str,
+    *,
+    mode: str = "baseline",
+    output_dir: str = "reports/zap",
+    minutes: int = 1,
+    context_file: str | None = None,
+    user: str | None = None,
+    min_level: str | None = None,
+    api_format: str | None = None,
+    fail_on_warn: bool = True,
+) -> str:
+    """Build a ZAP Docker command for the given scan mode.
+
+    ``context_file`` (a ZAP .context filename that must already sit in
+    ``output_dir``, which is mounted as /zap/wrk) plus ``user`` drive
+    authenticated scanning. ``mode='api'`` runs ``zap-api-scan.py`` against an
+    OpenAPI/GraphQL/SOAP spec (``api_format``). Active modes (full/api) send
+    attack traffic — callers must gate them behind explicit authorization.
+    """
+
+    if mode not in _ZAP_SCRIPTS:
+        raise ValueError(f"Unsupported ZAP mode: {mode}")
     _require_http_url(target_url, label="target URL")
-    if minutes <= 0:
+    if mode in {"baseline", "full"} and minutes <= 0:
         raise ValueError("minutes must be positive")
     output_path = output_dir.rstrip("/") or "reports/zap"
     if not re.fullmatch(r"[A-Za-z0-9_./-]+", output_path):
         raise ValueError("output_dir may only contain letters, numbers, slash, dot, dash, and underscore")
     mount_path = output_path if output_path.startswith("/") else f"$PWD/{output_path}"
+    prefix = ZAP_REPORT_PREFIX[mode]
+
+    scan_args: list[str] = ["-t", shlex.quote(target_url)]
+    if mode in {"baseline", "full"}:
+        scan_args += ["-m", str(minutes)]
+    if mode == "api":
+        fmt = api_format or "openapi"
+        if fmt not in _ZAP_API_FORMATS:
+            raise ValueError(f"Unsupported api_format: {fmt}")
+        scan_args += ["-f", fmt]
+    if context_file:
+        if not _ZAP_SAFE_NAME.match(context_file):
+            raise ValueError("context_file must be a bare filename placed in output_dir")
+        scan_args += ["-n", shlex.quote(context_file)]
+    if user:
+        scan_args += ["-U", shlex.quote(user)]
+    if min_level:
+        if min_level not in _ZAP_MIN_LEVELS:
+            raise ValueError(f"min_level must be one of {sorted(_ZAP_MIN_LEVELS)}")
+        scan_args += ["-l", min_level]
+    if not fail_on_warn:
+        scan_args += ["-I"]
+    scan_args += ["-r", f"{prefix}.html", "-w", f"{prefix}.md", "-J", f"{prefix}.json"]
+
     return " ".join(
         [
-            "mkdir",
-            "-p",
-            shlex.quote(output_path),
-            "&&",
-            "docker",
-            "run",
-            "--rm",
-            "-t",
-            "-v",
-            f'"{mount_path}:/zap/wrk:rw"',
+            "mkdir", "-p", shlex.quote(output_path), "&&",
+            "docker", "run", "--rm", "-t",
+            "-v", f'"{mount_path}:/zap/wrk:rw"',
             shlex.quote(zap_image()),
-            "zap-baseline.py",
-            "-t",
-            shlex.quote(target_url),
-            "-m",
-            str(minutes),
-            "-r",
-            "zap-baseline.html",
-            "-w",
-            "zap-baseline.md",
-            "-J",
-            "zap-baseline.json",
+            _ZAP_SCRIPTS[mode],
+            *scan_args,
         ]
     )
+
+
+def zap_baseline_command(target_url: str, *, output_dir: str = "reports/zap", minutes: int = 1) -> str:
+    """Passive baseline scan (back-compat wrapper over :func:`zap_scan_command`)."""
+    return zap_scan_command(target_url, mode="baseline", output_dir=output_dir, minutes=minutes)
 
 
 def dependency_track_upload_command(

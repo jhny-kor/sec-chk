@@ -130,13 +130,26 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "zap-run":
-        from .dast import render_zap_findings_json, run_zap_baseline
+        from .dast import render_zap_findings_json, run_zap_scan
 
+        # Active modes (full/api) send attack traffic; require explicit authorization.
+        if args.mode in {"full", "api"} and not args.authorize_active:
+            print(
+                f"error: --mode {args.mode} runs an ACTIVE scan (attack traffic). "
+                "Re-run with --authorize-active and only against systems you are authorized to test.",
+                file=sys.stderr,
+            )
+            return 2
         try:
-            result = run_zap_baseline(
+            result = run_zap_scan(
                 args.url,
                 output_dir=expand_path(args.output_dir, Path.cwd()),
+                mode=args.mode,
                 minutes=args.minutes,
+                context_file=args.context_file,
+                user=args.user,
+                min_level=args.fail_on_level,
+                api_format=args.api_format,
                 dry_run=args.dry_run,
                 timeout_seconds=args.timeout,
             )
@@ -160,6 +173,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         if result.exit_code not in {0, 1, 2}:
+            return result.exit_code
+        # ZAP exit codes: 1 = FAIL alerts, 2 = WARN alerts, 3 = error.
+        if args.respect_exit_code and result.exit_code != 0:
             return result.exit_code
         if args.fail_on_alerts and result.findings:
             return 1
@@ -703,6 +719,16 @@ def build_parser() -> argparse.ArgumentParser:
     zap_run.add_argument("--output-dir", default="reports/zap", help="folder for ZAP reports")
     zap_run.add_argument("--minutes", type=int, default=1, help="spider duration in minutes")
     zap_run.add_argument("--timeout", type=int, default=900, help="maximum runtime in seconds")
+    zap_run.add_argument("--mode", choices=("baseline", "full", "api"), default="baseline",
+                         help="baseline=passive, full=active attack scan, api=OpenAPI/GraphQL/SOAP active scan")
+    zap_run.add_argument("--authorize-active", action="store_true",
+                         help="required to run --mode full/api (active attack traffic)")
+    zap_run.add_argument("--context-file", help="ZAP .context filename placed in --output-dir (for authenticated scans)")
+    zap_run.add_argument("--user", help="context user to scan as (authenticated scan)")
+    zap_run.add_argument("--api-format", choices=("openapi", "soap", "graphql"), help="spec format for --mode api")
+    zap_run.add_argument("--fail-on-level", choices=("PASS", "IGNORE", "INFO", "WARN", "FAIL"),
+                         help="minimum ZAP alert level to include/fail on")
+    zap_run.add_argument("--respect-exit-code", action="store_true", help="propagate ZAP's non-zero exit code (1=FAIL, 2=WARN)")
     zap_run.add_argument("--dry-run", action="store_true", help="print the Docker command without running ZAP")
     zap_run.add_argument("--fail-on-alerts", action="store_true", help="exit 1 when ZAP reports any finding")
 

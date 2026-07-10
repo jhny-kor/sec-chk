@@ -5,7 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .integrations import zap_baseline_command
+from .integrations import ZAP_REPORT_PREFIX, zap_scan_command
 from .models import Finding
 
 
@@ -28,15 +28,29 @@ class ZAPRunResult:
     stderr: str = ""
 
 
-def run_zap_baseline(
+def run_zap_scan(
     target_url: str,
     *,
     output_dir: Path,
+    mode: str = "baseline",
     minutes: int = 1,
+    context_file: str | None = None,
+    user: str | None = None,
+    min_level: str | None = None,
+    api_format: str | None = None,
     dry_run: bool = False,
     timeout_seconds: int = 900,
 ) -> ZAPRunResult:
-    command = zap_baseline_command(target_url, output_dir=str(output_dir), minutes=minutes)
+    command = zap_scan_command(
+        target_url,
+        mode=mode,
+        output_dir=str(output_dir),
+        minutes=minutes,
+        context_file=context_file,
+        user=user,
+        min_level=min_level,
+        api_format=api_format,
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return ZAPRunResult(exit_code=0, command=command, output_dir=output_dir, findings=())
@@ -49,7 +63,7 @@ def run_zap_baseline(
         timeout=timeout_seconds,
         check=False,
     )
-    json_path = output_dir / "zap-baseline.json"
+    json_path = output_dir / f"{ZAP_REPORT_PREFIX[mode]}.json"
     findings = tuple(findings_from_zap_json(json_path, target_url=target_url)) if json_path.exists() else ()
     return ZAPRunResult(
         exit_code=completed.returncode,
@@ -58,6 +72,25 @@ def run_zap_baseline(
         findings=findings,
         stdout=completed.stdout,
         stderr=completed.stderr,
+    )
+
+
+def run_zap_baseline(
+    target_url: str,
+    *,
+    output_dir: Path,
+    minutes: int = 1,
+    dry_run: bool = False,
+    timeout_seconds: int = 900,
+) -> ZAPRunResult:
+    """Passive baseline scan (back-compat wrapper over :func:`run_zap_scan`)."""
+    return run_zap_scan(
+        target_url,
+        output_dir=output_dir,
+        mode="baseline",
+        minutes=minutes,
+        dry_run=dry_run,
+        timeout_seconds=timeout_seconds,
     )
 
 
