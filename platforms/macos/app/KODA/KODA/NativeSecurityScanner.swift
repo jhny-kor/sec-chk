@@ -476,20 +476,26 @@ final class NativeSecurityScanner {
 
     private static func checkAutomaticSecurityUpdates(warnings: inout [String]) -> [NativeFinding] {
         let domain = "/Library/Preferences/com.apple.SoftwareUpdate"
-        let configData = runReadOnlyCommand("/usr/bin/defaults", ["read", domain, "ConfigDataInstall"])
-        let critical = runReadOnlyCommand("/usr/bin/defaults", ["read", domain, "CriticalUpdateInstall"])
-        if configData == nil && critical == nil {
-            warnings.append("자동 보안 업데이트 설정을 확인할 수 없습니다.")
+        // CIS Apple macOS software-update controls (1.x): automatic check, download,
+        // macOS-update install, and security responses/system files must all be on.
+        let keys = ["AutomaticCheckEnabled", "AutomaticDownload", "AutomaticallyInstallMacOSUpdates", "ConfigDataInstall", "CriticalUpdateInstall"]
+        var states: [(String, String)] = []
+        for key in keys {
+            states.append((key, runReadOnlyCommand("/usr/bin/defaults", ["read", domain, key]) ?? "unset"))
+        }
+        if states.allSatisfy({ $0.1 == "unset" }) {
+            warnings.append("자동 업데이트 설정을 확인할 수 없습니다.")
             return []
         }
-        let evidence = "ConfigDataInstall=\(configData ?? "unset"), CriticalUpdateInstall=\(critical ?? "unset")"
-        if configData == "1" && critical == "1" {
-            return [hostFinding("host.macos.auto-security-updates-enabled", "info", "보안 응답 및 시스템 파일 자동 설치가 켜져 있습니다", resource: "macos/automatic-security-updates", evidence: evidence)]
+        let evidence = states.map { "\($0.0)=\($0.1)" }.joined(separator: ", ")
+        let disabled = states.filter { $0.1 != "1" }.map { $0.0 }
+        if disabled.isEmpty {
+            return [hostFinding("host.macos.auto-security-updates-enabled", "info", "CIS 자동 업데이트 설정이 모두 켜져 있습니다", resource: "macos/automatic-security-updates", evidence: evidence)]
         }
         return [hostFinding(
-            "host.macos.auto-security-updates-disabled", "medium", "보안 응답 또는 시스템 파일 자동 설치가 꺼져 있습니다",
+            "host.macos.auto-security-updates-disabled", "medium", "자동 업데이트 설정이 완전히 켜져 있지 않습니다",
             resource: "macos/automatic-security-updates", evidence: evidence,
-            recommendation: "시스템 설정 > 일반 > 소프트웨어 업데이트 > 자동 업데이트에서 '보안 응답 및 시스템 파일 설치'를 켜세요."
+            recommendation: "시스템 설정 > 일반 > 소프트웨어 업데이트 > 자동 업데이트에서 모든 자동 업데이트 옵션을 켜세요. (미설정: \(disabled.joined(separator: ", ")))"
         )]
     }
 
@@ -531,14 +537,21 @@ final class NativeSecurityScanner {
             warnings.append("화면 잠금 비밀번호 설정을 확인할 수 없습니다.")
             return []
         }
-        if value.trimmingCharacters(in: .whitespaces) == "1" {
-            return [hostFinding("host.macos.screen-lock-enabled", "info", "잠금 화면에서 비밀번호를 요구합니다", resource: "macos/screen-lock", evidence: "askForPassword=1")]
+        // CIS 2.10.2/2.11.2: password required AND askForPasswordDelay 0-5s (immediate).
+        let delayRaw = runReadOnlyCommand("/usr/bin/defaults", ["-currentHost", "read", "com.apple.screensaver", "askForPasswordDelay"])
+        let askOn = value.trimmingCharacters(in: .whitespaces) == "1"
+        let delayText = delayRaw?.trimmingCharacters(in: .whitespaces) ?? ""
+        let delaySeconds = Double(delayText)
+        let delayOK = delaySeconds.map { $0 >= 0 && $0 <= 5 } ?? false
+        let evidence = "askForPassword=\(value.trimmingCharacters(in: .whitespaces)), askForPasswordDelay=\(delayText.isEmpty ? "unset" : delayText)"
+        if askOn && delayOK {
+            return [hostFinding("host.macos.screen-lock-enabled", "info", "화면 잠금 후 5초 이내 비밀번호를 요구합니다", resource: "macos/screen-lock", evidence: evidence)]
         }
         return [hostFinding(
             "host.macos.screen-lock-disabled", "medium",
-            "화면 보호기/잠금 후 비밀번호를 요구하지 않습니다",
-            resource: "macos/screen-lock", evidence: "askForPassword=\(value)",
-            recommendation: "시스템 설정 > 잠금 화면에서 '화면 보호기 시작 또는 디스플레이 꺼짐 후 암호 요구'를 켜세요."
+            "잠금 후 비밀번호 요구가 없거나 5초를 초과합니다",
+            resource: "macos/screen-lock", evidence: evidence,
+            recommendation: "시스템 설정 > 잠금 화면에서 '화면 보호기 시작 또는 디스플레이 꺼짐 후 암호 요구'를 '즉시(0~5초)'로 설정하세요."
         )]
     }
 

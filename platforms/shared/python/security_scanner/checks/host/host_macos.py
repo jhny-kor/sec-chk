@@ -159,18 +159,27 @@ def check_firewall_stealth_mode() -> list[Finding]:
 
 def check_automatic_security_updates() -> list[Finding]:
     domain = "/Library/Preferences/com.apple.SoftwareUpdate"
-    config_data = run_command(["defaults", "read", domain, "ConfigDataInstall"])
-    critical = run_command(["defaults", "read", domain, "CriticalUpdateInstall"])
-    # A missing key (ok=False) is treated as not explicitly enabled.
-    config_on = config_data.ok and config_data.text.strip() == "1"
-    critical_on = critical.ok and critical.text.strip() == "1"
-    evidence = f"ConfigDataInstall={config_data.text or 'unset'}, CriticalUpdateInstall={critical.text or 'unset'}"
-    if config_on and critical_on:
+    # CIS Apple macOS software-update controls (1.x): automatic check, download,
+    # macOS-update install, and security responses/system files must all be on.
+    keys = (
+        "AutomaticCheckEnabled",
+        "AutomaticDownload",
+        "AutomaticallyInstallMacOSUpdates",
+        "ConfigDataInstall",
+        "CriticalUpdateInstall",
+    )
+    states: dict[str, str] = {}
+    for key in keys:
+        result = run_command(["defaults", "read", domain, key])
+        states[key] = result.text.strip() if result.ok else "unset"
+    evidence = ", ".join(f"{key}={value}" for key, value in states.items())
+    disabled = [key for key, value in states.items() if value != "1"]
+    if not disabled:
         return [
             host_finding(
                 "host.macos.auto-security-updates-enabled",
                 "info",
-                "Automatic security responses and system files are enabled",
+                "All CIS automatic update settings are enabled",
                 "macos/automatic-security-updates",
                 evidence=evidence,
             )
@@ -179,11 +188,14 @@ def check_automatic_security_updates() -> list[Finding]:
         host_finding(
             "host.macos.auto-security-updates-disabled",
             "medium",
-            "Automatic security responses or system files are not enabled",
+            "Automatic update settings are not fully enabled",
             "macos/automatic-security-updates",
             evidence=evidence,
-            description="These settings let macOS install XProtect/security data files and rapid security responses without waiting for a full OS update. Disabling them delays protection against active threats.",
-            recommendation="Enable 'Install Security Responses and system files' in System Settings > General > Software Update > Automatic Updates.",
+            description=(
+                "CIS requires automatic update check, download, and install (including macOS updates, "
+                "security responses, and system data files). Missing: " + ", ".join(disabled) + "."
+            ),
+            recommendation="Enable every automatic-update option in System Settings > General > Software Update > Automatic Updates.",
         )
     ]
 
@@ -230,22 +242,32 @@ def check_guest_account() -> list[Finding]:
 
 
 def check_screen_lock() -> list[Finding]:
-    result = run_command(["defaults", "-currentHost", "read", "com.apple.screensaver", "askForPassword"])
-    if not result.ok:
+    ask = run_command(["defaults", "-currentHost", "read", "com.apple.screensaver", "askForPassword"])
+    if not ask.ok:
         return []
-    if result.text.strip() == "1":
+    # CIS 2.10.2/2.11.2: password required AND askForPasswordDelay of 0-5 seconds
+    # (effectively immediate). A large delay leaves a window of unlocked access.
+    delay = run_command(["defaults", "-currentHost", "read", "com.apple.screensaver", "askForPasswordDelay"])
+    ask_on = ask.text.strip() == "1"
+    delay_text = delay.text.strip() if delay.ok else ""
+    try:
+        delay_ok = 0 <= int(float(delay_text)) <= 5
+    except ValueError:
+        delay_ok = False
+    evidence = f"askForPassword={ask.text.strip() or 'unset'}, askForPasswordDelay={delay_text or 'unset'}"
+    if ask_on and delay_ok:
         return [
             host_finding(
-                "host.macos.screen-lock-enabled", "info", "A password is required after screen saver/lock",
-                "macos/screen-lock", evidence="askForPassword=1",
+                "host.macos.screen-lock-enabled", "info", "A password is required within 5s of screen saver/lock",
+                "macos/screen-lock", evidence=evidence,
             )
         ]
     return [
         host_finding(
-            "host.macos.screen-lock-disabled", "medium", "No password is required after screen saver/lock",
-            "macos/screen-lock", evidence=f"askForPassword={result.text.strip()}",
-            description="Without a password requirement after the screen locks, anyone with physical access can use the machine.",
-            recommendation="Require a password after sleep/screen saver in System Settings > Lock Screen.",
+            "host.macos.screen-lock-disabled", "medium", "Password after screen saver/lock is missing or delayed beyond 5s",
+            "macos/screen-lock", evidence=evidence,
+            description="CIS requires a password within 5 seconds of the screen locking; without it, anyone with physical access can use the machine.",
+            recommendation="Require a password immediately (0-5 seconds) after sleep/screen saver in System Settings > Lock Screen.",
         )
     ]
 
