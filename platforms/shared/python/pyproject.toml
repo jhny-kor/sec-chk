@@ -9,6 +9,15 @@ description = "Read-only local project security scanner with configurable target
 requires-python = ">=3.10"
 authors = [{ name = "Local" }]
 
+# The scanner core is standard-library only. Optional extras add heavier,
+# explicitly pinned third-party tools that stay out of the default install.
+[project.optional-dependencies]
+# Headless-browser rendering so the web crawler can follow JavaScript-rendered
+# (SPA) links. Install with:  pip install "local-security-scanner[render]"
+# then download the browser once:  python -m playwright install chromium
+# Pinned version (verified current as of 2026-07): playwright 1.61.0.
+render = ["playwright==1.61.0"]
+
 [project.scripts]
 koda = "security_scanner.cli:main"
 local-security-scan = "security_scanner.cli:main"

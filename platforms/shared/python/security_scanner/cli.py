@@ -377,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             delay=args.delay,
             opener=opener,
             extra_headers=extra_headers or None,
+            render=args.render,
         )
         findings = crawl_findings
         warnings.extend(crawl_warnings)
@@ -589,6 +590,11 @@ def build_parser() -> argparse.ArgumentParser:
     web_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
     web_scan.add_argument("--timeout", type=float, default=15.0, help="per-request timeout in seconds")
     web_scan.add_argument("--crawl", action="store_true", help="follow same-host links and scan sub-pages")
+    web_scan.add_argument(
+        "--render",
+        action="store_true",
+        help="render pages in headless Chromium to follow JS/SPA links (needs the 'render' extra)",
+    )
     web_scan.add_argument("--max-pages", type=int, default=50, help="max pages to crawl (default 50)")
     web_scan.add_argument("--max-depth", type=int, default=3, help="max link depth to crawl (default 3)")
     web_scan.add_argument("--delay", type=float, default=0.3, help="seconds to wait between crawl requests (default 0.3)")

@@ -114,6 +114,7 @@ TRANSLATIONS = {
         "web_scan_note": "Checks live security headers, TLS, cookies, and CORS with read-only requests. Only scan sites you are authorized to test.",
         "web_crawl_options": "Crawl & login options",
         "web_crawl_enable": "Crawl sub-pages (same host)",
+        "web_render_enable": "Render JS for SPA links (needs 'render' extra)",
         "web_max_pages": "Max pages",
         "web_max_depth": "Max depth",
         "web_login_legend": "Login (optional)",
@@ -272,6 +273,7 @@ TRANSLATIONS = {
         "web_scan_note": "읽기 전용 요청으로 실시간 보안 헤더·TLS·쿠키·CORS를 점검합니다. 점검 권한이 있는 사이트에만 실행하세요.",
         "web_crawl_options": "크롤·로그인 옵션",
         "web_crawl_enable": "하위 페이지 크롤 (같은 호스트)",
+        "web_render_enable": "SPA 링크용 JS 렌더링 ('render' 확장 필요)",
         "web_max_pages": "최대 페이지",
         "web_max_depth": "최대 깊이",
         "web_login_legend": "로그인 (선택)",
@@ -2571,6 +2573,7 @@ HTML_TEMPLATE = """<!doctype html>
         <details class="scan-web-options">
           <summary id="web-crawl-options-label"></summary>
           <label class="scan-web-check"><input id="web-crawl" type="checkbox"> <span id="web-crawl-enable-label"></span></label>
+          <label class="scan-web-check"><input id="web-render" type="checkbox"> <span id="web-render-enable-label"></span></label>
           <div class="scan-web-nums">
             <label><span id="web-max-pages-label"></span> <input id="web-max-pages" type="number" min="1" max="500" value="50"></label>
             <label><span id="web-max-depth-label"></span> <input id="web-max-depth" type="number" min="0" max="20" value="3"></label>
@@ -2930,6 +2933,7 @@ HTML_TEMPLATE = """<!doctype html>
       setText("web-scan-note", activeLabels.web_scan_note);
       setText("web-crawl-options-label", activeLabels.web_crawl_options);
       setText("web-crawl-enable-label", activeLabels.web_crawl_enable);
+      setText("web-render-enable-label", activeLabels.web_render_enable);
       setText("web-max-pages-label", activeLabels.web_max_pages);
       setText("web-max-depth-label", activeLabels.web_max_depth);
       setText("web-login-legend-label", activeLabels.web_login_legend);
@@ -3507,6 +3511,7 @@ HTML_TEMPLATE = """<!doctype html>
             language: state.language,
             min_severity: "info",
             crawl: byId("web-crawl").checked,
+            render: byId("web-render").checked,
             max_pages: Number(byId("web-max-pages").value) || 50,
             max_depth: Number(byId("web-max-depth").value) || 3,
             auth: {

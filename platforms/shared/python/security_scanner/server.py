@@ -142,6 +142,7 @@ def web_scan_payload(
     max_pages: int = 50,
     max_depth: int = 3,
     delay: float = 0.3,
+    render: bool = False,
     auth: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
@@ -182,6 +183,7 @@ def web_scan_payload(
         delay=delay,
         opener=opener,
         extra_headers=extra_headers or None,
+        render=render,
     )
     warnings.extend(crawl_warnings)
     findings = filter_by_min_severity(findings, min_severity)
@@ -348,6 +350,7 @@ def _handler(language: str):
                     max_pages=_bounded_int(request.get("max_pages"), default=50, low=1, high=500),
                     max_depth=_bounded_int(request.get("max_depth"), default=3, low=0, high=20),
                     delay=_bounded_float(request.get("delay"), default=0.3, low=0.0, high=10.0),
+                    render=bool(request.get("render")),
                     auth=auth,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:

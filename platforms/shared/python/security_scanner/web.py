@@ -76,6 +76,7 @@ def crawl_web(
     delay: float = 0.3,
     opener: urllib.request.OpenerDirector | None = None,
     extra_headers: Mapping[str, str] | None = None,
+    render: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
@@ -84,6 +85,11 @@ def crawl_web(
     cookie and CORS checks run per page; TLS is checked once per host. Findings
     that repeat across pages (e.g. a missing CSP header) are collapsed to one
     representative each. Returns ``(findings, warnings, pages_scanned)``.
+
+    When ``render`` is true and the optional Playwright extra is installed, each
+    page is also loaded in a headless browser so JavaScript-rendered (SPA) links
+    are discovered. If Playwright is unavailable the crawl degrades to the
+    stdlib link extraction with a one-time warning.
     """
 
     parsed = urllib.parse.urlparse(seed_url)
@@ -103,6 +109,7 @@ def crawl_web(
     visited: set[str] = set()
     queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
     pages_scanned = 0
+    render_warned = False
 
     while queue and pages_scanned < max_pages:
         current, depth = queue.popleft()
@@ -160,10 +167,20 @@ def crawl_web(
             collected.extend(tls_findings)
             warnings.extend(tls_warnings)
 
-        if depth < max_depth and body:
-            for link in _extract_links(final_url, body):
-                if _same_host(seed_url, link) and _canonical(link) not in visited:
-                    queue.append((link, depth + 1))
+        if depth < max_depth:
+            link_source = body
+            if render:
+                rendered, render_error = _render_page(final_url, timeout=timeout, extra_headers=headers)
+                if rendered is not None:
+                    # Rendered DOM is a superset of the raw HTML for link discovery.
+                    link_source = rendered
+                elif render_error and not render_warned:
+                    warnings.append(render_error)
+                    render_warned = True
+            if link_source:
+                for link in _extract_links(final_url, link_source):
+                    if _same_host(seed_url, link) and _canonical(link) not in visited:
+                        queue.append((link, depth + 1))
 
     findings = _dedupe_findings(collected)
     findings.sort(key=lambda finding: finding.sort_key())
@@ -530,6 +547,47 @@ def _read_html_body(response) -> bytes:
     return response.read(_MAX_BODY_BYTES)
 
 
+def _render_page(
+    url: str,
+    *,
+    timeout: float,
+    extra_headers: Mapping[str, str] | None = None,
+) -> tuple[str | None, str]:
+    """Return ``(rendered_html, error)`` for ``url`` via headless Chromium.
+
+    Uses the optional Playwright extra. Returns ``(None, message)`` when
+    Playwright is not installed or rendering fails, so the caller can fall back
+    to stdlib link extraction. ``(html, "")`` on success.
+    """
+
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None, (
+            "JS 렌더링 크롤을 건너뜁니다: Playwright 미설치. "
+            "설치: pip install \"local-security-scanner[render]\" && python -m playwright install chromium"
+        )
+
+    headers = {k: v for k, v in (extra_headers or {}).items() if k.lower() != "user-agent"}
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(user_agent=_USER_AGENT)
+                if headers:
+                    context.set_extra_http_headers(headers)
+                page = context.new_page()
+                page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
+                return page.content(), ""
+            finally:
+                browser.close()
+    except PlaywrightError as exc:
+        return None, f"JS 렌더링 실패 {url}: {exc}"
+    except Exception as exc:  # defensive: rendering must never abort the scan
+        return None, f"JS 렌더링 오류 {url}: {exc}"
+
+
 class _LinkParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -543,10 +601,11 @@ class _LinkParser(HTMLParser):
                 self.hrefs.append(value)
 
 
-def _extract_links(base_url: str, body: bytes) -> set[str]:
+def _extract_links(base_url: str, body: bytes | str) -> set[str]:
     parser = _LinkParser()
+    text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
     try:
-        parser.feed(body.decode("utf-8", "replace"))
+        parser.feed(text)
     except Exception:
         return set()
     links: set[str] = set()
