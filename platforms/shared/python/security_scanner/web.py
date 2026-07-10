@@ -85,6 +85,9 @@ def crawl_web(
     interact: bool = False,
     max_clicks: int = 20,
     max_assets: int = 20,
+    scan_js_secrets: bool = False,
+    ingest_sitemap: bool = False,
+    probe_paths: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
@@ -108,6 +111,13 @@ def crawl_web(
       browser.
     - ``seeds``: extra same-host URLs to enqueue up front (known routes, a
       sitemap dump, an OpenAPI path list).
+    - ``scan_js_secrets``: scan fetched same-host JS bundles for leaked secrets
+      (API keys, tokens) using the shared secret rules.
+    - ``ingest_sitemap``: read ``/robots.txt`` and ``/sitemap.xml`` and enqueue
+      the same-host URLs (and Disallow paths) they list.
+    - ``probe_paths``: probe a fixed list of well-known sensitive paths
+      (``/.env``, ``/.git/config``, ``/openapi.json`` …) and flag exposed ones,
+      guarding against SPA catch-all 200s.
 
     Falls back to stdlib link extraction with a one-time warning when the
     browser-based options are requested but Playwright is unavailable.
@@ -137,6 +147,13 @@ def crawl_web(
     pages_scanned = 0
     render_warned = False
     assets_seen: set[str] = set()  # A: JS bundles already scraped (global budget)
+
+    if ingest_sitemap:
+        for url in _ingest_sitemaps(seed_url, opener, headers, timeout):
+            if _same_host(seed_url, url):
+                queue.append((url, 0))
+    if probe_paths:
+        collected.extend(_probe_sensitive_paths(seed_url, opener, headers, timeout, target))
 
     while queue and pages_scanned < max_pages:
         current, depth = queue.popleft()
@@ -215,13 +232,14 @@ def crawl_web(
                     render_warned = True
             if link_source:
                 candidates.update(_extract_links(final_url, link_source))
-            if discover_assets and body:
-                # A: mine same-host JS bundles for route/endpoint strings.
-                candidates.update(
-                    _discover_asset_routes(
-                        final_url, body, opener, headers, timeout, assets_seen, max_assets
-                    )
+            if (discover_assets or scan_js_secrets) and body:
+                # A: mine same-host JS bundles for routes and/or leaked secrets.
+                routes, secret_findings = _scan_assets(
+                    final_url, body, opener, headers, timeout, assets_seen, max_assets, target,
+                    extract_routes=discover_assets, scan_secrets=scan_js_secrets,
                 )
+                candidates.update(routes)
+                collected.extend(secret_findings)
             for link in candidates:
                 if (
                     _same_host(seed_url, link)
@@ -781,7 +799,7 @@ def _read_asset(
         return None
 
 
-def _discover_asset_routes(
+def _scan_assets(
     page_url: str,
     body: bytes | str,
     opener: urllib.request.OpenerDirector,
@@ -789,18 +807,24 @@ def _discover_asset_routes(
     timeout: float,
     assets_seen: set[str],
     max_assets: int,
-) -> set[str]:
-    """A: mine same-host JS bundles referenced by ``body`` for route/API paths.
+    target: str,
+    *,
+    extract_routes: bool,
+    scan_secrets: bool,
+) -> tuple[set[str], list[Finding]]:
+    """Fetch same-host JS bundles once and mine them for routes (A) and secrets.
 
     Fetches each not-yet-seen same-host ``<script src>`` (bounded by
-    ``max_assets`` across the whole crawl), extracts quoted path literals, drops
-    framework/asset noise, and returns them as absolute same-host URLs.
+    ``max_assets`` across the whole crawl). ``extract_routes`` pulls quoted path
+    literals (dropping framework/asset noise); ``scan_secrets`` runs the shared
+    secret rules over the bundle text. Returns ``(routes, findings)``.
     """
 
     parser = _parse_html(page_url, body)
     if parser is None:
-        return set()
-    found: set[str] = set()
+        return set(), []
+    routes: set[str] = set()
+    findings: list[Finding] = []
     for src in parser.scripts:
         if len(assets_seen) >= max_assets:
             break
@@ -811,11 +835,180 @@ def _discover_asset_routes(
         text = _read_asset(opener, asset_url, headers, timeout)
         if text is None:
             continue
-        for path in _ROUTE_LITERAL_RE.findall(text):
-            if path == "/" or _ROUTE_NOISE_RE.search(path):
+        if extract_routes:
+            for path in _ROUTE_LITERAL_RE.findall(text):
+                if path == "/" or _ROUTE_NOISE_RE.search(path):
+                    continue
+                routes.add(urllib.parse.urljoin(page_url, path))
+        if scan_secrets:
+            findings.extend(_scan_text_for_secrets(text, asset_url, target))
+    return routes, findings
+
+
+def _scan_text_for_secrets(text: str, asset_url: str, target: str) -> list[Finding]:
+    """#1: run the shared secret rules over JS-bundle text; redacted, deduped."""
+    from .checks.secrets import SECRET_RULES, _looks_like_placeholder, _redact_line
+
+    findings: list[Finding] = []
+    counts: dict[str, int] = {}
+    for rule in SECRET_RULES:
+        for match in rule.pattern.finditer(text):
+            if counts.get(rule.rule_id, 0) >= 3:
+                break
+            secret = match.group(rule.secret_group)
+            if _looks_like_placeholder(secret):
                 continue
-            found.add(urllib.parse.urljoin(page_url, path))
+            snippet = text[max(0, match.start() - 24): match.end() + 24]
+            findings.append(
+                _finding(
+                    f"web.js-{rule.rule_id}",
+                    rule.severity,
+                    f"Secret exposed in client JS: {rule.title}",
+                    asset_url,
+                    target=target,
+                    evidence=_redact_line(snippet, secret),
+                    recommendation="Remove the secret from client-side JavaScript and rotate it; keep secrets server-side.",
+                )
+            )
+            counts[rule.rule_id] = counts.get(rule.rule_id, 0) + 1
+    return findings
+
+
+# --- #2: robots.txt / sitemap.xml ingestion --------------------------------
+
+
+def _ingest_sitemaps(
+    seed_url: str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+) -> set[str]:
+    """Read robots.txt + sitemap.xml from the seed origin; return listed URLs.
+
+    robots.txt yields ``Sitemap:`` locations (followed, bounded) and same-host
+    ``Disallow`` paths (worth scanning). sitemap.xml / sitemap-index ``<loc>``
+    entries are collected. Best-effort; failures are ignored.
+    """
+
+    origin = _origin(seed_url)
+    found: set[str] = set()
+    sitemaps: list[str] = [urllib.parse.urljoin(origin, "/sitemap.xml")]
+
+    robots = _read_asset(opener, urllib.parse.urljoin(origin, "/robots.txt"), headers, timeout)
+    if robots:
+        for line in robots.splitlines():
+            key, _, value = line.partition(":")
+            key, value = key.strip().lower(), value.strip()
+            if key == "sitemap" and value:
+                sitemaps.append(urllib.parse.urljoin(origin, value))
+            elif key == "disallow" and value and value != "/":
+                found.add(urllib.parse.urljoin(origin, value.split()[0]))
+
+    seen_sitemaps: set[str] = set()
+    index = 0
+    while index < len(sitemaps) and len(seen_sitemaps) < 10:
+        sitemap_url = sitemaps[index]
+        index += 1
+        if sitemap_url in seen_sitemaps:
+            continue
+        seen_sitemaps.add(sitemap_url)
+        xml = _read_asset(opener, sitemap_url, headers, timeout)
+        if not xml:
+            continue
+        for loc in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", xml):
+            absolute = urllib.parse.urljoin(origin, loc.strip())
+            if absolute.endswith(".xml"):
+                sitemaps.append(absolute)  # sitemap index -> nested sitemap
+            else:
+                found.add(absolute)
     return found
+
+
+# --- #3: sensitive-path probing --------------------------------------------
+
+_SENSITIVE_PATHS: tuple[tuple[str, str, str], ...] = (
+    # (path, severity, signature the body must contain to count as a real hit)
+    ("/.env", "high", "="),
+    ("/.git/config", "high", "[core]"),
+    ("/.git/HEAD", "high", "ref:"),
+    ("/openapi.json", "medium", "openapi"),
+    ("/swagger.json", "medium", "swagger"),
+    ("/.well-known/security.txt", "info", "contact"),
+    ("/.DS_Store", "low", "Bud1"),
+    ("/config.json", "low", "{"),
+)
+
+
+def _probe_sensitive_paths(
+    seed_url: str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+    target: str,
+) -> list[Finding]:
+    """Probe well-known sensitive paths, guarding against SPA catch-all 200s.
+
+    Fetches a random nonexistent path first as a baseline; a path only counts as
+    exposed when it returns 200, differs from that baseline (or the host 404s
+    unknown paths), and its body carries the expected signature.
+    """
+
+    origin = _origin(seed_url)
+    baseline = _fetch_meta(opener, urllib.parse.urljoin(origin, f"/koda-probe-{int(time.time())}-nope"), headers, timeout)
+    baseline_is_catch_all = baseline is not None and baseline[0] == 200
+
+    findings: list[Finding] = []
+    for path, severity, signature in _SENSITIVE_PATHS:
+        meta = _fetch_meta(opener, urllib.parse.urljoin(origin, path), headers, timeout)
+        if meta is None or meta[0] != 200:
+            continue
+        status, body = meta
+        # On SPA catch-all hosts, only trust a hit whose body carries the signature
+        # (and isn't just the same HTML shell the baseline returned).
+        if baseline_is_catch_all and (signature.lower() not in body.lower() or body == baseline[1]):
+            continue
+        if signature and signature.lower() not in body.lower():
+            continue
+        findings.append(
+            _finding(
+                "web.sensitive-path-exposed",
+                severity,
+                f"Sensitive path is publicly accessible: {path}",
+                urllib.parse.urljoin(origin, path),
+                target=target,
+                evidence=f"GET {path} returned {status} with expected content.",
+                recommendation="Block public access to this path (deny rule / auth) and remove it from the web root.",
+            )
+        )
+    return findings
+
+
+def _fetch_meta(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    headers: Mapping[str, str],
+    timeout: float,
+) -> tuple[int, str] | None:
+    """GET returning ``(status, body_prefix)`` for probe comparison."""
+    request = urllib.request.Request(url, headers=dict(headers), method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.status, response.read(4096).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, ""
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return None
+
+
+def _origin(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _same_host(seed_url: str, candidate: str) -> bool:
+    seed = urllib.parse.urlparse(seed_url)
+    other = urllib.parse.urlparse(candidate)
+    return other.scheme in {"http", "https"} and other.netloc == seed.netloc
 
 
 def _same_host(seed_url: str, candidate: str) -> bool:

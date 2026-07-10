@@ -148,6 +148,9 @@ def web_scan_payload(
     interact: bool = False,
     max_clicks: int = 20,
     seeds: tuple[str, ...] = (),
+    scan_js_secrets: bool = False,
+    ingest_sitemap: bool = False,
+    probe_paths: bool = False,
     auth: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
@@ -194,6 +197,9 @@ def web_scan_payload(
         interact=interact,
         max_clicks=max_clicks,
         seeds=seeds,
+        scan_js_secrets=scan_js_secrets,
+        ingest_sitemap=ingest_sitemap,
+        probe_paths=probe_paths,
     )
     warnings.extend(crawl_warnings)
     findings = filter_by_min_severity(findings, min_severity)
@@ -368,6 +374,9 @@ def _handler(language: str):
                     seeds=tuple(s for s in request.get("seeds", []) if isinstance(s, str))
                     if isinstance(request.get("seeds"), list)
                     else (),
+                    scan_js_secrets=bool(request.get("scan_js_secrets")),
+                    ingest_sitemap=bool(request.get("ingest_sitemap")),
+                    probe_paths=bool(request.get("probe_paths")),
                     auth=auth,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:

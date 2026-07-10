@@ -383,6 +383,9 @@ def main(argv: list[str] | None = None) -> int:
             capture_network=args.capture_network,
             interact=args.interact,
             max_clicks=args.max_clicks,
+            scan_js_secrets=args.scan_js_secrets,
+            ingest_sitemap=args.ingest_sitemap,
+            probe_paths=args.probe_paths,
         )
         findings = crawl_findings
         warnings.extend(crawl_warnings)
@@ -616,6 +619,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --render, click bounded elements to discover button/router routes",
     )
     web_scan.add_argument("--max-clicks", type=int, default=20, help="max elements to click per page with --interact (default 20)")
+    web_scan.add_argument("--scan-js-secrets", action="store_true", help="scan same-host JS bundles for leaked secrets (keys/tokens)")
+    web_scan.add_argument("--ingest-sitemap", action="store_true", help="enqueue URLs from /robots.txt and /sitemap.xml")
+    web_scan.add_argument("--probe-paths", action="store_true", help="probe well-known sensitive paths (/.env, /.git/config, ...)")
     web_scan.add_argument(
         "--seed",
         action="append",

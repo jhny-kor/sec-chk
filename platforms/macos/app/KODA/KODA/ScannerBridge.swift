@@ -4207,6 +4207,9 @@ private enum NativeWebScanner {
         var maxClicks = 20
         var maxAssets = 20
         var seeds: [String] = []     // E: extra same-host URLs to enqueue
+        var scanJsSecrets = false    // 1: scan JS bundles for leaked secrets
+        var ingestSitemap = false    // 2: enqueue robots.txt / sitemap.xml URLs
+        var probePaths = false       // 3: probe well-known sensitive paths
 
         static let singlePage = Options()
     }
@@ -4269,6 +4272,16 @@ private enum NativeWebScanner {
         let maxDepth = options.crawl ? max(0, options.maxDepth) : 0
         let renderer: WebPageRenderer? = options.render ? await WebPageRenderer() : nil
 
+        if options.ingestSitemap {
+            for url in await ingestSitemaps(seed: seed, session: session, options: options, jar: jar, timeout: timeout)
+            where sameHost(seed, url) {
+                if let u = URL(string: url) { queue.append((u, 0)) }
+            }
+        }
+        if options.probePaths {
+            collected.append(contentsOf: await probeSensitivePaths(seed: seed, session: session, options: options, jar: jar, timeout: timeout))
+        }
+
         while !queue.isEmpty, pagesScanned < maxPages {
             let (current, depth) = queue.removeFirst()
             let key = canonical(current)
@@ -4322,9 +4335,9 @@ private enum NativeWebScanner {
                         )
                         links.formUnion(rendered)
                     }
-                    if options.discoverAssets, !page.body.isEmpty {
-                        // A: mine same-host JS bundles for route/endpoint strings.
-                        links.formUnion(await discoverAssetRoutes(
+                    if (options.discoverAssets || options.scanJsSecrets), !page.body.isEmpty {
+                        // A + secret scan: fetch same-host JS bundles once.
+                        let (routes, secretFindings) = await scanAssets(
                             pageURL: page.finalURL,
                             html: page.body,
                             session: session,
@@ -4332,7 +4345,9 @@ private enum NativeWebScanner {
                             jar: jar,
                             assetsSeen: &assetsSeen,
                             timeout: timeout
-                        ))
+                        )
+                        links.formUnion(routes)
+                        collected.append(contentsOf: secretFindings)
                     }
                     for link in links where sameHost(seed, link) && !isStaticAsset(link) && !visited.contains(canonical(link)) {
                         if let linkURL = URL(string: link) { queue.append((linkURL, depth + 1)) }
@@ -4596,9 +4611,10 @@ private enum NativeWebScanner {
         return re.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil
     }
 
-    /// A: fetch same-host `<script src>` bundles referenced by `html` and extract
-    /// quoted path literals (routes + /api endpoints), dropping framework noise.
-    private static func discoverAssetRoutes(
+    /// A + secret scan: fetch same-host `<script src>` bundles once, extract
+    /// quoted path literals (routes + /api endpoints) and, when requested, scan
+    /// the bundle text for leaked secrets.
+    private static func scanAssets(
         pageURL: URL,
         html: String,
         session: URLSession,
@@ -4606,30 +4622,78 @@ private enum NativeWebScanner {
         jar: CookieJar,
         assetsSeen: inout Set<String>,
         timeout: TimeInterval
-    ) async -> Set<String> {
+    ) async -> (routes: Set<String>, findings: [NativeFinding]) {
         var srcs: [String] = []
         for tag in allTags("script", html) {
             if let src = attribute("src", in: tag) { srcs.append(src) }
         }
-        var found: Set<String> = []
+        var routes: Set<String> = []
+        var findings: [NativeFinding] = []
         for src in srcs {
             if assetsSeen.count >= options.maxAssets { break }
             guard let assetURL = URL(string: src, relativeTo: pageURL)?.absoluteURL else { continue }
             let key = assetURL.absoluteString
             if !sameHost(pageURL, key) || assetsSeen.contains(key) { continue }
             assetsSeen.insert(key)
-            guard let text = await readAsset(session: session, url: assetURL, options: options, jar: jar, timeout: timeout),
-                  let re = routeLiteralRegex else { continue }
-            let ns = text as NSString
-            for match in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-                let path = ns.substring(with: match.range(at: 1))
-                if path == "/" || matchesRouteNoise(path) { continue }
-                if let routeURL = URL(string: path, relativeTo: pageURL)?.absoluteURL {
-                    found.insert(routeURL.absoluteString)
+            guard let text = await readAsset(session: session, url: assetURL, options: options, jar: jar, timeout: timeout) else { continue }
+            if options.discoverAssets, let re = routeLiteralRegex {
+                let ns = text as NSString
+                for match in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                    let path = ns.substring(with: match.range(at: 1))
+                    if path == "/" || matchesRouteNoise(path) { continue }
+                    if let routeURL = URL(string: path, relativeTo: pageURL)?.absoluteURL {
+                        routes.insert(routeURL.absoluteString)
+                    }
                 }
             }
+            if options.scanJsSecrets {
+                findings.append(contentsOf: scanTextForSecrets(text, assetURL: key))
+            }
         }
-        return found
+        return (routes, findings)
+    }
+
+    // --- 1: JS-bundle secret scanning ---------------------------------------
+
+    private struct SecretRule { let id: String; let title: String; let severity: String; let regex: NSRegularExpression? }
+    private static let secretRules: [SecretRule] = [
+        SecretRule(id: "private-key", title: "Private key material", severity: "critical",
+                   regex: try? NSRegularExpression(pattern: #"-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"#)),
+        SecretRule(id: "aws-access-key", title: "AWS access key ID", severity: "high",
+                   regex: try? NSRegularExpression(pattern: #"\b(?:A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16}\b"#)),
+        SecretRule(id: "github-token", title: "GitHub token", severity: "high",
+                   regex: try? NSRegularExpression(pattern: #"\bgh[pousr]_[A-Za-z0-9_]{20,255}\b"#)),
+        SecretRule(id: "openai-key", title: "OpenAI API key", severity: "high",
+                   regex: try? NSRegularExpression(pattern: #"\bsk-[A-Za-z0-9_-]{20,}\b"#)),
+        SecretRule(id: "slack-token", title: "Slack token", severity: "high",
+                   regex: try? NSRegularExpression(pattern: #"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"#)),
+    ]
+
+    private static func scanTextForSecrets(_ text: String, assetURL: String) -> [NativeFinding] {
+        var findings: [NativeFinding] = []
+        let ns = text as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        for rule in secretRules {
+            guard let re = rule.regex else { continue }
+            var count = 0
+            for match in re.matches(in: text, range: full) {
+                if count >= 3 { break }
+                let value = ns.substring(with: match.range)
+                findings.append(finding(
+                    "web.js-secret.\(rule.id)", rule.severity,
+                    "클라이언트 JS에 시크릿 노출: \(rule.title)", assetURL,
+                    evidence: redactSecret(value),
+                    recommendation: "클라이언트 JavaScript에서 시크릿을 제거하고 회전(rotate)하세요. 시크릿은 서버에만 두어야 합니다."
+                ))
+                count += 1
+            }
+        }
+        return findings
+    }
+
+    private static func redactSecret(_ value: String) -> String {
+        if value.count <= 8 { return "<redacted>" }
+        return "\(value.prefix(4))...\(value.suffix(4)) (\(value.count) chars)"
     }
 
     private static func readAsset(
@@ -4651,6 +4715,127 @@ private enum NativeWebScanner {
         } catch {
             return nil
         }
+    }
+
+    // --- 2: robots.txt / sitemap.xml ingestion ------------------------------
+
+    private static func ingestSitemaps(
+        seed: URL, session: URLSession, options: Options, jar: CookieJar, timeout: TimeInterval
+    ) async -> Set<String> {
+        guard let origin = originURL(seed) else { return [] }
+        var found: Set<String> = []
+        var sitemaps: [String] = [origin.appendingPathComponent("sitemap.xml").absoluteString]
+
+        if let robots = await readAsset(session: session, url: origin.appendingPathComponent("robots.txt"), options: options, jar: jar, timeout: timeout) {
+            for line in robots.split(whereSeparator: \.isNewline) {
+                let parts = line.split(separator: ":", maxSplits: 1)
+                guard parts.count == 2 else { continue }
+                let key = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                if key == "sitemap", let u = URL(string: value, relativeTo: origin)?.absoluteURL {
+                    sitemaps.append(u.absoluteString)
+                } else if key == "disallow", value != "/", !value.isEmpty,
+                          let u = URL(string: String(value.split(separator: " ")[0]), relativeTo: origin)?.absoluteURL {
+                    found.insert(u.absoluteString)
+                }
+            }
+        }
+
+        guard let re = try? NSRegularExpression(pattern: #"<loc>\s*([^<\s]+)\s*</loc>"#) else { return found }
+        var seenSitemaps: Set<String> = []
+        var index = 0
+        while index < sitemaps.count, seenSitemaps.count < 10 {
+            let sitemapURL = sitemaps[index]; index += 1
+            if seenSitemaps.contains(sitemapURL) { continue }
+            seenSitemaps.insert(sitemapURL)
+            guard let u = URL(string: sitemapURL),
+                  let xml = await readAsset(session: session, url: u, options: options, jar: jar, timeout: timeout) else { continue }
+            let ns = xml as NSString
+            for match in re.matches(in: xml, range: NSRange(location: 0, length: ns.length)) {
+                let loc = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
+                guard let absolute = URL(string: loc, relativeTo: origin)?.absoluteURL else { continue }
+                if absolute.absoluteString.hasSuffix(".xml") {
+                    sitemaps.append(absolute.absoluteString)
+                } else {
+                    found.insert(absolute.absoluteString)
+                }
+            }
+        }
+        return found
+    }
+
+    // --- 3: sensitive-path probing ------------------------------------------
+
+    // (path, severity, signature the body must contain to count as a real hit)
+    private static let sensitivePaths: [(String, String, String)] = [
+        (".env", "high", "="),
+        (".git/config", "high", "[core]"),
+        (".git/HEAD", "high", "ref:"),
+        ("openapi.json", "medium", "openapi"),
+        ("swagger.json", "medium", "swagger"),
+        (".well-known/security.txt", "info", "contact"),
+        ("config.json", "low", "{"),
+    ]
+
+    private static func probeSensitivePaths(
+        seed: URL, session: URLSession, options: Options, jar: CookieJar, timeout: TimeInterval
+    ) async -> [NativeFinding] {
+        guard let origin = originURL(seed) else { return [] }
+        let base = origin.absoluteString
+        var baselineMeta: (status: Int, body: String)?
+        if let baselineURL = probeURL(base, "koda-probe-\(Int(Date().timeIntervalSince1970))-nope") {
+            baselineMeta = await readMeta(session: session, url: baselineURL, options: options, jar: jar, timeout: timeout)
+        }
+        let baselineCatchAll = baselineMeta?.status == 200
+
+        var findings: [NativeFinding] = []
+        for (path, severity, signature) in sensitivePaths {
+            guard let url = probeURL(base, path),
+                  let meta = await readMeta(session: session, url: url, options: options, jar: jar, timeout: timeout),
+                  meta.status == 200 else { continue }
+            let body = meta.body.lowercased()
+            // On SPA catch-all hosts, only trust a hit whose body carries the signature
+            // and differs from the baseline HTML shell.
+            if baselineCatchAll, (!body.contains(signature.lowercased()) || meta.body == baselineMeta?.body) { continue }
+            if !signature.isEmpty, !body.contains(signature.lowercased()) { continue }
+            findings.append(finding(
+                "web.sensitive-path-exposed", severity,
+                "민감 경로가 공개 접근 가능: /\(path)", url.absoluteString,
+                evidence: "GET /\(path) → 200, 예상 콘텐츠 포함.",
+                recommendation: "이 경로의 공개 접근을 차단(deny/인증)하고 웹 루트에서 제거하세요."
+            ))
+        }
+        return findings
+    }
+
+    private static func probeURL(_ base: String, _ path: String) -> URL? {
+        return URL(string: base + "/" + path)
+    }
+
+    private static func readMeta(
+        session: URLSession, url: URL, options: Options, jar: CookieJar, timeout: TimeInterval
+    ) async -> (status: Int, body: String)? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        applyAuthHeaders(to: &request, jar: jar, options: options)
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return nil }
+            return (http.statusCode, String(decoding: data.prefix(4096), as: UTF8.self))
+        } catch {
+            return nil
+        }
+    }
+
+    private static func originURL(_ url: URL) -> URL? {
+        guard let scheme = url.scheme, let host = url.host else { return nil }
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        components.port = url.port
+        return components.url
     }
 
     // --- small regex helpers for HTML tag/attribute extraction ---------------
@@ -5052,6 +5237,9 @@ private final class WebScanAccessoryView: NSView {
     private let assetsCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let networkCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let interactCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let secretsCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let sitemapCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let probeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let maxPagesField = NSTextField()
     private let maxDepthField = NSTextField()
     private let loginURLField = NSTextField()
@@ -5069,6 +5257,9 @@ private final class WebScanAccessoryView: NSView {
         assetsCheck.title = ko ? "JS 번들에서 라우트/API 추출" : "Mine JS bundles for routes/APIs"
         networkCheck.title = ko ? "네트워크 요청 캡처 (렌더링 시)" : "Capture network requests (with render)"
         interactCheck.title = ko ? "요소 클릭으로 라우트 탐색 (렌더링 시)" : "Click elements to find routes (with render)"
+        secretsCheck.title = ko ? "JS 번들에서 유출 시크릿 스캔" : "Scan JS bundles for leaked secrets"
+        sitemapCheck.title = ko ? "robots.txt / sitemap.xml 수집" : "Ingest robots.txt / sitemap.xml"
+        probeCheck.title = ko ? "민감 경로 프로브 (/.env, /.git ...)" : "Probe sensitive paths (/.env, /.git ...)"
         maxPagesField.stringValue = "50"
         maxDepthField.stringValue = "3"
         loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
@@ -5099,6 +5290,9 @@ private final class WebScanAccessoryView: NSView {
             assetsCheck,
             networkCheck,
             interactCheck,
+            secretsCheck,
+            sitemapCheck,
+            probeCheck,
             nums,
             NSTextField(labelWithString: ko ? "추가 경로 (선택)" : "Extra routes (optional)"),
             seedsField,
@@ -5141,6 +5335,9 @@ private final class WebScanAccessoryView: NSView {
         opts.discoverAssets = assetsCheck.state == .on
         opts.captureNetwork = networkCheck.state == .on
         opts.interact = interactCheck.state == .on
+        opts.scanJsSecrets = secretsCheck.state == .on
+        opts.ingestSitemap = sitemapCheck.state == .on
+        opts.probePaths = probeCheck.state == .on
         opts.maxPages = max(1, min(500, Int(maxPagesField.stringValue) ?? 50))
         opts.maxDepth = max(0, min(20, Int(maxDepthField.stringValue) ?? 3))
         opts.loginURL = loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)

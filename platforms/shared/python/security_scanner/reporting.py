@@ -118,6 +118,9 @@ TRANSLATIONS = {
         "web_discover_assets": "Mine JS bundles for routes/APIs",
         "web_capture_network": "Capture network requests (with render)",
         "web_interact": "Click elements to find routes (with render)",
+        "web_scan_js_secrets": "Scan JS bundles for leaked secrets",
+        "web_ingest_sitemap": "Ingest robots.txt / sitemap.xml",
+        "web_probe_paths": "Probe sensitive paths (/.env, /.git ...)",
         "web_seeds_label": "Extra routes to scan (one URL/path per line)",
         "web_seeds_placeholder": "/help\n/api/items",
         "web_max_pages": "Max pages",
@@ -282,6 +285,9 @@ TRANSLATIONS = {
         "web_discover_assets": "JS 번들에서 라우트/API 추출",
         "web_capture_network": "네트워크 요청 캡처 (렌더링 시)",
         "web_interact": "요소 클릭으로 라우트 탐색 (렌더링 시)",
+        "web_scan_js_secrets": "JS 번들에서 유출 시크릿 스캔",
+        "web_ingest_sitemap": "robots.txt / sitemap.xml 수집",
+        "web_probe_paths": "민감 경로 프로브 (/.env, /.git ...)",
         "web_seeds_label": "추가 점검 경로 (한 줄에 URL/경로 하나)",
         "web_seeds_placeholder": "/help\n/api/items",
         "web_max_pages": "최대 페이지",
@@ -2587,6 +2593,9 @@ HTML_TEMPLATE = """<!doctype html>
           <label class="scan-web-check"><input id="web-discover-assets" type="checkbox"> <span id="web-discover-assets-label"></span></label>
           <label class="scan-web-check"><input id="web-capture-network" type="checkbox"> <span id="web-capture-network-label"></span></label>
           <label class="scan-web-check"><input id="web-interact" type="checkbox"> <span id="web-interact-label"></span></label>
+          <label class="scan-web-check"><input id="web-scan-js-secrets" type="checkbox"> <span id="web-scan-js-secrets-label"></span></label>
+          <label class="scan-web-check"><input id="web-ingest-sitemap" type="checkbox"> <span id="web-ingest-sitemap-label"></span></label>
+          <label class="scan-web-check"><input id="web-probe-paths" type="checkbox"> <span id="web-probe-paths-label"></span></label>
           <label class="scan-web-headers"><span id="web-seeds-label"></span>
             <textarea id="web-seeds" rows="2" autocomplete="off"></textarea>
           </label>
@@ -2953,6 +2962,9 @@ HTML_TEMPLATE = """<!doctype html>
       setText("web-discover-assets-label", activeLabels.web_discover_assets);
       setText("web-capture-network-label", activeLabels.web_capture_network);
       setText("web-interact-label", activeLabels.web_interact);
+      setText("web-scan-js-secrets-label", activeLabels.web_scan_js_secrets);
+      setText("web-ingest-sitemap-label", activeLabels.web_ingest_sitemap);
+      setText("web-probe-paths-label", activeLabels.web_probe_paths);
       setText("web-seeds-label", activeLabels.web_seeds_label);
       byId("web-seeds").placeholder = activeLabels.web_seeds_placeholder;
       setText("web-max-pages-label", activeLabels.web_max_pages);
@@ -3536,6 +3548,9 @@ HTML_TEMPLATE = """<!doctype html>
             discover_assets: byId("web-discover-assets").checked,
             capture_network: byId("web-capture-network").checked,
             interact: byId("web-interact").checked,
+            scan_js_secrets: byId("web-scan-js-secrets").checked,
+            ingest_sitemap: byId("web-ingest-sitemap").checked,
+            probe_paths: byId("web-probe-paths").checked,
             seeds: byId("web-seeds").value.split(/\r?\n/).map(function(s){return s.trim();}).filter(Boolean),
             max_pages: Number(byId("web-max-pages").value) || 50,
             max_depth: Number(byId("web-max-depth").value) || 3,
