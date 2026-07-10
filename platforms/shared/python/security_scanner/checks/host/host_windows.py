@@ -201,21 +201,29 @@ def check_screen_lock() -> list[Finding]:
     if not result.ok:
         return []
     value = result.text.strip()
-    if value.isdigit() and int(value) > 0:
+    seconds = int(value) if value.isdigit() else 0
+    # CIS Windows Benchmark: '900 or fewer second(s), but not 0'. A value above
+    # 900 (or 0/unset) is non-compliant, so a 1-hour timeout must not pass.
+    if 0 < seconds <= 900:
         return [
             host_finding(
                 "host.windows.screen-lock-enabled", "info",
-                f"Machine inactivity lock is enforced ({value}s)",
-                "windows/screen-lock", evidence=f"InactivityTimeoutSecs={value}",
+                f"Machine inactivity lock is enforced ({seconds}s, within the CIS 900s limit)",
+                "windows/screen-lock", evidence=f"InactivityTimeoutSecs={seconds}",
             )
         ]
+    detail = (
+        f"InactivityTimeoutSecs={value} exceeds the CIS maximum of 900 seconds."
+        if seconds > 900
+        else f"InactivityTimeoutSecs={value or 'unset'}"
+    )
     return [
         host_finding(
             "host.windows.screen-lock-disabled", "low",
-            "No machine inactivity lock policy is enforced",
-            "windows/screen-lock", evidence=f"InactivityTimeoutSecs={value or 'unset'}",
-            description="Without an inactivity lock, an unattended unlocked session stays accessible.",
-            recommendation="Set the 'Interactive logon: Machine inactivity limit' policy, or enable a password-protected screen saver timeout.",
+            "Machine inactivity lock is not within the CIS 900-second limit",
+            "windows/screen-lock", evidence=detail,
+            description="Without an inactivity lock of 900 seconds or fewer, an unattended unlocked session stays accessible too long.",
+            recommendation="Set 'Interactive logon: Machine inactivity limit' to 900 seconds or fewer (but not 0).",
         )
     ]
 

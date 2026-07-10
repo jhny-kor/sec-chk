@@ -94,7 +94,7 @@ def check_gatekeeper() -> list[Finding]:
             "macos/gatekeeper",
             evidence=result.text,
             description="Gatekeeper blocks unsigned or un-notarized applications. Disabling it allows unverified code to run.",
-            recommendation="Re-enable Gatekeeper by running 'sudo spctl --master-enable'.",
+            recommendation="Re-enable Gatekeeper in System Settings > Privacy & Security (on macOS 15 Sequoia and later 'spctl --master-enable' is no longer supported); enforce it fleet-wide with an MDM configuration profile.",
         )
     ]
 

@@ -440,7 +440,7 @@ final class NativeSecurityScanner {
         return [hostFinding(
             "host.macos.gatekeeper-disabled", "high", "Gatekeeper 검사가 꺼져 있습니다",
             resource: "macos/gatekeeper", evidence: output,
-            recommendation: "'sudo spctl --master-enable'으로 Gatekeeper를 다시 켜세요."
+            recommendation: "시스템 설정 > 개인정보 보호 및 보안에서 Gatekeeper를 다시 켜세요. (macOS 15 Sequoia 이상에서는 'spctl --master-enable'이 더 이상 지원되지 않으며, 대규모 적용은 MDM 구성 프로파일을 사용하세요.)"
         )]
     }
 
