@@ -4200,6 +4200,13 @@ private enum NativeWebScanner {
         // Render each page in a WKWebView so JavaScript-generated (SPA) links are
         // discovered, mirroring the Python side's headless-browser option.
         var render = false
+        // Extra discovery sources (mirror the Python crawl_web options):
+        var discoverAssets = false   // A: mine same-host JS bundles for routes/APIs
+        var captureNetwork = false   // C: record fetch/XHR URLs during render
+        var interact = false         // D: click bounded elements to find routes
+        var maxClicks = 20
+        var maxAssets = 20
+        var seeds: [String] = []     // E: extra same-host URLs to enqueue
 
         static let singlePage = Options()
     }
@@ -4250,7 +4257,14 @@ private enum NativeWebScanner {
         var visited: Set<String> = []
         var tlsCheckedHosts: Set<String> = []
         var queue: [(url: URL, depth: Int)] = [(seed, 0)]
+        // E: enqueue caller-supplied same-host seeds (known routes / sitemap / API paths).
+        for seedPath in options.seeds {
+            if let resolved = URL(string: seedPath, relativeTo: seed)?.absoluteURL, sameHost(seed, resolved.absoluteString) {
+                queue.append((resolved, 0))
+            }
+        }
         var pagesScanned = 0
+        var assetsSeen: Set<String> = []  // A: JS bundles already scraped (global budget)
         let maxPages = options.crawl ? max(1, options.maxPages) : 1
         let maxDepth = options.crawl ? max(0, options.maxDepth) : 0
         let renderer: WebPageRenderer? = options.render ? await WebPageRenderer() : nil
@@ -4296,16 +4310,31 @@ private enum NativeWebScanner {
                     if let renderer {
                         let injected = options.extraHeaders.first { $0.key.lowercased() == "cookie" }?.value
                         let cookieHeader = mergeCookieHeader(injected: injected, jar: jar.header)
-                        if let rendered = await renderer.renderedLinks(
+                        // C/D: rendered anchors plus captured network + interaction routes.
+                        let rendered = await renderer.renderedLinks(
                             url: page.finalURL,
                             cookieHeader: cookieHeader,
                             extraHeaders: options.extraHeaders,
+                            captureNetwork: options.captureNetwork,
+                            interact: options.interact,
+                            maxClicks: options.maxClicks,
                             timeout: timeout
-                        ) {
-                            links.formUnion(rendered)
-                        }
+                        )
+                        links.formUnion(rendered)
                     }
-                    for link in links where sameHost(seed, link) && !visited.contains(canonical(link)) {
+                    if options.discoverAssets, !page.body.isEmpty {
+                        // A: mine same-host JS bundles for route/endpoint strings.
+                        links.formUnion(await discoverAssetRoutes(
+                            pageURL: page.finalURL,
+                            html: page.body,
+                            session: session,
+                            options: options,
+                            jar: jar,
+                            assetsSeen: &assetsSeen,
+                            timeout: timeout
+                        ))
+                    }
+                    for link in links where sameHost(seed, link) && !isStaticAsset(link) && !visited.contains(canonical(link)) {
                         if let linkURL = URL(string: link) { queue.append((linkURL, depth + 1)) }
                     }
                 }
@@ -4543,6 +4572,85 @@ private enum NativeWebScanner {
             let v = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
             return "\(k)=\(v)"
         }.joined(separator: "&")
+    }
+
+    // --- A: JS-bundle route discovery + static-asset filter ------------------
+
+    private static let routeLiteralRegex = try? NSRegularExpression(pattern: #"["'`](/[A-Za-z0-9][\w\-/\[\]]*)["'`]"#)
+    private static let routeNoiseRegex = try? NSRegularExpression(pattern: #"(^/_)|(/node_modules/)|(\.[A-Za-z0-9]{1,5}$)"#)
+    private static let staticAssetRegex = try? NSRegularExpression(
+        pattern: #"\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|eot|mp4|webm|pdf|zip|gz)($|\?)"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Static assets carry the same per-host headers as pages; discover them but
+    /// keep them out of the scan frontier (matches the Python `_is_static_asset`).
+    static func isStaticAsset(_ urlString: String) -> Bool {
+        let path = URLComponents(string: urlString)?.path ?? urlString
+        guard let re = staticAssetRegex, !path.isEmpty else { return false }
+        return re.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil
+    }
+
+    private static func matchesRouteNoise(_ path: String) -> Bool {
+        guard let re = routeNoiseRegex else { return false }
+        return re.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil
+    }
+
+    /// A: fetch same-host `<script src>` bundles referenced by `html` and extract
+    /// quoted path literals (routes + /api endpoints), dropping framework noise.
+    private static func discoverAssetRoutes(
+        pageURL: URL,
+        html: String,
+        session: URLSession,
+        options: Options,
+        jar: CookieJar,
+        assetsSeen: inout Set<String>,
+        timeout: TimeInterval
+    ) async -> Set<String> {
+        var srcs: [String] = []
+        for tag in allTags("script", html) {
+            if let src = attribute("src", in: tag) { srcs.append(src) }
+        }
+        var found: Set<String> = []
+        for src in srcs {
+            if assetsSeen.count >= options.maxAssets { break }
+            guard let assetURL = URL(string: src, relativeTo: pageURL)?.absoluteURL else { continue }
+            let key = assetURL.absoluteString
+            if !sameHost(pageURL, key) || assetsSeen.contains(key) { continue }
+            assetsSeen.insert(key)
+            guard let text = await readAsset(session: session, url: assetURL, options: options, jar: jar, timeout: timeout),
+                  let re = routeLiteralRegex else { continue }
+            let ns = text as NSString
+            for match in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                let path = ns.substring(with: match.range(at: 1))
+                if path == "/" || matchesRouteNoise(path) { continue }
+                if let routeURL = URL(string: path, relativeTo: pageURL)?.absoluteURL {
+                    found.insert(routeURL.absoluteString)
+                }
+            }
+        }
+        return found
+    }
+
+    private static func readAsset(
+        session: URLSession,
+        url: URL,
+        options: Options,
+        jar: CookieJar,
+        timeout: TimeInterval
+    ) async -> String? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        applyAuthHeaders(to: &request, jar: jar, options: options)
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) else { return nil }
+            return String(decoding: data.prefix(2 * 1024 * 1024), as: UTF8.self)
+        } catch {
+            return nil
+        }
     }
 
     // --- small regex helpers for HTML tag/attribute extraction ---------------
@@ -4827,19 +4935,43 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
     private let webView: WKWebView
     private var loadContinuation: CheckedContinuation<Bool, Never>?
 
+    // Installed at document start on every navigation: records SPA router pushes
+    // (D) and fetch/XHR request URLs (C) into page globals we read after load.
+    private static let hookScript = """
+    (function(){
+      window.__koda_routes = []; window.__koda_net = [];
+      for (var i=0;i<2;i++){ var fn = ['pushState','replaceState'][i]; (function(fn){
+        var orig = history[fn];
+        history[fn] = function(s,t,u){ try{ if(u) window.__koda_routes.push(new URL(u, location.href).href); }catch(e){} return orig.apply(this, arguments); };
+      })(fn); }
+      var of = window.fetch;
+      if (of) window.fetch = function(){ try{ var u = arguments[0]; window.__koda_net.push(new URL((u&&u.url)||u, location.href).href); }catch(e){} return of.apply(this, arguments); };
+      var oo = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(m,u){ try{ window.__koda_net.push(new URL(u, location.href).href); }catch(e){} return oo.apply(this, arguments); };
+    })();
+    """
+
     override init() {
         let config = WKWebViewConfiguration()
+        let userScript = WKUserScript(source: Self.hookScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        config.userContentController.addUserScript(userScript)
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
         webView.navigationDelegate = self
     }
 
+    /// Load the page and return discovered same-page-context URLs: DOM anchors
+    /// always, plus captured network URLs (C) and interaction routes (D) when
+    /// requested. Empty on failure so the crawl continues with stdlib links.
     func renderedLinks(
         url: URL,
         cookieHeader: String,
         extraHeaders: [String: String],
+        captureNetwork: Bool,
+        interact: Bool,
+        maxClicks: Int,
         timeout: TimeInterval
-    ) async -> [String]? {
+    ) async -> [String] {
         await setCookies(from: cookieHeader, url: url)
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
@@ -4856,13 +4988,31 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
                 resume(false)  // no-op if navigation already finished
             }
         }
-        guard loaded else { return nil }
+        guard loaded else { return [] }
 
-        // Give a single-page app a moment to render its initial route before scraping links.
+        // Give a single-page app a moment to render its initial route before scraping.
         try? await Task.sleep(nanoseconds: 800_000_000)
-        let script = "Array.from(document.querySelectorAll('a[href]')).map(function(a){return a.href;})"
-        let result = try? await webView.evaluateJavaScript(script)
-        return result as? [String]
+        // D: click bounded candidate elements, then collect anchors/routes/net in one pass.
+        let clickJS = interact ? """
+          var els = document.querySelectorAll('a:not([href]), button, [role=button], [onclick]');
+          for (var i=0;i<Math.min(els.length,\(maxClicks));i++){ try{ els[i].click(); }catch(e){} }
+        """ : ""
+        let script = """
+        (function(){
+          \(clickJS)
+          return {
+            anchors: Array.from(document.querySelectorAll('a[href]')).map(function(a){return a.href;}),
+            routes: window.__koda_routes || [],
+            net: window.__koda_net || []
+          };
+        })();
+        """
+        guard let result = try? await webView.evaluateJavaScript(script) as? [String: Any] else { return [] }
+        var links = Set<String>()
+        links.formUnion(result["anchors"] as? [String] ?? [])
+        if interact { links.formUnion(result["routes"] as? [String] ?? []) }
+        if captureNetwork { links.formUnion(result["net"] as? [String] ?? []) }
+        return Array(links)
     }
 
     private func setCookies(from header: String, url: URL) async {
@@ -4899,12 +5049,16 @@ private final class WebScanAccessoryView: NSView {
     private let urlField = NSTextField()
     private let crawlCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let renderCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let assetsCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let networkCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let interactCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let maxPagesField = NSTextField()
     private let maxDepthField = NSTextField()
     private let loginURLField = NSTextField()
     private let userField = NSTextField()
     private let passField = NSSecureTextField()
     private let headersField = NSTextField()
+    private let seedsField = NSTextField()
 
     init(language: AppLanguage) {
         super.init(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
@@ -4912,12 +5066,16 @@ private final class WebScanAccessoryView: NSView {
         urlField.placeholderString = "https://example.com"
         crawlCheck.title = ko ? "하위 페이지 크롤 (같은 호스트)" : "Crawl sub-pages (same host)"
         renderCheck.title = ko ? "SPA 링크용 JS 렌더링 (WebKit)" : "Render JS for SPA links (WebKit)"
+        assetsCheck.title = ko ? "JS 번들에서 라우트/API 추출" : "Mine JS bundles for routes/APIs"
+        networkCheck.title = ko ? "네트워크 요청 캡처 (렌더링 시)" : "Capture network requests (with render)"
+        interactCheck.title = ko ? "요소 클릭으로 라우트 탐색 (렌더링 시)" : "Click elements to find routes (with render)"
         maxPagesField.stringValue = "50"
         maxDepthField.stringValue = "3"
         loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
         userField.placeholderString = ko ? "아이디" : "Username"
         passField.placeholderString = ko ? "비밀번호" : "Password"
         headersField.placeholderString = "Cookie: session=..."
+        seedsField.placeholderString = ko ? "추가 경로 (쉼표로 구분): /help, /api/items" : "Extra routes (comma-separated): /help, /api/items"
 
         func labeled(_ text: String, _ field: NSView) -> NSStackView {
             let label = NSTextField(labelWithString: text)
@@ -4938,7 +5096,12 @@ private final class WebScanAccessoryView: NSView {
             labeled("URL", urlField),
             crawlCheck,
             renderCheck,
+            assetsCheck,
+            networkCheck,
+            interactCheck,
             nums,
+            NSTextField(labelWithString: ko ? "추가 경로 (선택)" : "Extra routes (optional)"),
+            seedsField,
             NSTextField(labelWithString: ko ? "로그인 (선택)" : "Login (optional)"),
             loginURLField,
             labeled(ko ? "아이디" : "User", userField),
@@ -4951,7 +5114,7 @@ private final class WebScanAccessoryView: NSView {
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
-        for field in [urlField, loginURLField, headersField] {
+        for field in [urlField, loginURLField, headersField, seedsField] {
             field.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
         maxPagesField.widthAnchor.constraint(equalToConstant: 60).isActive = true
@@ -4975,12 +5138,19 @@ private final class WebScanAccessoryView: NSView {
         var opts = NativeWebScanner.Options()
         opts.crawl = crawlCheck.state == .on
         opts.render = renderCheck.state == .on
+        opts.discoverAssets = assetsCheck.state == .on
+        opts.captureNetwork = networkCheck.state == .on
+        opts.interact = interactCheck.state == .on
         opts.maxPages = max(1, min(500, Int(maxPagesField.stringValue) ?? 50))
         opts.maxDepth = max(0, min(20, Int(maxDepthField.stringValue) ?? 3))
         opts.loginURL = loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         opts.username = userField.stringValue
         opts.password = passField.stringValue
         opts.extraHeaders = Self.parseHeaders(headersField.stringValue)
+        opts.seeds = seedsField.stringValue
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
         return opts
     }
 
