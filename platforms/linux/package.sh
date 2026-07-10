@@ -32,6 +32,31 @@ for file in README.md pyproject.toml scanner_config.example.json scanner_config.
   fi
 done
 
+# Bundle the SPA-render dependencies for an offline install: the pinned
+# Playwright wheels plus a Chromium build. Best-effort — on failure the package
+# is leaner and install.sh fetches these online instead. Skip with
+# KODA_SKIP_RENDER=1.
+if [ "${KODA_SKIP_RENDER:-0}" != "1" ]; then
+  render_wheels="$stage/app/render-wheels"
+  mkdir -p "$render_wheels"
+  if python3 -m pip download "playwright==1.61.0" -d "$render_wheels" >/dev/null 2>&1; then
+    tmp_root="$(mktemp -d)"
+    tmp_venv="$tmp_root/venv"
+    if python3 -m venv "$tmp_venv" \
+       && "$tmp_venv/bin/pip" install --quiet --no-index --find-links "$render_wheels" "playwright==1.61.0" \
+       && PLAYWRIGHT_BROWSERS_PATH="$stage/ms-playwright" "$tmp_venv/bin/python" -m playwright install chromium >/dev/null 2>&1; then
+      echo "Bundled Playwright wheels + Chromium for offline SPA render." >&2
+    else
+      echo "warning: could not stage Chromium; package will fetch render deps at install time." >&2
+      rm -rf "$stage/ms-playwright"
+    fi
+    rm -rf "$tmp_root"
+  else
+    echo "warning: could not download Playwright wheels; package omits bundled render deps." >&2
+    rm -rf "$render_wheels"
+  fi
+fi
+
 tarball="$dist_dir/$package_name.tar.gz"
 tar -C "$stage_parent" -czf "$tarball" "$package_name"
 echo "$tarball"

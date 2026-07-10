@@ -28,6 +28,13 @@ done
 script_dir="$(CDPATH= cd -- "$(dirname -- "$source_path")" && pwd)"
 bundle_root="$(CDPATH= cd -- "$script_dir/.." && pwd)"
 
+# Prefer the bundled render venv (created by install.sh) so the optional SPA
+# rendering can import Playwright in-process. The scanner core is stdlib-only,
+# so running it from this venv is transparent when render is unused.
+if [ -x "$bundle_root/render-venv/bin/python" ]; then
+  python_bin="$bundle_root/render-venv/bin/python"
+fi
+
 if [ -d "$bundle_root/app/security_scanner" ]; then
   app_root="$bundle_root/app"
 elif [ -d "$bundle_root/../security_scanner" ]; then

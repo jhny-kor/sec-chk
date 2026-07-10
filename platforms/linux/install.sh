@@ -93,6 +93,44 @@ if [ -f "$script_dir/README-offline.md" ]; then
   cp "$script_dir/README-offline.md" "$prefix/README-offline.md"
 fi
 
+# A pre-bundled Chromium (staged by package.sh) makes SPA rendering fully
+# offline; copy it into place so setup_render below reuses it instead of
+# downloading.
+if [ -d "$script_dir/ms-playwright" ]; then
+  rm -rf "$prefix/ms-playwright"
+  cp -R "$script_dir/ms-playwright" "$prefix/ms-playwright"
+fi
+
+# Optional headless-render setup for the SPA web crawl. Installs the pinned
+# Playwright into a dedicated venv the koda launcher prefers, and provisions
+# Chromium. Never fatal: any failure leaves KODA working with the standard-
+# library crawler (non-rendered). Skip with KODA_SKIP_RENDER=1.
+setup_render() {
+  if [ "${KODA_SKIP_RENDER:-0}" = "1" ]; then
+    echo "Skipping SPA-render setup (KODA_SKIP_RENDER=1)."
+    return 0
+  fi
+  local venv="$prefix/render-venv"
+  local wheels="$prefix/app/render-wheels"
+  if ! "$python_bin" -m venv "$venv" 2>/dev/null; then
+    echo "warning: could not create render venv; SPA rendering disabled." >&2
+    return 0
+  fi
+  if [ -d "$wheels" ]; then
+    "$venv/bin/pip" install --quiet --no-index --find-links "$wheels" "playwright==1.61.0" \
+      || { echo "warning: offline playwright install failed; SPA rendering disabled." >&2; return 0; }
+  else
+    "$venv/bin/pip" install --quiet "playwright==1.61.0" \
+      || { echo "warning: playwright install failed (offline without bundled wheels?); SPA rendering disabled." >&2; return 0; }
+  fi
+  if [ ! -d "$prefix/ms-playwright" ]; then
+    PLAYWRIGHT_BROWSERS_PATH="$prefix/ms-playwright" "$venv/bin/python" -m playwright install chromium \
+      || echo "warning: Chromium download failed; run 'PLAYWRIGHT_BROWSERS_PATH=$prefix/ms-playwright $venv/bin/python -m playwright install chromium' later." >&2
+  fi
+  echo "SPA-render support installed: $venv"
+}
+setup_render
+
 if [ "$link_command" -eq 1 ]; then
   mkdir -p "$bin_dir"
   ln -sfn "$prefix/bin/koda" "$bin_dir/koda"

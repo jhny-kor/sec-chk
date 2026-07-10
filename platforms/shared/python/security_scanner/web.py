@@ -15,9 +15,11 @@ network fetch so they can be unit tested without a live server.
 from __future__ import annotations
 
 import http.cookiejar
+import os
 import re
 import socket
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -547,6 +549,32 @@ def _read_html_body(response) -> bytes:
     return response.read(_MAX_BODY_BYTES)
 
 
+def _ensure_bundled_browsers_path() -> None:
+    """Point Playwright at a browser bundled with the install, if one ships.
+
+    The Windows/Linux installers place the Chromium build under an
+    ``ms-playwright`` folder so rendering works offline without a separate
+    ``playwright install``. An explicit ``PLAYWRIGHT_BROWSERS_PATH`` always wins;
+    otherwise use the first bundled folder found next to the frozen executable or
+    the installed package tree.
+    """
+
+    if os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return
+    candidates: list[str] = []
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        candidates.append(os.path.join(base, "ms-playwright"))
+    # .../<app_root>/security_scanner/web.py -> app_root, and its parent (install prefix).
+    app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.path.join(app_root, "ms-playwright"))
+    candidates.append(os.path.join(os.path.dirname(app_root), "ms-playwright"))
+    for path in candidates:
+        if os.path.isdir(path):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = path
+            return
+
+
 def _render_page(
     url: str,
     *,
@@ -560,6 +588,7 @@ def _render_page(
     to stdlib link extraction. ``(html, "")`` on success.
     """
 
+    _ensure_bundled_browsers_path()
     try:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright

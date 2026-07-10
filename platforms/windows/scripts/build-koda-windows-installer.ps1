@@ -17,6 +17,9 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $SharedPythonRoot = Join-Path $RepoRoot "platforms\shared\python"
 $BuildRoot = Join-Path $RepoRoot ".build\koda-windows-installer"
 $VenvDir = Join-Path $BuildRoot ".venv"
+# Chromium build for the SPA-render feature is downloaded here, then bundled
+# into the app so rendering works offline (no separate 'playwright install').
+$BrowsersDir = Join-Path $BuildRoot "ms-playwright"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $EntryPoint = Join-Path $RepoRoot "platforms\windows\scripts\koda-desktop.py"
 $DistDir = Join-Path $RepoRoot "dist"
@@ -116,9 +119,17 @@ if (-not $SkipDependencyInstall) {
     Write-Host "Installing build dependencies."
     # pywebview hosts the dashboard in a single native window (Edge WebView2),
     # so KODA opens like the macOS app instead of a console + browser tab.
-    & $VenvPython -m pip install --upgrade pip pyinstaller pywebview
+    # playwright (pinned) powers the optional SPA-render web crawl.
+    & $VenvPython -m pip install --upgrade pip pyinstaller pywebview "playwright==1.61.0"
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to install PyInstaller and pywebview."
+        throw "Failed to install PyInstaller, pywebview, and playwright."
+    }
+
+    Write-Host "Downloading Playwright Chromium to bundle for offline SPA rendering."
+    $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
+    & $VenvPython -m playwright install chromium
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to download Playwright Chromium."
     }
 }
 
@@ -156,10 +167,21 @@ $pyInstallerArgs = @(
     "--collect-all", "webview",
     "--collect-all", "clr_loader",
     "--collect-all", "pythonnet",
+    # playwright ships a bundled node driver as package data; collect it all so
+    # the frozen app can drive the bundled Chromium for SPA rendering.
+    "--collect-all", "playwright",
     "--hidden-import", "tkinter",
     "--hidden-import", "tkinter.filedialog",
     "--hidden-import", "tkinter.messagebox"
 )
+
+# Bundle the downloaded Chromium under ms-playwright/ so it ships inside the app;
+# security_scanner.web points PLAYWRIGHT_BROWSERS_PATH at it at runtime.
+if (Test-Path -LiteralPath $BrowsersDir -PathType Container) {
+    $pyInstallerArgs += @("--add-data", ($BrowsersDir + ";ms-playwright"))
+} else {
+    Write-Warning "Chromium browser folder not found at $BrowsersDir; SPA rendering will be unavailable in this build. Re-run without -SkipDependencyInstall."
+}
 
 if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
     $pyInstallerArgs += @("--icon", $IconPath)
