@@ -4223,6 +4223,9 @@ private enum NativeWebScanner {
                 cookies[cookie.name] = cookie
             }
         }
+        func store(browserCookies: [HTTPCookie]) {
+            for cookie in browserCookies { cookies[cookie.name] = cookie }
+        }
         var header: String {
             HTTPCookie.requestHeaderFields(with: Array(cookies.values))["Cookie"] ?? ""
         }
@@ -4337,7 +4340,9 @@ private enum NativeWebScanner {
                             maxClicks: options.maxClicks,
                             timeout: timeout
                         )
-                        links.formUnion(rendered)
+                        links.formUnion(rendered.links)
+                        // Sync cookies the SPA rotated in the browser back into the jar.
+                        jar.store(browserCookies: rendered.cookies)
                     }
                     if (options.discoverAssets || options.scanJsSecrets), !page.body.isEmpty {
                         // A + secret scan: fetch same-host JS bundles once.
@@ -5325,7 +5330,7 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
         interact: Bool,
         maxClicks: Int,
         timeout: TimeInterval
-    ) async -> [String] {
+    ) async -> (links: [String], cookies: [HTTPCookie]) {
         await setCookies(from: cookieHeader, url: url)
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
@@ -5342,7 +5347,7 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
                 resume(false)  // no-op if navigation already finished
             }
         }
-        guard loaded else { return [] }
+        guard loaded else { return ([], await currentCookies()) }
 
         // Give a single-page app a moment to render its initial route before scraping.
         try? await Task.sleep(nanoseconds: 800_000_000)
@@ -5361,12 +5366,22 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
           };
         })();
         """
-        guard let result = try? await webView.evaluateJavaScript(script) as? [String: Any] else { return [] }
+        guard let result = try? await webView.evaluateJavaScript(script) as? [String: Any] else {
+            return ([], await currentCookies())
+        }
         var links = Set<String>()
         links.formUnion(result["anchors"] as? [String] ?? [])
         if interact { links.formUnion(result["routes"] as? [String] ?? []) }
         if captureNetwork { links.formUnion(result["net"] as? [String] ?? []) }
-        return Array(links)
+        return (Array(links), await currentCookies())
+    }
+
+    /// Read the web view's cookies so a session the SPA rotated can be synced back
+    /// into the crawl's jar (bidirectional cookie sync).
+    private func currentCookies() async -> [HTTPCookie] {
+        await withCheckedContinuation { (cont: CheckedContinuation<[HTTPCookie], Never>) in
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cont.resume(returning: $0) }
+        }
     }
 
     private func setCookies(from header: String, url: URL) async {

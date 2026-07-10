@@ -225,7 +225,7 @@ def crawl_web(
             candidates: set[str] = set()
             link_source = body
             if render:
-                rendered, extra_urls, render_error = _render_page(
+                rendered, extra_urls, browser_cookies, render_error = _render_page(
                     final_url,
                     timeout=timeout,
                     extra_headers=headers,
@@ -237,6 +237,9 @@ def crawl_web(
                 if rendered is not None:
                     # Rendered DOM is a superset of the raw HTML for link discovery.
                     link_source = rendered
+                    # Sync any cookie the SPA rotated back into the jar so later
+                    # stdlib requests keep the fresh session (bidirectional sync).
+                    _merge_browser_cookies(opener, browser_cookies)
                     candidates.update(extra_urls)  # C/D: network + interaction URLs
                 elif render_error and not render_warned:
                     warnings.append(render_error)
@@ -827,15 +830,17 @@ def _render_page(
     interact: bool = False,
     max_clicks: int = 20,
     cookies: Sequence[dict[str, object]] = (),
-) -> tuple[str | None, set[str], str]:
-    """Render ``url`` in headless Chromium; return ``(html, extra_urls, error)``.
+) -> tuple[str | None, set[str], list[dict[str, object]], str]:
+    """Render ``url`` in headless Chromium; return ``(html, extra_urls, cookies, error)``.
 
     ``cookies`` (Playwright cookie dicts) seed the browser context so a form-login
-    session held in the crawl's cookie jar is carried into rendering. ``extra_urls``
-    holds URLs discovered beyond the DOM anchors: same-origin requests the page
-    made (``capture_network``) and routes reached by clicking bounded candidate
-    elements (``interact``). Returns ``(None, set(), message)`` when Playwright is
-    unavailable or rendering fails, so the caller falls back to stdlib extraction.
+    session held in the crawl's cookie jar is carried into rendering; the browser's
+    cookies after rendering are returned so the caller can sync back any the SPA
+    rotated. ``extra_urls`` holds URLs discovered beyond the DOM anchors: same-origin
+    requests the page made (``capture_network``) and routes reached by clicking
+    bounded candidate elements (``interact``). Returns ``(None, set(), [], message)``
+    when Playwright is unavailable or rendering fails, so the caller falls back to
+    stdlib extraction.
     """
 
     _ensure_bundled_browsers_path()
@@ -843,7 +848,7 @@ def _render_page(
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return None, set(), (
+        return None, set(), [], (
             "JS 렌더링 크롤을 건너뜁니다: Playwright 미설치. "
             "설치: pip install \"local-security-scanner[render]\" && python -m playwright install chromium"
         )
@@ -871,13 +876,17 @@ def _render_page(
                 html = page.content()
                 if interact:
                     captured.update(_interact_page(page, max_clicks))
-                return html, captured, ""
+                try:
+                    browser_cookies = list(context.cookies())
+                except Exception:
+                    browser_cookies = []
+                return html, captured, browser_cookies, ""
             finally:
                 browser.close()
     except PlaywrightError as exc:
-        return None, set(), f"JS 렌더링 실패 {url}: {exc}"
+        return None, set(), [], f"JS 렌더링 실패 {url}: {exc}"
     except Exception as exc:  # defensive: rendering must never abort the scan
-        return None, set(), f"JS 렌더링 오류 {url}: {exc}"
+        return None, set(), [], f"JS 렌더링 오류 {url}: {exc}"
 
 
 def _interact_page(page, max_clicks: int) -> set[str]:
@@ -1229,12 +1238,6 @@ def _same_host(seed_url: str, candidate: str) -> bool:
     return other.scheme in {"http", "https"} and other.netloc == seed.netloc
 
 
-def _same_host(seed_url: str, candidate: str) -> bool:
-    seed = urllib.parse.urlparse(seed_url)
-    other = urllib.parse.urlparse(candidate)
-    return other.scheme in {"http", "https"} and other.netloc == seed.netloc
-
-
 # Static assets carry the same per-host headers as pages, so scanning them adds
 # noise and wasted requests (and rendering a font/image errors). Discover them,
 # but keep them out of the scan frontier.
@@ -1422,6 +1425,56 @@ def _opener_cookies(opener: urllib.request.OpenerDirector) -> list[dict[str, obj
             }
             cookies.append(entry)
     return cookies
+
+
+def _merge_browser_cookies(
+    opener: urllib.request.OpenerDirector,
+    browser_cookies: Sequence[Mapping[str, object]],
+) -> None:
+    """Sync Playwright browser cookies back into the opener's jar.
+
+    Completes the bidirectional sync: a session the SPA rotated inside the
+    headless browser is written back so subsequent stdlib crawl requests use the
+    fresh cookie instead of a stale one.
+    """
+    jar = None
+    for handler in opener.handlers:
+        candidate = getattr(handler, "cookiejar", None)
+        if candidate is not None:
+            jar = candidate
+            break
+    if jar is None:
+        return
+    for cookie in browser_cookies:
+        name = str(cookie.get("name") or "")
+        domain = str(cookie.get("domain") or "")
+        if not name or not domain:
+            continue
+        expires = cookie.get("expires")
+        try:
+            expires_val = int(expires) if expires not in (None, -1) else None
+        except (TypeError, ValueError):
+            expires_val = None
+        jar.set_cookie(
+            http.cookiejar.Cookie(
+                version=0,
+                name=name,
+                value=str(cookie.get("value") or ""),
+                port=None,
+                port_specified=False,
+                domain=domain,
+                domain_specified=bool(domain),
+                domain_initial_dot=domain.startswith("."),
+                path=str(cookie.get("path") or "/"),
+                path_specified=True,
+                secure=bool(cookie.get("secure")),
+                expires=expires_val,
+                discard=expires_val is None,
+                comment=None,
+                comment_url=None,
+                rest={"HttpOnly": ""} if cookie.get("httpOnly") else {},
+            )
+        )
 
 
 def _finding(

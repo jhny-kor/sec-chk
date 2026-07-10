@@ -11,6 +11,21 @@ import urllib.request
 from pathlib import Path
 
 
+# Default image; override via KODA_ZAP_IMAGE to pin a reproducible tag or, for
+# closed networks, a locally-imported digest (e.g. ghcr.io/zaproxy/zaproxy@sha256:...).
+_DEFAULT_ZAP_IMAGE = "ghcr.io/zaproxy/zaproxy:stable"
+# Docker image reference: repo:tag, or repo@sha256:<64 hex>.
+_ZAP_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]+|@sha256:[0-9a-f]{64})$")
+
+
+def zap_image() -> str:
+    """The ZAP Docker image, overridable via ``KODA_ZAP_IMAGE`` for pinning/offline."""
+    image = os.environ.get("KODA_ZAP_IMAGE", "").strip() or _DEFAULT_ZAP_IMAGE
+    if not _ZAP_IMAGE_RE.match(image):
+        raise ValueError(f"Invalid KODA_ZAP_IMAGE reference: {image!r}")
+    return image
+
+
 def zap_baseline_command(target_url: str, *, output_dir: str = "reports/zap", minutes: int = 1) -> str:
     _require_http_url(target_url, label="target URL")
     if minutes <= 0:
@@ -31,7 +46,7 @@ def zap_baseline_command(target_url: str, *, output_dir: str = "reports/zap", mi
             "-t",
             "-v",
             f'"{mount_path}:/zap/wrk:rw"',
-            "ghcr.io/zaproxy/zaproxy:stable",
+            shlex.quote(zap_image()),
             "zap-baseline.py",
             "-t",
             shlex.quote(target_url),
