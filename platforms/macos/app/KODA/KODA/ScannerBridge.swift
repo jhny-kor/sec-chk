@@ -4558,16 +4558,20 @@ private enum NativeWebScanner {
     private static func dedupe(_ findings: [NativeFinding]) -> [NativeFinding] {
         var order: [String] = []
         var first: [String: NativeFinding] = [:]
-        var counts: [String: Int] = [:]
+        var urls: [String: [String]] = [:]
         for finding in findings {
             let key = finding.ruleID
             if first[key] == nil { first[key] = finding; order.append(key) }
-            counts[key, default: 0] += 1
+            if !(urls[key]?.contains(finding.path) ?? false) { urls[key, default: []].append(finding.path) }
         }
         return order.compactMap { key in
             guard var finding = first[key] else { return nil }
-            if let count = counts[key], count > 1 {
-                let suffix = "\(count)개 페이지에서 발견"
+            let affected = urls[key] ?? []
+            if affected.count > 1 {
+                // List the actual affected URLs, not just a count, so remediation has the real set.
+                let shown = affected.prefix(8).joined(separator: ", ")
+                let more = affected.count > 8 ? " (+\(affected.count - 8) more)" : ""
+                let suffix = "affected URLs: \(shown)\(more)"
                 finding.evidence = finding.evidence.isEmpty ? suffix : "\(finding.evidence); \(suffix)"
             }
             return finding
@@ -4775,8 +4779,16 @@ private enum NativeWebScanner {
         (".env", "high", "="),
         (".git/config", "high", "[core]"),
         (".git/HEAD", "high", "ref:"),
+        (".svn/entries", "high", "dir"),
+        (".aws/credentials", "high", "aws_access_key_id"),
+        (".npmrc", "high", "_authtoken"),
         ("openapi.json", "medium", "openapi"),
         ("swagger.json", "medium", "swagger"),
+        ("actuator", "medium", "_links"),
+        ("actuator/env", "high", "propertysources"),
+        ("actuator/health", "low", "status"),
+        ("server-status", "medium", "apache server status"),
+        ("phpinfo.php", "medium", "phpinfo"),
         (".well-known/security.txt", "info", "contact"),
         ("config.json", "low", "{"),
     ]
@@ -4983,13 +4995,19 @@ private enum NativeWebScanner {
         var findings: [NativeFinding] = []
         let csp = headers["content-security-policy"] ?? ""
 
-        if isHTTPS && headers["strict-transport-security"] == nil {
-            findings.append(finding("web.missing-hsts", "medium", "HSTS 헤더 누락", url,
-                recommendation: "'Strict-Transport-Security: max-age=31536000; includeSubDomains'를 추가하세요."))
+        if isHTTPS {
+            if let hsts = headers["strict-transport-security"] {
+                findings.append(contentsOf: hstsQuality(url: url, hsts: hsts))
+            } else {
+                findings.append(finding("web.missing-hsts", "medium", "HSTS 헤더 누락", url,
+                    recommendation: "'Strict-Transport-Security: max-age=31536000; includeSubDomains'를 추가하세요."))
+            }
         }
         if csp.isEmpty {
             findings.append(finding("web.missing-csp", "medium", "Content-Security-Policy 헤더 누락", url,
                 recommendation: "스크립트/스타일/연결 소스를 제한하는 Content-Security-Policy를 설정하세요."))
+        } else {
+            findings.append(contentsOf: cspQuality(url: url, csp: csp))
         }
         if (headers["x-content-type-options"] ?? "").lowercased() != "nosniff" {
             findings.append(finding("web.missing-x-content-type-options", "low", "'X-Content-Type-Options: nosniff' 누락", url,
@@ -5061,6 +5079,49 @@ private enum NativeWebScanner {
                 recommendation: "CSRF 노출을 줄이도록 'SameSite=Lax' 또는 'SameSite=Strict'를 추가하세요."))
         }
         return findings
+    }
+
+    /// Flag a present-but-weak CSP (unsafe-inline/eval, wildcard sources).
+    private static func cspQuality(url: String, csp: String) -> [NativeFinding] {
+        let lowered = csp.lowercased()
+        var directives: [String: String] = [:]
+        for segment in lowered.split(separator: ";") {
+            let part = segment.trimmingCharacters(in: .whitespaces)
+            if let name = part.split(separator: " ").first { directives[String(name)] = part }
+        }
+        let script = directives["script-src"] ?? directives["default-src"] ?? ""
+        var issues: [String] = []
+        if script.contains("'unsafe-inline'") { issues.append("script-src allows 'unsafe-inline'") }
+        if script.contains("'unsafe-eval'") { issues.append("script-src allows 'unsafe-eval'") }
+        let tokens = script.split(separator: " ").dropFirst().map(String.init)
+        if tokens.contains(where: { ["*", "http:", "https:"].contains($0) }) {
+            issues.append("script-src allows a wildcard/scheme source")
+        }
+        if directives["object-src"] == nil && directives["default-src"] == nil {
+            issues.append("no object-src/default-src to block plugins")
+        }
+        if issues.isEmpty { return [] }
+        return [finding("web.weak-csp", "medium", "Content-Security-Policy가 있으나 취약함", url,
+            evidence: issues.joined(separator: "; "),
+            recommendation: "'unsafe-inline'/'unsafe-eval'과 와일드카드 소스를 제거하고 nonce/hash를 쓰며 object-src 'none', base-uri 'self'를 설정하세요.")]
+    }
+
+    /// Flag a present-but-weak HSTS header (short max-age / no includeSubDomains).
+    private static func hstsQuality(url: String, hsts: String) -> [NativeFinding] {
+        let lowered = hsts.lowercased()
+        var maxAge = 0
+        if let re = try? NSRegularExpression(pattern: #"max-age\s*=\s*(\d+)"#),
+           let m = re.firstMatch(in: lowered, range: NSRange(lowered.startIndex..., in: lowered)),
+           let r = Range(m.range(at: 1), in: lowered) {
+            maxAge = Int(lowered[r]) ?? 0
+        }
+        var issues: [String] = []
+        if maxAge < 15_552_000 { issues.append("max-age=\(maxAge) is under 180 days") }
+        if !lowered.contains("includesubdomains") { issues.append("no includeSubDomains") }
+        if issues.isEmpty { return [] }
+        return [finding("web.weak-hsts", "low", "HSTS 헤더가 있으나 취약함", url,
+            evidence: issues.joined(separator: "; "),
+            recommendation: "'Strict-Transport-Security: max-age=31536000; includeSubDomains'를 사용하세요(검증 후 'preload' 추가).")]
     }
 
     private static func loweredHeaders(_ raw: [AnyHashable: Any]) -> [String: String] {

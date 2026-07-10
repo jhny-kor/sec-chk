@@ -1,14 +1,21 @@
 """Live website security posture checks using only the Python standard library.
 
 This is the lightweight, dependency-free counterpart to the Docker/OWASP-ZAP
-path in ``dast.py``. Given an authorized URL it sends a small number of
-**non-destructive** requests (a single GET plus one TLS handshake) and inspects
-the response: security headers, TLS/certificate posture, cookie flags, HTTP to
-HTTPS enforcement, information disclosure, and CORS misconfiguration.
+path in ``dast.py``. The request footprint depends on the options:
 
-It never sends attack payloads, never fuzzes, and only reads what the server
-already returns. Run it only against systems you own or are authorized to test.
-The analysis helpers (``analyze_response``/``check_tls``) are separated from the
+- Default single-page scan: one GET plus one TLS handshake, inspecting security
+  headers, TLS/certificate posture, cookie flags, HTTP→HTTPS enforcement,
+  information disclosure, CORS, mixed content, SRI, and CSRF-less forms.
+- ``crawl``/``render``/``discover_assets``/``capture_network``/``interact``:
+  fetch many same-host pages, download JS bundles, and (with Playwright) render
+  and click in a headless browser to discover routes.
+- ``probe_paths``: actively request well-known sensitive paths and POST a
+  GraphQL introspection query.
+
+None of these send attack payloads or fuzz parameters, but crawling and probing
+do issue many requests and touch non-linked paths, so run it only against
+systems you own or are authorized to test. The analysis helpers
+(``analyze_response``/``analyze_body``/``check_tls``) are separated from the
 network fetch so they can be unit tested without a live server.
 """
 
@@ -225,6 +232,7 @@ def crawl_web(
                     capture_network=capture_network,
                     interact=interact,
                     max_clicks=max_clicks,
+                    cookies=_opener_cookies(opener),
                 )
                 if rendered is not None:
                     # Rendered DOM is a superset of the raw HTML for link discovery.
@@ -431,6 +439,59 @@ def check_tls(
 # --- analysis helpers -------------------------------------------------------
 
 
+def _csp_quality(url: str, csp: str, target: str) -> list[Finding]:
+    """Flag a present-but-weak Content-Security-Policy (not just its absence)."""
+    lowered = csp.lower()
+    directives = {
+        part.split()[0]: part for part in (seg.strip() for seg in lowered.split(";")) if part
+    }
+    # The source list that actually governs script execution.
+    script = directives.get("script-src") or directives.get("default-src") or ""
+    weaknesses: list[str] = []
+    if "'unsafe-inline'" in script:
+        weaknesses.append("script-src allows 'unsafe-inline'")
+    if "'unsafe-eval'" in script:
+        weaknesses.append("script-src allows 'unsafe-eval'")
+    # A bare '*' (or http(s): scheme source) as a script source defeats the policy.
+    tokens = script.split()[1:] if script else []
+    if any(tok in {"*", "http:", "https:"} for tok in tokens):
+        weaknesses.append("script-src allows a wildcard/scheme source")
+    if "object-src" not in directives and "default-src" not in directives:
+        weaknesses.append("no object-src/default-src to block plugins")
+    if not weaknesses:
+        return []
+    return [
+        _finding(
+            "web.weak-csp", "medium", "Content-Security-Policy is present but weak",
+            url, target=target, evidence="; ".join(weaknesses),
+            recommendation="Remove 'unsafe-inline'/'unsafe-eval' and wildcard sources; use nonces/hashes and set object-src 'none' and base-uri 'self'.",
+        )
+    ]
+
+
+def _hsts_quality(url: str, hsts: str, target: str) -> list[Finding]:
+    """Flag a present-but-weak HSTS header (short max-age / no includeSubDomains)."""
+    lowered = hsts.lower()
+    max_age = 0
+    match = re.search(r"max-age\s*=\s*(\d+)", lowered)
+    if match:
+        max_age = int(match.group(1))
+    issues: list[str] = []
+    if max_age < 15552000:  # < 180 days is too short to matter
+        issues.append(f"max-age={max_age} is under 180 days")
+    if "includesubdomains" not in lowered:
+        issues.append("no includeSubDomains")
+    if not issues:
+        return []
+    return [
+        _finding(
+            "web.weak-hsts", "low", "HSTS header is present but weak",
+            url, target=target, evidence="; ".join(issues),
+            recommendation="Use 'Strict-Transport-Security: max-age=31536000; includeSubDomains' (add 'preload' once verified).",
+        )
+    ]
+
+
 def _security_headers(url: str, headers: dict[str, str], is_https: bool, target: str) -> list[Finding]:
     findings: list[Finding] = []
     csp = headers.get("content-security-policy", "")
@@ -446,6 +507,8 @@ def _security_headers(url: str, headers: dict[str, str], is_https: bool, target:
                 recommendation="Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains'.",
             )
         )
+    elif is_https:
+        findings.extend(_hsts_quality(url, headers["strict-transport-security"], target))
     if not csp:
         findings.append(
             _finding(
@@ -457,6 +520,8 @@ def _security_headers(url: str, headers: dict[str, str], is_https: bool, target:
                 recommendation="Define a Content-Security-Policy to limit script/style/connect sources.",
             )
         )
+    else:
+        findings.extend(_csp_quality(url, csp, target))
     if headers.get("x-content-type-options", "").lower() != "nosniff":
         findings.append(
             _finding(
@@ -761,14 +826,16 @@ def _render_page(
     capture_network: bool = False,
     interact: bool = False,
     max_clicks: int = 20,
+    cookies: Sequence[dict[str, object]] = (),
 ) -> tuple[str | None, set[str], str]:
     """Render ``url`` in headless Chromium; return ``(html, extra_urls, error)``.
 
-    ``extra_urls`` holds URLs discovered beyond the DOM anchors: same-origin
-    requests the page made (``capture_network``) and routes reached by clicking
-    bounded candidate elements (``interact``). Returns ``(None, set(), message)``
-    when Playwright is unavailable or rendering fails, so the caller falls back
-    to stdlib extraction.
+    ``cookies`` (Playwright cookie dicts) seed the browser context so a form-login
+    session held in the crawl's cookie jar is carried into rendering. ``extra_urls``
+    holds URLs discovered beyond the DOM anchors: same-origin requests the page
+    made (``capture_network``) and routes reached by clicking bounded candidate
+    elements (``interact``). Returns ``(None, set(), message)`` when Playwright is
+    unavailable or rendering fails, so the caller falls back to stdlib extraction.
     """
 
     _ensure_bundled_browsers_path()
@@ -788,6 +855,11 @@ def _render_page(
             browser = p.chromium.launch(headless=True)
             try:
                 context = browser.new_context(user_agent=_USER_AGENT)
+                if cookies:
+                    try:
+                        context.add_cookies(list(cookies))
+                    except Exception:
+                        pass  # malformed cookie must never abort rendering
                 if headers:
                     context.set_extra_http_headers(headers)
                 page = context.new_page()
@@ -1031,8 +1103,16 @@ _SENSITIVE_PATHS: tuple[tuple[str, str, str], ...] = (
     ("/.env", "high", "="),
     ("/.git/config", "high", "[core]"),
     ("/.git/HEAD", "high", "ref:"),
+    ("/.svn/entries", "high", "dir"),
+    ("/.aws/credentials", "high", "aws_access_key_id"),
+    ("/.npmrc", "high", "_authtoken"),
     ("/openapi.json", "medium", "openapi"),
     ("/swagger.json", "medium", "swagger"),
+    ("/actuator", "medium", "_links"),
+    ("/actuator/env", "high", "propertysources"),
+    ("/actuator/health", "low", "status"),
+    ("/server-status", "medium", "apache server status"),
+    ("/phpinfo.php", "medium", "phpinfo"),
     ("/.well-known/security.txt", "info", "contact"),
     ("/.DS_Store", "low", "Bud1"),
     ("/config.json", "low", "{"),
@@ -1176,22 +1256,25 @@ def _canonical(url: str) -> str:
 def _dedupe_findings(findings: list[Finding]) -> list[Finding]:
     """Collapse repeats of the same rule to one representative.
 
-    A missing-CSP header appears on every page; keep the first occurrence and,
-    when it recurred, note how many pages were affected in the evidence.
+    A missing-CSP header appears on every page; keep the first occurrence but
+    record the actual affected URLs in the evidence (up to a cap) so remediation
+    has the real list instead of just a page count.
     """
 
     seen: dict[tuple[str, str], Finding] = {}
-    counts: dict[tuple[str, str], int] = {}
+    instances: dict[tuple[str, str], list[str]] = {}
     for finding in findings:
         key = (finding.rule_id, finding.target)
-        counts[key] = counts.get(key, 0) + 1
         seen.setdefault(key, finding)
+        instances.setdefault(key, []).append(str(finding.path))
 
     result: list[Finding] = []
     for key, finding in seen.items():
-        count = counts[key]
-        if count > 1:
-            suffix = f"{count} page(s) affected"
+        urls = list(dict.fromkeys(instances[key]))  # de-dup, preserve order
+        if len(urls) > 1:
+            shown = ", ".join(urls[:8])
+            more = f" (+{len(urls) - 8} more)" if len(urls) > 8 else ""
+            suffix = f"affected URLs: {shown}{more}"
             evidence = f"{finding.evidence}; {suffix}" if finding.evidence else suffix
             finding = replace(finding, evidence=evidence)
         result.append(finding)
@@ -1316,6 +1399,29 @@ def _cookie_count(opener: urllib.request.OpenerDirector) -> int:
         if jar is not None:
             return len(jar)
     return 0
+
+
+def _opener_cookies(opener: urllib.request.OpenerDirector) -> list[dict[str, object]]:
+    """Convert the opener's cookie jar to Playwright cookie dicts.
+
+    Lets a form-login session (stored in the urllib jar) carry into the headless
+    browser so authenticated SPA pages render logged-in rather than anonymous.
+    """
+    cookies: list[dict[str, object]] = []
+    for handler in opener.handlers:
+        jar = getattr(handler, "cookiejar", None)
+        if jar is None:
+            continue
+        for cookie in jar:
+            entry: dict[str, object] = {
+                "name": cookie.name,
+                "value": cookie.value or "",
+                "domain": cookie.domain,
+                "path": cookie.path or "/",
+                "secure": bool(cookie.secure),
+            }
+            cookies.append(entry)
+    return cookies
 
 
 def _finding(
