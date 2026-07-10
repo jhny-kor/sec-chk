@@ -199,12 +199,29 @@ def web_scan_payload(
 
 
 def _headers_from_text(raw: str) -> dict[str, str]:
-    """Parse a textarea of ``Name: value`` lines (one per line) into a dict."""
+    """Parse a textarea of ``Name: value`` lines into a header dict.
+
+    A line whose name-part contains ``=`` (or that has no colon at all) is a bare
+    cookie string pasted from the browser (``a=b; c=d``); treat it as a Cookie
+    value rather than dropping it — that silent drop is the common "I pasted a
+    cookie and nothing happened" failure.
+    """
     headers: dict[str, str] = {}
+    bare_cookies: list[str] = []
     for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
         name, sep, value = line.partition(":")
-        if sep and name.strip():
-            headers[name.strip()] = value.strip()
+        if sep and name.strip() and "=" not in name:
+            if name.strip().lower() == "cookie":
+                bare_cookies.append(value.strip())
+            else:
+                headers[name.strip()] = value.strip()
+        else:
+            bare_cookies.append(line)
+    if bare_cookies:
+        headers["Cookie"] = "; ".join(bare_cookies)
     return headers
 
 

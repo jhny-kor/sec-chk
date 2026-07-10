@@ -4410,16 +4410,38 @@ private enum NativeWebScanner {
     }
 
     private static func applyAuthHeaders(to request: inout URLRequest, jar: CookieJar, options: Options) {
+        var injectedCookie: String?
         for (name, value) in options.extraHeaders {
+            if name.lowercased() == "cookie" {
+                injectedCookie = value
+                continue
+            }
             request.setValue(value, forHTTPHeaderField: name)
         }
-        let jarHeader = jar.header
-        if !jarHeader.isEmpty {
-            // Merge a user-supplied Cookie header with jar cookies rather than clobbering.
-            let injected = options.extraHeaders.first { $0.key.lowercased() == "cookie" }?.value
-            let combined = [injected, jarHeader].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "; ")
-            request.setValue(combined, forHTTPHeaderField: "Cookie")
+        let merged = mergeCookieHeader(injected: injectedCookie, jar: jar.header)
+        if !merged.isEmpty {
+            request.setValue(merged, forHTTPHeaderField: "Cookie")
         }
+    }
+
+    /// Merge two "a=b; c=d" cookie headers, deduping by name with the injected
+    /// (user-supplied) value winning, so a pasted session cookie is not shadowed
+    /// by a same-named cookie the server rotated in mid-crawl.
+    private static func mergeCookieHeader(injected: String?, jar: String) -> String {
+        var order: [String] = []
+        var values: [String: String] = [:]
+        func absorb(_ header: String, override: Bool) {
+            for part in header.split(separator: ";") {
+                let pair = part.trimmingCharacters(in: .whitespaces)
+                guard !pair.isEmpty else { continue }
+                let name = pair.split(separator: "=", maxSplits: 1).first.map(String.init) ?? pair
+                if values[name] == nil { order.append(name) }
+                if override || values[name] == nil { values[name] = pair }
+            }
+        }
+        absorb(jar, override: false)
+        if let injected { absorb(injected, override: true) }
+        return order.compactMap { values[$0] }.joined(separator: "; ")
     }
 
     private struct LoginForm { let action: String; let fields: [String: String] }
@@ -4867,11 +4889,30 @@ private final class WebScanAccessoryView: NSView {
 
     private static func parseHeaders(_ raw: String) -> [String: String] {
         var headers: [String: String] = [:]
-        for line in raw.split(whereSeparator: \.isNewline) {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let name = line[..<colon].trimmingCharacters(in: .whitespaces)
-            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-            if !name.isEmpty { headers[name] = value }
+        var bareCookies: [String] = []
+        for rawLine in raw.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            // A header line is "Name: value" where Name is a token with no '='.
+            // A cookie string pasted from the browser ("a=b; c=d") has no such
+            // colon, so treat the whole line as a Cookie value rather than
+            // silently dropping it — that dropped-cookie case is the common
+            // "I pasted a cookie and nothing happened" bug.
+            if let colon = line.firstIndex(of: ":"), !line[..<colon].contains("=") {
+                let name = line[..<colon].trimmingCharacters(in: .whitespaces)
+                let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if name.isEmpty { continue }
+                if name.lowercased() == "cookie" {
+                    bareCookies.append(value)
+                } else {
+                    headers[name] = value
+                }
+            } else {
+                bareCookies.append(line)
+            }
+        }
+        if !bareCookies.isEmpty {
+            headers["Cookie"] = bareCookies.joined(separator: "; ")
         }
         return headers
     }
