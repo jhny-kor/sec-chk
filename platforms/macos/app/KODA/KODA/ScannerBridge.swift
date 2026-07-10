@@ -4,6 +4,7 @@ import Foundation
 import Security
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 enum ReportExportFormat: String, CaseIterable, Hashable {
     case html
@@ -4196,6 +4197,9 @@ private enum NativeWebScanner {
         var userField = ""
         var passField = ""
         var extraHeaders: [String: String] = [:]
+        // Render each page in a WKWebView so JavaScript-generated (SPA) links are
+        // discovered, mirroring the Python side's headless-browser option.
+        var render = false
 
         static let singlePage = Options()
     }
@@ -4249,6 +4253,7 @@ private enum NativeWebScanner {
         var pagesScanned = 0
         let maxPages = options.crawl ? max(1, options.maxPages) : 1
         let maxDepth = options.crawl ? max(0, options.maxDepth) : 0
+        let renderer: WebPageRenderer? = options.render ? await WebPageRenderer() : nil
 
         while !queue.isEmpty, pagesScanned < maxPages {
             let (current, depth) = queue.removeFirst()
@@ -4286,8 +4291,21 @@ private enum NativeWebScanner {
                         version: delegate.negotiatedTLSVersion
                     ))
                 }
-                if depth < maxDepth, !page.body.isEmpty {
-                    for link in extractLinks(base: page.finalURL, body: page.body) where sameHost(seed, link) && !visited.contains(canonical(link)) {
+                if depth < maxDepth {
+                    var links = extractLinks(base: page.finalURL, body: page.body)
+                    if let renderer {
+                        let injected = options.extraHeaders.first { $0.key.lowercased() == "cookie" }?.value
+                        let cookieHeader = mergeCookieHeader(injected: injected, jar: jar.header)
+                        if let rendered = await renderer.renderedLinks(
+                            url: page.finalURL,
+                            cookieHeader: cookieHeader,
+                            extraHeaders: options.extraHeaders,
+                            timeout: timeout
+                        ) {
+                            links.formUnion(rendered)
+                        }
+                    }
+                    for link in links where sameHost(seed, link) && !visited.contains(canonical(link)) {
                         if let linkURL = URL(string: link) { queue.append((linkURL, depth + 1)) }
                     }
                 }
@@ -4800,11 +4818,87 @@ private final class WebScanTLSDelegate: NSObject, URLSessionDelegate, URLSession
     }
 }
 
+/// Renders a page in an off-screen WKWebView and returns its JavaScript-resolved
+/// `<a href>` links, so the crawler can follow SPA navigation the raw HTML lacks.
+/// This is the macOS-native counterpart to the Python Playwright path — no third-
+/// party dependency, WebKit ships with the OS. Main-actor bound (WKWebView is).
+@MainActor
+private final class WebPageRenderer: NSObject, WKNavigationDelegate {
+    private let webView: WKWebView
+    private var loadContinuation: CheckedContinuation<Bool, Never>?
+
+    override init() {
+        let config = WKWebViewConfiguration()
+        webView = WKWebView(frame: .zero, configuration: config)
+        super.init()
+        webView.navigationDelegate = self
+    }
+
+    func renderedLinks(
+        url: URL,
+        cookieHeader: String,
+        extraHeaders: [String: String],
+        timeout: TimeInterval
+    ) async -> [String]? {
+        await setCookies(from: cookieHeader, url: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.setValue("KODA-web-scanner (+https://github.com/jhny-kor)", forHTTPHeaderField: "User-Agent")
+        for (name, value) in extraHeaders where name.lowercased() != "cookie" {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+
+        let loaded = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            loadContinuation = cont
+            webView.load(request)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                resume(false)  // no-op if navigation already finished
+            }
+        }
+        guard loaded else { return nil }
+
+        // Give a single-page app a moment to render its initial route before scraping links.
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        let script = "Array.from(document.querySelectorAll('a[href]')).map(function(a){return a.href;})"
+        let result = try? await webView.evaluateJavaScript(script)
+        return result as? [String]
+    }
+
+    private func setCookies(from header: String, url: URL) async {
+        guard !header.isEmpty, let host = url.host else { return }
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        for part in header.split(separator: ";") {
+            let pair = part.trimmingCharacters(in: .whitespaces)
+            guard let eq = pair.firstIndex(of: "="), eq != pair.startIndex else { continue }
+            let name = String(pair[..<eq])
+            let value = String(pair[pair.index(after: eq)...])
+            guard let cookie = HTTPCookie(properties: [
+                .domain: host, .path: "/", .name: name, .value: value,
+            ]) else { continue }
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                store.setCookie(cookie) { cont.resume() }
+            }
+        }
+    }
+
+    private func resume(_ ok: Bool) {
+        guard let cont = loadContinuation else { return }
+        loadContinuation = nil
+        cont.resume(returning: ok)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { resume(true) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { resume(false) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { resume(false) }
+}
+
 /// Accessory form for the web-scan alert: URL plus optional crawl and login
 /// controls. Reads back into `NativeWebScanner.Options` for the scan.
 private final class WebScanAccessoryView: NSView {
     private let urlField = NSTextField()
     private let crawlCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let renderCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let maxPagesField = NSTextField()
     private let maxDepthField = NSTextField()
     private let loginURLField = NSTextField()
@@ -4817,6 +4911,7 @@ private final class WebScanAccessoryView: NSView {
         let ko = language == .ko
         urlField.placeholderString = "https://example.com"
         crawlCheck.title = ko ? "하위 페이지 크롤 (같은 호스트)" : "Crawl sub-pages (same host)"
+        renderCheck.title = ko ? "SPA 링크용 JS 렌더링 (WebKit)" : "Render JS for SPA links (WebKit)"
         maxPagesField.stringValue = "50"
         maxDepthField.stringValue = "3"
         loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
@@ -4842,6 +4937,7 @@ private final class WebScanAccessoryView: NSView {
         let stack = NSStackView(views: [
             labeled("URL", urlField),
             crawlCheck,
+            renderCheck,
             nums,
             NSTextField(labelWithString: ko ? "로그인 (선택)" : "Login (optional)"),
             loginURLField,
@@ -4878,6 +4974,7 @@ private final class WebScanAccessoryView: NSView {
     var options: NativeWebScanner.Options {
         var opts = NativeWebScanner.Options()
         opts.crawl = crawlCheck.state == .on
+        opts.render = renderCheck.state == .on
         opts.maxPages = max(1, min(500, Int(maxPagesField.stringValue) ?? 50))
         opts.maxDepth = max(0, min(20, Int(maxDepthField.stringValue) ?? 3))
         opts.loginURL = loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
