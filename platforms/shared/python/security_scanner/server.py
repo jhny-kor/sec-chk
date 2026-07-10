@@ -143,6 +143,11 @@ def web_scan_payload(
     max_depth: int = 3,
     delay: float = 0.3,
     render: bool = False,
+    discover_assets: bool = False,
+    capture_network: bool = False,
+    interact: bool = False,
+    max_clicks: int = 20,
+    seeds: tuple[str, ...] = (),
     auth: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
@@ -184,6 +189,11 @@ def web_scan_payload(
         opener=opener,
         extra_headers=extra_headers or None,
         render=render,
+        discover_assets=discover_assets,
+        capture_network=capture_network,
+        interact=interact,
+        max_clicks=max_clicks,
+        seeds=seeds,
     )
     warnings.extend(crawl_warnings)
     findings = filter_by_min_severity(findings, min_severity)
@@ -351,6 +361,13 @@ def _handler(language: str):
                     max_depth=_bounded_int(request.get("max_depth"), default=3, low=0, high=20),
                     delay=_bounded_float(request.get("delay"), default=0.3, low=0.0, high=10.0),
                     render=bool(request.get("render")),
+                    discover_assets=bool(request.get("discover_assets")),
+                    capture_network=bool(request.get("capture_network")),
+                    interact=bool(request.get("interact")),
+                    max_clicks=_bounded_int(request.get("max_clicks"), default=20, low=1, high=200),
+                    seeds=tuple(s for s in request.get("seeds", []) if isinstance(s, str))
+                    if isinstance(request.get("seeds"), list)
+                    else (),
                     auth=auth,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:

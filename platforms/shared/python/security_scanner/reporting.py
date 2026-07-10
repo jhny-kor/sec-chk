@@ -115,6 +115,11 @@ TRANSLATIONS = {
         "web_crawl_options": "Crawl & login options",
         "web_crawl_enable": "Crawl sub-pages (same host)",
         "web_render_enable": "Render JS for SPA links (needs 'render' extra)",
+        "web_discover_assets": "Mine JS bundles for routes/APIs",
+        "web_capture_network": "Capture network requests (with render)",
+        "web_interact": "Click elements to find routes (with render)",
+        "web_seeds_label": "Extra routes to scan (one URL/path per line)",
+        "web_seeds_placeholder": "/help\n/api/items",
         "web_max_pages": "Max pages",
         "web_max_depth": "Max depth",
         "web_login_legend": "Login (optional)",
@@ -274,6 +279,11 @@ TRANSLATIONS = {
         "web_crawl_options": "크롤·로그인 옵션",
         "web_crawl_enable": "하위 페이지 크롤 (같은 호스트)",
         "web_render_enable": "SPA 링크용 JS 렌더링 ('render' 확장 필요)",
+        "web_discover_assets": "JS 번들에서 라우트/API 추출",
+        "web_capture_network": "네트워크 요청 캡처 (렌더링 시)",
+        "web_interact": "요소 클릭으로 라우트 탐색 (렌더링 시)",
+        "web_seeds_label": "추가 점검 경로 (한 줄에 URL/경로 하나)",
+        "web_seeds_placeholder": "/help\n/api/items",
         "web_max_pages": "최대 페이지",
         "web_max_depth": "최대 깊이",
         "web_login_legend": "로그인 (선택)",
@@ -2574,6 +2584,12 @@ HTML_TEMPLATE = """<!doctype html>
           <summary id="web-crawl-options-label"></summary>
           <label class="scan-web-check"><input id="web-crawl" type="checkbox"> <span id="web-crawl-enable-label"></span></label>
           <label class="scan-web-check"><input id="web-render" type="checkbox"> <span id="web-render-enable-label"></span></label>
+          <label class="scan-web-check"><input id="web-discover-assets" type="checkbox"> <span id="web-discover-assets-label"></span></label>
+          <label class="scan-web-check"><input id="web-capture-network" type="checkbox"> <span id="web-capture-network-label"></span></label>
+          <label class="scan-web-check"><input id="web-interact" type="checkbox"> <span id="web-interact-label"></span></label>
+          <label class="scan-web-headers"><span id="web-seeds-label"></span>
+            <textarea id="web-seeds" rows="2" autocomplete="off"></textarea>
+          </label>
           <div class="scan-web-nums">
             <label><span id="web-max-pages-label"></span> <input id="web-max-pages" type="number" min="1" max="500" value="50"></label>
             <label><span id="web-max-depth-label"></span> <input id="web-max-depth" type="number" min="0" max="20" value="3"></label>
@@ -2934,6 +2950,11 @@ HTML_TEMPLATE = """<!doctype html>
       setText("web-crawl-options-label", activeLabels.web_crawl_options);
       setText("web-crawl-enable-label", activeLabels.web_crawl_enable);
       setText("web-render-enable-label", activeLabels.web_render_enable);
+      setText("web-discover-assets-label", activeLabels.web_discover_assets);
+      setText("web-capture-network-label", activeLabels.web_capture_network);
+      setText("web-interact-label", activeLabels.web_interact);
+      setText("web-seeds-label", activeLabels.web_seeds_label);
+      byId("web-seeds").placeholder = activeLabels.web_seeds_placeholder;
       setText("web-max-pages-label", activeLabels.web_max_pages);
       setText("web-max-depth-label", activeLabels.web_max_depth);
       setText("web-login-legend-label", activeLabels.web_login_legend);
@@ -3512,6 +3533,10 @@ HTML_TEMPLATE = """<!doctype html>
             min_severity: "info",
             crawl: byId("web-crawl").checked,
             render: byId("web-render").checked,
+            discover_assets: byId("web-discover-assets").checked,
+            capture_network: byId("web-capture-network").checked,
+            interact: byId("web-interact").checked,
+            seeds: byId("web-seeds").value.split(/\r?\n/).map(function(s){return s.trim();}).filter(Boolean),
             max_pages: Number(byId("web-max-pages").value) || 50,
             max_depth: Number(byId("web-max-depth").value) || 3,
             auth: {

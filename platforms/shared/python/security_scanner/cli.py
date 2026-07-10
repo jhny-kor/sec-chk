@@ -378,6 +378,11 @@ def main(argv: list[str] | None = None) -> int:
             opener=opener,
             extra_headers=extra_headers or None,
             render=args.render,
+            seeds=tuple(args.seed),
+            discover_assets=args.discover_assets,
+            capture_network=args.capture_network,
+            interact=args.interact,
+            max_clicks=args.max_clicks,
         )
         findings = crawl_findings
         warnings.extend(crawl_warnings)
@@ -594,6 +599,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--render",
         action="store_true",
         help="render pages in headless Chromium to follow JS/SPA links (needs the 'render' extra)",
+    )
+    web_scan.add_argument(
+        "--discover-assets",
+        action="store_true",
+        help="mine same-host JS bundles for route/API paths (no browser needed)",
+    )
+    web_scan.add_argument(
+        "--capture-network",
+        action="store_true",
+        help="with --render, record same-host URLs the page fetches",
+    )
+    web_scan.add_argument(
+        "--interact",
+        action="store_true",
+        help="with --render, click bounded elements to discover button/router routes",
+    )
+    web_scan.add_argument("--max-clicks", type=int, default=20, help="max elements to click per page with --interact (default 20)")
+    web_scan.add_argument(
+        "--seed",
+        action="append",
+        default=[],
+        metavar="URL",
+        help="extra same-host URL/path to scan (known route, sitemap entry); repeatable",
     )
     web_scan.add_argument("--max-pages", type=int, default=50, help="max pages to crawl (default 50)")
     web_scan.add_argument("--max-depth", type=int, default=3, help="max link depth to crawl (default 3)")

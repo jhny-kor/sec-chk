@@ -79,6 +79,12 @@ def crawl_web(
     opener: urllib.request.OpenerDirector | None = None,
     extra_headers: Mapping[str, str] | None = None,
     render: bool = False,
+    seeds: Sequence[str] = (),
+    discover_assets: bool = False,
+    capture_network: bool = False,
+    interact: bool = False,
+    max_clicks: int = 20,
+    max_assets: int = 20,
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
@@ -88,10 +94,23 @@ def crawl_web(
     that repeat across pages (e.g. a missing CSP header) are collapsed to one
     representative each. Returns ``(findings, warnings, pages_scanned)``.
 
-    When ``render`` is true and the optional Playwright extra is installed, each
-    page is also loaded in a headless browser so JavaScript-rendered (SPA) links
-    are discovered. If Playwright is unavailable the crawl degrades to the
-    stdlib link extraction with a one-time warning.
+    Link discovery combines several sources so JavaScript-heavy apps (SPAs) that
+    expose no ``<a href>`` links are still reached:
+
+    - ``render``: load each page in a headless browser (Playwright extra) to see
+      JS-rendered anchors.
+    - ``capture_network``: while rendering, record same-host URLs the page
+      fetches (its API/route surface). Requires ``render``.
+    - ``interact``: while rendering, click bounded candidate elements and record
+      routes they navigate to (``max_clicks`` cap). Requires ``render``.
+    - ``discover_assets``: fetch the page's same-host JS bundles and extract
+      path-like route/endpoint strings (``max_assets`` cap). Works without a
+      browser.
+    - ``seeds``: extra same-host URLs to enqueue up front (known routes, a
+      sitemap dump, an OpenAPI path list).
+
+    Falls back to stdlib link extraction with a one-time warning when the
+    browser-based options are requested but Playwright is unavailable.
     """
 
     parsed = urllib.parse.urlparse(seed_url)
@@ -110,8 +129,14 @@ def crawl_web(
     tls_checked_hosts: set[str] = set()
     visited: set[str] = set()
     queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
+    # E: enqueue caller-supplied same-host seeds (known routes / sitemap / API paths).
+    for seed in seeds:
+        absolute = urllib.parse.urljoin(seed_url, seed)
+        if _same_host(seed_url, absolute):
+            queue.append((absolute, 0))
     pages_scanned = 0
     render_warned = False
+    assets_seen: set[str] = set()  # A: JS bundles already scraped (global budget)
 
     while queue and pages_scanned < max_pages:
         current, depth = queue.popleft()
@@ -170,19 +195,40 @@ def crawl_web(
             warnings.extend(tls_warnings)
 
         if depth < max_depth:
+            candidates: set[str] = set()
             link_source = body
             if render:
-                rendered, render_error = _render_page(final_url, timeout=timeout, extra_headers=headers)
+                rendered, extra_urls, render_error = _render_page(
+                    final_url,
+                    timeout=timeout,
+                    extra_headers=headers,
+                    capture_network=capture_network,
+                    interact=interact,
+                    max_clicks=max_clicks,
+                )
                 if rendered is not None:
                     # Rendered DOM is a superset of the raw HTML for link discovery.
                     link_source = rendered
+                    candidates.update(extra_urls)  # C/D: network + interaction URLs
                 elif render_error and not render_warned:
                     warnings.append(render_error)
                     render_warned = True
             if link_source:
-                for link in _extract_links(final_url, link_source):
-                    if _same_host(seed_url, link) and _canonical(link) not in visited:
-                        queue.append((link, depth + 1))
+                candidates.update(_extract_links(final_url, link_source))
+            if discover_assets and body:
+                # A: mine same-host JS bundles for route/endpoint strings.
+                candidates.update(
+                    _discover_asset_routes(
+                        final_url, body, opener, headers, timeout, assets_seen, max_assets
+                    )
+                )
+            for link in candidates:
+                if (
+                    _same_host(seed_url, link)
+                    and not _is_static_asset(link)
+                    and _canonical(link) not in visited
+                ):
+                    queue.append((link, depth + 1))
 
     findings = _dedupe_findings(collected)
     findings.sort(key=lambda finding: finding.sort_key())
@@ -575,17 +621,36 @@ def _ensure_bundled_browsers_path() -> None:
             return
 
 
+# Injected before interaction (D): record every route the SPA router pushes so
+# clicks that navigate via history.pushState are captured without leaving the page.
+_ROUTE_HOOK_JS = """
+window.__koda_routes = [];
+for (const fn of ['pushState', 'replaceState']) {
+  const orig = history[fn];
+  history[fn] = function(state, title, url) {
+    try { if (url) window.__koda_routes.push(new URL(url, location.href).href); } catch (e) {}
+    return orig.apply(this, arguments);
+  };
+}
+"""
+
+
 def _render_page(
     url: str,
     *,
     timeout: float,
     extra_headers: Mapping[str, str] | None = None,
-) -> tuple[str | None, str]:
-    """Return ``(rendered_html, error)`` for ``url`` via headless Chromium.
+    capture_network: bool = False,
+    interact: bool = False,
+    max_clicks: int = 20,
+) -> tuple[str | None, set[str], str]:
+    """Render ``url`` in headless Chromium; return ``(html, extra_urls, error)``.
 
-    Uses the optional Playwright extra. Returns ``(None, message)`` when
-    Playwright is not installed or rendering fails, so the caller can fall back
-    to stdlib link extraction. ``(html, "")`` on success.
+    ``extra_urls`` holds URLs discovered beyond the DOM anchors: same-origin
+    requests the page made (``capture_network``) and routes reached by clicking
+    bounded candidate elements (``interact``). Returns ``(None, set(), message)``
+    when Playwright is unavailable or rendering fails, so the caller falls back
+    to stdlib extraction.
     """
 
     _ensure_bundled_browsers_path()
@@ -593,12 +658,13 @@ def _render_page(
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return None, (
+        return None, set(), (
             "JS 렌더링 크롤을 건너뜁니다: Playwright 미설치. "
             "설치: pip install \"local-security-scanner[render]\" && python -m playwright install chromium"
         )
 
     headers = {k: v for k, v in (extra_headers or {}).items() if k.lower() != "user-agent"}
+    captured: set[str] = set()
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -607,35 +673,85 @@ def _render_page(
                 if headers:
                     context.set_extra_http_headers(headers)
                 page = context.new_page()
+                if capture_network:
+                    page.on("request", lambda req: captured.add(req.url))
+                if interact:
+                    page.add_init_script(_ROUTE_HOOK_JS)
                 page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
-                return page.content(), ""
+                html = page.content()
+                if interact:
+                    captured.update(_interact_page(page, max_clicks))
+                return html, captured, ""
             finally:
                 browser.close()
     except PlaywrightError as exc:
-        return None, f"JS 렌더링 실패 {url}: {exc}"
+        return None, set(), f"JS 렌더링 실패 {url}: {exc}"
     except Exception as exc:  # defensive: rendering must never abort the scan
-        return None, f"JS 렌더링 오류 {url}: {exc}"
+        return None, set(), f"JS 렌더링 오류 {url}: {exc}"
+
+
+def _interact_page(page, max_clicks: int) -> set[str]:
+    """D: click bounded candidate elements, collecting routes they navigate to.
+
+    Best-effort and defensive — a single click that throws, opens a dialog, or
+    navigates away never aborts the crawl. Records router pushes (via the init
+    hook) and any full URL change, resetting back to the start page after a
+    hard navigation so later candidates start from the same state.
+    """
+
+    found: set[str] = set()
+    start = page.url
+    try:
+        elements = page.query_selector_all("a:not([href]), button, [role=button], [onclick]")
+    except Exception:
+        return found
+    for element in elements[:max_clicks]:
+        try:
+            element.click(timeout=1000, no_wait_after=True)
+            page.wait_for_timeout(150)
+        except Exception:
+            continue
+        try:
+            if page.url != start:
+                found.add(page.url)
+                page.go_back(wait_until="domcontentloaded", timeout=2000)
+        except Exception:
+            pass
+    try:
+        routes = page.evaluate("window.__koda_routes || []")
+        found.update(routes)
+    except Exception:
+        pass
+    return found
 
 
 class _LinkParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.hrefs: list[str] = []
+        self.scripts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag != "a":
-            return
-        for name, value in attrs:
-            if name == "href" and value:
-                self.hrefs.append(value)
+        data = dict(attrs)
+        if tag == "a" and data.get("href"):
+            self.hrefs.append(data["href"])
+        elif tag == "script" and data.get("src"):
+            self.scripts.append(data["src"])
 
 
-def _extract_links(base_url: str, body: bytes | str) -> set[str]:
+def _parse_html(base_url: str, body: bytes | str) -> _LinkParser | None:
     parser = _LinkParser()
     text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
     try:
         parser.feed(text)
     except Exception:
+        return None
+    return parser
+
+
+def _extract_links(base_url: str, body: bytes | str) -> set[str]:
+    parser = _parse_html(base_url, body)
+    if parser is None:
         return set()
     links: set[str] = set()
     for href in parser.hrefs:
@@ -644,10 +760,81 @@ def _extract_links(base_url: str, body: bytes | str) -> set[str]:
     return links
 
 
+# Path-like string literals inside JS bundles (route tables, fetch() calls).
+_ROUTE_LITERAL_RE = re.compile(r"""["'`](/[A-Za-z0-9][\w\-/\[\]]*)["'`]""")
+# Segments that are framework/asset noise, not app routes/endpoints.
+_ROUTE_NOISE_RE = re.compile(r"(^/_)|(/node_modules/)|(\.[A-Za-z0-9]{1,5}$)")
+
+
+def _read_asset(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    headers: Mapping[str, str],
+    timeout: float,
+) -> str | None:
+    """Read a JS/text asset in full (not just HTML like ``_fetch``) for scraping."""
+    request = urllib.request.Request(url, headers=dict(headers), method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+    except (urllib.error.HTTPError, urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return None
+
+
+def _discover_asset_routes(
+    page_url: str,
+    body: bytes | str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+    assets_seen: set[str],
+    max_assets: int,
+) -> set[str]:
+    """A: mine same-host JS bundles referenced by ``body`` for route/API paths.
+
+    Fetches each not-yet-seen same-host ``<script src>`` (bounded by
+    ``max_assets`` across the whole crawl), extracts quoted path literals, drops
+    framework/asset noise, and returns them as absolute same-host URLs.
+    """
+
+    parser = _parse_html(page_url, body)
+    if parser is None:
+        return set()
+    found: set[str] = set()
+    for src in parser.scripts:
+        if len(assets_seen) >= max_assets:
+            break
+        asset_url = urllib.parse.urldefrag(urllib.parse.urljoin(page_url, src)).url
+        if not _same_host(page_url, asset_url) or asset_url in assets_seen:
+            continue
+        assets_seen.add(asset_url)
+        text = _read_asset(opener, asset_url, headers, timeout)
+        if text is None:
+            continue
+        for path in _ROUTE_LITERAL_RE.findall(text):
+            if path == "/" or _ROUTE_NOISE_RE.search(path):
+                continue
+            found.add(urllib.parse.urljoin(page_url, path))
+    return found
+
+
 def _same_host(seed_url: str, candidate: str) -> bool:
     seed = urllib.parse.urlparse(seed_url)
     other = urllib.parse.urlparse(candidate)
     return other.scheme in {"http", "https"} and other.netloc == seed.netloc
+
+
+# Static assets carry the same per-host headers as pages, so scanning them adds
+# noise and wasted requests (and rendering a font/image errors). Discover them,
+# but keep them out of the scan frontier.
+_STATIC_ASSET_RE = re.compile(
+    r"\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|eot|mp4|webm|pdf|zip|gz)(?:$|\?)",
+    re.IGNORECASE,
+)
+
+
+def _is_static_asset(url: str) -> bool:
+    return bool(_STATIC_ASSET_RE.search(urllib.parse.urlparse(url).path))
 
 
 def _canonical(url: str) -> str:
