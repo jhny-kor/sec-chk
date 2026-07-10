@@ -4280,6 +4280,7 @@ private enum NativeWebScanner {
         }
         if options.probePaths {
             collected.append(contentsOf: await probeSensitivePaths(seed: seed, session: session, options: options, jar: jar, timeout: timeout))
+            collected.append(contentsOf: await probeGraphQL(seed: seed, session: session, options: options, jar: jar, timeout: timeout))
         }
 
         while !queue.isEmpty, pagesScanned < maxPages {
@@ -4303,6 +4304,9 @@ private enum NativeWebScanner {
             case .success(let page):
                 pagesScanned += 1
                 collected.append(contentsOf: analyze(url: page.finalURL.absoluteString, headers: page.headers, cookies: page.cookies))
+                if !page.body.isEmpty {
+                    collected.append(contentsOf: analyzeBody(url: page.finalURL, html: page.body))
+                }
                 if current.scheme?.lowercased() == "http", page.finalURL.scheme?.lowercased() != "https" {
                     collected.append(finding(
                         "web.no-https-redirect", "medium", "HTTP가 HTTPS로 리다이렉트되지 않음",
@@ -4838,7 +4842,111 @@ private enum NativeWebScanner {
         return components.url
     }
 
+    // --- Tier 2: mixed content, SRI, CSRF-less forms, GraphQL introspection ---
+
+    /// Passive HTML checks mirroring the Python `analyze_body`.
+    static func analyzeBody(url: URL, html: String) -> [NativeFinding] {
+        let isHTTPS = url.scheme?.lowercased() == "https"
+        var findings: [NativeFinding] = []
+        var mixed: [String] = []
+        var sriMissing: [String] = []
+
+        func consider(_ tag: String, needsSRI: Bool) {
+            for element in allTags(tag, html) {
+                let attr = tag == "link" ? "href" : "src"
+                guard let raw = attribute(attr, in: element), !raw.isEmpty,
+                      let resolved = URL(string: raw, relativeTo: url)?.absoluteURL else { continue }
+                if tag == "link", !(attribute("rel", in: element)?.lowercased().contains("stylesheet") ?? false) { continue }
+                if isHTTPS, resolved.scheme?.lowercased() == "http" { mixed.append(resolved.absoluteString) }
+                if needsSRI, attribute("integrity", in: element) == nil,
+                   let host = resolved.host, host != url.host,
+                   ["http", "https"].contains(resolved.scheme?.lowercased() ?? "") {
+                    sriMissing.append(resolved.absoluteString)
+                }
+            }
+        }
+        consider("script", needsSRI: true)
+        consider("link", needsSRI: true)
+        for tag in ["img", "iframe", "source", "audio", "video"] { consider(tag, needsSRI: false) }
+
+        if !mixed.isEmpty {
+            findings.append(finding("web.mixed-content", "medium", "HTTPS 페이지가 HTTP 리소스를 로드(혼합 콘텐츠)", url.absoluteString,
+                evidence: Array(Set(mixed)).prefix(5).joined(separator: "; "),
+                recommendation: "모든 서브리소스를 HTTPS로 제공하세요. http:// 스크립트/스타일/미디어 URL을 업그레이드하거나 제거하세요."))
+        }
+        if !sriMissing.isEmpty {
+            findings.append(finding("web.subresource-integrity-missing", "low", "Subresource Integrity 없는 교차 출처 스크립트/스타일", url.absoluteString,
+                evidence: Array(Set(sriMissing)).prefix(5).joined(separator: "; "),
+                recommendation: "서드파티 <script>/<link>에 'integrity'(및 'crossorigin') 속성을 추가하세요."))
+        }
+
+        var csrfReported = false
+        var passwordOverHTTP = false
+        for form in allBlocks("form", html) {
+            let openTag = firstTag("form", form) ?? ""
+            let method = (attribute("method", in: openTag) ?? "get").lowercased()
+            var hasPassword = false
+            var hasToken = false
+            for input in allTags("input", form) {
+                if (attribute("type", in: input)?.lowercased() ?? "text") == "password" { hasPassword = true }
+                let name = attribute("name", in: input)?.lowercased() ?? ""
+                if ["csrf", "xsrf", "authenticity", "nonce", "_token", "token"].contains(where: name.contains) { hasToken = true }
+            }
+            if method == "post", !hasToken, !csrfReported {
+                findings.append(finding("web.form-missing-csrf-token", "low", "POST 폼에 CSRF 토큰 필드가 없음", url.absoluteString,
+                    evidence: "<form method=post>에 csrf/token 히든 필드가 없습니다.",
+                    recommendation: "상태 변경 폼에 CSRF 토큰을 포함하거나 SameSite 쿠키 + 검증 헤더를 사용하세요."))
+                csrfReported = true
+            }
+            if hasPassword, !isHTTPS { passwordOverHTTP = true }
+        }
+        if passwordOverHTTP {
+            findings.append(finding("web.password-input-over-http", "high", "비밀번호 필드가 평문 HTTP로 제공됨", url.absoluteString,
+                evidence: "http:// 페이지에 password <input>이 있습니다.",
+                recommendation: "비밀번호 필드가 있는 페이지는 반드시 HTTPS로만 제공하세요."))
+        }
+        return findings
+    }
+
+    private static let graphqlPaths = ["graphql", "api/graphql", "v1/graphql"]
+
+    private static func probeGraphQL(
+        seed: URL, session: URLSession, options: Options, jar: CookieJar, timeout: TimeInterval
+    ) async -> [NativeFinding] {
+        guard let origin = originURL(seed) else { return [] }
+        let base = origin.absoluteString
+        for path in graphqlPaths {
+            guard let url = probeURL(base, path) else { continue }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = timeout
+            request.httpShouldHandleCookies = false
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            applyAuthHeaders(to: &request, jar: jar, options: options)
+            request.httpBody = #"{"query":"{__schema{queryType{name}}}"}"#.data(using: .utf8)
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard response is HTTPURLResponse else { continue }
+                let body = String(decoding: data.prefix(8192), as: UTF8.self)
+                if body.contains("\"__schema\"") || (body.contains("\"queryType\"") && body.contains("\"data\"")) {
+                    return [finding("web.graphql-introspection-enabled", "medium", "GraphQL 인트로스펙션이 활성화됨", url.absoluteString,
+                        evidence: "POST /\(path) 응답에 채워진 __schema 포함.",
+                        recommendation: "프로덕션에서 인트로스펙션을 비활성화해 스키마가 공개 열거되지 않게 하세요.")]
+                }
+            } catch { continue }
+        }
+        return []
+    }
+
     // --- small regex helpers for HTML tag/attribute extraction ---------------
+
+    /// All `<tag>...</tag>` blocks (non-greedy), used for per-form input scanning.
+    private static func allBlocks(_ tag: String, _ html: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: "<\(tag)[^>]*>[\\s\\S]*?</\(tag)>", options: [.caseInsensitive]) else { return [] }
+        let range = NSRange(html.startIndex..., in: html)
+        return regex.matches(in: html, range: range).compactMap { Range($0.range, in: html).map { String(html[$0]) } }
+    }
 
     private static func firstMatch(_ pattern: String, in text: String) -> Range<String.Index>? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }

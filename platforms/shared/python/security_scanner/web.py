@@ -154,6 +154,7 @@ def crawl_web(
                 queue.append((url, 0))
     if probe_paths:
         collected.extend(_probe_sensitive_paths(seed_url, opener, headers, timeout, target))
+        collected.extend(_probe_graphql(seed_url, opener, headers, timeout, target))
 
     while queue and pages_scanned < max_pages:
         current, depth = queue.popleft()
@@ -188,6 +189,8 @@ def crawl_web(
         pages_scanned += 1
 
         collected.extend(analyze_response(final_url, header_items, set_cookies, target=target))
+        if body:
+            collected.extend(analyze_body(final_url, body, target=target))
 
         if urllib.parse.urlparse(current).scheme == "http" and urllib.parse.urlparse(final_url).scheme != "https":
             collected.append(
@@ -273,6 +276,103 @@ def analyze_response(
     findings.extend(_cookie_flags(url, set_cookies, is_https, target))
     findings.extend(_information_disclosure(url, lowered, target))
     findings.extend(_cors(url, lowered, target))
+    return findings
+
+
+class _BodyParser(HTMLParser):
+    """Collect subresources and forms from HTML for Tier-2 body checks."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # (tag, url, has_integrity, is_subresource_needing_sri)
+        self.subresources: list[tuple[str, str, bool, bool]] = []
+        self.forms: list[dict[str, object]] = []
+        self._form: dict[str, object] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        data = {k: (v or "") for k, v in attrs}
+        if tag == "script" and data.get("src"):
+            self.subresources.append(("script", data["src"], "integrity" in data, True))
+        elif tag == "link" and data.get("href") and "stylesheet" in data.get("rel", "").lower():
+            self.subresources.append(("link", data["href"], "integrity" in data, True))
+        elif tag in {"img", "iframe", "source", "audio", "video"} and data.get("src"):
+            # Mixed-content matters; SRI does not apply to these.
+            self.subresources.append((tag, data["src"], True, False))
+        elif tag == "form":
+            self._form = {"method": data.get("method", "get").lower(), "has_password": False, "has_token": False}
+        elif tag == "input" and self._form is not None:
+            itype = data.get("type", "text").lower()
+            name = data.get("name", "").lower()
+            if itype == "password":
+                self._form["has_password"] = True
+            if any(token in name for token in ("csrf", "xsrf", "authenticity", "nonce", "_token", "token")):
+                self._form["has_token"] = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form" and self._form is not None:
+            self.forms.append(self._form)
+            self._form = None
+
+
+def analyze_body(url: str, body: bytes | str, *, target: str = "") -> list[Finding]:
+    """Tier-2 passive HTML checks: mixed content, missing SRI, and CSRF-less forms."""
+    text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
+    parser = _BodyParser()
+    try:
+        parser.feed(text)
+    except Exception:
+        return []
+
+    page = urllib.parse.urlparse(url)
+    is_https = page.scheme == "https"
+    findings: list[Finding] = []
+
+    mixed: list[str] = []
+    sri_missing: list[str] = []
+    for _tag, src, has_integrity, needs_sri in parser.subresources:
+        absolute = urllib.parse.urljoin(url, src)
+        parsed = urllib.parse.urlparse(absolute)
+        if is_https and parsed.scheme == "http":
+            mixed.append(absolute)
+        if needs_sri and not has_integrity and parsed.scheme in {"http", "https"} and parsed.netloc and parsed.netloc != page.netloc:
+            sri_missing.append(absolute)
+
+    if mixed:
+        findings.append(
+            _finding(
+                "web.mixed-content", "medium", "HTTPS page loads resources over HTTP (mixed content)",
+                url, target=target, evidence="; ".join(sorted(set(mixed))[:5]),
+                recommendation="Serve every subresource over HTTPS; upgrade or remove http:// script/style/media URLs.",
+            )
+        )
+    if sri_missing:
+        findings.append(
+            _finding(
+                "web.subresource-integrity-missing", "low", "Cross-origin script/style without Subresource Integrity",
+                url, target=target, evidence="; ".join(sorted(set(sri_missing))[:5]),
+                recommendation="Add an 'integrity' (and 'crossorigin') attribute to third-party <script>/<link> tags.",
+            )
+        )
+
+    for form in parser.forms:
+        if form["method"] == "post" and not form["has_token"]:
+            findings.append(
+                _finding(
+                    "web.form-missing-csrf-token", "low", "POST form has no visible CSRF token field",
+                    url, target=target,
+                    evidence="A <form method=post> exposed no csrf/token hidden field.",
+                    recommendation="Include an anti-CSRF token in state-changing forms (or rely on SameSite cookies + a verified header).",
+                )
+            )
+            break
+    if not is_https and any(form["has_password"] for form in parser.forms):
+        findings.append(
+            _finding(
+                "web.password-input-over-http", "high", "Password field served over plain HTTP",
+                url, target=target, evidence="A password <input> was served on an http:// page.",
+                recommendation="Serve any page with a password field exclusively over HTTPS.",
+            )
+        )
     return findings
 
 
@@ -980,6 +1080,44 @@ def _probe_sensitive_paths(
                 recommendation="Block public access to this path (deny rule / auth) and remove it from the web root.",
             )
         )
+    return findings
+
+
+_GRAPHQL_PATHS = ("/graphql", "/api/graphql", "/v1/graphql")
+_GRAPHQL_INTROSPECTION = b'{"query":"{__schema{queryType{name}}}"}'
+
+
+def _probe_graphql(
+    seed_url: str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+    target: str,
+) -> list[Finding]:
+    """Active check: POST an introspection query to common GraphQL endpoints."""
+    origin = _origin(seed_url)
+    findings: list[Finding] = []
+    for path in _GRAPHQL_PATHS:
+        url = urllib.parse.urljoin(origin, path)
+        post_headers = {**dict(headers), "Content-Type": "application/json"}
+        request = urllib.request.Request(url, data=_GRAPHQL_INTROSPECTION, headers=post_headers, method="POST")
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                body = response.read(8192).decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            body = exc.read(8192).decode("utf-8", "replace") if exc.fp else ""
+        except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+            continue
+        if '"__schema"' in body or ('"queryType"' in body and '"data"' in body):
+            findings.append(
+                _finding(
+                    "web.graphql-introspection-enabled", "medium",
+                    "GraphQL introspection is enabled", url, target=target,
+                    evidence=f"POST {path} returned a populated __schema.",
+                    recommendation="Disable introspection in production so the schema is not publicly enumerable.",
+                )
+            )
+            break
     return findings
 
 
