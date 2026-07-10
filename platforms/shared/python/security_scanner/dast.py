@@ -102,21 +102,74 @@ def findings_from_zap_json(path: Path, *, target_url: str = "") -> list[Finding]
         severity = _severity_from_risk(risk)
         name = str(alert.get("name") or alert.get("alert") or "ZAP baseline finding")
         plugin_id = str(alert.get("pluginid") or alert.get("pluginId") or "unknown")
-        uri = _first_uri(alert) or target_url
-        evidence = str(alert.get("evidence") or alert.get("param") or uri)
+        instances = _alert_instances(alert)
+        uri = (instances[0]["uri"] if instances else "") or _first_uri(alert) or target_url
         findings.append(
             Finding(
                 rule_id=f"dast.zap.{plugin_id}",
                 category="configuration",
                 severity=severity,
-                title=f"ZAP baseline: {name}",
+                title=f"ZAP: {name}",
                 path=Path(uri or target_url or path),
-                evidence=evidence,
-                description=_plain_text(str(alert.get("desc") or alert.get("description") or "")),
+                evidence=_format_instances(alert, instances),
+                description=_format_description(alert, plugin_id),
                 recommendation=_plain_text(str(alert.get("solution") or alert.get("recommendation") or "Review the ZAP alert and remediate the affected endpoint.")),
             )
         )
     return findings
+
+
+def _alert_instances(alert: dict[str, object]) -> list[dict[str, str]]:
+    """All affected instances with method/param/attack/evidence preserved."""
+    raw = alert.get("instances")
+    result: list[dict[str, str]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and item.get("uri"):
+                result.append(
+                    {
+                        "uri": str(item.get("uri") or ""),
+                        "method": str(item.get("method") or "GET"),
+                        "param": str(item.get("param") or ""),
+                        "attack": str(item.get("attack") or ""),
+                        "evidence": str(item.get("evidence") or ""),
+                    }
+                )
+    return result
+
+
+def _format_instances(alert: dict[str, object], instances: list[dict[str, str]], limit: int = 20) -> str:
+    """Preserve every affected URL (not just the first) with request detail."""
+    if not instances:
+        return str(alert.get("evidence") or alert.get("param") or alert.get("uri") or "")
+    lines: list[str] = []
+    for inst in instances[:limit]:
+        line = f"{inst['method']} {inst['uri']}".strip()
+        extra = [f"{k}={inst[k]}" for k in ("param", "attack", "evidence") if inst[k]]
+        if extra:
+            line += " (" + ", ".join(extra) + ")"
+        lines.append(line)
+    if len(instances) > limit:
+        lines.append(f"... +{len(instances) - limit} more affected URL(s)")
+    return "\n".join(lines)
+
+
+def _format_description(alert: dict[str, object], plugin_id: str) -> str:
+    """Prepend ZAP classification metadata (CWE/WASC/confidence/plugin) to the text."""
+    meta: list[str] = []
+    for key, label in (("cweid", "CWE"), ("wascid", "WASC"), ("confidence", "Confidence")):
+        value = str(alert.get(key) or "").strip()
+        if value and value not in {"-1", "0"}:
+            meta.append(f"{label}={value}")
+    meta.append(f"PluginID={plugin_id}")
+    parts = [f"[{', '.join(meta)}]"]
+    desc = _plain_text(str(alert.get("desc") or alert.get("description") or ""))
+    if desc:
+        parts.append(desc)
+    reference = _plain_text(str(alert.get("reference") or ""))
+    if reference:
+        parts.append(f"Reference: {reference}")
+    return "\n".join(parts)
 
 
 def render_zap_findings_json(findings: list[Finding] | tuple[Finding, ...]) -> str:

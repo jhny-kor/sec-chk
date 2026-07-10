@@ -24,6 +24,7 @@ from __future__ import annotations
 import http.cookiejar
 import os
 import re
+import secrets
 import socket
 import ssl
 import sys
@@ -95,6 +96,7 @@ def crawl_web(
     scan_js_secrets: bool = False,
     ingest_sitemap: bool = False,
     probe_paths: bool = False,
+    active: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
@@ -198,6 +200,9 @@ def crawl_web(
         collected.extend(analyze_response(final_url, header_items, set_cookies, target=target))
         if body:
             collected.extend(analyze_body(final_url, body, target=target))
+        if active and urllib.parse.urlparse(final_url).query:
+            # Opt-in active verification of this URL's query parameters.
+            collected.extend(active_probe(final_url, opener, headers, timeout, target))
 
         if urllib.parse.urlparse(current).scheme == "http" and urllib.parse.urlparse(final_url).scheme != "https":
             collected.append(
@@ -1230,6 +1235,144 @@ def _fetch_meta(
 def _origin(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+# --- Active verification (opt-in): sends bounded, non-destructive payloads -----
+
+# DB error signatures used for error-based SQL injection detection.
+_SQL_ERROR_RE = re.compile(
+    r"(SQL syntax|mysql_fetch|valid MySQL result|ORA-\d{5}|Oracle error|"
+    r"PostgreSQL.*ERROR|PG::SyntaxError|SQLite/JDBC|SQLite3::|"
+    r"Unclosed quotation mark|quoted string not properly terminated|"
+    r"Microsoft OLE DB Provider|ODBC SQL Server Driver|syntax error at or near)",
+    re.IGNORECASE,
+)
+_REDIRECT_PARAM_NAMES = {
+    "redirect", "redirect_uri", "redirecturl", "url", "next", "return", "returnurl",
+    "returnto", "return_to", "dest", "destination", "continue", "redir", "goto", "u", "r",
+}
+_ACTIVE_OOB_HOST = "koda-open-redirect.example"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Stops urllib from following redirects so open-redirect can be observed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401,N802
+        return None
+
+
+def active_probe(
+    url: str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+    target: str,
+    *,
+    max_params: int = 15,
+) -> list[Finding]:
+    """Send bounded, non-destructive attack payloads to a URL's query params.
+
+    Verifies (not just guesses) reflected XSS, error-based SQL injection, and
+    open redirect by observing the server's response. GET-only, no data-changing
+    requests, capped per parameter. Opt-in and authorization-gated by the caller;
+    comprehensive active scanning belongs to the ZAP full/api modes.
+    """
+
+    parsed = urllib.parse.urlparse(url)
+    params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    if not params:
+        return []
+
+    findings: list[Finding] = []
+    token = secrets.token_hex(4)
+    no_redirect_opener = urllib.request.build_opener(_NoRedirect())
+    for name in list(params)[:max_params]:
+        original = params[name][0] if params[name] else ""
+
+        # Reflected XSS: a unique marker with HTML-significant chars reflected raw.
+        # No single quote, so it does not collide with the SQL-quote probe below.
+        marker = f"koda{token}\"><kdx>"
+        body = _probe_body(opener, _with_query_param(parsed, name, marker), headers, timeout)
+        if body and marker in body:
+            findings.append(
+                _finding(
+                    "web.reflected-xss-verified", "high",
+                    "Reflected input is returned unencoded (verified XSS vector)",
+                    url, target=target,
+                    evidence=f"param '{name}': marker reflected without encoding ({marker})",
+                    recommendation="Context-encode all user input on output and add a strict CSP.",
+                )
+            )
+
+        # Error-based SQL injection: a single quote provokes a DB error the
+        # unmodified request did not.
+        injected = _probe_body(opener, _with_query_param(parsed, name, original + "'"), headers, timeout)
+        if injected and _SQL_ERROR_RE.search(injected):
+            baseline = _probe_body(opener, _with_query_param(parsed, name, original), headers, timeout)
+            if not (baseline and _SQL_ERROR_RE.search(baseline)):
+                findings.append(
+                    _finding(
+                        "web.sql-injection-error-verified", "high",
+                        "A single quote triggers a database error (verified SQL injection vector)",
+                        url, target=target,
+                        evidence=f"param '{name}': SQL error signature appeared only with a trailing quote",
+                        recommendation="Use parameterized queries / prepared statements; never build SQL from raw input.",
+                    )
+                )
+
+        # Open redirect: a redirect-like param that sends the browser off-site.
+        if name.lower() in _REDIRECT_PARAM_NAMES:
+            location = _probe_location(
+                no_redirect_opener, _with_query_param(parsed, name, f"https://{_ACTIVE_OOB_HOST}/"), headers, timeout
+            )
+            if location and _ACTIVE_OOB_HOST in location:
+                findings.append(
+                    _finding(
+                        "web.open-redirect-verified", "medium",
+                        "Redirect parameter sends users to an external site (verified open redirect)",
+                        url, target=target,
+                        evidence=f"param '{name}' -> Location: {location}",
+                        recommendation="Allow only relative paths or an allow-list of destinations for redirect parameters.",
+                    )
+                )
+    return findings
+
+
+def _with_query_param(parsed: urllib.parse.ParseResult, name: str, value: str) -> str:
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    query[name] = [value]
+    new_query = urllib.parse.urlencode(query, doseq=True)
+    return urllib.parse.urlunparse(parsed._replace(query=new_query))
+
+
+def _probe_body(
+    opener: urllib.request.OpenerDirector, url: str, headers: Mapping[str, str], timeout: float
+) -> str | None:
+    request = urllib.request.Request(url, headers=dict(headers), method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        # A 500 with a SQL error in the body is exactly what we want to inspect.
+        try:
+            return exc.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+        except Exception:
+            return None
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return None
+
+
+def _probe_location(
+    opener: urllib.request.OpenerDirector, url: str, headers: Mapping[str, str], timeout: float
+) -> str | None:
+    request = urllib.request.Request(url, headers=dict(headers), method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.headers.get("Location")
+    except urllib.error.HTTPError as exc:
+        return exc.headers.get("Location") if exc.headers else None
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return None
 
 
 def _same_host(seed_url: str, candidate: str) -> bool:

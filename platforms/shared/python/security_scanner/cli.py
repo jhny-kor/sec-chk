@@ -367,6 +367,12 @@ def main(argv: list[str] | None = None) -> int:
         from .web import build_auth_opener, crawl_web, login
 
         extra_headers = _parse_headers(args.header)
+        if args.active:
+            print(
+                "warning: --active sends attack payloads (XSS/SQLi/open-redirect) to query "
+                "parameters. Run only against systems you are explicitly authorized to test.",
+                file=sys.stderr,
+            )
         opener = build_auth_opener()
         warnings: list[str] = []
         if args.login_url:
@@ -402,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
             scan_js_secrets=args.scan_js_secrets,
             ingest_sitemap=args.ingest_sitemap,
             probe_paths=args.probe_paths,
+            active=args.active,
         )
         findings = crawl_findings
         warnings.extend(crawl_warnings)
@@ -638,6 +645,11 @@ def build_parser() -> argparse.ArgumentParser:
     web_scan.add_argument("--scan-js-secrets", action="store_true", help="scan same-host JS bundles for leaked secrets (keys/tokens)")
     web_scan.add_argument("--ingest-sitemap", action="store_true", help="enqueue URLs from /robots.txt and /sitemap.xml")
     web_scan.add_argument("--probe-paths", action="store_true", help="probe well-known sensitive paths (/.env, /.git/config, ...)")
+    web_scan.add_argument(
+        "--active",
+        action="store_true",
+        help="send bounded, non-destructive attack payloads to URL query params to verify reflected XSS / error-based SQLi / open redirect (authorized targets only)",
+    )
     web_scan.add_argument(
         "--seed",
         action="append",

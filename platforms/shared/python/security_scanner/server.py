@@ -151,6 +151,7 @@ def web_scan_payload(
     scan_js_secrets: bool = False,
     ingest_sitemap: bool = False,
     probe_paths: bool = False,
+    active: bool = False,
     auth: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
@@ -200,6 +201,7 @@ def web_scan_payload(
         scan_js_secrets=scan_js_secrets,
         ingest_sitemap=ingest_sitemap,
         probe_paths=probe_paths,
+        active=active,
     )
     warnings.extend(crawl_warnings)
     findings = filter_by_min_severity(findings, min_severity)
@@ -377,6 +379,7 @@ def _handler(language: str):
                     scan_js_secrets=bool(request.get("scan_js_secrets")),
                     ingest_sitemap=bool(request.get("ingest_sitemap")),
                     probe_paths=bool(request.get("probe_paths")),
+                    active=bool(request.get("active")),
                     auth=auth,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
