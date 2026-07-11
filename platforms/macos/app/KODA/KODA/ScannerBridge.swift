@@ -4210,6 +4210,7 @@ private enum NativeWebScanner {
         var scanJsSecrets = false    // 1: scan JS bundles for leaked secrets
         var ingestSitemap = false    // 2: enqueue robots.txt / sitemap.xml URLs
         var probePaths = false       // 3: probe well-known sensitive paths
+        var active = false           // active verification (XSS/SQLi/open-redirect payloads)
 
         static let singlePage = Options()
     }
@@ -4309,6 +4310,9 @@ private enum NativeWebScanner {
                 collected.append(contentsOf: analyze(url: page.finalURL.absoluteString, headers: page.headers, cookies: page.cookies))
                 if !page.body.isEmpty {
                     collected.append(contentsOf: analyzeBody(url: page.finalURL, html: page.body))
+                }
+                if options.active, !(URLComponents(url: page.finalURL, resolvingAgainstBaseURL: false)?.queryItems ?? []).isEmpty {
+                    collected.append(contentsOf: await activeProbe(url: page.finalURL, session: session, options: options, jar: jar, timeout: timeout))
                 }
                 if current.scheme?.lowercased() == "http", page.finalURL.scheme?.lowercased() != "https" {
                     collected.append(finding(
@@ -4859,6 +4863,119 @@ private enum NativeWebScanner {
         return components.url
     }
 
+    // --- Active verification (opt-in): bounded, non-destructive payloads ------
+
+    private static let sqlErrorRegex = try? NSRegularExpression(
+        pattern: #"(SQL syntax|mysql_fetch|valid MySQL result|ORA-\d{5}|Oracle error|PostgreSQL.*ERROR|PG::SyntaxError|SQLite/JDBC|SQLite3::|Unclosed quotation mark|quoted string not properly terminated|Microsoft OLE DB Provider|ODBC SQL Server Driver|syntax error at or near)"#,
+        options: [.caseInsensitive]
+    )
+    private static let redirectParamNames: Set<String> = [
+        "redirect", "redirect_uri", "redirecturl", "url", "next", "return", "returnurl",
+        "returnto", "return_to", "dest", "destination", "continue", "redir", "goto", "u", "r",
+    ]
+    private static let activeOOBHost = "koda-open-redirect.example"
+
+    /// Send bounded, non-destructive attack payloads to a URL's query params and
+    /// verify reflected XSS / error-based SQLi / open redirect from the response.
+    /// Mirrors the Python `active_probe`. GET-only, capped per parameter.
+    private static func activeProbe(
+        url: URL, session: URLSession, options: Options, jar: CookieJar, timeout: TimeInterval, maxParams: Int = 15
+    ) async -> [NativeFinding] {
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let items = comps.queryItems, !items.isEmpty else { return [] }
+        var findings: [NativeFinding] = []
+        let token = String(UInt32.random(in: 0 ..< UInt32.max), radix: 16)
+        for name in items.map({ $0.name }).prefix(maxParams) {
+            let original = items.first(where: { $0.name == name })?.value ?? ""
+
+            // Reflected XSS: unique marker (no single quote) reflected unencoded.
+            let marker = "koda\(token)\"><kdx>"
+            if let target = withQueryParam(url, name, marker),
+               let body = await probeBody(target, session: session, options: options, jar: jar, timeout: timeout),
+               body.contains(marker) {
+                findings.append(finding("web.reflected-xss-verified", "high",
+                    "반사된 입력이 인코딩 없이 반환됨(검증된 XSS 벡터)", url.absoluteString,
+                    evidence: "param '\(name)': 마커가 인코딩 없이 반사됨",
+                    recommendation: "출력 시 컨텍스트 인코딩을 적용하고 엄격한 CSP를 설정하세요."))
+            }
+
+            // Error-based SQL injection: a trailing quote provokes a DB error.
+            if let target = withQueryParam(url, name, original + "'"),
+               let injected = await probeBody(target, session: session, options: options, jar: jar, timeout: timeout),
+               matchesSQLError(injected) {
+                let baseURL = withQueryParam(url, name, original)
+                let baseline = baseURL == nil ? nil : await probeBody(baseURL!, session: session, options: options, jar: jar, timeout: timeout)
+                if !(baseline.map(matchesSQLError) ?? false) {
+                    findings.append(finding("web.sql-injection-error-verified", "high",
+                        "작은따옴표가 DB 오류를 유발함(검증된 SQL 인젝션 벡터)", url.absoluteString,
+                        evidence: "param '\(name)': 따옴표를 넣었을 때만 SQL 오류 시그니처가 나타남",
+                        recommendation: "파라미터화 쿼리/프리페어드 스테이트먼트를 사용하고 원시 입력으로 SQL을 조립하지 마세요."))
+                }
+            }
+
+            // Open redirect: a redirect-like param that sends users off-site.
+            if redirectParamNames.contains(name.lowercased()),
+               let target = withQueryParam(url, name, "https://\(activeOOBHost)/"),
+               let location = await probeLocation(target, options: options, jar: jar, timeout: timeout),
+               location.contains(activeOOBHost) {
+                findings.append(finding("web.open-redirect-verified", "medium",
+                    "리다이렉트 파라미터가 외부 사이트로 보냄(검증된 오픈 리다이렉트)", url.absoluteString,
+                    evidence: "param '\(name)' -> Location: \(location)",
+                    recommendation: "리다이렉트 대상은 상대 경로 또는 허용 목록만 허용하세요."))
+            }
+        }
+        return findings
+    }
+
+    private static func withQueryParam(_ url: URL, _ name: String, _ value: String) -> URL? {
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        var items = comps.queryItems ?? []
+        items = items.map { $0.name == name ? URLQueryItem(name: name, value: value) : $0 }
+        comps.queryItems = items
+        return comps.url
+    }
+
+    private static func matchesSQLError(_ text: String) -> Bool {
+        guard let re = sqlErrorRegex else { return false }
+        return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    private static func probeBody(
+        _ url: URL, session: URLSession, options: Options, jar: CookieJar, timeout: TimeInterval
+    ) async -> String? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        applyAuthHeaders(to: &request, jar: jar, options: options)
+        do {
+            let (data, _) = try await session.data(for: request)
+            return String(decoding: data.prefix(2 * 1024 * 1024), as: UTF8.self)
+        } catch {
+            return nil
+        }
+    }
+
+    private static func probeLocation(
+        _ url: URL, options: Options, jar: CookieJar, timeout: TimeInterval
+    ) async -> String? {
+        // A session that does not follow redirects, so a 3xx Location is observable.
+        let delegate = NoRedirectDelegate()
+        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        applyAuthHeaders(to: &request, jar: jar, options: options)
+        do {
+            let (_, response) = try await session.data(for: request)
+            return (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Location")
+        } catch {
+            return nil
+        }
+    }
+
     // --- Tier 2: mixed content, SRI, CSRF-less forms, GraphQL introspection ---
 
     /// Passive HTML checks mirroring the Python `analyze_body`.
@@ -5257,6 +5374,18 @@ private enum NativeWebScanner {
 
 /// Captures the server trust and negotiated TLS version from a URLSession web scan
 /// so certificate expiry and weak-protocol checks match the Python `check_tls`.
+/// Stops URLSession from following redirects so an open-redirect Location header
+/// can be observed instead of transparently followed.
+private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)  // return the 3xx response rather than following it
+    }
+}
+
 private final class WebScanTLSDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
     private(set) var serverTrust: SecTrust?
     private(set) var negotiatedTLSVersion: tls_protocol_version_t?
@@ -5424,6 +5553,7 @@ private final class WebScanAccessoryView: NSView {
     private let secretsCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let sitemapCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let probeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let activeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let maxPagesField = NSTextField()
     private let maxDepthField = NSTextField()
     private let loginURLField = NSTextField()
@@ -5444,6 +5574,7 @@ private final class WebScanAccessoryView: NSView {
         secretsCheck.title = ko ? "JS 번들에서 유출 시크릿 스캔" : "Scan JS bundles for leaked secrets"
         sitemapCheck.title = ko ? "robots.txt / sitemap.xml 수집" : "Ingest robots.txt / sitemap.xml"
         probeCheck.title = ko ? "민감 경로 프로브 (/.env, /.git ...)" : "Probe sensitive paths (/.env, /.git ...)"
+        activeCheck.title = ko ? "능동 검증 (XSS/SQLi/리다이렉트 — 권한 대상만)" : "Active verify (XSS/SQLi/redirect — authorized only)"
         maxPagesField.stringValue = "50"
         maxDepthField.stringValue = "3"
         loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
@@ -5477,6 +5608,7 @@ private final class WebScanAccessoryView: NSView {
             secretsCheck,
             sitemapCheck,
             probeCheck,
+            activeCheck,
             nums,
             NSTextField(labelWithString: ko ? "추가 경로 (선택)" : "Extra routes (optional)"),
             seedsField,
@@ -5522,6 +5654,7 @@ private final class WebScanAccessoryView: NSView {
         opts.scanJsSecrets = secretsCheck.state == .on
         opts.ingestSitemap = sitemapCheck.state == .on
         opts.probePaths = probeCheck.state == .on
+        opts.active = activeCheck.state == .on
         opts.maxPages = max(1, min(500, Int(maxPagesField.stringValue) ?? 50))
         opts.maxDepth = max(0, min(20, Int(maxDepthField.stringValue) ?? 3))
         opts.loginURL = loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
