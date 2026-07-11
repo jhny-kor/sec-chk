@@ -4211,6 +4211,8 @@ private enum NativeWebScanner {
         var ingestSitemap = false    // 2: enqueue robots.txt / sitemap.xml URLs
         var probePaths = false       // 3: probe well-known sensitive paths
         var active = false           // active verification (XSS/SQLi/open-redirect payloads)
+        var compareUnauth = false    // access-control: compare authed vs unauthenticated
+        var secondaryHeaders: [String: String] = [:]  // access-control: second account
 
         static let singlePage = Options()
     }
@@ -4313,6 +4315,9 @@ private enum NativeWebScanner {
                 }
                 if options.active, !(URLComponents(url: page.finalURL, resolvingAgainstBaseURL: false)?.queryItems ?? []).isEmpty {
                     collected.append(contentsOf: await activeProbe(url: page.finalURL, session: session, options: options, jar: jar, timeout: timeout))
+                }
+                if (options.compareUnauth || !options.secondaryHeaders.isEmpty), !isStaticAsset(page.finalURL.absoluteString) {
+                    collected.append(contentsOf: await accessControlCheck(url: page.finalURL, session: session, options: options, jar: jar, timeout: timeout))
                 }
                 if current.scheme?.lowercased() == "http", page.finalURL.scheme?.lowercased() != "https" {
                     collected.append(finding(
@@ -4976,6 +4981,76 @@ private enum NativeWebScanner {
         }
     }
 
+    // --- Access-control comparison (IDOR/BOLA/BFLA heuristic) -----------------
+
+    /// Re-request an authenticated page as a lower-privileged context and flag
+    /// when it still receives the authenticated content. Mirrors the Python
+    /// `_access_control_check`. Heuristic, non-destructive (GET only).
+    private static func accessControlCheck(
+        url: URL, session: URLSession, options: Options, jar: CookieJar, timeout: TimeInterval
+    ) async -> [NativeFinding] {
+        let injected = options.extraHeaders.first { $0.key.lowercased() == "cookie" }?.value
+        let primaryCookie = mergeCookieHeader(injected: injected, jar: jar.header)
+        let nonCookie = options.extraHeaders.filter { $0.key.lowercased() != "cookie" }
+        guard let primary = await probeMeta(url, session: session, cookieHeader: primaryCookie, extraHeaders: nonCookie, timeout: timeout),
+              primary.status == 200, !looksLikeLogin(primary.body) else { return [] }
+
+        var findings: [NativeFinding] = []
+        if options.compareUnauth,
+           let meta = await probeMeta(url, session: session, cookieHeader: "", extraHeaders: nonCookie, timeout: timeout),
+           meta.status == 200, !looksLikeLogin(meta.body), similarBodies(primary.body, meta.body) {
+            findings.append(finding("web.broken-access-control-unauth", "medium",
+                "인증 콘텐츠가 비인증에도 제공됨(검토 필요)", url.absoluteString,
+                evidence: "인증/비인증 GET 모두 200이며 콘텐츠가 유사함",
+                recommendation: "이 자원에 서버 측 인증/인가를 강제하세요. 공개 대상이 맞는지 확인하세요."))
+        }
+        if !options.secondaryHeaders.isEmpty {
+            let secInjected = options.secondaryHeaders.first { $0.key.lowercased() == "cookie" }?.value ?? ""
+            let secNon = options.secondaryHeaders.filter { $0.key.lowercased() != "cookie" }
+            if let meta = await probeMeta(url, session: session, cookieHeader: secInjected, extraHeaders: secNon, timeout: timeout),
+               meta.status == 200, !looksLikeLogin(meta.body), similarBodies(primary.body, meta.body) {
+                findings.append(finding("web.broken-access-control-cross-account", "high",
+                    "두 번째 계정이 첫 계정의 콘텐츠를 받음(IDOR/BOLA 의심, 검토 필요)", url.absoluteString,
+                    evidence: "두 번째 계정의 GET이 200이며 첫 계정과 콘텐츠가 유사함",
+                    recommendation: "객체·기능 단위 인가를 강제해 한 사용자가 다른 사용자의 자원을 읽지 못하게 하세요."))
+            }
+        }
+        return findings
+    }
+
+    private static func probeMeta(
+        _ url: URL, session: URLSession, cookieHeader: String, extraHeaders: [String: String], timeout: TimeInterval
+    ) async -> (status: Int, body: String)? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        for (name, value) in extraHeaders where name.lowercased() != "cookie" {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        if !cookieHeader.isEmpty { request.setValue(cookieHeader, forHTTPHeaderField: "Cookie") }
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return nil }
+            return (http.statusCode, String(decoding: data.prefix(8192), as: UTF8.self))
+        } catch {
+            return nil
+        }
+    }
+
+    private static func looksLikeLogin(_ body: String) -> Bool {
+        let lowered = body.lowercased()
+        if lowered.contains("type=\"password\"") || lowered.contains("type='password'") { return true }
+        return (lowered.contains("login") || lowered.contains("sign in") || body.contains("로그인")) && lowered.contains("<form")
+    }
+
+    private static func similarBodies(_ a: String, _ b: String, tolerance: Double = 0.15) -> Bool {
+        if a.isEmpty || b.isEmpty { return a == b }
+        if a == b { return true }
+        let longer = Double(max(a.count, b.count))
+        return Double(abs(a.count - b.count)) / longer <= tolerance
+    }
+
     // --- Tier 2: mixed content, SRI, CSRF-less forms, GraphQL introspection ---
 
     /// Passive HTML checks mirroring the Python `analyze_body`.
@@ -5554,6 +5629,8 @@ private final class WebScanAccessoryView: NSView {
     private let sitemapCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let probeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let activeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let compareUnauthCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let secondaryField = NSTextField()
     private let maxPagesField = NSTextField()
     private let maxDepthField = NSTextField()
     private let loginURLField = NSTextField()
@@ -5575,6 +5652,8 @@ private final class WebScanAccessoryView: NSView {
         sitemapCheck.title = ko ? "robots.txt / sitemap.xml 수집" : "Ingest robots.txt / sitemap.xml"
         probeCheck.title = ko ? "민감 경로 프로브 (/.env, /.git ...)" : "Probe sensitive paths (/.env, /.git ...)"
         activeCheck.title = ko ? "능동 검증 (XSS/SQLi/리다이렉트 — 권한 대상만)" : "Active verify (XSS/SQLi/redirect — authorized only)"
+        compareUnauthCheck.title = ko ? "접근통제 점검: 비인증과 비교" : "Access-control check: compare vs unauthenticated"
+        secondaryField.placeholderString = ko ? "두 번째 계정 쿠키 (계정 간 IDOR/BOLA)" : "Second account cookie (cross-account IDOR/BOLA)"
         maxPagesField.stringValue = "50"
         maxDepthField.stringValue = "3"
         loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
@@ -5609,6 +5688,8 @@ private final class WebScanAccessoryView: NSView {
             sitemapCheck,
             probeCheck,
             activeCheck,
+            compareUnauthCheck,
+            secondaryField,
             nums,
             NSTextField(labelWithString: ko ? "추가 경로 (선택)" : "Extra routes (optional)"),
             seedsField,
@@ -5624,7 +5705,7 @@ private final class WebScanAccessoryView: NSView {
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
-        for field in [urlField, loginURLField, headersField, seedsField] {
+        for field in [urlField, loginURLField, headersField, seedsField, secondaryField] {
             field.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
         maxPagesField.widthAnchor.constraint(equalToConstant: 60).isActive = true
@@ -5655,6 +5736,8 @@ private final class WebScanAccessoryView: NSView {
         opts.ingestSitemap = sitemapCheck.state == .on
         opts.probePaths = probeCheck.state == .on
         opts.active = activeCheck.state == .on
+        opts.compareUnauth = compareUnauthCheck.state == .on
+        opts.secondaryHeaders = Self.parseHeaders(secondaryField.stringValue)
         opts.maxPages = max(1, min(500, Int(maxPagesField.stringValue) ?? 50))
         opts.maxDepth = max(0, min(20, Int(maxDepthField.stringValue) ?? 3))
         opts.loginURL = loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
