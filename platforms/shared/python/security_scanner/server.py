@@ -175,17 +175,18 @@ def web_scan_payload(
         password = str(auth.get("password") or "")
         if not username or not password:
             raise ValueError("Form login requires both a username and a password.")
-        warnings.extend(
-            login(
-                opener,
-                login_url,
-                username,
-                password,
-                user_field=(str(auth.get("user_field")) or None) if auth.get("user_field") else None,
-                pass_field=(str(auth.get("pass_field")) or None) if auth.get("pass_field") else None,
-                timeout=timeout,
-            )
+        login_warnings, login_findings = login(
+            opener,
+            login_url,
+            username,
+            password,
+            user_field=(str(auth.get("user_field")) or None) if auth.get("user_field") else None,
+            pass_field=(str(auth.get("pass_field")) or None) if auth.get("pass_field") else None,
+            timeout=timeout,
         )
+        warnings.extend(login_warnings)
+    else:
+        login_findings = []
 
     seeds = tuple(seeds)
     if api_spec_text.strip():
@@ -218,7 +219,7 @@ def web_scan_payload(
         secondary_headers=secondary_headers or None,
     )
     warnings.extend(crawl_warnings)
-    findings = filter_by_min_severity(findings, min_severity)
+    findings = filter_by_min_severity(login_findings + list(findings), min_severity)
     target_name = parsed.netloc
     payload = build_dashboard_payload(
         findings,

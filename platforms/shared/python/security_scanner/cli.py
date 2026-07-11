@@ -415,22 +415,22 @@ def main(argv: list[str] | None = None) -> int:
         secondary_headers = _parse_headers(args.secondary_header)
         opener = build_auth_opener()
         warnings: list[str] = []
+        login_findings: list = []
         if args.login_url:
             password = os.environ.get(args.password_env) if args.password_env else args.password
             if not args.username or not password:
                 print("error: --login-url requires --username and --password/--password-env", file=sys.stderr)
                 return 2
-            warnings.extend(
-                login(
-                    opener,
-                    args.login_url,
-                    args.username,
-                    password,
-                    user_field=args.user_field,
-                    pass_field=args.pass_field,
-                    timeout=args.timeout,
-                )
+            login_warnings, login_findings = login(
+                opener,
+                args.login_url,
+                args.username,
+                password,
+                user_field=args.user_field,
+                pass_field=args.pass_field,
+                timeout=args.timeout,
             )
+            warnings.extend(login_warnings)
         crawl_findings, crawl_warnings, pages = crawl_web(
             args.url,
             timeout=args.timeout,
@@ -454,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
             compare_unauth=args.compare_unauth,
             secondary_headers=secondary_headers or None,
         )
-        findings = crawl_findings
+        findings = login_findings + crawl_findings
         warnings.extend(crawl_warnings)
         report = ReportConfig(
             format=args.format or "markdown",

@@ -205,6 +205,9 @@ def crawl_web(
         if active and urllib.parse.urlparse(final_url).query:
             # Opt-in active verification of this URL's query parameters.
             collected.extend(active_probe(final_url, opener, headers, timeout, target))
+        if active and body:
+            # Opt-in active verification of this page's form fields (GET/POST).
+            collected.extend(form_active_probe(final_url, body, opener, headers, timeout, target))
         if (compare_unauth or secondary_headers) and not _is_static_asset(final_url):
             # Access-control comparison: does a lower-privileged context get the
             # same authenticated content? (IDOR/BOLA/BFLA heuristic.)
@@ -1349,6 +1352,125 @@ def active_probe(
     return findings
 
 
+class _FormsParser(HTMLParser):
+    """Collect every <form>: action, method, and its input fields."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.forms: list[dict[str, object]] = []
+        self._form: dict[str, object] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        data = {k: (v or "") for k, v in attrs}
+        if tag == "form":
+            self._form = {"action": data.get("action", ""), "method": data.get("method", "get").lower(),
+                          "fields": {}, "has_password": False, "has_file": False}
+        elif tag in {"input", "textarea", "select"} and self._form is not None:
+            itype = data.get("type", "text").lower()
+            name = data.get("name", "")
+            if itype == "password":
+                self._form["has_password"] = True
+            if itype == "file":
+                self._form["has_file"] = True
+            if name and itype not in {"submit", "button", "image", "reset", "file"}:
+                self._form["fields"][name] = (itype, data.get("value", ""))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form" and self._form is not None:
+            self.forms.append(self._form)
+            self._form = None
+
+
+def form_active_probe(
+    page_url: str,
+    body: bytes | str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+    target: str,
+    *,
+    max_forms: int = 5,
+    max_fields: int = 10,
+) -> list[Finding]:
+    """Active verification of HTML form fields (GET and POST), mirroring the
+    query-param checks. Skips login/register (password) and file-upload forms to
+    avoid credential submission and uploads. Opt-in, capped, non-destructive-ish."""
+
+    text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
+    parser = _FormsParser()
+    try:
+        parser.feed(text)
+    except Exception:
+        return []
+
+    findings: list[Finding] = []
+    token = secrets.token_hex(4)
+    for form in parser.forms[:max_forms]:
+        if form["has_password"] or form["has_file"]:
+            continue  # avoid submitting credentials or uploading files
+        fields: dict[str, tuple[str, str]] = form["fields"]  # type: ignore[assignment]
+        if not fields:
+            continue
+        method = "post" if form["method"] == "post" else "get"
+        action_url = urllib.parse.urljoin(page_url, str(form["action"])) if form["action"] else page_url
+        base = {name: (value or "test") for name, (_type, value) in fields.items()}
+        # Only fuzz visible-ish fields (not hidden tokens) to limit noise.
+        testable = [name for name, (itype, _v) in fields.items() if itype in {"text", "search", "email", "url", "", "textarea"}]
+
+        for name in testable[:max_fields]:
+            marker = f"koda{token}\"><kdx>"
+            body_x = _submit_form(opener, action_url, method, {**base, name: marker}, headers, timeout)
+            if body_x and marker in body_x:
+                findings.append(
+                    _finding(
+                        "web.reflected-xss-verified", "high",
+                        "Form field is reflected unencoded (verified XSS vector)",
+                        action_url, target=target,
+                        evidence=f"form field '{name}' ({method.upper()}) reflected the marker unencoded",
+                        recommendation="Context-encode all user input on output and add a strict CSP.",
+                    )
+                )
+            body_s = _submit_form(opener, action_url, method, {**base, name: base[name] + "'"}, headers, timeout)
+            if body_s and _SQL_ERROR_RE.search(body_s):
+                baseline = _submit_form(opener, action_url, method, base, headers, timeout)
+                if not (baseline and _SQL_ERROR_RE.search(baseline)):
+                    findings.append(
+                        _finding(
+                            "web.sql-injection-error-verified", "high",
+                            "Form field triggers a database error (verified SQL injection vector)",
+                            action_url, target=target,
+                            evidence=f"form field '{name}' ({method.upper()}) produced a SQL error only with a trailing quote",
+                            recommendation="Use parameterized queries / prepared statements; never build SQL from raw input.",
+                        )
+                    )
+    return findings
+
+
+def _submit_form(
+    opener: urllib.request.OpenerDirector, action_url: str, method: str,
+    fields: Mapping[str, str], headers: Mapping[str, str], timeout: float,
+) -> str | None:
+    encoded = urllib.parse.urlencode(fields)
+    if method == "post":
+        request = urllib.request.Request(
+            action_url, data=encoded.encode("utf-8"),
+            headers={**dict(headers), "Content-Type": "application/x-www-form-urlencoded"}, method="POST",
+        )
+    else:
+        sep = "&" if urllib.parse.urlparse(action_url).query else "?"
+        request = urllib.request.Request(action_url + sep + encoded, headers=dict(headers), method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+        except Exception:
+            return None
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return None
+
+
 def _with_query_param(parsed: urllib.parse.ParseResult, name: str, value: str) -> str:
     query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
     query[name] = [value]
@@ -1559,39 +1681,42 @@ def login(
     user_field: str | None = None,
     pass_field: str | None = None,
     timeout: float = 15.0,
-) -> list[str]:
+) -> tuple[list[str], list[Finding]]:
     """Perform a best-effort form login, keeping the session in ``opener``'s jar.
 
     Parses the login form (preserving hidden/CSRF inputs), fills the username and
     password fields (auto-detected by name when not given), and POSTs to the
-    form action. Failures degrade to a returned warning instead of raising; the
-    scan then proceeds unauthenticated.
+    form action. Also checks session management: if the session ID is unchanged
+    after login, that is session fixation. Returns ``(warnings, findings)``;
+    failures degrade to a warning so the scan proceeds unauthenticated.
     """
 
     warnings: list[str] = []
+    target = urllib.parse.urlparse(login_url).netloc
     request = urllib.request.Request(login_url, headers={"User-Agent": _USER_AGENT})
     try:
         with opener.open(request, timeout=timeout) as response:
             page_url = response.geturl()
             body = response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
-        return [f"Login page could not be loaded ({login_url}): {getattr(exc, 'reason', exc)}"]
+        return [f"Login page could not be loaded ({login_url}): {getattr(exc, 'reason', exc)}"], []
 
     parser = _FormParser()
     parser.feed(body)
     if not parser.done:
-        return [f"No login form found at {login_url}; scanning unauthenticated."]
+        return [f"No login form found at {login_url}; scanning unauthenticated."], []
 
     user_key = user_field or _match_field(parser.fields, _USER_FIELD_RE)
     pass_key = pass_field or _match_field(parser.fields, _PASS_FIELD_RE)
     if not user_key or not pass_key:
-        return [f"Could not identify login fields at {login_url}; scanning unauthenticated."]
+        return [f"Could not identify login fields at {login_url}; scanning unauthenticated."], []
 
     fields = dict(parser.fields)
     fields[user_key] = username
     fields[pass_key] = password
     action_url = urllib.parse.urljoin(page_url, parser.action) if parser.action else page_url
     cookies_before = _cookie_count(opener)
+    sessions_before = _session_cookie_values(opener)
 
     data = urllib.parse.urlencode(fields).encode("utf-8")
     post = urllib.request.Request(
@@ -1606,13 +1731,46 @@ def login(
     except urllib.error.HTTPError as exc:
         final_url = exc.geturl() if hasattr(exc, "geturl") else action_url
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
-        return [f"Login POST failed ({action_url}): {getattr(exc, 'reason', exc)}"]
+        return [f"Login POST failed ({action_url}): {getattr(exc, 'reason', exc)}"], []
 
     got_cookie = _cookie_count(opener) > cookies_before
     redirected_away = _canonical(final_url) != _canonical(action_url)
     if not (got_cookie or redirected_away):
         warnings.append(f"Login may have failed at {login_url}; no session cookie set. Scanning may be unauthenticated.")
-    return warnings
+
+    findings: list[Finding] = []
+    if got_cookie or redirected_away:
+        sessions_after = _session_cookie_values(opener)
+        unchanged = [name for name, value in sessions_before.items() if sessions_after.get(name) == value]
+        if unchanged:
+            findings.append(
+                _finding(
+                    "web.session-not-rotated", "medium",
+                    "Session ID is not rotated after login (session fixation)",
+                    login_url, target=target,
+                    evidence=f"session cookie(s) kept the same value across login: {', '.join(unchanged)}",
+                    recommendation="Issue a fresh session identifier immediately after successful authentication.",
+                )
+            )
+    return warnings, findings
+
+
+_SESSION_COOKIE_NAMES = {
+    "session", "sessionid", "sid", "sess", "jsessionid", "phpsessid",
+    "asp.net_sessionid", "connect.sid", "laravel_session", "_session_id",
+}
+
+
+def _session_cookie_values(opener: urllib.request.OpenerDirector) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for handler in opener.handlers:
+        jar = getattr(handler, "cookiejar", None)
+        if jar is None:
+            continue
+        for cookie in jar:
+            if cookie.name.lower() in _SESSION_COOKIE_NAMES:
+                values[cookie.name.lower()] = cookie.value or ""
+    return values
 
 
 def _match_field(fields: Mapping[str, str], pattern: re.Pattern[str]) -> str | None:
