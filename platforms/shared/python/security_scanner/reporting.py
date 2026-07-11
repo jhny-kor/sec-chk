@@ -1953,6 +1953,56 @@ HTML_TEMPLATE = """<!doctype html>
       white-space: nowrap;
     }
 
+    /* The crawl/login/active options span the full form width and stack
+       vertically so the growing list of checkboxes never overlaps or crams. */
+    .scan-web-options {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .scan-web-options > summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .scan-web-check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .scan-web-check input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; }
+    .scan-web-nums {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px 12px;
+    }
+    .scan-web-nums input {
+      width: 70px;
+      flex: 0 0 auto;
+    }
+    .scan-web-login {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      margin: 0;
+    }
+    .scan-web-headers {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .scan-web-options input:not([type="checkbox"]),
+    .scan-web-options textarea {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
     .scan-actions {
       display: flex;
       flex-wrap: wrap;
@@ -3581,7 +3631,7 @@ HTML_TEMPLATE = """<!doctype html>
             compare_unauth: byId("web-compare-unauth").checked,
             secondary_headers: byId("web-secondary").value,
             api_spec: byId("web-api-spec").value,
-            seeds: byId("web-seeds").value.split(/\r?\n/).map(function(s){return s.trim();}).filter(Boolean),
+            seeds: byId("web-seeds").value.split(/\\r?\\n/).map(function(s){return s.trim();}).filter(Boolean),
             max_pages: Number(byId("web-max-pages").value) || 50,
             max_depth: Number(byId("web-max-depth").value) || 3,
             auth: {

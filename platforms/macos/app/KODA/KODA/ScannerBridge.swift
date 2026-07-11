@@ -5712,10 +5712,15 @@ private final class WebScanAccessoryView: NSView {
         maxDepthField.widthAnchor.constraint(equalToConstant: 60).isActive = true
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        // Size the accessory view to the stack's natural height so the growing
+        // list of options is not crushed into a fixed frame (which overlapped).
+        layoutSubtreeIfNeeded()
+        let fitting = fittingSize
+        setFrameSize(NSSize(width: max(460, fitting.width), height: fitting.height))
     }
 
     @available(*, unavailable)
