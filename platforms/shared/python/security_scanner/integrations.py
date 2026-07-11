@@ -107,6 +107,141 @@ def zap_baseline_command(target_url: str, *, output_dir: str = "reports/zap", mi
     return zap_scan_command(target_url, mode="baseline", output_dir=output_dir, minutes=minutes)
 
 
+# --- ZAP Automation Framework (YAML plan) -------------------------------------
+
+ZAP_AUTOMATION_REPORT_PREFIX = "zap-automation"
+_ZAP_AF_AUTH_METHODS = {"form", "json"}
+
+
+def build_zap_plan(
+    target_url: str,
+    *,
+    minutes: int = 1,
+    ajax_spider: bool = False,
+    active_scan: bool = False,
+    include_paths: tuple[str, ...] = (),
+    exclude_paths: tuple[str, ...] = (),
+    openapi_url: str | None = None,
+    openapi_file: str | None = None,
+    auth: dict[str, str] | None = None,
+    fail_on_error: bool = True,
+) -> dict:
+    """Build a ZAP Automation Framework plan (a dict; emit as JSON — valid YAML).
+
+    Sequences spider (+ optional ajaxSpider), passive scan, and an optional
+    activeScan inside a context. ``auth`` (form/json) plus a user enables
+    authenticated scanning; ``openapi_url``/``openapi_file`` import an OpenAPI
+    definition as a job. Reports are written to /zap/wrk for the caller to parse.
+    """
+
+    _require_http_url(target_url, label="target URL")
+    context: dict = {"name": "koda", "urls": [target_url]}
+    if include_paths:
+        context["includePaths"] = list(include_paths)
+    if exclude_paths:
+        context["excludePaths"] = list(exclude_paths)
+
+    user_name = None
+    if auth:
+        method = auth.get("method", "form")
+        if method not in _ZAP_AF_AUTH_METHODS:
+            raise ValueError(f"auth method must be one of {sorted(_ZAP_AF_AUTH_METHODS)}")
+        login_url = auth.get("login_url") or ""
+        if not login_url:
+            raise ValueError("auth requires 'login_url'")
+        user_name = "koda-user"
+        context["authentication"] = {
+            "method": method,
+            "parameters": {
+                "loginPageUrl": login_url,
+                "loginRequestUrl": auth.get("login_request_url") or login_url,
+                "loginRequestBody": auth.get("login_body")
+                or "username={%username%}&password={%password%}",
+            },
+            "verification": {
+                "method": "response",
+                "loggedInRegex": auth.get("logged_in_regex") or "",
+                "loggedOutRegex": auth.get("logged_out_regex") or "",
+            },
+        }
+        context["sessionManagement"] = {"method": "cookie"}
+        context["users"] = [
+            {
+                "name": user_name,
+                "credentials": {
+                    "username": auth.get("username") or "",
+                    "password": auth.get("password") or "",
+                },
+            }
+        ]
+
+    def _with_user(params: dict) -> dict:
+        if user_name:
+            params["user"] = user_name
+        return params
+
+    jobs: list[dict] = []
+    if openapi_url or openapi_file:
+        params = {"targetUrl": target_url}
+        if openapi_url:
+            params["apiUrl"] = openapi_url
+        if openapi_file:
+            if not _ZAP_SAFE_NAME.match(openapi_file):
+                raise ValueError("openapi_file must be a bare filename placed in output_dir")
+            params["apiFile"] = openapi_file
+        jobs.append({"type": "openapi", "parameters": params})
+
+    jobs.append({"type": "spider", "parameters": _with_user({"context": "koda", "url": target_url, "maxDuration": minutes})})
+    if ajax_spider:
+        jobs.append({"type": "spiderAjax", "parameters": _with_user({"context": "koda", "url": target_url, "maxDuration": minutes})})
+    jobs.append({"type": "passiveScan-wait", "parameters": {}})
+    if active_scan:
+        jobs.append({"type": "activeScan", "parameters": _with_user({"context": "koda"})})
+    for template in ("traditional-json", "traditional-html", "traditional-md"):
+        jobs.append(
+            {
+                "type": "report",
+                "parameters": {
+                    "template": template,
+                    "reportDir": "/zap/wrk",
+                    "reportFile": ZAP_AUTOMATION_REPORT_PREFIX,
+                },
+            }
+        )
+
+    return {
+        "env": {
+            "contexts": [context],
+            "parameters": {"failOnError": fail_on_error, "failOnWarning": False, "progressToStdout": True},
+        },
+        "jobs": jobs,
+    }
+
+
+def render_zap_plan(plan: dict) -> str:
+    """Serialize a plan as JSON (a valid YAML document ZAP's parser accepts)."""
+    return json.dumps(plan, indent=2, ensure_ascii=False)
+
+
+def zap_automation_command(output_dir: str = "reports/zap", *, plan_filename: str = "koda-zap-plan.yaml") -> str:
+    """Docker command that runs a ZAP Automation Framework plan from ``output_dir``."""
+    output_path = output_dir.rstrip("/") or "reports/zap"
+    if not re.fullmatch(r"[A-Za-z0-9_./-]+", output_path):
+        raise ValueError("output_dir may only contain letters, numbers, slash, dot, dash, and underscore")
+    if not _ZAP_SAFE_NAME.match(plan_filename):
+        raise ValueError("plan_filename must be a bare filename")
+    mount_path = output_path if output_path.startswith("/") else f"$PWD/{output_path}"
+    return " ".join(
+        [
+            "mkdir", "-p", shlex.quote(output_path), "&&",
+            "docker", "run", "--rm", "-t",
+            "-v", f'"{mount_path}:/zap/wrk:rw"',
+            shlex.quote(zap_image()),
+            "zap.sh", "-cmd", "-autorun", f"/zap/wrk/{plan_filename}",
+        ]
+    )
+
+
 def dependency_track_upload_command(
     *,
     server_url: str,

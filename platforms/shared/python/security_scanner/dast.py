@@ -5,7 +5,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .integrations import ZAP_REPORT_PREFIX, zap_scan_command
+from .integrations import (
+    ZAP_AUTOMATION_REPORT_PREFIX,
+    ZAP_REPORT_PREFIX,
+    build_zap_plan,
+    render_zap_plan,
+    zap_automation_command,
+    zap_scan_command,
+)
 from .models import Finding
 
 
@@ -64,6 +71,55 @@ def run_zap_scan(
         check=False,
     )
     json_path = output_dir / f"{ZAP_REPORT_PREFIX[mode]}.json"
+    findings = tuple(findings_from_zap_json(json_path, target_url=target_url)) if json_path.exists() else ()
+    return ZAPRunResult(
+        exit_code=completed.returncode,
+        command=command,
+        output_dir=output_dir,
+        findings=findings,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+    )
+
+
+def run_zap_automation(
+    target_url: str,
+    *,
+    output_dir: Path,
+    minutes: int = 1,
+    ajax_spider: bool = False,
+    active_scan: bool = False,
+    include_paths: tuple[str, ...] = (),
+    exclude_paths: tuple[str, ...] = (),
+    openapi_url: str | None = None,
+    openapi_file: str | None = None,
+    auth: dict[str, str] | None = None,
+    plan_filename: str = "koda-zap-plan.yaml",
+    dry_run: bool = False,
+    timeout_seconds: int = 1800,
+) -> ZAPRunResult:
+    """Run a ZAP Automation Framework plan, writing it into ``output_dir`` first."""
+    plan = build_zap_plan(
+        target_url,
+        minutes=minutes,
+        ajax_spider=ajax_spider,
+        active_scan=active_scan,
+        include_paths=include_paths,
+        exclude_paths=exclude_paths,
+        openapi_url=openapi_url,
+        openapi_file=openapi_file,
+        auth=auth,
+    )
+    command = zap_automation_command(str(output_dir), plan_filename=plan_filename)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / plan_filename).write_text(render_zap_plan(plan), encoding="utf-8")
+    if dry_run:
+        return ZAPRunResult(exit_code=0, command=command, output_dir=output_dir, findings=())
+
+    completed = subprocess.run(
+        command, shell=True, text=True, capture_output=True, timeout=timeout_seconds, check=False
+    )
+    json_path = output_dir / f"{ZAP_AUTOMATION_REPORT_PREFIX}.json"
     findings = tuple(findings_from_zap_json(json_path, target_url=target_url)) if json_path.exists() else ()
     return ZAPRunResult(
         exit_code=completed.returncode,

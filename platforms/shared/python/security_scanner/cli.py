@@ -130,29 +130,57 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "zap-run":
-        from .dast import render_zap_findings_json, run_zap_scan
+        from .dast import render_zap_findings_json, run_zap_automation, run_zap_scan
 
-        # Active modes (full/api) send attack traffic; require explicit authorization.
-        if args.mode in {"full", "api"} and not args.authorize_active:
+        # Active traffic (full/api, or automation + active scan) requires authorization.
+        active_requested = args.mode in {"full", "api"} or (args.mode == "automation" and args.active_scan)
+        if active_requested and not args.authorize_active:
+            label = f"--mode {args.mode}" + (" --active-scan" if args.mode == "automation" else "")
             print(
-                f"error: --mode {args.mode} runs an ACTIVE scan (attack traffic). "
+                f"error: {label} runs an ACTIVE scan (attack traffic). "
                 "Re-run with --authorize-active and only against systems you are authorized to test.",
                 file=sys.stderr,
             )
             return 2
         try:
-            result = run_zap_scan(
-                args.url,
-                output_dir=expand_path(args.output_dir, Path.cwd()),
-                mode=args.mode,
-                minutes=args.minutes,
-                context_file=args.context_file,
-                user=args.user,
-                min_level=args.fail_on_level,
-                api_format=args.api_format,
-                dry_run=args.dry_run,
-                timeout_seconds=args.timeout,
-            )
+            if args.mode == "automation":
+                auth = None
+                if args.af_login_url:
+                    auth = {
+                        "method": args.af_auth_method or "form",
+                        "login_url": args.af_login_url,
+                        "login_body": args.af_login_body or "",
+                        "logged_in_regex": args.af_logged_in_regex or "",
+                        "username": args.af_username or "",
+                        "password": args.af_password or "",
+                    }
+                result = run_zap_automation(
+                    args.url,
+                    output_dir=expand_path(args.output_dir, Path.cwd()),
+                    minutes=args.minutes,
+                    ajax_spider=args.ajax_spider,
+                    active_scan=args.active_scan,
+                    include_paths=tuple(args.include_path),
+                    exclude_paths=tuple(args.exclude_path),
+                    openapi_url=args.openapi_url,
+                    openapi_file=args.openapi_file,
+                    auth=auth,
+                    dry_run=args.dry_run,
+                    timeout_seconds=args.timeout,
+                )
+            else:
+                result = run_zap_scan(
+                    args.url,
+                    output_dir=expand_path(args.output_dir, Path.cwd()),
+                    mode=args.mode,
+                    minutes=args.minutes,
+                    context_file=args.context_file,
+                    user=args.user,
+                    min_level=args.fail_on_level,
+                    api_format=args.api_format,
+                    dry_run=args.dry_run,
+                    timeout_seconds=args.timeout,
+                )
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             print(f"ZAP run error: {exc}", file=sys.stderr)
             return 2
@@ -765,10 +793,23 @@ def build_parser() -> argparse.ArgumentParser:
     zap_run.add_argument("--output-dir", default="reports/zap", help="folder for ZAP reports")
     zap_run.add_argument("--minutes", type=int, default=1, help="spider duration in minutes")
     zap_run.add_argument("--timeout", type=int, default=900, help="maximum runtime in seconds")
-    zap_run.add_argument("--mode", choices=("baseline", "full", "api"), default="baseline",
-                         help="baseline=passive, full=active attack scan, api=OpenAPI/GraphQL/SOAP active scan")
+    zap_run.add_argument("--mode", choices=("baseline", "full", "api", "automation"), default="baseline",
+                         help="baseline=passive, full=active attack scan, api=OpenAPI/GraphQL/SOAP active scan, automation=YAML plan (spider/ajax/active/auth/openapi)")
     zap_run.add_argument("--authorize-active", action="store_true",
-                         help="required to run --mode full/api (active attack traffic)")
+                         help="required to run --mode full/api, or automation with --active-scan (active attack traffic)")
+    # ZAP Automation Framework (--mode automation) options:
+    zap_run.add_argument("--ajax-spider", action="store_true", help="[automation] add an Ajax (browser) spider job")
+    zap_run.add_argument("--active-scan", action="store_true", help="[automation] add an active scan job (attack traffic)")
+    zap_run.add_argument("--include-path", action="append", default=[], metavar="REGEX", help="[automation] context include path regex (repeatable)")
+    zap_run.add_argument("--exclude-path", action="append", default=[], metavar="REGEX", help="[automation] context exclude path regex (repeatable)")
+    zap_run.add_argument("--openapi-url", help="[automation] OpenAPI definition URL to import")
+    zap_run.add_argument("--openapi-file", help="[automation] OpenAPI filename placed in --output-dir")
+    zap_run.add_argument("--af-auth-method", choices=("form", "json"), help="[automation] authentication method")
+    zap_run.add_argument("--af-login-url", help="[automation] login page/request URL for authenticated scan")
+    zap_run.add_argument("--af-login-body", help="[automation] login request body (use {%%username%%}/{%%password%%})")
+    zap_run.add_argument("--af-logged-in-regex", help="[automation] regex proving a logged-in response")
+    zap_run.add_argument("--af-username", help="[automation] scan user's username")
+    zap_run.add_argument("--af-password", help="[automation] scan user's password")
     zap_run.add_argument("--context-file", help="ZAP .context filename placed in --output-dir (for authenticated scans)")
     zap_run.add_argument("--user", help="context user to scan as (authenticated scan)")
     zap_run.add_argument("--api-format", choices=("openapi", "soap", "graphql"), help="spec format for --mode api")
