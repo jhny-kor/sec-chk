@@ -152,6 +152,9 @@ def web_scan_payload(
     ingest_sitemap: bool = False,
     probe_paths: bool = False,
     active: bool = False,
+    compare_unauth: bool = False,
+    secondary_headers_text: str = "",
+    api_spec_text: str = "",
     auth: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
@@ -184,10 +187,19 @@ def web_scan_payload(
             )
         )
 
+    seeds = tuple(seeds)
+    if api_spec_text.strip():
+        from .api_spec import parse_api_spec
+
+        spec_urls, spec_warnings = parse_api_spec(api_spec_text, url)
+        seeds = seeds + tuple(spec_urls)
+        warnings.extend(spec_warnings)
+    secondary_headers = _headers_from_text(secondary_headers_text)
+
     findings, crawl_warnings, pages = crawl_web(
         url,
         timeout=timeout,
-        max_pages=max_pages if crawl else 1,
+        max_pages=max_pages if (crawl or seeds) else 1,
         max_depth=max_depth if crawl else 0,
         delay=delay,
         opener=opener,
@@ -202,6 +214,8 @@ def web_scan_payload(
         ingest_sitemap=ingest_sitemap,
         probe_paths=probe_paths,
         active=active,
+        compare_unauth=compare_unauth,
+        secondary_headers=secondary_headers or None,
     )
     warnings.extend(crawl_warnings)
     findings = filter_by_min_severity(findings, min_severity)
@@ -358,7 +372,7 @@ def _handler(language: str):
 
         def _handle_web_scan(self) -> None:
             try:
-                request = self._read_json()
+                request = self._read_json(max_bytes=4_194_304)  # allow a pasted API spec
                 auth = request.get("auth") if isinstance(request.get("auth"), dict) else {}
                 payload = web_scan_payload(
                     _string_value(request, "url"),
@@ -380,6 +394,9 @@ def _handler(language: str):
                     ingest_sitemap=bool(request.get("ingest_sitemap")),
                     probe_paths=bool(request.get("probe_paths")),
                     active=bool(request.get("active")),
+                    compare_unauth=bool(request.get("compare_unauth")),
+                    secondary_headers_text=str(request.get("secondary_headers") or ""),
+                    api_spec_text=str(request.get("api_spec") or ""),
                     auth=auth,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:

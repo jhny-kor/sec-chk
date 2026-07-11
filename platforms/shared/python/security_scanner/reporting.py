@@ -122,6 +122,11 @@ TRANSLATIONS = {
         "web_ingest_sitemap": "Ingest robots.txt / sitemap.xml",
         "web_probe_paths": "Probe sensitive paths (/.env, /.git ...)",
         "web_active": "Active verify (XSS/SQLi/redirect payloads — authorized only)",
+        "web_compare_unauth": "Access-control check: compare vs unauthenticated",
+        "web_secondary_label": "Second account cookie/header (cross-account IDOR/BOLA)",
+        "web_secondary_placeholder": "Cookie: sid=second-account",
+        "web_api_spec_label": "API spec (OpenAPI/HAR/Postman JSON) to scan its GET endpoints",
+        "web_api_spec_placeholder": "{ \"openapi\": \"3.0.0\", ... }",
         "web_seeds_label": "Extra routes to scan (one URL/path per line)",
         "web_seeds_placeholder": "/help\n/api/items",
         "web_max_pages": "Max pages",
@@ -290,6 +295,11 @@ TRANSLATIONS = {
         "web_ingest_sitemap": "robots.txt / sitemap.xml 수집",
         "web_probe_paths": "민감 경로 프로브 (/.env, /.git ...)",
         "web_active": "능동 검증 (XSS/SQLi/리다이렉트 페이로드 — 권한 대상만)",
+        "web_compare_unauth": "접근통제 점검: 비인증과 비교",
+        "web_secondary_label": "두 번째 계정 쿠키/헤더 (계정 간 IDOR/BOLA)",
+        "web_secondary_placeholder": "Cookie: sid=second-account",
+        "web_api_spec_label": "API 스펙(OpenAPI/HAR/Postman JSON) — GET 엔드포인트 점검",
+        "web_api_spec_placeholder": "{ \"openapi\": \"3.0.0\", ... }",
         "web_seeds_label": "추가 점검 경로 (한 줄에 URL/경로 하나)",
         "web_seeds_placeholder": "/help\n/api/items",
         "web_max_pages": "최대 페이지",
@@ -2599,6 +2609,13 @@ HTML_TEMPLATE = """<!doctype html>
           <label class="scan-web-check"><input id="web-ingest-sitemap" type="checkbox"> <span id="web-ingest-sitemap-label"></span></label>
           <label class="scan-web-check"><input id="web-probe-paths" type="checkbox"> <span id="web-probe-paths-label"></span></label>
           <label class="scan-web-check"><input id="web-active" type="checkbox"> <span id="web-active-label"></span></label>
+          <label class="scan-web-check"><input id="web-compare-unauth" type="checkbox"> <span id="web-compare-unauth-label"></span></label>
+          <label class="scan-web-headers"><span id="web-secondary-label"></span>
+            <textarea id="web-secondary" rows="2" autocomplete="off"></textarea>
+          </label>
+          <label class="scan-web-headers"><span id="web-api-spec-label"></span>
+            <textarea id="web-api-spec" rows="3" autocomplete="off"></textarea>
+          </label>
           <label class="scan-web-headers"><span id="web-seeds-label"></span>
             <textarea id="web-seeds" rows="2" autocomplete="off"></textarea>
           </label>
@@ -2969,6 +2986,11 @@ HTML_TEMPLATE = """<!doctype html>
       setText("web-ingest-sitemap-label", activeLabels.web_ingest_sitemap);
       setText("web-probe-paths-label", activeLabels.web_probe_paths);
       setText("web-active-label", activeLabels.web_active);
+      setText("web-compare-unauth-label", activeLabels.web_compare_unauth);
+      setText("web-secondary-label", activeLabels.web_secondary_label);
+      byId("web-secondary").placeholder = activeLabels.web_secondary_placeholder;
+      setText("web-api-spec-label", activeLabels.web_api_spec_label);
+      byId("web-api-spec").placeholder = activeLabels.web_api_spec_placeholder;
       setText("web-seeds-label", activeLabels.web_seeds_label);
       byId("web-seeds").placeholder = activeLabels.web_seeds_placeholder;
       setText("web-max-pages-label", activeLabels.web_max_pages);
@@ -3556,6 +3578,9 @@ HTML_TEMPLATE = """<!doctype html>
             ingest_sitemap: byId("web-ingest-sitemap").checked,
             probe_paths: byId("web-probe-paths").checked,
             active: byId("web-active").checked,
+            compare_unauth: byId("web-compare-unauth").checked,
+            secondary_headers: byId("web-secondary").value,
+            api_spec: byId("web-api-spec").value,
             seeds: byId("web-seeds").value.split(/\r?\n/).map(function(s){return s.trim();}).filter(Boolean),
             max_pages: Number(byId("web-max-pages").value) || 50,
             max_depth: Number(byId("web-max-depth").value) || 3,

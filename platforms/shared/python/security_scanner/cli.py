@@ -373,6 +373,18 @@ def main(argv: list[str] | None = None) -> int:
                 "parameters. Run only against systems you are explicitly authorized to test.",
                 file=sys.stderr,
             )
+        seeds = list(args.seed)
+        if args.api_spec:
+            from .api_spec import parse_api_spec
+
+            spec_urls, spec_warnings = parse_api_spec(
+                expand_path(str(args.api_spec), Path.cwd()).read_text(encoding="utf-8"), args.url
+            )
+            seeds.extend(spec_urls)
+            for warning in spec_warnings:
+                print(f"warning: {warning}", file=sys.stderr)
+            print(f"API spec: seeded {len(spec_urls)} GET endpoint(s).", file=sys.stderr)
+        secondary_headers = _parse_headers(args.secondary_header)
         opener = build_auth_opener()
         warnings: list[str] = []
         if args.login_url:
@@ -394,13 +406,15 @@ def main(argv: list[str] | None = None) -> int:
         crawl_findings, crawl_warnings, pages = crawl_web(
             args.url,
             timeout=args.timeout,
-            max_pages=args.max_pages if args.crawl else 1,
+            # Seeds (an API spec or --seed) are scanned even without --crawl, at
+            # depth 0 (no link-following) unless --crawl is also given.
+            max_pages=args.max_pages if (args.crawl or seeds) else 1,
             max_depth=args.max_depth if args.crawl else 0,
             delay=args.delay,
             opener=opener,
             extra_headers=extra_headers or None,
             render=args.render,
-            seeds=tuple(args.seed),
+            seeds=tuple(seeds),
             discover_assets=args.discover_assets,
             capture_network=args.capture_network,
             interact=args.interact,
@@ -409,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
             ingest_sitemap=args.ingest_sitemap,
             probe_paths=args.probe_paths,
             active=args.active,
+            compare_unauth=args.compare_unauth,
+            secondary_headers=secondary_headers or None,
         )
         findings = crawl_findings
         warnings.extend(crawl_warnings)
@@ -649,6 +665,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--active",
         action="store_true",
         help="send bounded, non-destructive attack payloads to URL query params to verify reflected XSS / error-based SQLi / open redirect (authorized targets only)",
+    )
+    web_scan.add_argument(
+        "--api-spec",
+        type=Path,
+        metavar="FILE",
+        help="OpenAPI/HAR/Postman JSON to seed the crawl with the API's GET endpoints",
+    )
+    web_scan.add_argument(
+        "--compare-unauth",
+        action="store_true",
+        help="access-control check: re-request authenticated pages without auth and flag matching content",
+    )
+    web_scan.add_argument(
+        "--secondary-header",
+        action="append",
+        default=[],
+        metavar="'Name: value'",
+        help="a second account's header/cookie for cross-account IDOR/BOLA comparison (repeatable)",
     )
     web_scan.add_argument(
         "--seed",

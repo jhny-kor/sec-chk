@@ -97,6 +97,8 @@ def crawl_web(
     ingest_sitemap: bool = False,
     probe_paths: bool = False,
     active: bool = False,
+    compare_unauth: bool = False,
+    secondary_headers: Mapping[str, str] | None = None,
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
@@ -203,6 +205,15 @@ def crawl_web(
         if active and urllib.parse.urlparse(final_url).query:
             # Opt-in active verification of this URL's query parameters.
             collected.extend(active_probe(final_url, opener, headers, timeout, target))
+        if (compare_unauth or secondary_headers) and not _is_static_asset(final_url):
+            # Access-control comparison: does a lower-privileged context get the
+            # same authenticated content? (IDOR/BOLA/BFLA heuristic.)
+            collected.extend(
+                _access_control_check(
+                    final_url, opener, headers, timeout, target,
+                    compare_unauth=compare_unauth, secondary_headers=secondary_headers,
+                )
+            )
 
         if urllib.parse.urlparse(current).scheme == "http" and urllib.parse.urlparse(final_url).scheme != "https":
             collected.append(
@@ -1373,6 +1384,78 @@ def _probe_location(
         return exc.headers.get("Location") if exc.headers else None
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
+
+
+# --- Access-control comparison (IDOR/BOLA/BFLA heuristic) ----------------------
+
+
+def _access_control_check(
+    url: str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+    target: str,
+    *,
+    compare_unauth: bool,
+    secondary_headers: Mapping[str, str] | None,
+) -> list[Finding]:
+    """Compare an authenticated response against lower-privileged contexts.
+
+    If an unauthenticated request, or a second account, receives content similar
+    to the primary (authenticated) response, access control may be broken.
+    Heuristic and non-destructive (GET only); findings are flagged for review.
+    """
+
+    primary = _fetch_meta(opener, url, headers, timeout)
+    if not primary or primary[0] != 200 or _looks_like_login(primary[1]):
+        return []  # only meaningful when the authenticated context truly has access
+
+    findings: list[Finding] = []
+    base_headers = {k: v for k, v in headers.items() if k.lower() != "cookie"}
+
+    if compare_unauth:
+        meta = _fetch_meta(urllib.request.build_opener(), url, base_headers, timeout)
+        if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _similar(primary[1], meta[1]):
+            findings.append(
+                _finding(
+                    "web.broken-access-control-unauth", "medium",
+                    "Authenticated content is also served without authentication (review)",
+                    url, target=target,
+                    evidence="authenticated and unauthenticated GET both returned 200 with similar content",
+                    recommendation="Require authentication/authorization server-side for this resource; verify it is not meant to be public.",
+                )
+            )
+
+    if secondary_headers:
+        meta = _fetch_meta(urllib.request.build_opener(), url, {**base_headers, **secondary_headers}, timeout)
+        if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _similar(primary[1], meta[1]):
+            findings.append(
+                _finding(
+                    "web.broken-access-control-cross-account", "high",
+                    "A second account receives the first account's content (possible IDOR/BOLA, review)",
+                    url, target=target,
+                    evidence="the secondary account's GET returned 200 with content similar to the primary account",
+                    recommendation="Enforce per-object and per-function authorization so one user cannot read another's resource.",
+                )
+            )
+    return findings
+
+
+def _looks_like_login(body: str) -> bool:
+    lowered = body.lower()
+    if 'type="password"' in lowered or "type='password'" in lowered:
+        return True
+    return ("login" in lowered or "sign in" in lowered or "로그인" in body) and "<form" in lowered
+
+
+def _similar(a: str, b: str, tolerance: float = 0.15) -> bool:
+    """True when two response prefixes are close in size (same underlying data)."""
+    if not a or not b:
+        return a == b
+    if a == b:
+        return True
+    longer = max(len(a), len(b))
+    return abs(len(a) - len(b)) / longer <= tolerance
 
 
 def _same_host(seed_url: str, candidate: str) -> bool:
