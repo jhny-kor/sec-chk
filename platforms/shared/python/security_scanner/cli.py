@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         from .discovery import discover_projects
 
         target = expand_path(args.target, Path.cwd())
-        for project in discover_projects(target, args.depth):
+        for project in discover_projects(target):
             markers = ", ".join(project.markers)
             ecosystems = ", ".join(project.ecosystems)
             print(f"{project.name}\t{project.path}\t{ecosystems}\t{markers}")
@@ -436,8 +436,8 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
             # Seeds (an API spec or --seed) are scanned even without --crawl, at
             # depth 0 (no link-following) unless --crawl is also given.
-            max_pages=args.max_pages if (args.crawl or seeds) else 1,
-            max_depth=args.max_depth if args.crawl else 0,
+            max_pages=None if (args.crawl or seeds) else 1,
+            max_depth=None if args.crawl else 0,
             delay=args.delay,
             opener=opener,
             extra_headers=extra_headers or None,
@@ -446,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
             discover_assets=args.discover_assets,
             capture_network=args.capture_network,
             interact=args.interact,
-            max_clicks=args.max_clicks,
+            max_clicks=20,
             scan_js_secrets=args.scan_js_secrets,
             ingest_sitemap=args.ingest_sitemap,
             probe_paths=args.probe_paths,
@@ -590,7 +590,6 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
     scan.add_argument("--max-file-size", type=int, help="maximum file size to scan in bytes")
     scan.add_argument("--discover-projects", action="store_true", help="discover project roots under target folders")
-    scan.add_argument("--discovery-depth", type=int, help="maximum discovery depth below each target")
     scan.add_argument("--enable-osv", action="store_true", help="query OSV.dev for exact-version dependency vulnerabilities")
     scan.add_argument(
         "--enable-vuln-intel",
@@ -685,7 +684,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with --render, click bounded elements to discover button/router routes",
     )
-    web_scan.add_argument("--max-clicks", type=int, default=20, help="max elements to click per page with --interact (default 20)")
     web_scan.add_argument("--scan-js-secrets", action="store_true", help="scan same-host JS bundles for leaked secrets (keys/tokens)")
     web_scan.add_argument("--ingest-sitemap", action="store_true", help="enqueue URLs from /robots.txt and /sitemap.xml")
     web_scan.add_argument("--probe-paths", action="store_true", help="probe well-known sensitive paths (/.env, /.git/config, ...)")
@@ -719,8 +717,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="URL",
         help="extra same-host URL/path to scan (known route, sitemap entry); repeatable",
     )
-    web_scan.add_argument("--max-pages", type=int, default=50, help="max pages to crawl (default 50)")
-    web_scan.add_argument("--max-depth", type=int, default=3, help="max link depth to crawl (default 3)")
     web_scan.add_argument("--delay", type=float, default=0.3, help="seconds to wait between crawl requests (default 0.3)")
     web_scan.add_argument("--login-url", help="URL of a login form to authenticate before scanning")
     web_scan.add_argument("--username", help="username for form login")
@@ -738,7 +734,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     discover = subparsers.add_parser("discover", help="list project roots under a folder")
     discover.add_argument("--target", default=".", help="folder to inspect")
-    discover.add_argument("--depth", type=int, default=2, help="maximum folder depth")
 
     serve = subparsers.add_parser("serve", help="run the local dashboard server")
     serve.add_argument("--host", default="127.0.0.1", help="host interface to bind")
@@ -910,7 +905,7 @@ def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | N
             categories=categories,
             max_file_size_bytes=args.max_file_size or 524288,
             discover_projects=bool(args.discover_projects),
-            discovery_depth=args.discovery_depth if args.discovery_depth is not None else 2,
+            discovery_depth=None,
         )
         for target in target_values
     )
@@ -944,7 +939,7 @@ def _apply_overrides(
     if args.target:
         cli_config = _config_from_cli(args, archive_extract_root=archive_extract_root)
         targets = cli_config.targets
-    elif args.category or args.max_file_size or args.discover_projects or args.discovery_depth is not None:
+    elif args.category or args.max_file_size or args.discover_projects:
         targets = tuple(
             TargetConfig(
                 name=target.name,
@@ -953,7 +948,7 @@ def _apply_overrides(
                 exclude_globs=target.exclude_globs,
                 max_file_size_bytes=args.max_file_size or target.max_file_size_bytes,
                 discover_projects=True if args.discover_projects else target.discover_projects,
-                discovery_depth=args.discovery_depth if args.discovery_depth is not None else target.discovery_depth,
+                discovery_depth=None if args.discover_projects else target.discovery_depth,
             )
             for target in config.targets
         )

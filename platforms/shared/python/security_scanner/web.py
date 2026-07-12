@@ -81,8 +81,8 @@ def crawl_web(
     seed_url: str,
     *,
     timeout: float = 15.0,
-    max_pages: int = 50,
-    max_depth: int = 3,
+    max_pages: int | None = None,
+    max_depth: int | None = None,
     delay: float = 0.3,
     opener: urllib.request.OpenerDirector | None = None,
     extra_headers: Mapping[str, str] | None = None,
@@ -99,11 +99,12 @@ def crawl_web(
     active: bool = False,
     compare_unauth: bool = False,
     secondary_headers: Mapping[str, str] | None = None,
+    scanned_pages: list[str] | None = None,
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
-    Breadth-first over links that stay on the seed's host, bounded by
-    ``max_pages`` and ``max_depth`` with a ``delay`` between requests. Header,
+    Breadth-first over links that stay on the seed's host with a ``delay`` between
+    requests. Optional explicit limits are retained for single-page callers. Header,
     cookie and CORS checks run per page; TLS is checked once per host. Findings
     that repeat across pages (e.g. a missing CSP header) are collapsed to one
     representative each. Returns ``(findings, warnings, pages_scanned)``.
@@ -167,7 +168,7 @@ def crawl_web(
         collected.extend(_probe_sensitive_paths(seed_url, opener, headers, timeout, target))
         collected.extend(_probe_graphql(seed_url, opener, headers, timeout, target))
 
-    while queue and pages_scanned < max_pages:
+    while queue and (max_pages is None or pages_scanned < max_pages):
         current, depth = queue.popleft()
         canonical = _canonical(current)
         if canonical in visited:
@@ -197,7 +198,12 @@ def crawl_web(
             continue
 
         final_url, header_items, set_cookies, body = fetched
+        if not _same_host(seed_url, final_url):
+            warnings.append(f"Web scan skipped cross-host redirect from {current} to {final_url}")
+            continue
         pages_scanned += 1
+        if scanned_pages is not None:
+            scanned_pages.append(final_url)
 
         collected.extend(analyze_response(final_url, header_items, set_cookies, target=target))
         if body:
@@ -240,7 +246,7 @@ def crawl_web(
             collected.extend(tls_findings)
             warnings.extend(tls_warnings)
 
-        if depth < max_depth:
+        if max_depth is None or depth < max_depth:
             candidates: set[str] = set()
             link_source = body
             if render:

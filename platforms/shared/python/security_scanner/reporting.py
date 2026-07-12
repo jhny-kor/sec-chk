@@ -85,7 +85,10 @@ TRANSLATIONS = {
         "settings_tab_quality": "Quality check",
         "settings_loading": "Loading rules…",
         "settings_reset": "Enable all",
-        "download_report": "Download report",
+        "settings_disable_all": "Disable all",
+        "settings_expand_all": "Expand all",
+        "settings_collapse_all": "Collapse all",
+        "download_report": "Report",
         "download_format_prompt": "Choose a format to save",
         "download_standard_label": "Standard",
         "download_all": "All findings",
@@ -129,8 +132,6 @@ TRANSLATIONS = {
         "web_api_spec_placeholder": "{ \"openapi\": \"3.0.0\", ... }",
         "web_seeds_label": "Extra routes to scan (one URL/path per line)",
         "web_seeds_placeholder": "/help\n/api/items",
-        "web_max_pages": "Max pages",
-        "web_max_depth": "Max depth",
         "web_login_legend": "Login (optional)",
         "web_login_url": "Login form URL",
         "web_login_user": "Username",
@@ -150,7 +151,6 @@ TRANSLATIONS = {
         "prevention_kept": "kept existing",
         "prevention_failed": "Prevention kit failed",
         "discover_projects": "Discover projects",
-        "discovery_depth": "Depth",
         "scan_status_idle": "Ready",
         "scan_status_running": "Scanning...",
         "scan_status_done": "Scan complete",
@@ -258,7 +258,10 @@ TRANSLATIONS = {
         "settings_tab_quality": "품질점검",
         "settings_loading": "규칙을 불러오는 중…",
         "settings_reset": "모두 사용",
-        "download_report": "보고서 다운로드",
+        "settings_disable_all": "모두 해제",
+        "settings_expand_all": "+",
+        "settings_collapse_all": "−",
+        "download_report": "보고서",
         "download_format_prompt": "저장할 형식을 선택하세요",
         "download_standard_label": "기준",
         "download_all": "전체",
@@ -302,8 +305,6 @@ TRANSLATIONS = {
         "web_api_spec_placeholder": "{ \"openapi\": \"3.0.0\", ... }",
         "web_seeds_label": "추가 점검 경로 (한 줄에 URL/경로 하나)",
         "web_seeds_placeholder": "/help\n/api/items",
-        "web_max_pages": "최대 페이지",
-        "web_max_depth": "최대 깊이",
         "web_login_legend": "로그인 (선택)",
         "web_login_url": "로그인 폼 URL",
         "web_login_user": "아이디",
@@ -323,7 +324,6 @@ TRANSLATIONS = {
         "prevention_kept": "기존 유지",
         "prevention_failed": "예방 키트 실패",
         "discover_projects": "하위 프로젝트 탐색",
-        "discovery_depth": "깊이",
         "scan_status_idle": "대기 중",
         "scan_status_running": "점검 중...",
         "scan_status_done": "점검 완료",
@@ -1556,7 +1556,6 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_PREVENTION_INSTALL_HOOK__": html.escape(str(labels["prevention_install_hook"])),
         "__INITIAL_PREVENTION_CREATE_IGNORE__": html.escape(str(labels["prevention_create_ignore"])),
         "__INITIAL_DISCOVER_PROJECTS__": html.escape(str(labels["discover_projects"])),
-        "__INITIAL_DISCOVERY_DEPTH__": html.escape(str(labels["discovery_depth"])),
         "__INITIAL_SCAN_STATUS_IDLE__": html.escape(str(labels["scan_status_idle"])),
         "__INITIAL_SEARCH_PLACEHOLDER__": html.escape(str(labels["search_placeholder"]), quote=True),
         "__INITIAL_RESET__": html.escape(str(labels["reset"])),
@@ -1973,16 +1972,6 @@ HTML_TEMPLATE = """<!doctype html>
       gap: 6px;
     }
     .scan-web-check input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; }
-    .scan-web-nums {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 6px 12px;
-    }
-    .scan-web-nums input {
-      width: 70px;
-      flex: 0 0 auto;
-    }
     .scan-web-login {
       display: flex;
       flex-direction: column;
@@ -2036,16 +2025,6 @@ HTML_TEMPLATE = """<!doctype html>
     .scan-note {
       color: var(--muted);
       font-size: 12px;
-    }
-
-    .scan-depth {
-      display: grid;
-      grid-template-columns: auto minmax(54px, 1fr);
-      gap: 8px;
-      align-items: center;
-      color: var(--muted);
-      font-weight: 700;
-      white-space: nowrap;
     }
 
     .scan-status {
@@ -2631,16 +2610,8 @@ HTML_TEMPLATE = """<!doctype html>
       <h2 id="scan-directory-title">__INITIAL_SCAN_DIRECTORY__</h2>
       <div class="scan-form">
         <input id="scan-path" class="path-display" type="text" autocomplete="off" readonly aria-readonly="true" placeholder="__INITIAL_SCAN_PATH_PLACEHOLDER__">
-        <button id="scan-choose" type="button">__INITIAL_CHOOSE_FOLDER__</button>
-        <label class="scan-option">
-          <input id="scan-discover" type="checkbox" checked>
-          <span id="scan-discover-label">__INITIAL_DISCOVER_PROJECTS__</span>
-        </label>
-        <label class="scan-depth">
-          <span id="scan-depth-label">__INITIAL_DISCOVERY_DEPTH__</span>
-          <input id="scan-depth" type="number" min="0" max="20" value="2">
-        </label>
         <div class="scan-run-row">
+          <button id="scan-choose" type="button">__INITIAL_CHOOSE_FOLDER__</button>
           <button id="scan-run" type="button">__INITIAL_SCAN_NOW__</button>
           <button id="screen-quality-run" type="button">__INITIAL_SCREEN_QUALITY_RUN__</button>
         </div>
@@ -2669,10 +2640,6 @@ HTML_TEMPLATE = """<!doctype html>
           <label class="scan-web-headers"><span id="web-seeds-label"></span>
             <textarea id="web-seeds" rows="2" autocomplete="off"></textarea>
           </label>
-          <div class="scan-web-nums">
-            <label><span id="web-max-pages-label"></span> <input id="web-max-pages" type="number" min="1" max="500" value="50"></label>
-            <label><span id="web-max-depth-label"></span> <input id="web-max-depth" type="number" min="0" max="20" value="3"></label>
-          </div>
           <fieldset class="scan-web-login">
             <legend id="web-login-legend-label"></legend>
             <label><span id="web-login-url-label"></span> <input id="web-login-url" type="url" autocomplete="off"></label>
@@ -2745,6 +2712,7 @@ HTML_TEMPLATE = """<!doctype html>
       <select id="severity"></select>
       <select id="category"></select>
       <select id="target"></select>
+      <select id="result-standard"></select>
       <button id="reset" type="button">__INITIAL_RESET__</button>
     </section>
 
@@ -2805,6 +2773,9 @@ HTML_TEMPLATE = """<!doctype html>
       <div class="settings-tabs" role="tablist">
         <button id="settings-tab-security" class="settings-tab active" type="button" data-kind="security"></button>
         <button id="settings-tab-quality" class="settings-tab" type="button" data-kind="quality"></button>
+        <button id="settings-collapse-all" type="button"></button>
+        <button id="settings-expand-all" type="button"></button>
+        <button id="settings-disable-all" type="button"></button>
         <button id="settings-reset" class="settings-reset" type="button"></button>
       </div>
       <div id="settings-groups" class="settings-groups"></div>
@@ -2823,8 +2794,10 @@ HTML_TEMPLATE = """<!doctype html>
       severity: "all",
       category: "all",
       target: "all",
+      resultStandard: "all",
       language: payload.language || "en",
       scanStatus: "",
+      scannedPages: [],
       scanStatusClass: "",
       scanRunning: false,
       scanStandard: (payload.scan && payload.scan.standard) || "local",
@@ -2987,8 +2960,6 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-choose", activeLabels.choose_folder);
       setText("scan-standard-label", activeLabels.scan_standard);
       setText("scan-standard-category-label", activeLabels.scan_standard_category);
-      setText("scan-discover-label", activeLabels.discover_projects);
-      setText("scan-depth-label", activeLabels.discovery_depth);
       setText("scan-osv-label", activeLabels.osv_toggle);
       setText("scan-osv-note", activeLabels.osv_network_note);
       setText("scan-host-label", activeLabels.host_toggle);
@@ -3012,6 +2983,9 @@ HTML_TEMPLATE = """<!doctype html>
       setText("settings-tab-security", activeLabels.settings_tab_security);
       setText("settings-tab-quality", activeLabels.settings_tab_quality);
       setText("settings-reset", activeLabels.settings_reset);
+      setText("settings-disable-all", activeLabels.settings_disable_all);
+      setText("settings-expand-all", activeLabels.settings_expand_all);
+      setText("settings-collapse-all", activeLabels.settings_collapse_all);
       const hasFindings = (findings() || []).length > 0;
       byId("report-download-open").disabled = !hasFindings;
       setText("report-download-note", hasFindings ? "" : activeLabels.download_report_empty);
@@ -3043,8 +3017,6 @@ HTML_TEMPLATE = """<!doctype html>
       byId("web-api-spec").placeholder = activeLabels.web_api_spec_placeholder;
       setText("web-seeds-label", activeLabels.web_seeds_label);
       byId("web-seeds").placeholder = activeLabels.web_seeds_placeholder;
-      setText("web-max-pages-label", activeLabels.web_max_pages);
-      setText("web-max-depth-label", activeLabels.web_max_depth);
       setText("web-login-legend-label", activeLabels.web_login_legend);
       setText("web-login-url-label", activeLabels.web_login_url);
       setText("web-login-user-label", activeLabels.web_login_user);
@@ -3066,6 +3038,20 @@ HTML_TEMPLATE = """<!doctype html>
       byId("sbom-download").disabled = components().length === 0;
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
+      if (state.scannedPages.length) {
+        const details = document.createElement("details");
+        details.className = "scan-pages";
+        details.innerHTML = "<summary>점검 화면 목록</summary>";
+        const list = document.createElement("ul");
+        state.scannedPages.forEach((page) => {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = page; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = page;
+          item.appendChild(link); list.appendChild(item);
+        });
+        details.appendChild(list);
+        scanStatus.appendChild(details);
+      }
       scanStatus.className = `scan-status ${state.scanStatusClass}`;
       setText("risk-score-note", activeLabels.risk_score_formula);
       byId("search").placeholder = activeLabels.search_placeholder;
@@ -3146,6 +3132,11 @@ HTML_TEMPLATE = """<!doctype html>
       fillSelect(byId("severity"), [["all", activeLabels.all_severities], ...severityOrder.map((sev) => [sev, activeSeverityLabels[sev]])], state.severity);
       fillSelect(byId("category"), [["all", activeLabels.all_categories], ...categories.map((cat) => [cat, categoryLabel(cat)])], state.category);
       fillSelect(byId("target"), [["all", activeLabels.all_targets], ...targets.map((target) => [target, targetDisplay(target)])], state.target);
+      const scannedStandard = (payload.scan && payload.scan.standard) || "all";
+      const standardOptions = standardDefinitions()
+        .filter((standard) => standard.id === scannedStandard)
+        .map((standard) => [standard.id, localizedText(standard.labels, standard.id)]);
+      fillSelect(byId("result-standard"), standardOptions.length ? standardOptions : [["all", activeLabels.download_all]], state.resultStandard);
     }
 
     function fillSelect(select, entries, selected) {
@@ -3167,6 +3158,7 @@ HTML_TEMPLATE = """<!doctype html>
         if (state.severity !== "all" && finding.severity !== state.severity) return false;
         if (state.category !== "all" && finding.category !== state.category) return false;
         if (state.target !== "all" && finding.target !== state.target) return false;
+        if (state.resultStandard !== "all" && !(ruleMappings()[finding.rule_id] || []).some((mapping) => mapping.standard_id === state.resultStandard)) return false;
         if (!query) return true;
         return [finding.title, finding.rule_id, categoryLabel(finding.category), finding.path, targetDisplay(finding.target), finding.evidence, finding.recommendation]
           .join(" ")
@@ -3509,6 +3501,7 @@ HTML_TEMPLATE = """<!doctype html>
       state.severity = "all";
       state.category = "all";
       state.target = "all";
+      state.resultStandard = (payload.scan && payload.scan.standard) || "all";
       state.scanStandard = (payload.scan && payload.scan.standard) || state.scanStandard;
       state.scanStandardCategory = (payload.scan && payload.scan.standard_category) || state.scanStandardCategory;
       byId("search").value = "";
@@ -3570,8 +3563,7 @@ HTML_TEMPLATE = """<!doctype html>
           body: JSON.stringify({
             path,
             language: state.language,
-            discover_projects: byId("scan-discover").checked,
-            discovery_depth: Number(byId("scan-depth").value || 0),
+            discover_projects: true,
             standard: state.scanStandard,
             standard_category: state.scanStandardCategory,
             min_severity: "low",
@@ -3632,8 +3624,6 @@ HTML_TEMPLATE = """<!doctype html>
             secondary_headers: byId("web-secondary").value,
             api_spec: byId("web-api-spec").value,
             seeds: byId("web-seeds").value.split(/\\r?\\n/).map(function(s){return s.trim();}).filter(Boolean),
-            max_pages: Number(byId("web-max-pages").value) || 50,
-            max_depth: Number(byId("web-max-depth").value) || 3,
             auth: {
               login_url: byId("web-login-url").value.trim(),
               username: byId("web-login-user").value,
@@ -3649,7 +3639,8 @@ HTML_TEMPLATE = """<!doctype html>
         state.scanRunning = false;
         const pages = nextPayload.pages_scanned;
         const scanned = pages ? ` (${pages} ${labels().web_pages_scanned})` : "";
-        state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}${scanned}`;
+      state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}${scanned}`;
+      state.scannedPages = nextPayload.scanned_pages || [];
         state.scanStatusClass = "ok";
         applyPayload(nextPayload);
       } catch (error) {
@@ -3682,8 +3673,7 @@ HTML_TEMPLATE = """<!doctype html>
           body: JSON.stringify({
             path,
             language: state.language,
-            discover_projects: byId("scan-discover").checked,
-            discovery_depth: Number(byId("scan-depth").value || 0),
+            discover_projects: true,
             categories: ["screen_quality"],
             standard: "local",
             standard_category: "screen_quality",
@@ -3783,6 +3773,10 @@ HTML_TEMPLATE = """<!doctype html>
       state.target = event.target.value;
       render();
     });
+    byId("result-standard").addEventListener("change", (event) => {
+      state.resultStandard = event.target.value;
+      render();
+    });
     byId("scan-standard").addEventListener("change", (event) => {
       state.scanStandard = event.target.value;
       const standard = currentStandard();
@@ -3799,10 +3793,12 @@ HTML_TEMPLATE = """<!doctype html>
       state.severity = "all";
       state.category = "all";
       state.target = "all";
+      state.resultStandard = "all";
       byId("search").value = "";
       byId("severity").value = "all";
       byId("category").value = "all";
       byId("target").value = "all";
+      byId("result-standard").value = "all";
       render();
     });
     byId("scan-choose").addEventListener("click", () => {
@@ -3859,6 +3855,19 @@ HTML_TEMPLATE = """<!doctype html>
       state.disabledRules.clear();
       saveDisabledRules();
       renderSettings();
+    });
+    byId("settings-disable-all").addEventListener("click", () => {
+      for (const group of state.settingsCatalog?.groups || []) {
+        for (const rule of group.rules || []) state.disabledRules.add(rule.id);
+      }
+      saveDisabledRules();
+      renderSettings();
+    });
+    byId("settings-expand-all").addEventListener("click", () => {
+      byId("settings-groups").querySelectorAll("details").forEach((group) => { group.open = true; });
+    });
+    byId("settings-collapse-all").addEventListener("click", () => {
+      byId("settings-groups").querySelectorAll("details").forEach((group) => { group.open = false; });
     });
     byId("report-download-open").addEventListener("click", () => {
       if ((findings() || []).length === 0) return;

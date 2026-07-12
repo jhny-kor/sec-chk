@@ -58,13 +58,13 @@ class DiscoveredProject:
     ecosystems: tuple[str, ...]
 
 
-def discover_projects(root: Path, max_depth: int = 2, include_root: bool = False) -> tuple[DiscoveredProject, ...]:
+def discover_projects(root: Path, max_depth: int | None = None, include_root: bool = False) -> tuple[DiscoveredProject, ...]:
     root = root.expanduser().resolve()
     if not root.exists() or not root.is_dir():
         return ()
 
     projects: list[DiscoveredProject] = []
-    _visit(root, root, 0, max(0, max_depth), include_root, projects)
+    _visit(root, root, 0, max_depth, include_root, projects)
     return tuple(projects)
 
 
@@ -72,7 +72,7 @@ def _visit(
     root: Path,
     current: Path,
     depth: int,
-    max_depth: int,
+    max_depth: int | None,
     include_root: bool,
     projects: list[DiscoveredProject],
 ) -> None:
@@ -81,7 +81,7 @@ def _visit(
         projects.append(project)
         return
 
-    if depth >= max_depth:
+    if max_depth is not None and depth >= max_depth:
         return
 
     try:

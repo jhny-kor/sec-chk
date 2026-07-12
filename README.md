@@ -142,7 +142,7 @@ Use a narrower target before scanning a large folder. Normal scans are read-only
 For a portfolio-style scan of a folder that contains multiple projects:
 
 ```bash
-python3 -m security_scanner discover --target /path/to/projects --depth 2
+python3 -m security_scanner discover --target /path/to/projects
 SEC_CHK_TARGET=/path/to/projects PYTHONPATH=platforms/shared/python python3 -m security_scanner scan --config platforms/shared/python/scanner_config.documents.example.json
 ```
 
@@ -157,7 +157,6 @@ Copy `scanner_config.example.json` and edit the `targets` list:
       "name": "security-workspace",
       "path": ".",
       "discover_projects": false,
-      "discovery_depth": 2,
       "categories": ["secrets", "dependencies", "configuration", "code", "prevention"],
       "exclude_globs": ["**/.git/**", "**/node_modules/**"],
       "max_file_size_bytes": 524288
@@ -190,7 +189,7 @@ ignore:
 python3 -m security_scanner app
 python3 -m security_scanner list-categories
 python3 -m security_scanner serve
-python3 -m security_scanner discover --target /path/to/projects --depth 2
+python3 -m security_scanner discover --target /path/to/projects
 python3 -m security_scanner scan --target /path/to/project --category secrets --format json
 python3 -m security_scanner scan --config scanner_config.example.json --fail-on high
 python3 -m security_scanner scan --target . --format sarif --output reports/results.sarif
@@ -402,7 +401,7 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner scan --config pla
 여러 프로젝트가 들어 있는 폴더를 한 번에 점검하려면:
 
 ```bash
-python3 -m security_scanner discover --target /path/to/projects --depth 2
+python3 -m security_scanner discover --target /path/to/projects
 SEC_CHK_TARGET=/path/to/projects PYTHONPATH=platforms/shared/python python3 -m security_scanner scan --config platforms/shared/python/scanner_config.documents.example.json
 ```
 
@@ -417,7 +416,6 @@ SEC_CHK_TARGET=/path/to/projects PYTHONPATH=platforms/shared/python python3 -m s
       "name": "security-workspace",
       "path": ".",
       "discover_projects": false,
-      "discovery_depth": 2,
       "categories": ["secrets", "dependencies", "configuration", "code", "prevention"],
       "exclude_globs": ["**/.git/**", "**/node_modules/**"],
       "max_file_size_bytes": 524288
@@ -450,7 +448,7 @@ ignore:
 python3 -m security_scanner app
 python3 -m security_scanner list-categories
 python3 -m security_scanner serve
-python3 -m security_scanner discover --target /path/to/projects --depth 2
+python3 -m security_scanner discover --target /path/to/projects
 python3 -m security_scanner scan --target /path/to/project --category secrets --format json
 python3 -m security_scanner scan --config scanner_config.example.json --fail-on high
 python3 -m security_scanner scan --target . --format sarif --output reports/results.sarif

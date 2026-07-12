@@ -4188,8 +4188,6 @@ private enum NativeWebScanner {
     /// `crawl_web` / `login` parameters so both platforms behave the same.
     struct Options {
         var crawl = false
-        var maxPages = 50
-        var maxDepth = 3
         var delay: TimeInterval = 0.3
         var loginURL = ""
         var username = ""
@@ -4203,7 +4201,7 @@ private enum NativeWebScanner {
         // Extra discovery sources (mirror the Python crawl_web options):
         var discoverAssets = false   // A: mine same-host JS bundles for routes/APIs
         var captureNetwork = false   // C: record fetch/XHR URLs during render
-        var interact = false         // D: click bounded elements to find routes
+        var interact = false
         var maxClicks = 20
         var maxAssets = 20
         var seeds: [String] = []     // E: extra same-host URLs to enqueue
@@ -4274,8 +4272,6 @@ private enum NativeWebScanner {
         }
         var pagesScanned = 0
         var assetsSeen: Set<String> = []  // A: JS bundles already scraped (global budget)
-        let maxPages = options.crawl ? max(1, options.maxPages) : 1
-        let maxDepth = options.crawl ? max(0, options.maxDepth) : 0
         let renderer: WebPageRenderer? = options.render ? await WebPageRenderer() : nil
 
         if options.ingestSitemap {
@@ -4289,7 +4285,7 @@ private enum NativeWebScanner {
             collected.append(contentsOf: await probeGraphQL(seed: seed, session: session, options: options, jar: jar, timeout: timeout))
         }
 
-        while !queue.isEmpty, pagesScanned < maxPages {
+        while !queue.isEmpty {
             let (current, depth) = queue.removeFirst()
             let key = canonical(current)
             if visited.contains(key) { continue }
@@ -4308,6 +4304,10 @@ private enum NativeWebScanner {
                 warnings.append("웹 점검 연결 실패 \(current.absoluteString): \(error.localizedDescription)")
                 continue
             case .success(let page):
+                guard sameHost(seed, page.finalURL.absoluteString) else {
+                    warnings.append("웹 점검이 다른 호스트 리디렉션을 건너뜀: \(current.absoluteString) → \(page.finalURL.absoluteString)")
+                    continue
+                }
                 pagesScanned += 1
                 collected.append(contentsOf: analyze(url: page.finalURL.absoluteString, headers: page.headers, cookies: page.cookies))
                 if !page.body.isEmpty {
@@ -4334,7 +4334,7 @@ private enum NativeWebScanner {
                         version: delegate.negotiatedTLSVersion
                     ))
                 }
-                if depth < maxDepth {
+                if options.crawl {
                     var links = extractLinks(base: page.finalURL, body: page.body)
                     if let renderer {
                         let injected = options.extraHeaders.first { $0.key.lowercased() == "cookie" }?.value
@@ -5631,8 +5631,6 @@ private final class WebScanAccessoryView: NSView {
     private let activeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let compareUnauthCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let secondaryField = NSTextField()
-    private let maxPagesField = NSTextField()
-    private let maxDepthField = NSTextField()
     private let loginURLField = NSTextField()
     private let userField = NSTextField()
     private let passField = NSSecureTextField()
@@ -5654,8 +5652,6 @@ private final class WebScanAccessoryView: NSView {
         activeCheck.title = ko ? "능동 검증 (XSS/SQLi/리다이렉트 — 권한 대상만)" : "Active verify (XSS/SQLi/redirect — authorized only)"
         compareUnauthCheck.title = ko ? "접근통제 점검: 비인증과 비교" : "Access-control check: compare vs unauthenticated"
         secondaryField.placeholderString = ko ? "두 번째 계정 쿠키 (계정 간 IDOR/BOLA)" : "Second account cookie (cross-account IDOR/BOLA)"
-        maxPagesField.stringValue = "50"
-        maxDepthField.stringValue = "3"
         loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
         userField.placeholderString = ko ? "아이디" : "Username"
         passField.placeholderString = ko ? "비밀번호" : "Password"
@@ -5671,12 +5667,6 @@ private final class WebScanAccessoryView: NSView {
             return row
         }
 
-        let nums = NSStackView(views: [
-            NSTextField(labelWithString: ko ? "최대 페이지" : "Max pages"), maxPagesField,
-            NSTextField(labelWithString: ko ? "최대 깊이" : "Max depth"), maxDepthField,
-        ])
-        nums.orientation = .horizontal
-
         let stack = NSStackView(views: [
             labeled("URL", urlField),
             crawlCheck,
@@ -5690,7 +5680,6 @@ private final class WebScanAccessoryView: NSView {
             activeCheck,
             compareUnauthCheck,
             secondaryField,
-            nums,
             NSTextField(labelWithString: ko ? "추가 경로 (선택)" : "Extra routes (optional)"),
             seedsField,
             NSTextField(labelWithString: ko ? "로그인 (선택)" : "Login (optional)"),
@@ -5708,8 +5697,6 @@ private final class WebScanAccessoryView: NSView {
         for field in [urlField, loginURLField, headersField, seedsField, secondaryField] {
             field.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
-        maxPagesField.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        maxDepthField.widthAnchor.constraint(equalToConstant: 60).isActive = true
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -5743,8 +5730,6 @@ private final class WebScanAccessoryView: NSView {
         opts.active = activeCheck.state == .on
         opts.compareUnauth = compareUnauthCheck.state == .on
         opts.secondaryHeaders = Self.parseHeaders(secondaryField.stringValue)
-        opts.maxPages = max(1, min(500, Int(maxPagesField.stringValue) ?? 50))
-        opts.maxDepth = max(0, min(20, Int(maxDepthField.stringValue) ?? 3))
         opts.loginURL = loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         opts.username = userField.stringValue
         opts.password = passField.stringValue

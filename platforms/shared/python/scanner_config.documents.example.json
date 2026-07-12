@@ -4,7 +4,6 @@
       "name": "local-projects",
       "path": "${SEC_CHK_TARGET:-.}",
       "discover_projects": true,
-      "discovery_depth": 2,
       "categories": ["secrets", "dependencies", "configuration", "code", "prevention", "screen_quality"],
       "exclude_globs": [
         "**/.git/**",

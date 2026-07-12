@@ -66,7 +66,7 @@ def scan_directory_payload(
     language: str = "ko",
     min_severity: str = "low",
     discover_projects: bool = True,
-    discovery_depth: int = 2,
+    discovery_depth: int | None = None,
     categories: tuple[str, ...] = DEFAULT_CATEGORIES,
     standard: str = DEFAULT_STANDARD,
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
@@ -85,7 +85,7 @@ def scan_directory_payload(
     scanner_categories = standard_selection.scanner_categories
     if include_host and "host" not in scanner_categories:
         scanner_categories = scanner_categories + ("host",)
-    if discovery_depth < 0:
+    if discovery_depth is not None and discovery_depth < 0:
         raise ValueError("discovery_depth must be zero or greater")
     if max_file_size_bytes <= 0:
         raise ValueError("max_file_size_bytes must be positive")
@@ -139,14 +139,14 @@ def web_scan_payload(
     min_severity: str = "info",
     timeout: float = 15.0,
     crawl: bool = False,
-    max_pages: int = 50,
-    max_depth: int = 3,
+    max_pages: int | None = None,
+    max_depth: int | None = None,
     delay: float = 0.3,
     render: bool = False,
     discover_assets: bool = False,
     capture_network: bool = False,
     interact: bool = False,
-    max_clicks: int = 20,
+    max_clicks: int | None = None,
     seeds: tuple[str, ...] = (),
     scan_js_secrets: bool = False,
     ingest_sitemap: bool = False,
@@ -197,6 +197,7 @@ def web_scan_payload(
         warnings.extend(spec_warnings)
     secondary_headers = _headers_from_text(secondary_headers_text)
 
+    scanned_pages: list[str] = []
     findings, crawl_warnings, pages = crawl_web(
         url,
         timeout=timeout,
@@ -217,6 +218,7 @@ def web_scan_payload(
         active=active,
         compare_unauth=compare_unauth,
         secondary_headers=secondary_headers or None,
+        scanned_pages=scanned_pages,
     )
     warnings.extend(crawl_warnings)
     findings = filter_by_min_severity(login_findings + list(findings), min_severity)
@@ -230,6 +232,7 @@ def web_scan_payload(
         scan_path=url,
     )
     payload["pages_scanned"] = pages
+    payload["scanned_pages"] = scanned_pages
     return payload
 
 
@@ -351,7 +354,7 @@ def _handler(language: str):
                     language=_choice_value(request, "language", {"en", "ko"}, language),
                     min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "low"),
                     discover_projects=bool(request.get("discover_projects", True)),
-                    discovery_depth=int(request.get("discovery_depth", 2)),
+                    discovery_depth=None,
                     categories=_categories_value(request),
                     standard=_choice_value(
                         request,
@@ -380,14 +383,12 @@ def _handler(language: str):
                     language=_choice_value(request, "language", {"en", "ko"}, language),
                     min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "info"),
                     crawl=bool(request.get("crawl")),
-                    max_pages=_bounded_int(request.get("max_pages"), default=50, low=1, high=500),
-                    max_depth=_bounded_int(request.get("max_depth"), default=3, low=0, high=20),
                     delay=_bounded_float(request.get("delay"), default=0.3, low=0.0, high=10.0),
                     render=bool(request.get("render")),
                     discover_assets=bool(request.get("discover_assets")),
                     capture_network=bool(request.get("capture_network")),
                     interact=bool(request.get("interact")),
-                    max_clicks=_bounded_int(request.get("max_clicks"), default=20, low=1, high=200),
+                    max_clicks=20,
                     seeds=tuple(s for s in request.get("seeds", []) if isinstance(s, str))
                     if isinstance(request.get("seeds"), list)
                     else (),

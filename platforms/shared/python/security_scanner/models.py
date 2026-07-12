@@ -71,7 +71,7 @@ class TargetConfig:
     exclude_globs: tuple[str, ...] = ()
     max_file_size_bytes: int = 524288
     discover_projects: bool = False
-    discovery_depth: int = 2
+    discovery_depth: int | None = None
 
 
 @dataclass(frozen=True)

@@ -71,8 +71,9 @@ def _target_from_dict(raw: dict[str, Any], base_dir: Path) -> TargetConfig:
     if max_file_size_bytes <= 0:
         raise ConfigError("max_file_size_bytes must be positive.")
     discover_projects = bool(raw.get("discover_projects", False))
-    discovery_depth = int(raw.get("discovery_depth", 2))
-    if discovery_depth < 0:
+    raw_discovery_depth = raw.get("discovery_depth")
+    discovery_depth = int(raw_discovery_depth) if raw_discovery_depth is not None else None
+    if discovery_depth is not None and discovery_depth < 0:
         raise ConfigError("discovery_depth must be zero or greater.")
 
     return TargetConfig(
