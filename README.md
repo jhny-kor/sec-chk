@@ -82,6 +82,23 @@ Security scans run `secrets`, `dependencies`, `configuration`, `code`, and `prev
 
 ## Quick Start
 
+## Web Scan Coverage
+
+KODA's lightweight web scan follows discovered same-origin child pages and records each requested URL separately from its final URL. A login redirect, blocked Origin, failed request, or disabled active check is coverage information, not a successful protected-page scan. A result of zero findings is not a safety guarantee; coverage depends on authentication, enabled checks, and reachable pages and APIs.
+
+| Feature | Lightweight web scan | ZAP Baseline | ZAP Active |
+| --- | ---: | ---: | ---: |
+| Child-page crawl | supported | supported | supported |
+| Security headers | supported | supported | supported |
+| TLS and cookies | supported | partial | partial |
+| Reflected input | limited | manual analysis | supported |
+| SQL injection | error-based indication only | limited | supported |
+| Authenticated checks | limited | context required | context required |
+| Non-GET API | inventory only | API mode | API mode |
+| Business-logic vulnerabilities | not supported | not supported | manual review required |
+
+The dashboard's lightweight web scan is read-only by default. OWASP ZAP is a separate, authorized DAST workflow; it does not run merely because a lightweight scan completes.
+
 Run it like a local app:
 
 ```bash
@@ -106,6 +123,8 @@ Mac App Store packaging for the native macOS app name `KODA` lives in `platforms
 The native KODA app also includes the prevention workflow that previously required terminal commands: an auto-fix wizard for missing guardrail files, in-app pre-commit gate installation, threat model wizard, compliance dashboard, GitHub repository security checklist export, SLSA/Sigstore release signing plan export, NIST SSDF workflow plan export, NIST CSF 2.0 profile export, CISA Secure by Design plan export, CISA secure software development attestation checklist export, API security plan export, OWASP SCVS plan export, privacy data map export, security roadmap export, evidence register export, security headers baseline export, container hardening baseline export, Cloud/IaC security plan export, AI/LLM security plan export, mobile security plan export, secret rotation runbook export, in-app CycloneDX SBOM export, in-app OSV/CVE lookup enriched with CISA KEV and FIRST EPSS where CVEs are available, CycloneDX VEX draft export, ZAP DAST plan generation and Docker-based ZAP baseline execution for authorized URLs, manual evidence checklists for standards that require evidence review, release security packages, `koda-ignore.yml` exception templates with owner/reason/expiry checks, scan change reports, local score history with latest-vs-previous comparison, remediation guide screens, and saved project profiles for frequently scanned target sets. SBOM and OSV inputs include `requirements.txt`, `requirements.in`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, and `pnpm-lock.yaml`.
 
 Windows users can install KODA without administrator privileges after the Windows installer is built on a Windows PC. The macOS App Store SwiftUI app cannot be compiled into a Windows `.exe` on macOS; use the Windows build script for the Python dashboard runtime:
+
+This change does not create, validate, replace, or package Windows EXE or installer artifacts. Run the Windows packaging workflow separately on a Windows build host.
 
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/).
 2. Install Inno Setup 6.

@@ -132,6 +132,8 @@ TRANSLATIONS = {
         "web_api_spec_placeholder": "{ \"openapi\": \"3.0.0\", ... }",
         "web_seeds_label": "Extra routes to scan (one URL/path per line)",
         "web_seeds_placeholder": "/help\n/api/items",
+        "web_allowed_origins_label": "Allowed origins (one exact http(s) origin per line; credentials are never forwarded)",
+        "web_allowed_origins_placeholder": "https://api.example.com",
         "web_login_legend": "Login (optional)",
         "web_login_url": "Login form URL",
         "web_login_user": "Username",
@@ -305,6 +307,8 @@ TRANSLATIONS = {
         "web_api_spec_placeholder": "{ \"openapi\": \"3.0.0\", ... }",
         "web_seeds_label": "추가 점검 경로 (한 줄에 URL/경로 하나)",
         "web_seeds_placeholder": "/help\n/api/items",
+        "web_allowed_origins_label": "허용 Origin (한 줄에 정확한 http(s) Origin 하나, 인증정보는 전달하지 않음)",
+        "web_allowed_origins_placeholder": "https://api.example.com",
         "web_login_legend": "로그인 (선택)",
         "web_login_url": "로그인 폼 URL",
         "web_login_user": "아이디",
@@ -1495,6 +1499,7 @@ def build_dashboard_payload(
     target_paths: dict[str, str] | None = None,
     warnings: tuple[str, ...] = (),
     scan_path: str | None = None,
+    kind: str = "directory",
     standard: str = DEFAULT_STANDARD,
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
     components: tuple[DependencyComponent, ...] = (),
@@ -1502,6 +1507,8 @@ def build_dashboard_payload(
 ) -> dict[str, object]:
     generated, generated_display = _generated_at()
     summary = _summary(findings, target_names, target_paths)
+    summary["raw_finding_count"] = len(findings)
+    summary["displayed_finding_count"] = len(findings)
     labels = _labels(language)
     return {
         "generated_at": generated,
@@ -1515,11 +1522,13 @@ def build_dashboard_payload(
         "scanner": {"name": "local-security-scanner", "version": __version__},
         "summary": summary,
         "scan": {
+            "kind": kind,
             "path": scan_path or "",
             "standard": standard,
             "standard_category": standard_category,
             "warnings": list(warnings),
             "enable_osv": enable_osv,
+            "coverage_message": "현재 활성화된 점검 범위에서 탐지된 항목입니다." if kind == "web" else "",
         },
         "findings_by_language": {
             "en": [_finding_payload(finding) for finding in findings],
@@ -2640,6 +2649,9 @@ HTML_TEMPLATE = """<!doctype html>
           <label class="scan-web-headers"><span id="web-seeds-label"></span>
             <textarea id="web-seeds" rows="2" autocomplete="off"></textarea>
           </label>
+          <label class="scan-web-headers"><span id="web-allowed-origins-label"></span>
+            <textarea id="web-allowed-origins" rows="2" autocomplete="off"></textarea>
+          </label>
           <fieldset class="scan-web-login">
             <legend id="web-login-legend-label"></legend>
             <label><span id="web-login-url-label"></span> <input id="web-login-url" type="url" autocomplete="off"></label>
@@ -2798,6 +2810,7 @@ HTML_TEMPLATE = """<!doctype html>
       language: payload.language || "en",
       scanStatus: "",
       scannedPages: [],
+      pageResults: [],
       scanStatusClass: "",
       scanRunning: false,
       scanStandard: (payload.scan && payload.scan.standard) || "local",
@@ -3017,6 +3030,8 @@ HTML_TEMPLATE = """<!doctype html>
       byId("web-api-spec").placeholder = activeLabels.web_api_spec_placeholder;
       setText("web-seeds-label", activeLabels.web_seeds_label);
       byId("web-seeds").placeholder = activeLabels.web_seeds_placeholder;
+      setText("web-allowed-origins-label", activeLabels.web_allowed_origins_label);
+      byId("web-allowed-origins").placeholder = activeLabels.web_allowed_origins_placeholder;
       setText("web-login-legend-label", activeLabels.web_login_legend);
       setText("web-login-url-label", activeLabels.web_login_url);
       setText("web-login-user-label", activeLabels.web_login_user);
@@ -3038,16 +3053,32 @@ HTML_TEMPLATE = """<!doctype html>
       byId("sbom-download").disabled = components().length === 0;
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
-      if (state.scannedPages.length) {
+      if (payload.scan && payload.scan.kind === "web") {
+        const coverage = document.createElement("div");
+        const raw = summary.raw_finding_count ?? findings().length;
+        const displayed = filteredFindings().length;
+        coverage.textContent = `${payload.scan.coverage_message || "현재 활성화된 점검 범위에서 탐지된 항목입니다."} 전체 탐지 ${raw}건, 현재 표시 ${displayed}건.`;
+        scanStatus.appendChild(coverage);
+        if (payload.auth && ["failed", "uncertain"].includes(payload.auth.status)) {
+          const authWarning = document.createElement("div");
+          authWarning.textContent = "인증 성공을 확인하지 못했습니다. 로그인 이후 화면과 보호 API가 점검되지 않았을 수 있습니다.";
+          scanStatus.appendChild(authWarning);
+        }
+      }
+      if (state.pageResults.length) {
         const details = document.createElement("details");
         details.className = "scan-pages";
         details.innerHTML = "<summary>점검 화면 목록</summary>";
         const list = document.createElement("ul");
-        state.scannedPages.forEach((page) => {
+        state.pageResults.forEach((page) => {
           const item = document.createElement("li");
-          const link = document.createElement("a");
-          link.href = page; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = page;
-          item.appendChild(link); list.appendChild(item);
+          const requested = page.requested_url || "";
+          const finalURL = page.final_url || requested;
+          const status = page.status ? `HTTP ${page.status}` : "request failed";
+          const active = page.active_checks_executed ? "능동 검증 실행" : "능동 검증 미실행";
+          const outcome = page.skip_reason || `점검 완료 (${(page.checks_executed || []).join(", ") || "headers"}; ${active})`;
+          item.textContent = `요청: ${requested} | 결과: ${finalURL} | ${status} | ${outcome}`;
+          list.appendChild(item);
         });
         details.appendChild(list);
         scanStatus.appendChild(details);
@@ -3132,11 +3163,12 @@ HTML_TEMPLATE = """<!doctype html>
       fillSelect(byId("severity"), [["all", activeLabels.all_severities], ...severityOrder.map((sev) => [sev, activeSeverityLabels[sev]])], state.severity);
       fillSelect(byId("category"), [["all", activeLabels.all_categories], ...categories.map((cat) => [cat, categoryLabel(cat)])], state.category);
       fillSelect(byId("target"), [["all", activeLabels.all_targets], ...targets.map((target) => [target, targetDisplay(target)])], state.target);
+      const scanKind = (payload.scan && payload.scan.kind) || "directory";
       const scannedStandard = (payload.scan && payload.scan.standard) || "all";
       const standardOptions = standardDefinitions()
         .filter((standard) => standard.id === scannedStandard)
         .map((standard) => [standard.id, localizedText(standard.labels, standard.id)]);
-      fillSelect(byId("result-standard"), standardOptions.length ? standardOptions : [["all", activeLabels.download_all]], state.resultStandard);
+      fillSelect(byId("result-standard"), scanKind === "web" ? [["all", activeLabels.download_all]] : [["all", activeLabels.download_all], ...standardOptions], state.resultStandard);
     }
 
     function fillSelect(select, entries, selected) {
@@ -3501,7 +3533,9 @@ HTML_TEMPLATE = """<!doctype html>
       state.severity = "all";
       state.category = "all";
       state.target = "all";
-      state.resultStandard = (payload.scan && payload.scan.standard) || "all";
+      state.resultStandard = payload.scan && payload.scan.kind === "web" ? "all" : (payload.scan && payload.scan.standard) || "all";
+      state.scannedPages = payload.scanned_pages || [];
+      state.pageResults = payload.page_results || [];
       state.scanStandard = (payload.scan && payload.scan.standard) || state.scanStandard;
       state.scanStandardCategory = (payload.scan && payload.scan.standard_category) || state.scanStandardCategory;
       byId("search").value = "";
@@ -3624,6 +3658,7 @@ HTML_TEMPLATE = """<!doctype html>
             secondary_headers: byId("web-secondary").value,
             api_spec: byId("web-api-spec").value,
             seeds: byId("web-seeds").value.split(/\\r?\\n/).map(function(s){return s.trim();}).filter(Boolean),
+            allowed_origins: byId("web-allowed-origins").value.split(/\\r?\\n/).map(function(s){return s.trim();}).filter(Boolean),
             auth: {
               login_url: byId("web-login-url").value.trim(),
               username: byId("web-login-user").value,

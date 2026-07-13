@@ -2214,15 +2214,15 @@ private struct RemediationGuideScreen: View {
 
     private var noFindingsTitle: String {
         switch language {
-        case .ko: return "조치할 발견 항목이 없습니다."
-        case .en: return "No findings to remediate."
+        case .ko: return "현재 활성화된 점검 범위에서 탐지된 항목이 없습니다."
+        case .en: return "No findings were detected within the active scan scope."
         }
     }
 
     private var noFindingsSubtitle: String {
         switch language {
-        case .ko: return "현재 기준의 결과에는 표시할 취약점이 없습니다. 예방 키트로 기본 가드레일을 유지하세요."
-        case .en: return "This standard currently has no visible findings. Keep baseline guardrails in place with the Prevention Kit."
+        case .ko: return "이 결과는 전체 보안성을 보장하지 않습니다. 인증 상태, 활성화된 옵션, 접근 가능한 화면과 API에 따라 점검 범위가 달라집니다."
+        case .en: return "This does not guarantee that the target is free of vulnerabilities; coverage depends on authentication, enabled options, and reachable pages and APIs."
         }
     }
 

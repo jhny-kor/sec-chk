@@ -4898,8 +4898,8 @@ private enum NativeWebScanner {
             if let target = withQueryParam(url, name, marker),
                let body = await probeBody(target, session: session, options: options, jar: jar, timeout: timeout),
                body.contains(marker) {
-                findings.append(finding("web.reflected-xss-verified", "high",
-                    "반사된 입력이 인코딩 없이 반환됨(검증된 XSS 벡터)", url.absoluteString,
+                findings.append(finding("web.reflected-xss-verified", "medium",
+                    "입력값이 인코딩되지 않고 반사됨 — XSS 실행 가능성 수동 확인 필요", url.absoluteString,
                     evidence: "param '\(name)': 마커가 인코딩 없이 반사됨",
                     recommendation: "출력 시 컨텍스트 인코딩을 적용하고 엄격한 CSP를 설정하세요."))
             }
@@ -4911,8 +4911,8 @@ private enum NativeWebScanner {
                 let baseURL = withQueryParam(url, name, original)
                 let baseline = baseURL == nil ? nil : await probeBody(baseURL!, session: session, options: options, jar: jar, timeout: timeout)
                 if !(baseline.map(matchesSQLError) ?? false) {
-                    findings.append(finding("web.sql-injection-error-verified", "high",
-                        "작은따옴표가 DB 오류를 유발함(검증된 SQL 인젝션 벡터)", url.absoluteString,
+                findings.append(finding("web.sql-injection-error-verified", "high",
+                        "입력값 변경 시 데이터베이스 오류가 발생함 — SQL Injection 가능성 높음", url.absoluteString,
                         evidence: "param '\(name)': 따옴표를 넣었을 때만 SQL 오류 시그니처가 나타남",
                         recommendation: "파라미터화 쿼리/프리페어드 스테이트먼트를 사용하고 원시 입력으로 SQL을 조립하지 마세요."))
                 }

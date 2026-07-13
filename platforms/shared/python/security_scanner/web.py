@@ -100,6 +100,8 @@ def crawl_web(
     compare_unauth: bool = False,
     secondary_headers: Mapping[str, str] | None = None,
     scanned_pages: list[str] | None = None,
+    page_results: list[dict[str, object]] | None = None,
+    allowed_origins: Sequence[str] = (),
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
@@ -140,8 +142,9 @@ def crawl_web(
         return [], [f"Web scan skipped: not an http(s) URL: {seed_url}"], 0
 
     target = parsed.netloc
+    allowed = {_origin(seed_url), *(_origin(origin) for origin in allowed_origins)}
     if opener is None:
-        opener = urllib.request.build_opener()
+        opener = build_auth_opener()
     headers = {"User-Agent": _USER_AGENT}
     if extra_headers:
         headers.update(extra_headers)
@@ -154,7 +157,7 @@ def crawl_web(
     # E: enqueue caller-supplied same-host seeds (known routes / sitemap / API paths).
     for seed in seeds:
         absolute = urllib.parse.urljoin(seed_url, seed)
-        if _same_host(seed_url, absolute):
+        if _is_allowed_origin(absolute, allowed):
             queue.append((absolute, 0))
     pages_scanned = 0
     render_warned = False
@@ -162,7 +165,7 @@ def crawl_web(
 
     if ingest_sitemap:
         for url in _ingest_sitemaps(seed_url, opener, headers, timeout):
-            if _same_host(seed_url, url):
+            if _is_allowed_origin(url, allowed):
                 queue.append((url, 0))
     if probe_paths:
         collected.extend(_probe_sensitive_paths(seed_url, opener, headers, timeout, target))
@@ -178,7 +181,7 @@ def crawl_web(
         if pages_scanned and delay:
             time.sleep(delay)
 
-        fetched = _fetch(opener, current, headers, timeout)
+        fetched = _fetch(opener, current, headers, timeout, allowed)
         if fetched is None:
             # Only the seed's unreachability is worth a finding; sub-pages degrade
             # to a warning so one dead link never dominates the report.
@@ -195,15 +198,40 @@ def crawl_web(
                     )
                 )
             warnings.append(f"Web scan could not reach {current}")
+            if page_results is not None:
+                page_results.append(_page_result(current, current, 0, "", False, "", False, "request failed"))
             continue
 
-        final_url, header_items, set_cookies, body = fetched
-        if not _same_host(seed_url, final_url):
+        final_url, status, content_type, header_items, set_cookies, body = fetched
+        if not _is_allowed_origin(final_url, allowed):
             warnings.append(f"Web scan skipped cross-host redirect from {current} to {final_url}")
+            if page_results is not None:
+                page_results.append(_page_result(
+                    current, final_url, status, content_type, False, "", False, "redirected to an unapproved origin"
+                ))
+            continue
+        login_redirect = _canonical(current) != _canonical(final_url) and _looks_like_login(body.decode("utf-8", "replace"))
+        if login_redirect:
+            warnings.append(f"Web scan could not inspect protected page {current}; it redirected to login page {final_url}")
+            if page_results is not None:
+                page_results.append(_page_result(
+                    current, final_url, status, content_type, True, "login-page", False,
+                    "redirected to login page; protected content was not scanned",
+                ))
             continue
         pages_scanned += 1
         if scanned_pages is not None:
             scanned_pages.append(final_url)
+
+        checks = ["headers", "cookies"]
+        if body:
+            checks.append("html-body")
+        active_executed = active and (bool(urllib.parse.urlparse(final_url).query) or bool(body))
+        if page_results is not None:
+            page_results.append(_page_result(
+                current, final_url, status, content_type, True, "authenticated" if _cookie_count(opener) else "not-requested",
+                active_executed, "", checks,
+            ))
 
         collected.extend(analyze_response(final_url, header_items, set_cookies, target=target))
         if body:
@@ -281,7 +309,7 @@ def crawl_web(
                 collected.extend(secret_findings)
             for link in candidates:
                 if (
-                    _same_host(seed_url, link)
+                    _is_allowed_origin(link, allowed)
                     and not _is_static_asset(link)
                     and _canonical(link) not in visited
                 ):
@@ -774,36 +802,74 @@ def _fetch(
     url: str,
     headers: Mapping[str, str],
     timeout: float,
-) -> tuple[str, list[tuple[str, str]], list[str], bytes] | None:
-    """Fetch ``url`` returning ``(final_url, header_items, set_cookies, body)``.
+    allowed_origins: set[str],
+) -> tuple[str, int, str, list[tuple[str, str]], list[str], bytes] | None:
+    current_url = url
+    current_headers = dict(headers)
+    current_opener = opener
+    for _ in range(6):
+        request = urllib.request.Request(current_url, headers=current_headers, method="GET")
+        try:
+            with current_opener.open(request, timeout=timeout) as response:
+                header_items = list(response.headers.items())
+                set_cookies = response.headers.get_all("Set-Cookie") or []
+                return response.geturl(), response.status, response.headers.get("Content-Type") or "", header_items, set_cookies, _read_safe_body(response)
+        except urllib.error.HTTPError as exc:
+            header_items = list(exc.headers.items()) if exc.headers else []
+            set_cookies = exc.headers.get_all("Set-Cookie") if exc.headers else []
+            content_type = exc.headers.get("Content-Type") if exc.headers else ""
+            location = exc.headers.get("Location") if exc.headers else None
+            if 300 <= exc.code < 400 and location:
+                next_url = urllib.parse.urljoin(current_url, location)
+                if not _is_allowed_origin(next_url, allowed_origins):
+                    exc.close()
+                    return next_url, exc.code, content_type or "", header_items, set_cookies, b""
+                if _origin(next_url) != _origin(url):
+                    current_headers = _without_credentials(current_headers)
+                    current_opener = urllib.request.build_opener(_NoRedirect())
+                exc.close()
+                current_url = next_url
+                continue
+            return exc.geturl() if hasattr(exc, "geturl") else current_url, exc.code, content_type or "", header_items, set_cookies, _read_safe_body(exc)
+        except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+            return None
+    return current_url, 0, "", [], [], b""
 
-    ``body`` is the response bytes for html responses under ``_MAX_BODY_BYTES``
-    (empty otherwise, so non-html/large pages are analyzed but not crawled).
-    Returns ``None`` on a connection-level failure so the caller can degrade.
-    """
 
-    request = urllib.request.Request(url, headers=dict(headers), method="GET")
-    try:
-        with opener.open(request, timeout=timeout) as response:
-            final_url = response.geturl()
-            header_items = list(response.headers.items())
-            set_cookies = response.headers.get_all("Set-Cookie") or []
-            body = _read_html_body(response)
-            return final_url, header_items, set_cookies, body
-    except urllib.error.HTTPError as exc:
-        # An error status still carries the response headers we want to inspect.
-        header_items = list(exc.headers.items()) if exc.headers else []
-        set_cookies = exc.headers.get_all("Set-Cookie") if exc.headers else []
-        return url, header_items, set_cookies, b""
-    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
-        return None
-
-
-def _read_html_body(response) -> bytes:
+def _read_safe_body(response) -> bytes:
     content_type = (response.headers.get("Content-Type") or "").lower()
-    if "html" not in content_type:
+    if "html" not in content_type and not content_type.startswith("text/"):
         return b""
     return response.read(_MAX_BODY_BYTES)
+
+
+def _without_credentials(headers: Mapping[str, str]) -> dict[str, str]:
+    return {name: value for name, value in headers.items() if name.lower() not in {"authorization", "cookie", "proxy-authorization"}}
+
+
+def _page_result(
+    requested_url: str,
+    final_url: str,
+    status: int,
+    content_type: str,
+    same_host: bool,
+    auth_state: str,
+    active_checks_executed: bool,
+    skip_reason: str,
+    checks_executed: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "requested_url": requested_url,
+        "final_url": final_url,
+        "status": status,
+        "content_type": content_type,
+        "redirected": _canonical(requested_url) != _canonical(final_url),
+        "same_host": same_host,
+        "auth_state": auth_state,
+        "checks_executed": checks_executed or [],
+        "active_checks_executed": active_checks_executed,
+        "skip_reason": skip_reason,
+    }
 
 
 def _ensure_bundled_browsers_path() -> None:
@@ -1316,8 +1382,8 @@ def active_probe(
         if body and marker in body:
             findings.append(
                 _finding(
-                    "web.reflected-xss-verified", "high",
-                    "Reflected input is returned unencoded (verified XSS vector)",
+                    "web.reflected-xss-verified", "medium",
+                    "Unencoded reflected input detected; XSS context review required",
                     url, target=target,
                     evidence=f"param '{name}': marker reflected without encoding ({marker})",
                     recommendation="Context-encode all user input on output and add a strict CSP.",
@@ -1333,7 +1399,7 @@ def active_probe(
                 findings.append(
                     _finding(
                         "web.sql-injection-error-verified", "high",
-                        "A single quote triggers a database error (verified SQL injection vector)",
+                        "Input change triggers a database error; SQL injection is likely",
                         url, target=target,
                         evidence=f"param '{name}': SQL error signature appeared only with a trailing quote",
                         recommendation="Use parameterized queries / prepared statements; never build SQL from raw input.",
@@ -1429,8 +1495,8 @@ def form_active_probe(
             if body_x and marker in body_x:
                 findings.append(
                     _finding(
-                        "web.reflected-xss-verified", "high",
-                        "Form field is reflected unencoded (verified XSS vector)",
+                        "web.reflected-xss-verified", "medium",
+                        "Unencoded reflected input detected; XSS context review required",
                         action_url, target=target,
                         evidence=f"form field '{name}' ({method.upper()}) reflected the marker unencoded",
                         recommendation="Context-encode all user input on output and add a strict CSP.",
@@ -1443,7 +1509,7 @@ def form_active_probe(
                     findings.append(
                         _finding(
                             "web.sql-injection-error-verified", "high",
-                            "Form field triggers a database error (verified SQL injection vector)",
+                            "Input change triggers a database error; SQL injection is likely",
                             action_url, target=target,
                             evidence=f"form field '{name}' ({method.upper()}) produced a SQL error only with a trailing quote",
                             recommendation="Use parameterized queries / prepared statements; never build SQL from raw input.",
@@ -1592,6 +1658,10 @@ def _same_host(seed_url: str, candidate: str) -> bool:
     return other.scheme in {"http", "https"} and other.netloc == seed.netloc
 
 
+def _is_allowed_origin(candidate: str, allowed_origins: set[str]) -> bool:
+    return _origin(candidate) in allowed_origins
+
+
 # Static assets carry the same per-host headers as pages, so scanning them adds
 # noise and wasted requests (and rendering a font/image errors). Discover them,
 # but keep them out of the scan frontier.
@@ -1647,7 +1717,7 @@ def build_auth_opener() -> urllib.request.OpenerDirector:
     """
 
     jar = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), _NoRedirect())
 
 
 class _FormParser(HTMLParser):
@@ -1687,6 +1757,7 @@ def login(
     user_field: str | None = None,
     pass_field: str | None = None,
     timeout: float = 15.0,
+    result: dict[str, object] | None = None,
 ) -> tuple[list[str], list[Finding]]:
     """Perform a best-effort form login, keeping the session in ``opener``'s jar.
 
@@ -1698,6 +1769,15 @@ def login(
     """
 
     warnings: list[str] = []
+    if result is not None:
+        result.update({
+            "status": "uncertain",
+            "login_url": login_url,
+            "final_url": login_url,
+            "session_cookie_received": False,
+            "session_rotated": False,
+            "message": "Login success could not yet be confirmed.",
+        })
     target = urllib.parse.urlparse(login_url).netloc
     request = urllib.request.Request(login_url, headers={"User-Agent": _USER_AGENT})
     try:
@@ -1705,16 +1785,22 @@ def login(
             page_url = response.geturl()
             body = response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
+        if result is not None:
+            result.update({"status": "failed", "message": "Login page could not be loaded."})
         return [f"Login page could not be loaded ({login_url}): {getattr(exc, 'reason', exc)}"], []
 
     parser = _FormParser()
     parser.feed(body)
     if not parser.done:
+        if result is not None:
+            result.update({"status": "failed", "message": "No login form was found."})
         return [f"No login form found at {login_url}; scanning unauthenticated."], []
 
     user_key = user_field or _match_field(parser.fields, _USER_FIELD_RE)
     pass_key = pass_field or _match_field(parser.fields, _PASS_FIELD_RE)
     if not user_key or not pass_key:
+        if result is not None:
+            result.update({"status": "failed", "message": "Login fields could not be identified."})
         return [f"Could not identify login fields at {login_url}; scanning unauthenticated."], []
 
     fields = dict(parser.fields)
@@ -1734,15 +1820,28 @@ def login(
     try:
         with opener.open(post, timeout=timeout) as response:
             final_url = response.geturl()
+            response_body = _read_safe_body(response).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         final_url = exc.geturl() if hasattr(exc, "geturl") else action_url
+        response_body = _read_safe_body(exc).decode("utf-8", "replace")
+        exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
+        if result is not None:
+            result.update({"status": "failed", "message": "Login request failed."})
         return [f"Login POST failed ({action_url}): {getattr(exc, 'reason', exc)}"], []
 
     got_cookie = _cookie_count(opener) > cookies_before
     redirected_away = _canonical(final_url) != _canonical(action_url)
     if not (got_cookie or redirected_away):
         warnings.append(f"Login may have failed at {login_url}; no session cookie set. Scanning may be unauthenticated.")
+    if result is not None:
+        result.update({
+            "status": "uncertain" if got_cookie and not _looks_like_login(response_body) else "failed",
+            "final_url": final_url,
+            "session_cookie_received": got_cookie,
+            "session_rotated": False,
+            "message": "Login requires protected-content confirmation." if got_cookie else "Login success could not be confirmed.",
+        })
 
     findings: list[Finding] = []
     if got_cookie or redirected_away:
@@ -1758,6 +1857,8 @@ def login(
                     recommendation="Issue a fresh session identifier immediately after successful authentication.",
                 )
             )
+        elif result is not None:
+            result["session_rotated"] = bool(sessions_before)
     return warnings, findings
 
 

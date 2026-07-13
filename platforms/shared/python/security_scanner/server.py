@@ -156,6 +156,7 @@ def web_scan_payload(
     secondary_headers_text: str = "",
     api_spec_text: str = "",
     auth: dict[str, object] | None = None,
+    allowed_origins: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -169,6 +170,14 @@ def web_scan_payload(
     extra_headers = _headers_from_text(str(auth.get("headers") or ""))
     opener = build_auth_opener()
     warnings: list[str] = []
+    auth_result: dict[str, object] = {
+        "status": "not-requested",
+        "login_url": "",
+        "final_url": "",
+        "session_cookie_received": False,
+        "session_rotated": False,
+        "message": "",
+    }
     login_url = str(auth.get("login_url") or "").strip()
     if login_url:
         username = str(auth.get("username") or "")
@@ -183,10 +192,12 @@ def web_scan_payload(
             user_field=(str(auth.get("user_field")) or None) if auth.get("user_field") else None,
             pass_field=(str(auth.get("pass_field")) or None) if auth.get("pass_field") else None,
             timeout=timeout,
+            result=auth_result,
         )
         warnings.extend(login_warnings)
     else:
         login_findings = []
+    origins = _validated_origins(url, allowed_origins)
 
     seeds = tuple(seeds)
     if api_spec_text.strip():
@@ -198,6 +209,7 @@ def web_scan_payload(
     secondary_headers = _headers_from_text(secondary_headers_text)
 
     scanned_pages: list[str] = []
+    page_results: list[dict[str, object]] = []
     findings, crawl_warnings, pages = crawl_web(
         url,
         timeout=timeout,
@@ -219,8 +231,13 @@ def web_scan_payload(
         compare_unauth=compare_unauth,
         secondary_headers=secondary_headers or None,
         scanned_pages=scanned_pages,
+        page_results=page_results,
+        allowed_origins=origins,
     )
     warnings.extend(crawl_warnings)
+    if auth_result["status"] == "uncertain" and any(item["auth_state"] == "authenticated" for item in page_results):
+        auth_result["status"] = "authenticated"
+        auth_result["message"] = "Authenticated content was reached during the crawl."
     findings = filter_by_min_severity(login_findings + list(findings), min_severity)
     target_name = parsed.netloc
     payload = build_dashboard_payload(
@@ -230,10 +247,28 @@ def web_scan_payload(
         target_paths={target_name: url},
         warnings=tuple(warnings),
         scan_path=url,
+        kind="web",
     )
     payload["pages_scanned"] = pages
     payload["scanned_pages"] = scanned_pages
+    payload["page_results"] = page_results
+    payload["auth"] = auth_result
     return payload
+
+
+def _validated_origins(seed_url: str, raw_origins: tuple[str, ...]) -> tuple[str, ...]:
+    origins = {_origin_value(seed_url)}
+    for raw in raw_origins:
+        parsed = urlparse(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+            raise ValueError("Allowed origins must use exactly http(s)://host[:port].")
+        origins.add(_origin_value(raw))
+    return tuple(sorted(origins))
+
+
+def _origin_value(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _headers_from_text(raw: str) -> dict[str, str]:
@@ -400,6 +435,9 @@ def _handler(language: str):
                     secondary_headers_text=str(request.get("secondary_headers") or ""),
                     api_spec_text=str(request.get("api_spec") or ""),
                     auth=auth,
+                    allowed_origins=tuple(origin for origin in request.get("allowed_origins", []) if isinstance(origin, str))
+                    if isinstance(request.get("allowed_origins"), list)
+                    else (),
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)

@@ -2874,7 +2874,7 @@ private extension NativeSecurityScanner {
             "evidence": "근거",
             "recommendation": "조치",
             "evidenceAction": "근거 / 조치",
-            "noFindings": "발견 항목이 없습니다.",
+            "noFindings": "현재 활성화된 점검 범위에서 탐지된 항목이 없습니다. 전체 보안성을 보장하지 않습니다.",
         ]
         let en = [
             "pageTitle": "KODA Security Scan Report",
@@ -2895,7 +2895,7 @@ private extension NativeSecurityScanner {
             "evidence": "Evidence",
             "recommendation": "Recommendation",
             "evidenceAction": "Evidence / Action",
-            "noFindings": "No findings.",
+            "noFindings": "No findings were detected within the checks and pages covered by this scan. This does not guarantee that the target is free of vulnerabilities.",
         ]
         return (language == .ko ? ko : en)[key] ?? key
     }
