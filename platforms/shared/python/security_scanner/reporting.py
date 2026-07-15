@@ -2095,6 +2095,13 @@ HTML_TEMPLATE = """<!doctype html>
       flex-direction: column;
       gap: 4px;
     }
+    .scan-web-textareas {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 12px;
+      min-width: 0;
+    }
     .scan-web-options input:not([type="checkbox"]),
     .scan-web-options textarea {
       width: 100%;
@@ -2723,6 +2730,7 @@ HTML_TEMPLATE = """<!doctype html>
       .metrics, .filters, .scan-form, .scan-standard-form, .scan-web-form { grid-template-columns: 1fr; }
       .scan-web-options-content { grid-template-columns: 1fr; }
       .scan-web-headers, .scan-web-login { grid-column: 1 / -1; }
+      .scan-web-textareas { grid-template-columns: 1fr; }
       .scan-actions { display: grid; grid-template-columns: 1fr; }
       .standard-head { grid-template-columns: 1fr; }
       .metric { min-height: 84px; }
@@ -2782,6 +2790,7 @@ HTML_TEMPLATE = """<!doctype html>
           <label class="scan-web-check"><input id="web-probe-paths" type="checkbox"> <span id="web-probe-paths-label"></span></label>
           <label class="scan-web-check"><input id="web-active" type="checkbox"> <span id="web-active-label"></span></label>
           <label class="scan-web-check"><input id="web-compare-unauth" type="checkbox"> <span id="web-compare-unauth-label"></span></label>
+          <div class="scan-web-textareas">
           <label class="scan-web-headers"><span id="web-secondary-label"></span>
             <textarea id="web-secondary" rows="2" autocomplete="off"></textarea>
           </label>
@@ -2794,6 +2803,7 @@ HTML_TEMPLATE = """<!doctype html>
           <label class="scan-web-headers"><span id="web-allowed-origins-label"></span>
             <textarea id="web-allowed-origins" rows="2" autocomplete="off"></textarea>
           </label>
+          </div>
           <fieldset class="scan-web-login">
             <legend id="web-login-legend-label"></legend>
             <label><span id="web-login-url-label"></span> <input id="web-login-url" type="url" autocomplete="off"></label>
