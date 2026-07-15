@@ -35,6 +35,17 @@ http://<server-ip>:8765/security-dashboard.html
 
 Use `koda serve` without `--host` for same-server loopback access only.
 
+The installer and package include the Playwright Chromium renderer. Confirm the
+server is healthy before handing the dashboard to an operator:
+
+```bash
+curl --fail http://127.0.0.1:8765/api/health
+```
+
+After a completed scan, **보고서 → PDF** downloads a PDF file directly; it does
+not open a print dialog. Do not omit Chromium when building an offline bundle:
+`install.sh` and `package.sh` fail if the renderer cannot be staged.
+
 ## Build An Offline Tarball
 
 Build on a connected machine, then move the tarball into the closed network.

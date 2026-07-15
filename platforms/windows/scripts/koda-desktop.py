@@ -61,6 +61,7 @@ def _run_native_window(url: str, display_name: str) -> bool:
         return False
 
     try:
+        webview.settings["ALLOW_DOWNLOADS"] = True
         webview.create_window(
             display_name,
             url=url,

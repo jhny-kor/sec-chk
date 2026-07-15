@@ -19,6 +19,8 @@ from .reporting import (
     render_html,
     render_hwpx,
     render_markdown_from_payload,
+    render_pdf,
+    PdfExportError,
     render_xlsx,
 )
 from .scanner import SecurityScanner
@@ -459,7 +461,7 @@ def _handler(language: str):
         def _handle_export(self) -> None:
             try:
                 request = self._read_json(max_bytes=4_194_304)
-                report_format = _choice_value(request, "format", {"md", "markdown", "xlsx", "hwpx"}, "md")
+                report_format = _choice_value(request, "format", {"md", "markdown", "xlsx", "hwpx", "pdf"}, "md")
                 lang = _choice_value(request, "language", {"en", "ko"}, language)
                 payload = request.get("payload")
                 if not isinstance(payload, dict):
@@ -475,6 +477,13 @@ def _handler(language: str):
                 body = render_xlsx(payload, lang)
                 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 extension = "xlsx"
+            elif report_format == "pdf":
+                try:
+                    body = render_pdf(payload, lang)
+                except PdfExportError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+                    return
+                content_type, extension = "application/pdf", "pdf"
             else:
                 body = render_hwpx(payload, lang)
                 content_type, extension = "application/hwp+zip", "hwpx"
@@ -627,8 +636,6 @@ def _should_retry_macos_picker_without_default(result: subprocess.CompletedProce
 def allowed_cors_origin(origin: str | None) -> str | None:
     if origin is None:
         return None
-    if origin == "null":
-        return origin
     parsed = urlparse(origin)
     if parsed.scheme in {"http", "https"} and parsed.hostname in LOCAL_CORS_HOSTS:
         return origin

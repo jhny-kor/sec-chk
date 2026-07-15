@@ -7,6 +7,7 @@ import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+from threading import BoundedSemaphore
 
 from . import __version__
 from .dependency_inventory import component_payload
@@ -96,8 +97,11 @@ TRANSLATIONS = {
         "download_md": "Markdown",
         "download_xlsx": "Excel (xlsx)",
         "download_hwpx": "Hangul (hwpx)",
-        "download_pdf": "PDF (print)",
+        "download_pdf": "PDF",
         "download_report_empty": "Run a scan first to download a report.",
+        "download_future_title": "Format support notice",
+        "download_future_support": "Markdown, Hangul, and Excel export will be provided in a future update. Use PDF export for a file download now.",
+        "download_notice_close": "Close",
         "sbom_unavailable": "No dependency components available for SBOM.",
         "osv_toggle": "OSV/CVE + KEV/EPSS lookup",
         "osv_network_note": "Queries exact dependency versions through OSV.dev and enriches CVEs with CISA KEV and FIRST EPSS priority data.",
@@ -116,6 +120,8 @@ TRANSLATIONS = {
         "web_scan_now": "Scan URL",
         "web_scan_note": "Checks live security headers, TLS, cookies, and CORS with read-only requests. Only scan sites you are authorized to test.",
         "web_crawl_options": "Crawl & login options",
+        "web_select_all": "Select all options",
+        "web_clear_all": "Clear all options",
         "web_crawl_enable": "Crawl sub-pages (same host)",
         "web_render_enable": "Render JS for SPA links (needs 'render' extra)",
         "web_discover_assets": "Mine JS bundles for routes/APIs",
@@ -271,8 +277,11 @@ TRANSLATIONS = {
         "download_md": "마크다운",
         "download_xlsx": "엑셀 (xlsx)",
         "download_hwpx": "한글 (hwpx)",
-        "download_pdf": "PDF (인쇄)",
+        "download_pdf": "PDF",
         "download_report_empty": "먼저 점검을 실행한 뒤 결과를 다운로드하세요.",
+        "download_future_title": "형식 지원 안내",
+        "download_future_support": "마크다운·한글·엑셀 다운로드는 추후 업데이트에서 지원할 예정입니다. 현재는 PDF 다운로드를 이용해 주세요.",
+        "download_notice_close": "닫기",
         "sbom_unavailable": "SBOM으로 내보낼 의존성 컴포넌트가 없습니다.",
         "osv_toggle": "OSV/CVE + KEV/EPSS 조회",
         "osv_network_note": "정확한 의존성 버전을 OSV.dev로 조회하고 CVE에 CISA KEV와 FIRST EPSS 우선순위 정보를 덧붙입니다.",
@@ -291,6 +300,8 @@ TRANSLATIONS = {
         "web_scan_now": "URL 점검",
         "web_scan_note": "읽기 전용 요청으로 실시간 보안 헤더·TLS·쿠키·CORS를 점검합니다. 점검 권한이 있는 사이트에만 실행하세요.",
         "web_crawl_options": "크롤·로그인 옵션",
+        "web_select_all": "옵션 전체 선택",
+        "web_clear_all": "옵션 전체 해제",
         "web_crawl_enable": "하위 페이지 크롤 (같은 호스트)",
         "web_render_enable": "SPA 링크용 JS 렌더링 ('render' 확장 필요)",
         "web_discover_assets": "JS 번들에서 라우트/API 추출",
@@ -1404,6 +1415,55 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
     return buffer.getvalue()
 
 
+_PDF_MAX_REPORT_CHARS = 500_000
+_PDF_RENDERER = BoundedSemaphore(1)
+
+
+class PdfExportError(RuntimeError):
+    pass
+
+
+def render_pdf(payload: dict[str, object], language: str = "ko") -> bytes:
+    report = render_markdown_from_payload(payload, language)
+    if len(report) > _PDF_MAX_REPORT_CHARS:
+        raise PdfExportError("PDF export is limited to 500,000 report characters")
+    if not _PDF_RENDERER.acquire(blocking=False):
+        raise PdfExportError("PDF renderer is busy; try again shortly")
+    try:
+        from .web import _ensure_bundled_browsers_path
+
+        _ensure_bundled_browsers_path()
+        try:
+            from playwright.sync_api import Error as PlaywrightError
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise PdfExportError("PDF export requires the bundled Chromium renderer") from exc
+
+        content = html.escape(report)
+        document = (
+            "<!doctype html><meta charset=\"utf-8\"><style>"
+            "@page { size: A4; margin: 16mm; }"
+            "body { color: #111827; font-family: 'Noto Sans KR', 'Malgun Gothic', 'NanumGothic', sans-serif; }"
+            "pre { font: 10pt/1.55 inherit; white-space: pre-wrap; overflow-wrap: anywhere; }"
+            "</style><pre>"
+            f"{content}"
+            "</pre>"
+        )
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                try:
+                    page = browser.new_page()
+                    page.set_content(document, wait_until="load")
+                    return page.pdf(format="A4", print_background=True)
+                finally:
+                    browser.close()
+        except PlaywrightError as exc:
+            raise PdfExportError(f"PDF renderer failed: {exc}") from exc
+    finally:
+        _PDF_RENDERER.release()
+
+
 _HWPX_TEMPLATE_PATH = Path(__file__).resolve().parent / "assets" / "koda-hwpx-template.hwpx"
 
 
@@ -1930,9 +1990,16 @@ HTML_TEMPLATE = """<!doctype html>
 
     .scan-form {
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) auto auto minmax(88px, 110px) auto;
+      grid-template-columns: minmax(180px, 1fr) auto;
       gap: 10px;
       align-items: center;
+    }
+
+    .scan-form .path-display {
+      min-width: 0;
+      min-height: 34px;
+      padding: 7px 10px;
+      font-size: 13px;
     }
 
     .scan-standard-form {
@@ -1965,23 +2032,43 @@ HTML_TEMPLATE = """<!doctype html>
        vertically so the growing list of checkboxes never overlaps or crams. */
     .scan-web-options {
       grid-column: 1 / -1;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px 12px;
+      align-items: start;
+      padding: 8px 0 2px;
     }
     .scan-web-options > summary {
+      grid-column: 1 / -1;
       cursor: pointer;
       color: var(--muted);
       font-size: 12px;
       font-weight: 600;
     }
+    .scan-option-select-all {
+      grid-column: 1 / -1;
+      justify-self: end;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid var(--border, #cbd5e1);
+      border-radius: 7px;
+      background: #f8fafc;
+      color: var(--ink, #0f172a);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
     .scan-web-check {
       display: flex;
       align-items: center;
       gap: 6px;
+      min-width: 0;
+      line-height: 1.35;
     }
+    .scan-web-check span { overflow-wrap: anywhere; }
     .scan-web-check input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; }
     .scan-web-login {
+      grid-column: 1 / -1;
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -1991,6 +2078,7 @@ HTML_TEMPLATE = """<!doctype html>
       margin: 0;
     }
     .scan-web-headers {
+      grid-column: span 1;
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -2173,6 +2261,7 @@ HTML_TEMPLATE = """<!doctype html>
       width: 100%;
       border-collapse: collapse;
       min-width: 960px;
+      table-layout: fixed;
     }
 
     th, td {
@@ -2191,6 +2280,11 @@ HTML_TEMPLATE = """<!doctype html>
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0;
+      min-width: 76px;
+      overflow: hidden;
+      resize: horizontal;
+      cursor: col-resize;
+      user-select: none;
     }
 
     tr:last-child td {
@@ -2255,12 +2349,17 @@ HTML_TEMPLATE = """<!doctype html>
     }
 
     .scan-run-row {
-      grid-column: 1 / -1;
       display: flex;
-      gap: 10px;
+      gap: 8px;
+      min-width: 0;
     }
     .scan-run-row > button {
       flex: 1 1 0;
+      min-width: 0;
+      min-height: 34px;
+      padding: 7px 11px;
+      font-size: 13px;
+      white-space: nowrap;
     }
     .report-download {
       display: flex;
@@ -2315,11 +2414,30 @@ HTML_TEMPLATE = """<!doctype html>
       width: 100%;
       cursor: pointer;
     }
+    .download-notice-body {
+      margin: 0 0 14px;
+      color: var(--muted, #64748b);
+      line-height: 1.5;
+    }
     .settings-tabs {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
+    }
+    #settings-collapse-all,
+    #settings-expand-all {
+      min-width: 54px;
+      font-size: 18px;
+      line-height: 1;
+    }
+    #settings-collapse-all {
+      background: #9a3412;
+      border-color: #9a3412;
+    }
+    #settings-expand-all {
+      background: #0f766e;
+      border-color: #0f766e;
     }
     .settings-tab {
       cursor: pointer;
@@ -2336,14 +2454,20 @@ HTML_TEMPLATE = """<!doctype html>
       border-color: transparent;
     }
     .settings-reset {
-      margin-left: auto;
+      margin-left: 0;
       cursor: pointer;
     }
+    #settings-disable-all { margin-left: auto; }
     .settings-groups {
       display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: 14px;
+      width: 100%;
     }
+    #settings-view { width: 100%; }
     .settings-group {
+      width: 100%;
+      box-sizing: border-box;
       border: 1px solid var(--border, #e2e8f0);
       border-radius: 12px;
       padding: 12px 14px;
@@ -2568,10 +2692,12 @@ HTML_TEMPLATE = """<!doctype html>
     @media (max-width: 1000px) {
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr 1fr; }
+      .scan-web-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .scan-actions { align-items: stretch; }
       .standards-help { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
       button { width: 100%; }
+      .settings-tabs button { width: auto; }
       .topbar-action { width: auto; }
     }
 
@@ -2583,6 +2709,8 @@ HTML_TEMPLATE = """<!doctype html>
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
       .metrics, .filters, .scan-form, .scan-standard-form, .scan-web-form { grid-template-columns: 1fr; }
+      .scan-web-options { grid-template-columns: 1fr; }
+      .scan-web-headers, .scan-web-login { grid-column: 1 / -1; }
       .scan-actions { display: grid; grid-template-columns: 1fr; }
       .standard-head { grid-template-columns: 1fr; }
       .metric { min-height: 84px; }
@@ -2630,6 +2758,7 @@ HTML_TEMPLATE = """<!doctype html>
         <input id="web-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
         <details class="scan-web-options">
           <summary id="web-crawl-options-label"></summary>
+          <button id="web-options-select-all" class="scan-option-select-all" type="button"></button>
           <label class="scan-web-check"><input id="web-crawl" type="checkbox"> <span id="web-crawl-enable-label"></span></label>
           <label class="scan-web-check"><input id="web-render" type="checkbox"> <span id="web-render-enable-label"></span></label>
           <label class="scan-web-check"><input id="web-discover-assets" type="checkbox"> <span id="web-discover-assets-label"></span></label>
@@ -2713,6 +2842,11 @@ HTML_TEMPLATE = """<!doctype html>
         </div>
         <button id="download-dialog-cancel" type="button" class="download-dialog-cancel"></button>
       </dialog>
+      <dialog id="download-notice-dialog" class="download-dialog">
+        <p id="download-notice-title" class="download-dialog-title"></p>
+        <p id="download-notice-body" class="download-notice-body"></p>
+        <button id="download-notice-close" type="button" class="download-dialog-cancel"></button>
+      </dialog>
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
 
@@ -2740,7 +2874,7 @@ HTML_TEMPLATE = """<!doctype html>
     </section>
 
     <section class="table-wrap">
-      <table>
+      <table id="findings-table">
         <thead>
           <tr>
             <th id="th-severity">__INITIAL_SEVERITY__</th>
@@ -2931,6 +3065,27 @@ HTML_TEMPLATE = """<!doctype html>
       byId(id).textContent = value;
     }
 
+    function renderWebOptionSelectAllLabel() {
+      const activeLabels = labels();
+      const checkboxes = [...document.querySelectorAll(".scan-web-check input[type='checkbox']")];
+      const allChecked = checkboxes.length > 0 && checkboxes.every((input) => input.checked);
+      setText("web-options-select-all", allChecked ? activeLabels.web_clear_all : activeLabels.web_select_all);
+      byId("web-options-select-all").setAttribute("aria-pressed", String(allChecked));
+    }
+
+    function showDownloadNotice() {
+      const activeLabels = labels();
+      setText("download-notice-title", activeLabels.download_future_title);
+      setText("download-notice-body", activeLabels.download_future_support);
+      setText("download-notice-close", activeLabels.download_notice_close);
+      const dialog = byId("download-notice-dialog");
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      } else {
+        window.alert(activeLabels.download_future_support);
+      }
+    }
+
     function apiEndpoint(path) {
       const endpoint = path || "/api/scan";
       if (location.protocol === "http:" || location.protocol === "https:") {
@@ -2982,6 +3137,9 @@ HTML_TEMPLATE = """<!doctype html>
       setText("download-dialog-title", activeLabels.download_format_prompt);
       setText("download-standard-label", activeLabels.download_standard_label);
       setText("download-dialog-cancel", activeLabels.download_cancel);
+      setText("download-notice-title", activeLabels.download_future_title);
+      setText("download-notice-body", activeLabels.download_future_support);
+      setText("download-notice-close", activeLabels.download_notice_close);
       const formatLabels = {
         md: activeLabels.download_md,
         xlsx: activeLabels.download_xlsx,
@@ -3014,6 +3172,7 @@ HTML_TEMPLATE = """<!doctype html>
       byId("web-url").disabled = state.scanRunning;
       setText("web-scan-note", activeLabels.web_scan_note);
       setText("web-crawl-options-label", activeLabels.web_crawl_options);
+      renderWebOptionSelectAllLabel();
       setText("web-crawl-enable-label", activeLabels.web_crawl_enable);
       setText("web-render-enable-label", activeLabels.web_render_enable);
       setText("web-discover-assets-label", activeLabels.web_discover_assets);
@@ -3399,10 +3558,6 @@ HTML_TEMPLATE = """<!doctype html>
       const items = findingsForStandard(standardId);
       if (!items.length) return;
       const suffix = standardId && standardId !== "all" ? `-${standardId}` : "";
-      if (format === "pdf") {
-        window.print();
-        return;
-      }
       try {
         const response = await fetch(apiEndpoint("/api/export"), {
           method: "POST",
@@ -3411,16 +3566,21 @@ HTML_TEMPLATE = """<!doctype html>
         });
         if (!response.ok) {
           const error = await parseJsonResponse(response);
+          if (format !== "pdf" && [404, 405, 415, 501, 503].includes(response.status)) {
+            showDownloadNotice();
+            return;
+          }
           throw new Error(error.error || activeLabels.scan_status_failed);
         }
         const blob = await response.blob();
         const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
+        const downloadUrl = URL.createObjectURL(blob);
+        link.href = downloadUrl;
         link.download = `koda-report${suffix}.${format}`;
         document.body.appendChild(link);
         link.click();
         link.remove();
-        URL.revokeObjectURL(link.href);
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 60_000);
       } catch (error) {
         state.scanStatus = `${activeLabels.scan_status_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
         state.scanStatusClass = "error";
@@ -3784,12 +3944,13 @@ HTML_TEMPLATE = """<!doctype html>
       }
       const blob = new Blob([JSON.stringify(payload.sbom, null, 2)], { type: "application/json" });
       const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
+      const downloadUrl = URL.createObjectURL(blob);
+      link.href = downloadUrl;
       link.download = "sec-chk-cyclonedx-sbom.json";
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(link.href);
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 60_000);
     }
 
     byId("search").addEventListener("input", (event) => {
@@ -3857,6 +4018,12 @@ HTML_TEMPLATE = """<!doctype html>
     byId("prevention-create-ignore").addEventListener("click", () => {
       runPreventionAction("ignore");
     });
+    byId("web-options-select-all").addEventListener("click", () => {
+      const checkboxes = [...document.querySelectorAll(".scan-web-check input[type='checkbox']")];
+      const allChecked = checkboxes.length > 0 && checkboxes.every((input) => input.checked);
+      checkboxes.forEach((input) => { input.checked = !allChecked; });
+      renderWebOptionSelectAllLabel();
+    });
     byId("web-url").addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         runWebScan();
@@ -3921,6 +4088,11 @@ HTML_TEMPLATE = """<!doctype html>
       }
     }
     byId("download-dialog-cancel").addEventListener("click", closeDownloadDialog);
+    byId("download-notice-close").addEventListener("click", () => {
+      const dialog = byId("download-notice-dialog");
+      if (typeof dialog.close === "function") dialog.close();
+      else dialog.removeAttribute("open");
+    });
     document.querySelectorAll("#download-dialog .report-download-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         closeDownloadDialog();

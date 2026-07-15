@@ -126,6 +126,12 @@ Windows users can install KODA without administrator privileges after the Window
 
 This change does not create, validate, replace, or package Windows EXE or installer artifacts. Run the Windows packaging workflow separately on a Windows build host.
 
+The Windows dashboard uses the same shared HTML and export API as Linux. The
+desktop wrapper enables WebView downloads for SBOM and report files; validate the
+final `KODASetup.exe` on a Windows build host before distributing it. Linux
+installation and server application steps, including the required Chromium PDF
+renderer and health/PDF smoke tests, are documented in [`docs/install/linux.md`](docs/install/linux.md).
+
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/).
 2. Install Inno Setup 6.
 3. Download or clone this repository on the Windows build PC.

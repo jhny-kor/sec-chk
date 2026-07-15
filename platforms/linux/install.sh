@@ -101,33 +101,25 @@ if [ -d "$script_dir/ms-playwright" ]; then
   cp -R "$script_dir/ms-playwright" "$prefix/ms-playwright"
 fi
 
-# Optional headless-render setup for the SPA web crawl. Installs the pinned
-# Playwright into a dedicated venv the koda launcher prefers, and provisions
-# Chromium. Never fatal: any failure leaves KODA working with the standard-
-# library crawler (non-rendered). Skip with KODA_SKIP_RENDER=1.
 setup_render() {
-  if [ "${KODA_SKIP_RENDER:-0}" = "1" ]; then
-    echo "Skipping SPA-render setup (KODA_SKIP_RENDER=1)."
-    return 0
-  fi
   local venv="$prefix/render-venv"
   local wheels="$prefix/app/render-wheels"
   if ! "$python_bin" -m venv "$venv" 2>/dev/null; then
-    echo "warning: could not create render venv; SPA rendering disabled." >&2
-    return 0
+    echo "error: could not create PDF renderer venv." >&2
+    return 1
   fi
   if [ -d "$wheels" ]; then
     "$venv/bin/pip" install --quiet --no-index --find-links "$wheels" "playwright==1.61.0" \
-      || { echo "warning: offline playwright install failed; SPA rendering disabled." >&2; return 0; }
+      || { echo "error: offline PDF renderer install failed." >&2; return 1; }
   else
     "$venv/bin/pip" install --quiet "playwright==1.61.0" \
-      || { echo "warning: playwright install failed (offline without bundled wheels?); SPA rendering disabled." >&2; return 0; }
+      || { echo "error: PDF renderer install failed (offline without bundled wheels?)." >&2; return 1; }
   fi
   if [ ! -d "$prefix/ms-playwright" ]; then
     PLAYWRIGHT_BROWSERS_PATH="$prefix/ms-playwright" "$venv/bin/python" -m playwright install chromium \
-      || echo "warning: Chromium download failed; run 'PLAYWRIGHT_BROWSERS_PATH=$prefix/ms-playwright $venv/bin/python -m playwright install chromium' later." >&2
+      || { echo "error: Chromium download failed; dashboard PDF export requires it." >&2; return 1; }
   fi
-  echo "SPA-render support installed: $venv"
+  echo "Dashboard PDF renderer installed: $venv"
 }
 setup_render
 
