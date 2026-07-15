@@ -562,16 +562,33 @@ final class ScannerBridge: ObservableObject {
             : "Enter only an authorized staging or local URL. Docker must be installed and the scan sends real HTTP requests."
         alert.addButton(withTitle: language == .ko ? "실행" : "Run")
         alert.addButton(withTitle: language.cancelTitle)
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
-        input.placeholderString = "https://staging.example.com"
-        alert.accessoryView = input
+        let form = ZapScanAccessoryView(language: language)
+        alert.accessoryView = form
 
         guard alert.runModal() == .alertFirstButtonReturn else {
             return
         }
-        let targetURL = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetURL = form.urlValue
         guard Self.isHTTPURL(targetURL) else {
             setStatus(ko: "ZAP 실행 실패: http(s) URL만 입력할 수 있습니다.", en: "ZAP run failed: enter an http(s) URL.")
+            statusColor = .red
+            return
+        }
+        let activeScan = form.activeScan
+        let ajaxSpider = form.ajaxSpider
+        let loginURL = form.loginURL
+        let username = form.username
+        let password = form.password
+        // Authorization gate: active scanning sends real attack traffic, so it
+        // requires an explicit confirmation (mirrors the dashboard's gate).
+        if activeScan && !form.authorized {
+            setStatus(ko: "ZAP 능동 점검 차단: 먼저 권한 확인란을 선택하세요.", en: "ZAP active scan blocked: enable the authorization checkbox first.")
+            statusColor = .red
+            return
+        }
+        // Authenticated scan needs both credentials or none (mirrors the dashboard).
+        if !loginURL.isEmpty && (username.isEmpty || password.isEmpty) {
+            setStatus(ko: "ZAP 인증 점검 실패: 아이디와 비밀번호를 모두 입력하세요.", en: "ZAP auth scan failed: enter both a username and a password.")
             statusColor = .red
             return
         }
@@ -589,7 +606,8 @@ final class ScannerBridge: ObservableObject {
         guard panel.runModal() == .OK, let outputRoot = panel.url else {
             return
         }
-        let outputDir = outputRoot.appendingPathComponent("KODA-zap-baseline-\(Self.timestampToken())", isDirectory: true)
+        let scanKind = activeScan ? "active" : "baseline"
+        let outputDir = outputRoot.appendingPathComponent("KODA-zap-\(scanKind)-\(Self.timestampToken())", isDirectory: true)
 
         isRunning = true
         setStatus(ko: "ZAP DAST를 실행하고 있습니다.", en: "Running ZAP DAST.")
@@ -598,7 +616,10 @@ final class ScannerBridge: ObservableObject {
 
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                Self.runZAPBaselineCommand(targetURL: targetURL, outputDir: outputDir)
+                Self.runZAPScanCommand(
+                    targetURL: targetURL, outputDir: outputDir, activeScan: activeScan,
+                    ajaxSpider: ajaxSpider, loginURL: loginURL, username: username, password: password
+                )
             }.value
             isRunning = false
             setStatus(ko: result.messageKO, en: result.messageEN)
@@ -1631,21 +1652,29 @@ final class ScannerBridge: ObservableObject {
         return formatter.string(from: Date())
     }
 
-    private nonisolated static func runZAPBaselineCommand(targetURL: String, outputDir: URL) -> OperationResult {
+    private nonisolated static func runZAPScanCommand(
+        targetURL: String, outputDir: URL, activeScan: Bool, ajaxSpider: Bool,
+        loginURL: String, username: String, password: String
+    ) -> OperationResult {
         do {
             try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+            // Drive the ZAP Automation Framework (a YAML plan mounted at /zap/wrk)
+            // rather than the packaged baseline/full scripts: only the plan lets us
+            // add an authenticated Context, matching the dashboard's capability.
+            let planName = "koda-zap-plan.yaml"
+            let planJSON = zapAutomationPlanJSON(
+                targetURL: targetURL, ajaxSpider: ajaxSpider, activeScan: activeScan,
+                loginURL: loginURL, username: username, password: password
+            )
+            try planJSON.write(to: outputDir.appendingPathComponent(planName), atomically: true, encoding: .utf8)
+            let prefix = "zap-automation"
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [
                 "docker", "run", "--rm", "-t",
                 "-v", "\(outputDir.path):/zap/wrk:rw",
                 "ghcr.io/zaproxy/zaproxy:stable",
-                "zap-baseline.py",
-                "-t", targetURL,
-                "-m", "1",
-                "-r", "zap-baseline.html",
-                "-w", "zap-baseline.md",
-                "-J", "zap-baseline.json",
+                "zap.sh", "-cmd", "-autorun", "/zap/wrk/\(planName)",
             ]
             let stdout = Pipe()
             let stderr = Pipe()
@@ -1655,7 +1684,7 @@ final class ScannerBridge: ObservableObject {
             process.waitUntilExit()
             let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let alertCount = countZAPAlerts(in: outputDir.appendingPathComponent("zap-baseline.json"))
+            let alertCount = countZAPAlerts(in: outputDir.appendingPathComponent("\(prefix).json"))
             let acceptedExit = [0, 1, 2].contains(Int(process.terminationStatus))
             return OperationResult(
                 exitCode: acceptedExit ? 0 : process.terminationStatus,
@@ -1679,6 +1708,66 @@ final class ScannerBridge: ObservableObject {
                 failures: [error.localizedDescription]
             )
         }
+    }
+
+    /// Build a ZAP Automation Framework plan (JSON is valid YAML for ZAP's parser),
+    /// mirroring the shared Python `build_zap_plan`: spider (+ optional AJAX spider),
+    /// passive scan, optional active scan, and an optional authenticated Context.
+    private nonisolated static func zapAutomationPlanJSON(
+        targetURL: String, ajaxSpider: Bool, activeScan: Bool,
+        loginURL: String, username: String, password: String
+    ) -> String {
+        var context: [String: Any] = ["name": "koda", "urls": [targetURL]]
+        var userName: String? = nil
+        if !loginURL.isEmpty {
+            userName = "koda-user"
+            context["authentication"] = [
+                "method": "form",
+                "parameters": [
+                    "loginPageUrl": loginURL,
+                    "loginRequestUrl": loginURL,
+                    "loginRequestBody": "username={%username%}&password={%password%}",
+                ],
+                "verification": ["method": "response", "loggedInRegex": "", "loggedOutRegex": ""],
+            ]
+            context["sessionManagement"] = ["method": "cookie"]
+            context["users"] = [[
+                "name": userName!,
+                "credentials": ["username": username, "password": password],
+            ]]
+        }
+        func withUser(_ params: [String: Any]) -> [String: Any] {
+            var merged = params
+            if let user = userName { merged["user"] = user }
+            return merged
+        }
+        var jobs: [[String: Any]] = [
+            ["type": "spider", "parameters": withUser(["context": "koda", "url": targetURL, "maxDuration": 1])],
+        ]
+        if ajaxSpider {
+            jobs.append(["type": "spiderAjax", "parameters": withUser(["context": "koda", "url": targetURL, "maxDuration": 1])])
+        }
+        jobs.append(["type": "passiveScan-wait", "parameters": [String: Any]()])
+        if activeScan {
+            jobs.append(["type": "activeScan", "parameters": withUser(["context": "koda"])])
+        }
+        for template in ["traditional-json", "traditional-html", "traditional-md"] {
+            jobs.append(["type": "report", "parameters": [
+                "template": template, "reportDir": "/zap/wrk", "reportFile": "zap-automation",
+            ]])
+        }
+        let plan: [String: Any] = [
+            "env": [
+                "contexts": [context],
+                "parameters": ["failOnError": true, "failOnWarning": false, "progressToStdout": true],
+            ],
+            "jobs": jobs,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: plan, options: [.prettyPrinted]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
     }
 
     private nonisolated static func countZAPAlerts(in jsonURL: URL) -> Int {
@@ -4263,6 +4352,7 @@ private enum NativeWebScanner {
         var collected: [NativeFinding] = []
         var visited: Set<String> = []
         var tlsCheckedHosts: Set<String> = []
+        var hostProbed: Set<String> = []
         var queue: [(url: URL, depth: Int)] = [(seed, 0)]
         // E: enqueue caller-supplied same-host seeds (known routes / sitemap / API paths).
         for seedPath in options.seeds {
@@ -4333,6 +4423,15 @@ private enum NativeWebScanner {
                         trust: delegate.serverTrust,
                         version: delegate.negotiatedTLSVersion
                     ))
+                }
+                if let host = page.finalURL.host, !hostProbed.contains(host), !isStaticAsset(page.finalURL.absoluteString) {
+                    // Per-host active probes (once each): dynamic CORS (origin reflection /
+                    // 'null') and advertised HTTP methods (TRACE / write). Host-header
+                    // injection isn't reliably testable via URLSession (it reserves the
+                    // Host header) — that check lives in the Python engine and ZAP.
+                    hostProbed.insert(host)
+                    collected.append(contentsOf: await corsReflectionProbe(url: page.finalURL, session: session, timeout: timeout))
+                    collected.append(contentsOf: await httpMethodsProbe(url: page.finalURL, session: session, timeout: timeout))
                 }
                 if options.crawl {
                     var links = extractLinks(base: page.finalURL, body: page.body)
@@ -4918,6 +5017,16 @@ private enum NativeWebScanner {
                 }
             }
 
+            // Path traversal / LFI: a traversal payload returns a known system file.
+            if let target = withQueryParam(url, name, "../../../../../../../../etc/passwd"),
+               let lfiBody = await probeBody(target, session: session, options: options, jar: jar, timeout: timeout),
+               matchesLFI(lfiBody) {
+                findings.append(finding("web.path-traversal-lfi", "high",
+                    "경로 조작 / 로컬 파일 포함 (시스템 파일 내용이 반환됨)", url.absoluteString,
+                    evidence: "param '\(name)': 디렉터리 트래버설 페이로드가 시스템 파일 내용을 반환함",
+                    recommendation: "사용자 입력으로 파일 경로를 구성하지 말고 식별자 허용목록을 사용하며 경로를 정규화하세요."))
+            }
+
             // Open redirect: a redirect-like param that sends users off-site.
             if redirectParamNames.contains(name.lowercased()),
                let target = withQueryParam(url, name, "https://\(activeOOBHost)/"),
@@ -5044,11 +5153,65 @@ private enum NativeWebScanner {
         return (lowered.contains("login") || lowered.contains("sign in") || body.contains("로그인")) && lowered.contains("<form")
     }
 
-    private static func similarBodies(_ a: String, _ b: String, tolerance: Double = 0.15) -> Bool {
+    // Keys/tokens that legitimately differ between two requests for the SAME data.
+    private static let volatileJSONKeyRegex = try? NSRegularExpression(
+        pattern: "csrf|xsrf|token|nonce|session|request[_-]?id|trace|timestamp|_at$|_time$",
+        options: [.caseInsensitive])
+    private static let htmlVolatileRegex = try? NSRegularExpression(
+        pattern: "<input[^>]*\\b(?:csrf|xsrf|token|nonce|authenticity)[^>]*>|\\b[A-Fa-f0-9]{24,}\\b|\\b[A-Za-z0-9+/_-]{32,}={0,2}\\b|\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(?::\\d{2})?",
+        options: [.caseInsensitive])
+
+    private static func stripVolatileJSON(_ node: Any) -> Any {
+        if let dict = node as? [String: Any] {
+            var out: [String: Any] = [:]
+            for (key, value) in dict {
+                let range = NSRange(key.startIndex..., in: key)
+                if volatileJSONKeyRegex?.firstMatch(in: key, range: range) != nil { continue }
+                out[key] = stripVolatileJSON(value)
+            }
+            return out
+        }
+        if let array = node as? [Any] { return array.map { stripVolatileJSON($0) } }
+        return node
+    }
+
+    private static func canonicalJSON(_ text: String) -> String? {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              object is [String: Any] || object is [Any] else { return nil }
+        let stripped = stripVolatileJSON(object)
+        guard let out = try? JSONSerialization.data(withJSONObject: stripped, options: [.sortedKeys]) else { return nil }
+        return String(data: out, encoding: .utf8)
+    }
+
+    private static func normalizeBody(_ text: String) -> String {
+        var normalized = text
+        if let regex = htmlVolatileRegex {
+            normalized = regex.stringByReplacingMatches(
+                in: normalized, range: NSRange(normalized.startIndex..., in: normalized), withTemplate: "")
+        }
+        normalized = normalized.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return normalized.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// Structural/content equivalence of two responses for access-control checks.
+    /// Stronger than a raw length ratio (mirrors the Python `_responses_equivalent`):
+    /// JSON by canonical keys+values with volatile keys dropped; other bodies by
+    /// normalized text, then an order-independent word-token Jaccard as a fuzzy
+    /// backstop. Cuts false positives (different data, similar size) and false
+    /// negatives (identical data whose per-request token shifts the length).
+    private static func similarBodies(_ a: String, _ b: String, threshold: Double = 0.85) -> Bool {
         if a.isEmpty || b.isEmpty { return a == b }
-        if a == b { return true }
-        let longer = Double(max(a.count, b.count))
-        return Double(abs(a.count - b.count)) / longer <= tolerance
+        let na = canonicalJSON(a) ?? normalizeBody(a)
+        let nb = canonicalJSON(b) ?? normalizeBody(b)
+        if na.isEmpty || nb.isEmpty { return na == nb }
+        if na == nb { return true }
+        let wordsA = Set(na.split(separator: " "))
+        let wordsB = Set(nb.split(separator: " "))
+        if wordsA.isEmpty || wordsB.isEmpty { return wordsA == wordsB }
+        let intersection = Double(wordsA.intersection(wordsB).count)
+        let union = Double(wordsA.union(wordsB).count)
+        return intersection / union >= threshold
     }
 
     // --- Tier 2: mixed content, SRI, CSRF-less forms, GraphQL introspection ---
@@ -5057,6 +5220,7 @@ private enum NativeWebScanner {
     static func analyzeBody(url: URL, html: String) -> [NativeFinding] {
         let isHTTPS = url.scheme?.lowercased() == "https"
         var findings: [NativeFinding] = []
+        findings.append(contentsOf: errorDisclosure(url: url, html: html))
         var mixed: [String] = []
         var sriMissing: [String] = []
 
@@ -5249,6 +5413,168 @@ private enum NativeWebScanner {
         return findings
     }
 
+    // A syntactically valid but attacker-controlled origin no real allowlist matches.
+    private static let corsProbeOrigin = "https://koda-cors-probe.example"
+
+    /// GET `url` with a test `Origin`; return the server's
+    /// (Access-Control-Allow-Origin, credentials-allowed) or nil on error.
+    private static func corsACAO(
+        _ url: URL, session: URLSession, origin: String, timeout: TimeInterval
+    ) async -> (acao: String, credentials: Bool)? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        // No operator credentials on a CORS probe: this runs once per host, so the
+        // host may differ from the seed; reflection is flagged by the server's
+        // ACAC response header, not our request.
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(origin, forHTTPHeaderField: "Origin")
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return nil }
+            let acao = (http.value(forHTTPHeaderField: "Access-Control-Allow-Origin") ?? "").trimmingCharacters(in: .whitespaces)
+            let acac = (http.value(forHTTPHeaderField: "Access-Control-Allow-Credentials") ?? "").trimmingCharacters(in: .whitespaces).lowercased() == "true"
+            return (acao, acac)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Actively verify dynamic CORS misconfigurations the passive `*` check
+    /// misses: reflecting an arbitrary request Origin, and allowing `null`.
+    /// Mirrors the Python `_cors_reflection_probe`. GET only, no payloads.
+    private static func corsReflectionProbe(
+        url: URL, session: URLSession, timeout: TimeInterval
+    ) async -> [NativeFinding] {
+        var findings: [NativeFinding] = []
+        if let reflected = await corsACAO(url, session: session, origin: corsProbeOrigin, timeout: timeout),
+           reflected.acao == corsProbeOrigin {
+            if reflected.credentials {
+                findings.append(finding("web.cors-origin-reflection-credentials", "high",
+                    "CORS가 임의 Origin을 credentials와 함께 반사", url.absoluteString,
+                    evidence: "Origin: \(corsProbeOrigin) 가 Access-Control-Allow-Origin에 반사되고 Access-Control-Allow-Credentials: true",
+                    recommendation: "Origin을 엄격한 허용목록으로 검증하고, credentials 허용 시 요청 Origin을 반사하지 마세요."))
+            } else {
+                findings.append(finding("web.cors-origin-reflection", "medium",
+                    "CORS가 임의 요청 Origin을 반사", url.absoluteString,
+                    evidence: "Origin: \(corsProbeOrigin) 가 Access-Control-Allow-Origin에 그대로 반사됨",
+                    recommendation: "검증되지 않은 Origin 반사는 임의 사이트의 교차 출처 응답 read를 허용합니다. 엄격한 허용목록을 사용하세요."))
+            }
+        }
+        if let nullProbe = await corsACAO(url, session: session, origin: "null", timeout: timeout),
+           nullProbe.acao == "null" {
+            findings.append(finding("web.cors-null-origin", nullProbe.credentials ? "high" : "medium",
+                "CORS가 'null' origin을 허용", url.absoluteString,
+                evidence: "Origin: null 이 Access-Control-Allow-Origin에 반사됨" + (nullProbe.credentials ? " (credentials 포함)" : ""),
+                recommendation: "'null' origin을 허용하지 마세요. 샌드박스 iframe 등 공격자 제어 컨텍스트에서 강제될 수 있습니다."))
+        }
+        return findings
+    }
+
+    // --- Passive: server error / stack trace disclosure (mirrors Python) ------
+
+    private static let stackTraceRegex = try? NSRegularExpression(
+        pattern: "Traceback \\(most recent call last\\)|Werkzeug Debugger|\\bat [\\w.$]+\\([\\w.$]+\\.java:\\d+\\)|org\\.springframework\\.|(?:Fatal error|Parse error): .+ in .+ on line \\d+|Stack trace:\\s*#0 |ActionController::\\w+Error|\\bat [\\w.<>]+ \\([^)\\n]*\\.js:\\d+:\\d+\\)|System\\.\\w+(?:\\.\\w+)*Exception|Server Error in '.+?' Application",
+        options: [.caseInsensitive])
+
+    private static func errorDisclosure(url: URL, html: String) -> [NativeFinding] {
+        let range = NSRange(html.startIndex..., in: html)
+        if stackTraceRegex?.firstMatch(in: html, range: range) != nil {
+            return [finding("web.error-stack-trace", "medium",
+                "서버 오류 또는 스택 트레이스가 응답에 노출됨", url.absoluteString,
+                evidence: "프레임워크 스택 트레이스/디버그 오류 페이지가 클라이언트에 반환됨",
+                recommendation: "운영 환경에서 디버그 모드를 끄고 일반 오류 페이지를 반환하세요. 상세 로그는 서버에만 기록하세요.")]
+        }
+        if matchesSQLError(html) {
+            return [finding("web.database-error-disclosure", "medium",
+                "데이터베이스 오류 메시지가 응답에 노출됨", url.absoluteString,
+                evidence: "응답 본문에 DB 엔진 오류 문자열이 포함됨",
+                recommendation: "DB 오류를 잡아 일반 메시지를 반환하고, 원시 DB 오류를 클라이언트에 노출하지 마세요.")]
+        }
+        return []
+    }
+
+    // --- Passive: JWT misconfiguration in server-issued cookies (mirrors Python) -
+
+    private static let jwtRegex = try? NSRegularExpression(
+        pattern: "eyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]*")
+
+    private static func decodeJWTSegment(_ segment: String) -> [String: Any]? {
+        var base64 = segment.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        guard let data = Data(base64Encoded: base64),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return object
+    }
+
+    private static func jwtFindings(url: String, cookieValue: String) -> [NativeFinding] {
+        guard let regex = jwtRegex else { return [] }
+        var findings: [NativeFinding] = []
+        let range = NSRange(cookieValue.startIndex..., in: cookieValue)
+        for match in regex.matches(in: cookieValue, range: range) {
+            guard let matchRange = Range(match.range, in: cookieValue) else { continue }
+            let parts = String(cookieValue[matchRange]).split(separator: ".").map(String.init)
+            guard parts.count >= 2, let header = decodeJWTSegment(parts[0]) else { continue }
+            if (header["alg"] as? String)?.lowercased() == "none" {
+                findings.append(finding("web.jwt-alg-none", "high",
+                    "JWT가 'alg: none'으로 발급됨 (서명 없는 토큰 허용)", url,
+                    evidence: "Set-Cookie JWT 헤더의 alg=none",
+                    recommendation: "'none'을 거부하고 강력한 서명 알고리즘(RS256/ES256)을 요구하며 서버에서 서명을 검증하세요."))
+                continue
+            }
+            if let payload = decodeJWTSegment(parts[1]), payload["exp"] == nil {
+                findings.append(finding("web.jwt-missing-expiry", "low",
+                    "쿠키의 JWT에 만료('exp') 클레임이 없음", url,
+                    evidence: "Set-Cookie JWT 페이로드에 'exp' 없음",
+                    recommendation: "토큰에 짧은 'exp'를 설정해 유출/탈취된 토큰이 만료되도록 하세요."))
+            }
+        }
+        return findings
+    }
+
+    // --- Per-host active probe: advertised HTTP methods (mirrors Python) -------
+
+    private static let dangerousMethods: Set<String> = ["PUT", "DELETE", "PATCH", "CONNECT"]
+
+    private static func httpMethodsProbe(url: URL, session: URLSession, timeout: TimeInterval) async -> [NativeFinding] {
+        var request = URLRequest(url: url)
+        request.httpMethod = "OPTIONS"
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        let allow: String
+        do {
+            let (_, response) = try await session.data(for: request)
+            allow = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Allow") ?? ""
+        } catch { return [] }
+        let methods = Set(allow.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).uppercased() }.filter { !$0.isEmpty })
+        if methods.isEmpty { return [] }
+        var findings: [NativeFinding] = []
+        if methods.contains("TRACE") {
+            findings.append(finding("web.http-trace-enabled", "medium",
+                "HTTP TRACE 메서드 활성화 (크로스 사이트 트레이싱 위험)", url.absoluteString,
+                evidence: "OPTIONS Allow: \(allow)",
+                recommendation: "웹서버/프록시에서 TRACE 메서드를 비활성화하세요."))
+        }
+        if !methods.isDisjoint(with: dangerousMethods) {
+            findings.append(finding("web.http-methods-exposed", "low",
+                "서버가 상태 변경 HTTP 메서드를 광고", url.absoluteString,
+                evidence: "OPTIONS Allow: \(allow)",
+                recommendation: "각 엔드포인트에 필요한 메서드만 허용하고, 미사용 PUT/DELETE/PATCH/CONNECT를 차단하세요."))
+        }
+        return findings
+    }
+
+    // --- Path traversal / LFI system-file signatures (mirrors Python) ---------
+
+    private static let lfiRegex = try? NSRegularExpression(
+        pattern: "root:.*?:0:0:|\\bfor 16-bit app support\\b", options: [.caseInsensitive])
+
+    private static func matchesLFI(_ body: String) -> Bool {
+        guard let regex = lfiRegex else { return false }
+        return regex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil
+    }
+
     private static func cookieFindings(url: String, cookies: [HTTPCookie], isHTTPS: Bool) -> [NativeFinding] {
         guard !cookies.isEmpty else { return [] }
         var missingSecure: [String] = []
@@ -5274,6 +5600,9 @@ private enum NativeWebScanner {
             findings.append(finding("web.cookie-missing-samesite", "low", "SameSite 속성 없는 쿠키", url,
                 evidence: "쿠키: \(missingSameSite.joined(separator: ", "))",
                 recommendation: "CSRF 노출을 줄이도록 'SameSite=Lax' 또는 'SameSite=Strict'를 추가하세요."))
+        }
+        for cookie in cookies {
+            findings.append(contentsOf: jwtFindings(url: url, cookieValue: cookie.value))
         }
         return findings
     }
@@ -5770,6 +6099,81 @@ private final class WebScanAccessoryView: NSView {
         }
         return headers
     }
+}
+
+/// Accessory form for the ZAP alert: URL plus AJAX-spider, active-scan, and an
+/// explicit authorization checkbox. Active scanning sends real attack traffic,
+/// so `authorized` gates it (mirrors the dashboard's authorization_confirmed).
+private final class ZapScanAccessoryView: NSView {
+    private let urlField = NSTextField()
+    private let ajaxCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let activeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let authorizedCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let loginURLField = NSTextField()
+    private let userField = NSTextField()
+    private let passField = NSSecureTextField()
+
+    init(language: AppLanguage) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 460, height: 220))
+        let ko = language == .ko
+        urlField.placeholderString = "https://staging.example.com"
+        ajaxCheck.title = ko ? "AJAX 스파이더 (JS 위주 앱)" : "AJAX spider (JS-heavy apps)"
+        activeCheck.title = ko ? "능동 점검 (공격 트래픽 전송)" : "Active scan (sends attack traffic)"
+        authorizedCheck.title = ko ? "본인이 소유했거나 능동 점검 허가를 받은 대상입니다" : "I own or am authorized to actively test this target"
+        loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
+        userField.placeholderString = ko ? "아이디" : "Username"
+        passField.placeholderString = ko ? "비밀번호" : "Password"
+
+        func labeled(_ text: String, _ field: NSView) -> NSStackView {
+            let label = NSTextField(labelWithString: text)
+            label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            let row = NSStackView(views: [label, field])
+            row.orientation = .horizontal
+            row.distribution = .fill
+            return row
+        }
+
+        let stack = NSStackView(views: [
+            labeled("URL", urlField),
+            ajaxCheck,
+            activeCheck,
+            authorizedCheck,
+            NSTextField(labelWithString: ko ? "인증 점검 (선택): 로그인 이후 화면 점검" : "Authenticated scan (optional): scan behind a login"),
+            loginURLField,
+            labeled(ko ? "아이디" : "User", userField),
+            labeled(ko ? "비번" : "Pass", passField),
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        for field in [urlField, loginURLField] {
+            field.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        }
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        layoutSubtreeIfNeeded()
+        let fitting = fittingSize
+        setFrameSize(NSSize(width: max(460, fitting.width), height: fitting.height))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    var urlValue: String {
+        urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    var ajaxSpider: Bool { ajaxCheck.state == .on }
+    var activeScan: Bool { activeCheck.state == .on }
+    var authorized: Bool { authorizedCheck.state == .on }
+    var loginURL: String { loginURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
+    var username: String { userField.stringValue }
+    var password: String { passField.stringValue }
 }
 
 private enum NativeGitChanges {

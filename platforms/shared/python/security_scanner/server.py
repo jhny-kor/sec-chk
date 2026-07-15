@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import platform
 import subprocess
+import time
+from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -10,7 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config import expand_path
-from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, ScannerConfig, TargetConfig
+from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, Finding, ScannerConfig, TargetConfig
 from .reporting import (
     build_dashboard_payload,
     build_rule_catalog,
@@ -258,6 +260,220 @@ def web_scan_payload(
     return payload
 
 
+def _require_docker() -> None:
+    """Fail with a clear, actionable message when Docker is unusable for ZAP.
+
+    ZAP scans run as a ``docker run`` shell-out; without this precheck the caller
+    gets a cryptic ``command not found`` / exit-code from deep inside the run.
+    """
+    try:
+        probe = subprocess.run(
+            ["docker", "info"], capture_output=True, text=True, timeout=20, check=False
+        )
+    except FileNotFoundError as exc:
+        raise ValueError(
+            "Docker is required for ZAP scans but was not found on PATH. "
+            "Install Docker Desktop / Engine and retry."
+        ) from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(f"Docker could not be reached: {exc}") from exc
+    if probe.returncode != 0:
+        raise ValueError(
+            "Docker is installed but the daemon is not running or not reachable. "
+            "Start Docker and retry."
+        )
+
+
+def zap_scan_payload(
+    url: str,
+    *,
+    language: str = "ko",
+    min_severity: str = "info",
+    ajax_spider: bool = False,
+    active_scan: bool = False,
+    authorization_confirmed: bool = False,
+    minutes: int = 1,
+    include_paths: tuple[str, ...] = (),
+    exclude_paths: tuple[str, ...] = (),
+    auth: dict[str, object] | None = None,
+    merge: dict[str, object] | None = None,
+    output_dir: Path | None = None,
+    dry_run: bool = False,
+    timeout_seconds: int = 1800,
+) -> dict[str, object]:
+    """Run an OWASP ZAP Automation Framework plan and return a dashboard payload.
+
+    Wraps the existing :func:`security_scanner.dast.run_zap_automation` (spider +
+    optional AJAX spider + optional active scan, plus an optional authenticated
+    Context) so the local dashboard can drive the ZAP engine that already ships in
+    this repo. Active scanning sends real attack traffic, so it is gated behind
+    ``authorization_confirmed``.
+    """
+    if min_severity not in SEVERITIES:
+        raise ValueError(f"Unsupported min_severity: {min_severity}")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Enter an http(s) URL, e.g. https://staging.example.com")
+    if active_scan and not authorization_confirmed:
+        raise ValueError(
+            "Active scan sends real attack traffic. Confirm you own or are "
+            "explicitly authorized to test this target before enabling it."
+        )
+    zap_auth = _zap_auth_from_request(auth)
+    if not dry_run:
+        _require_docker()
+
+    from .dast import run_zap_automation
+
+    out_dir = output_dir or Path("reports") / "zap" / f"koda-zap-{int(time.time())}"
+    try:
+        result = run_zap_automation(
+            url,
+            output_dir=out_dir,
+            minutes=minutes,
+            ajax_spider=ajax_spider,
+            active_scan=active_scan,
+            include_paths=include_paths,
+            exclude_paths=exclude_paths,
+            auth=zap_auth,
+            dry_run=dry_run,
+            timeout_seconds=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"ZAP scan timed out after {timeout_seconds}s.") from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(f"ZAP scan could not run: {exc}") from exc
+
+    target_name = parsed.netloc
+    # Attribute every ZAP finding to the scanned host so it groups under that
+    # target in the results table (ZAP JSON has no per-finding target field).
+    zap_findings = [replace(finding, target=target_name) for finding in result.findings]
+    findings = filter_by_min_severity(zap_findings, min_severity)
+    warnings: list[str] = []
+    # A non-zero exit with no parsed findings means the run itself failed
+    # (unreachable target, bad plan, ZAP error) rather than "clean scan".
+    if not dry_run and result.exit_code != 0 and not findings:
+        tail = (result.stderr or result.stdout or "").strip()[-500:]
+        warnings.append(
+            f"ZAP exited with code {result.exit_code} and produced no findings. {tail}".strip()
+        )
+
+    if merge:
+        # Fold the ZAP (DAST) findings into the currently displayed report so one
+        # results table and one export hold both static and dynamic findings. The
+        # prior report is rebuilt through the same pipeline, keeping every summary
+        # count, category, and risk score authoritative (no client-side math).
+        prior_findings = _findings_from_payload(merge)
+        prior_scan = merge.get("scan") if isinstance(merge.get("scan"), dict) else {}
+        prior_summary = merge.get("summary") if isinstance(merge.get("summary"), dict) else {}
+        prior_paths = prior_summary.get("target_paths") if isinstance(prior_summary.get("target_paths"), dict) else {}
+        payload = build_dashboard_payload(
+            prior_findings + findings,
+            (),
+            language,
+            target_paths={**prior_paths, target_name: url},
+            warnings=tuple(warnings) + tuple(str(w) for w in (prior_scan.get("warnings") or []) if isinstance(w, str)),
+            scan_path=str(prior_scan.get("path") or url),
+            kind=str(prior_scan.get("kind") or "directory"),
+            standard=str(prior_scan.get("standard") or DEFAULT_STANDARD),
+            standard_category=str(prior_scan.get("standard_category") or DEFAULT_STANDARD_CATEGORY),
+        )
+        # SBOM/components are independent of findings; carry them over so a merged
+        # report keeps the code scan's dependency inventory intact.
+        if isinstance(merge.get("components"), list):
+            payload["components"] = merge["components"]
+        if isinstance(merge.get("sbom"), dict):
+            payload["sbom"] = merge["sbom"]
+    else:
+        payload = build_dashboard_payload(
+            findings,
+            (target_name,),
+            language,
+            target_paths={target_name: url},
+            warnings=tuple(warnings),
+            scan_path=url,
+            kind="web",
+        )
+    payload["zap"] = {
+        "mode": "automation",
+        "ajax_spider": ajax_spider,
+        "active_scan": active_scan,
+        "authenticated": zap_auth is not None,
+        "merged": bool(merge),
+        "exit_code": result.exit_code,
+        "output_dir": str(result.output_dir),
+        "command": result.command,
+    }
+    return payload
+
+
+def _zap_auth_from_request(auth: dict[str, object] | None) -> dict[str, str] | None:
+    """Normalize dashboard login fields into a ZAP Automation auth Context.
+
+    Returns ``None`` when no login URL is supplied (unauthenticated scan). When a
+    login URL is present, a username and password are required — an authenticated
+    scan with blank credentials would silently degrade to an anonymous one.
+    """
+    auth = auth or {}
+    login_url = str(auth.get("login_url") or "").strip()
+    if not login_url:
+        return None
+    username = str(auth.get("username") or "")
+    password = str(auth.get("password") or "")
+    if not username or not password:
+        raise ValueError("Authenticated ZAP scan requires both a username and a password.")
+    zap_auth: dict[str, str] = {
+        "method": str(auth.get("method") or "form"),
+        "login_url": login_url,
+        "username": username,
+        "password": password,
+    }
+    for key in ("login_request_url", "login_body", "logged_in_regex", "logged_out_regex"):
+        value = auth.get(key)
+        if value:
+            zap_auth[key] = str(value)
+    return zap_auth
+
+
+def _finding_from_payload(data: dict[str, object]) -> Finding:
+    """Reconstruct a Finding from a dashboard finding payload (for merge/round-trip).
+
+    The finding payload carries every Finding field, so a prior report's findings
+    can be rebuilt and re-aggregated by the normal pipeline.
+    """
+    severity = str(data.get("severity") or "info")
+    if severity not in SEVERITIES:
+        severity = "info"
+    line = data.get("line")
+    confidence = data.get("triage_confidence")
+    return Finding(
+        rule_id=str(data.get("rule_id") or ""),
+        category=str(data.get("category") or "configuration"),
+        severity=severity,
+        title=str(data.get("title") or ""),
+        path=Path(str(data.get("path") or "")),
+        target=str(data.get("target") or ""),
+        line=line if isinstance(line, int) else None,
+        evidence=str(data.get("evidence") or ""),
+        description=str(data.get("description") or ""),
+        recommendation=str(data.get("recommendation") or ""),
+        resource=str(data.get("resource") or ""),
+        reachable=str(data.get("reachable") or ""),
+        triage_verdict=str(data.get("triage_verdict") or ""),
+        triage_confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
+        triage_note=str(data.get("triage_note") or ""),
+    )
+
+
+def _findings_from_payload(payload: dict[str, object]) -> list[Finding]:
+    """Reconstruct the (English, canonical) findings list from a dashboard payload."""
+    by_language = payload.get("findings_by_language")
+    raw = by_language.get("en") if isinstance(by_language, dict) else None
+    if not isinstance(raw, list):
+        return []
+    return [_finding_from_payload(item) for item in raw if isinstance(item, dict)]
+
+
 def _validated_origins(seed_url: str, raw_origins: tuple[str, ...]) -> tuple[str, ...]:
     origins = {_origin_value(seed_url)}
     for raw in raw_origins:
@@ -358,7 +574,7 @@ def _handler(language: str):
 
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
-            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/select-directory", "/api/prevention-kit", "/api/export"}:
+            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/zap-scan", "/api/select-directory", "/api/prevention-kit", "/api/export"}:
                 self.send_response(HTTPStatus.NO_CONTENT)
                 self._send_cors_headers()
                 self.send_header("Content-Length", "0")
@@ -373,6 +589,9 @@ def _handler(language: str):
                 return
             if path == "/api/web-scan":
                 self._handle_web_scan()
+                return
+            if path == "/api/zap-scan":
+                self._handle_zap_scan()
                 return
             if path == "/api/prevention-kit":
                 self._handle_prevention_kit()
@@ -440,6 +659,31 @@ def _handler(language: str):
                     allowed_origins=tuple(origin for origin in request.get("allowed_origins", []) if isinstance(origin, str))
                     if isinstance(request.get("allowed_origins"), list)
                     else (),
+                )
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(payload)
+
+        def _handle_zap_scan(self) -> None:
+            try:
+                request = self._read_json(max_bytes=8_388_608)  # allow a prior report to merge into
+                payload = zap_scan_payload(
+                    _string_value(request, "url"),
+                    language=_choice_value(request, "language", {"en", "ko"}, language),
+                    min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "info"),
+                    ajax_spider=bool(request.get("ajax_spider")),
+                    active_scan=bool(request.get("active_scan")),
+                    authorization_confirmed=bool(request.get("authorization_confirmed")),
+                    minutes=_bounded_int(request.get("minutes"), default=1, low=1, high=60),
+                    include_paths=tuple(p for p in request.get("include_paths", []) if isinstance(p, str))
+                    if isinstance(request.get("include_paths"), list)
+                    else (),
+                    exclude_paths=tuple(p for p in request.get("exclude_paths", []) if isinstance(p, str))
+                    if isinstance(request.get("exclude_paths"), list)
+                    else (),
+                    auth=request.get("auth") if isinstance(request.get("auth"), dict) else {},
+                    merge=request.get("merge") if isinstance(request.get("merge"), dict) else None,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)

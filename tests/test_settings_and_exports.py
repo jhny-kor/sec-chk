@@ -1,0 +1,319 @@
+from __future__ import annotations
+
+import io
+import importlib.util
+import sys
+import http.client
+import json
+import threading
+import unittest
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
+if str(SHARED_PYTHON) not in sys.path:
+    sys.path.insert(0, str(SHARED_PYTHON))
+
+from security_scanner.models import Finding
+from security_scanner.reporting import (
+    build_rule_catalog,
+    filter_disabled_rules,
+    PdfExportError,
+    render_hwpx,
+    render_markdown_from_payload,
+    render_pdf,
+    render_xlsx,
+)
+from security_scanner.server import create_dashboard_server, zap_scan_payload
+
+SAMPLE_PAYLOAD = {
+    "findings": [
+        {
+            "severity": "high",
+            "category": "secrets",
+            "rule_id": "secret.aws-access-key",
+            "title": "AWS access key",
+            "path": "config.env",
+            "line": 1,
+            "recommendation": "Rotate the key.",
+        },
+        {
+            "severity": "low",
+            "category": "code",
+            "rule_id": "code.weak-hash",
+            "title": "Weak hash",
+            "path": "app.py",
+            "line": None,
+            "recommendation": "Use SHA-256.",
+        },
+    ]
+}
+
+
+class RuleCatalogTests(unittest.TestCase):
+    def test_security_grouped_by_standard_plus_quality(self) -> None:
+        catalog = build_rule_catalog("ko")
+        kinds = {group["kind"] for group in catalog}
+        self.assertEqual(kinds, {"security", "quality"})
+        keys = {group["key"] for group in catalog}
+        # Security groups are standards, e.g. "소프트웨어 개발보안 49" and the local ruleset.
+        self.assertIn("sw-dev-security-49", keys)
+        self.assertIn("local", keys)
+        self.assertIn("screen_quality", keys)
+        # The example standard is labelled and non-empty.
+        sw49 = next(g for g in catalog if g["key"] == "sw-dev-security-49")
+        self.assertEqual(sw49["label"], "소프트웨어 개발보안 49")
+        self.assertTrue(sw49["rules"])
+
+    def test_every_rule_has_id_and_title(self) -> None:
+        for language in ("ko", "en"):
+            for group in build_rule_catalog(language):
+                self.assertTrue(group["rules"], f"{group['key']} has no rules")
+                for rule in group["rules"]:
+                    self.assertTrue(rule["id"])
+                    self.assertTrue(rule["title"])
+
+    def test_korean_titles_use_translations(self) -> None:
+        local = next(g for g in build_rule_catalog("ko") if g["key"] == "local")
+        titles = {rule["id"]: rule["title"] for rule in local["rules"]}
+        # secret.private-key has a Korean translation in RULE_TRANSLATIONS_KO.
+        self.assertIn("secret.private-key", titles)
+        self.assertNotEqual(titles["secret.private-key"], "Private key")
+
+
+class DisabledRuleFilterTests(unittest.TestCase):
+    def _finding(self, rule_id: str) -> Finding:
+        return Finding(rule_id=rule_id, category="secrets", severity="high", title="t", path=Path("a"))
+
+    def test_disabled_rule_is_dropped(self) -> None:
+        findings = [self._finding("secret.aws-access-key"), self._finding("code.weak-hash")]
+        kept = filter_disabled_rules(findings, ["secret.aws-access-key"])
+        self.assertEqual([f.rule_id for f in kept], ["code.weak-hash"])
+
+    def test_empty_disabled_is_noop(self) -> None:
+        findings = [self._finding("secret.aws-access-key")]
+        self.assertEqual(filter_disabled_rules(findings, []), findings)
+        self.assertEqual(filter_disabled_rules(findings, None), findings)
+
+
+class ExportTests(unittest.TestCase):
+    def test_markdown_export_lists_findings(self) -> None:
+        markdown = render_markdown_from_payload(SAMPLE_PAYLOAD, "ko")
+        self.assertIn("secret.aws-access-key", markdown)
+        self.assertIn("code.weak-hash", markdown)
+        self.assertIn("전체 발견 항목: 2", markdown)
+
+    def test_xlsx_is_valid_zip_with_worksheet(self) -> None:
+        data = render_xlsx(SAMPLE_PAYLOAD, "ko")
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            names = archive.namelist()
+            self.assertIn("[Content_Types].xml", names)
+            self.assertIn("xl/worksheets/sheet1.xml", names)
+            sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+            self.assertIn("secret.aws-access-key", sheet)
+
+    def test_hwpx_is_valid_zip_with_hwp_mimetype(self) -> None:
+        data = render_hwpx(SAMPLE_PAYLOAD, "ko")
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            self.assertEqual(archive.namelist()[0], "mimetype")
+            self.assertEqual(archive.read("mimetype").decode("utf-8"), "application/hwp+zip")
+            section = archive.read("Contents/section0.xml").decode("utf-8")
+            self.assertIn("AWS access key", section)
+            # section0.xml must remain well-formed after substitution.
+            import xml.dom.minidom as minidom
+
+            minidom.parseString(section)
+
+    @unittest.skipUnless(importlib.util.find_spec("playwright"), "requires bundled Chromium renderer")
+    def test_pdf_export_is_a_downloadable_pdf_document(self) -> None:
+        data = render_pdf(SAMPLE_PAYLOAD, "ko")
+        self.assertTrue(data.startswith(b"%PDF-"))
+        self.assertIn(b"startxref", data)
+
+    def test_pdf_export_rejects_oversized_report_before_renderer(self) -> None:
+        payload = {"findings": [{"title": "x" * 500_001}]}
+        with self.assertRaises(PdfExportError):
+            render_pdf(payload, "ko")
+
+    def test_export_endpoint_returns_pdf_attachment(self) -> None:
+        server = create_dashboard_server(port=0)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request(
+                "POST",
+                "/api/export",
+                body=json.dumps({"format": "pdf", "language": "ko", "payload": SAMPLE_PAYLOAD}),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            if importlib.util.find_spec("playwright"):
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.getheader("Content-Type"), "application/pdf")
+                self.assertEqual(response.getheader("Content-Disposition"), 'attachment; filename="koda-report.pdf"')
+                self.assertTrue(response.read().startswith(b"%PDF-"))
+            else:
+                self.assertEqual(response.status, 503)
+                self.assertIn("bundled Chromium renderer", response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+
+class ZapScanTests(unittest.TestCase):
+    def test_dry_run_builds_automation_plan_and_dashboard_payload(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "zap"
+            payload = zap_scan_payload(
+                "https://staging.example.com",
+                language="ko",
+                ajax_spider=True,
+                active_scan=False,
+                output_dir=out,
+                dry_run=True,
+            )
+            # Dashboard-shaped payload the existing UI can render.
+            self.assertIn("summary", payload)
+            self.assertIn("findings_by_language", payload)
+            self.assertEqual(payload["zap"]["ajax_spider"], True)
+            self.assertEqual(payload["zap"]["active_scan"], False)
+            self.assertIn("docker run", payload["zap"]["command"])
+            plan = (out / "koda-zap-plan.yaml").read_text(encoding="utf-8")
+            self.assertIn("spiderAjax", plan)
+            self.assertNotIn("activeScan", plan)
+
+    def test_auth_context_builds_authentication_in_plan(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "zap"
+            payload = zap_scan_payload(
+                "https://staging.example.com",
+                auth={
+                    "login_url": "https://staging.example.com/login",
+                    "username": "alice",
+                    "password": "secret",
+                },
+                output_dir=out,
+                dry_run=True,
+            )
+            self.assertEqual(payload["zap"]["authenticated"], True)
+            plan = (out / "koda-zap-plan.yaml").read_text(encoding="utf-8")
+            self.assertIn("authentication", plan)
+            self.assertIn("loginPageUrl", plan)
+            self.assertIn("koda-user", plan)
+
+    def test_auth_requires_both_credentials(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            zap_scan_payload(
+                "https://staging.example.com",
+                auth={"login_url": "https://staging.example.com/login", "username": "alice", "password": ""},
+                dry_run=True,
+            )
+        self.assertIn("password", str(ctx.exception).lower())
+
+    def test_no_login_url_is_unauthenticated(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "zap"
+            payload = zap_scan_payload(
+                "https://staging.example.com", auth={}, output_dir=out, dry_run=True
+            )
+            self.assertEqual(payload["zap"]["authenticated"], False)
+            plan = (out / "koda-zap-plan.yaml").read_text(encoding="utf-8")
+            self.assertNotIn("authentication", plan)
+
+    def test_merge_folds_zap_into_prior_report(self) -> None:
+        import tempfile
+
+        from security_scanner.models import Finding
+        from security_scanner.reporting import build_dashboard_payload
+
+        prior = build_dashboard_payload(
+            [
+                Finding(rule_id="secrets.aws-key", category="secrets", severity="high",
+                        title="AWS key", path=Path("app/config.py"), target="myapp", line=12),
+                Finding(rule_id="deps.lodash", category="dependencies", severity="medium",
+                        title="lodash CVE", path=Path("package.json"), target="myapp"),
+            ],
+            ("myapp",), "ko", target_paths={"myapp": "/repo/myapp"},
+            scan_path="/repo/myapp", kind="directory",
+        )
+        prior["components"] = [{"name": "lodash", "version": "4.0.0"}]
+        prior["sbom"] = {"bomFormat": "CycloneDX"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            merged = zap_scan_payload(
+                "https://staging.example.com", language="ko",
+                output_dir=Path(directory) / "z", dry_run=True, merge=prior,
+            )
+            # Prior findings preserved and re-aggregated by the normal pipeline.
+            self.assertEqual(len(merged["findings_by_language"]["en"]), 2)
+            self.assertEqual(merged["zap"]["merged"], True)
+            self.assertEqual(merged["summary"]["by_severity"].get("high"), 1)
+            self.assertEqual(merged["summary"]["by_category"].get("secrets"), 1)
+            # Both targets present; SBOM and scan context carried over.
+            self.assertIn("myapp", merged["summary"]["target_paths"])
+            self.assertIn("staging.example.com", merged["summary"]["target_paths"])
+            self.assertEqual(merged["components"], [{"name": "lodash", "version": "4.0.0"}])
+            self.assertEqual(merged["scan"]["kind"], "directory")
+            self.assertEqual(merged["scan"]["path"], "/repo/myapp")
+
+    def test_active_scan_requires_authorization(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            zap_scan_payload(
+                "https://staging.example.com",
+                active_scan=True,
+                authorization_confirmed=False,
+                dry_run=True,
+            )
+        self.assertIn("authorized", str(ctx.exception).lower())
+
+    def test_authorized_active_scan_adds_active_job(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "zap"
+            zap_scan_payload(
+                "https://staging.example.com",
+                active_scan=True,
+                authorization_confirmed=True,
+                output_dir=out,
+                dry_run=True,
+            )
+            plan = (out / "koda-zap-plan.yaml").read_text(encoding="utf-8")
+            self.assertIn("activeScan", plan)
+
+    def test_route_rejects_unauthorized_active_scan(self) -> None:
+        server = create_dashboard_server(port=0)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request(
+                "POST",
+                "/api/zap-scan",
+                body=json.dumps(
+                    {"url": "https://staging.example.com", "active_scan": True, "authorization_confirmed": False}
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertIn("authorized", json.loads(response.read())["error"].lower())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+
+if __name__ == "__main__":
+    unittest.main()

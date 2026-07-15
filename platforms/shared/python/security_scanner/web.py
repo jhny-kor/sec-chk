@@ -21,7 +21,10 @@ network fetch so they can be unit tested without a live server.
 
 from __future__ import annotations
 
+import base64
+import difflib
 import http.cookiejar
+import json
 import os
 import re
 import secrets
@@ -152,6 +155,7 @@ def crawl_web(
     warnings: list[str] = []
     collected: list[Finding] = []
     tls_checked_hosts: set[str] = set()
+    host_probed: set[str] = set()
     visited: set[str] = set()
     queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
     # E: enqueue caller-supplied same-host seeds (known routes / sitemap / API paths).
@@ -274,6 +278,15 @@ def crawl_web(
             collected.extend(tls_findings)
             warnings.extend(tls_warnings)
 
+        if final.hostname and final.hostname not in host_probed and not _is_static_asset(final_url):
+            # Per-host active probes (once each): dynamic CORS (origin reflection /
+            # 'null'), advertised HTTP methods (TRACE/write), and Host-header
+            # reflection. GET/OPTIONS only, no payloads.
+            host_probed.add(final.hostname)
+            collected.extend(_cors_reflection_probe(final_url, opener, headers, timeout, target))
+            collected.extend(_http_methods_probe(final_url, opener, headers, timeout, target))
+            collected.extend(_host_header_probe(final_url, headers, timeout, target))
+
         if max_depth is None or depth < max_depth:
             candidates: set[str] = set()
             link_source = body
@@ -340,6 +353,7 @@ def analyze_response(
     findings.extend(_cookie_flags(url, set_cookies, is_https, target))
     findings.extend(_information_disclosure(url, lowered, target))
     findings.extend(_cors(url, lowered, target))
+    findings.extend(_jwt_findings(url, set_cookies, target))
     return findings
 
 
@@ -390,6 +404,7 @@ def analyze_body(url: str, body: bytes | str, *, target: str = "") -> list[Findi
     page = urllib.parse.urlparse(url)
     is_https = page.scheme == "https"
     findings: list[Finding] = []
+    findings.extend(_error_disclosure(url, text, target))
 
     mixed: list[str] = []
     sri_missing: list[str] = []
@@ -743,6 +758,261 @@ def _cors(url: str, headers: dict[str, str], target: str) -> list[Finding]:
             recommendation="Restrict CORS to the specific origins that need cross-site access.",
         )
     ]
+
+
+def _without_credentials(headers: Mapping[str, str]) -> dict[str, str]:
+    """Drop the operator's own credentials. Per-host / cross-origin probes must
+    never forward them: the probed host may differ from the seed (redirect /
+    allowed origin), and forwarding would leak the credentials there."""
+    return {name: value for name, value in headers.items() if name.lower() not in {"cookie", "authorization"}}
+
+
+# A syntactically valid but attacker-controlled origin no real allowlist matches.
+_CORS_PROBE_ORIGIN = "https://koda-cors-probe.example"
+
+
+def _cors_acao(
+    opener: urllib.request.OpenerDirector,
+    url: str,
+    headers: Mapping[str, str],
+    timeout: float,
+    origin: str,
+) -> tuple[str, bool] | None:
+    """GET ``url`` with a test ``Origin`` header; return the server's
+    (Access-Control-Allow-Origin, credentials-allowed) or ``None`` on error."""
+    # Reflection is flagged by the server's ACAC response header, not our request,
+    # so send no credentials (and avoid leaking them to a cross-origin host).
+    request = urllib.request.Request(url, headers={**_without_credentials(headers), "Origin": origin}, method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            response_headers = response.headers
+    except urllib.error.HTTPError as exc:
+        response_headers = exc.headers
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return None
+    if response_headers is None:
+        return None
+    acao = (response_headers.get("Access-Control-Allow-Origin") or "").strip()
+    acac = (response_headers.get("Access-Control-Allow-Credentials") or "").strip().lower() == "true"
+    return acao, acac
+
+
+def _cors_reflection_probe(
+    url: str,
+    opener: urllib.request.OpenerDirector,
+    headers: Mapping[str, str],
+    timeout: float,
+    target: str,
+) -> list[Finding]:
+    """Actively verify dynamic CORS misconfigurations the passive ``*`` check
+    misses: reflecting an arbitrary request Origin, and allowing ``null``.
+    Sends one GET per test Origin (no payloads, no state change)."""
+
+    findings: list[Finding] = []
+
+    reflected = _cors_acao(opener, url, headers, timeout, _CORS_PROBE_ORIGIN)
+    if reflected is not None and reflected[0] == _CORS_PROBE_ORIGIN:
+        if reflected[1]:
+            findings.append(
+                _finding(
+                    "web.cors-origin-reflection-credentials", "high",
+                    "CORS reflects an arbitrary Origin together with credentials",
+                    url, target=target,
+                    evidence=f"Origin: {_CORS_PROBE_ORIGIN} was echoed in Access-Control-Allow-Origin with Access-Control-Allow-Credentials: true",
+                    recommendation="Validate Origin against a strict allowlist; never reflect the request Origin when credentials are allowed.",
+                )
+            )
+        else:
+            findings.append(
+                _finding(
+                    "web.cors-origin-reflection", "medium",
+                    "CORS reflects any request Origin",
+                    url, target=target,
+                    evidence=f"Origin: {_CORS_PROBE_ORIGIN} was echoed back in Access-Control-Allow-Origin",
+                    recommendation="Reflecting an unvalidated Origin lets any site read cross-origin responses; use a strict allowlist.",
+                )
+            )
+
+    null_probe = _cors_acao(opener, url, headers, timeout, "null")
+    if null_probe is not None and null_probe[0] == "null":
+        findings.append(
+            _finding(
+                "web.cors-null-origin", "high" if null_probe[1] else "medium",
+                "CORS allows the 'null' origin",
+                url, target=target,
+                evidence="Origin: null was echoed in Access-Control-Allow-Origin"
+                + (" with credentials" if null_probe[1] else ""),
+                recommendation="Do not allow the 'null' origin; sandboxed iframes and some redirects can force it.",
+            )
+        )
+
+    return findings
+
+
+# --- Passive: server error / stack trace disclosure ---------------------------
+
+_STACKTRACE_RE = re.compile(
+    r"Traceback \(most recent call last\)"                       # Python
+    r"|Werkzeug Debugger|The debugger caught an exception"       # Flask/Werkzeug
+    r"|\bat [\w.$]+\([\w.$]+\.java:\d+\)"                        # Java stack frame
+    r"|\borg\.springframework\.\w"                               # Spring
+    r"|(?:Fatal error|Parse error|Uncaught \w+): .+ in .+ on line \d+"  # PHP
+    r"|Stack trace:\s*#0\s"                                       # PHP stack trace
+    r"|ActionController::\w+Error"                               # Rails
+    r"|\bat [\w.<>]+ \([^)\n]*\.js:\d+:\d+\)"                    # Node
+    r"|System\.\w+(?:\.\w+)*Exception"                          # .NET
+    r"|Server Error in '.+?' Application",                       # ASP.NET
+    re.IGNORECASE,
+)
+
+
+def _error_disclosure(url: str, text: str, target: str) -> list[Finding]:
+    """Passive: a framework stack trace / debug page or a raw DB error in the body."""
+    if _STACKTRACE_RE.search(text):
+        return [
+            _finding(
+                "web.error-stack-trace", "medium",
+                "Server error or stack trace exposed in the response",
+                url, target=target,
+                evidence="A framework stack trace / debug error page was returned to the client.",
+                recommendation="Disable debug mode in production; return generic error pages and log details server-side only.",
+            )
+        ]
+    if _SQL_ERROR_RE.search(text):
+        return [
+            _finding(
+                "web.database-error-disclosure", "medium",
+                "Database error message exposed in the response",
+                url, target=target,
+                evidence="A database engine error string was present in the response body.",
+                recommendation="Catch database errors and return a generic message; never surface raw DB errors to clients.",
+            )
+        ]
+    return []
+
+
+# --- Passive: JWT misconfiguration (server-issued cookies) --------------------
+
+_JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*")
+
+
+def _decode_jwt_json(segment: str) -> object | None:
+    try:
+        return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+    except (ValueError, TypeError):
+        return None
+
+
+def _jwt_findings(url: str, set_cookies: Sequence[str], target: str) -> list[Finding]:
+    """Passive: decode JWTs the server sets in cookies; flag 'alg: none' and no expiry."""
+    findings: list[Finding] = []
+    seen: set[str] = set()
+    for raw in set_cookies or ():
+        for token in _JWT_RE.findall(raw):
+            if token in seen:
+                continue
+            seen.add(token)
+            parts = token.split(".")
+            header = _decode_jwt_json(parts[0])
+            if not isinstance(header, dict):
+                continue
+            if str(header.get("alg", "")).lower() == "none":
+                findings.append(
+                    _finding(
+                        "web.jwt-alg-none", "high",
+                        "JWT issued with 'alg: none' (unsigned tokens accepted)",
+                        url, target=target,
+                        evidence="A Set-Cookie JWT header declared alg=none.",
+                        recommendation="Reject 'none'; require a strong signing algorithm (RS256/ES256) and verify signatures server-side.",
+                    )
+                )
+                continue
+            payload = _decode_jwt_json(parts[1])
+            if isinstance(payload, dict) and "exp" not in payload:
+                findings.append(
+                    _finding(
+                        "web.jwt-missing-expiry", "low",
+                        "JWT in a cookie has no expiry ('exp') claim",
+                        url, target=target,
+                        evidence="A Set-Cookie JWT payload had no 'exp' claim.",
+                        recommendation="Set a short 'exp' so a leaked or stolen token expires.",
+                    )
+                )
+    return findings
+
+
+# --- Per-host active probes: HTTP methods and Host-header injection ------------
+
+_DANGEROUS_METHODS = frozenset({"PUT", "DELETE", "PATCH", "CONNECT"})
+_HOST_PROBE = "koda-host-probe.example"
+
+
+def _http_methods_probe(
+    url: str, opener: urllib.request.OpenerDirector, headers: Mapping[str, str], timeout: float, target: str
+) -> list[Finding]:
+    """OPTIONS once per host: flag TRACE (cross-site tracing) and advertised write methods."""
+    request = urllib.request.Request(url, headers=_without_credentials(headers), method="OPTIONS")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            allow = response.headers.get("Allow", "")
+    except urllib.error.HTTPError as exc:
+        allow = exc.headers.get("Allow", "") if exc.headers else ""
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return []
+    methods = {method.strip().upper() for method in allow.split(",") if method.strip()}
+    if not methods:
+        return []
+    findings: list[Finding] = []
+    if "TRACE" in methods:
+        findings.append(
+            _finding(
+                "web.http-trace-enabled", "medium",
+                "HTTP TRACE method is enabled (cross-site tracing risk)",
+                url, target=target, evidence=f"OPTIONS Allow: {allow}",
+                recommendation="Disable the TRACE method at the web server or proxy.",
+            )
+        )
+    if methods & _DANGEROUS_METHODS:
+        findings.append(
+            _finding(
+                "web.http-methods-exposed", "low",
+                "Server advertises state-changing HTTP methods",
+                url, target=target, evidence=f"OPTIONS Allow: {allow}",
+                recommendation="Restrict each endpoint to the methods it needs; block PUT/DELETE/PATCH/CONNECT where unused.",
+            )
+        )
+    return findings
+
+
+def _host_header_probe(url: str, headers: Mapping[str, str], timeout: float, target: str) -> list[Finding]:
+    """Send a spoofed Host header (once per host); flag when the app reflects it into
+    a redirect Location or the body (cache / password-reset poisoning risk)."""
+    opener = urllib.request.build_opener(_NoRedirect())
+    request = urllib.request.Request(url, headers={**_without_credentials(headers), "Host": _HOST_PROBE}, method="GET")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            location = response.headers.get("Location", "")
+            body = response.read(4096).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        location = exc.headers.get("Location", "") if exc.headers else ""
+        try:
+            body = exc.read(4096).decode("utf-8", "replace")
+        except Exception:
+            body = ""
+    except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+        return []
+    if _HOST_PROBE in location or _HOST_PROBE in body:
+        where = "redirect Location" if _HOST_PROBE in location else "response body"
+        return [
+            _finding(
+                "web.host-header-injection", "medium",
+                "Application reflects an attacker-controlled Host header",
+                url, target=target,
+                evidence=f"Host: {_HOST_PROBE} was reflected in the {where}.",
+                recommendation="Validate Host against an allow-list; build absolute URLs from a fixed, trusted host.",
+            )
+        ]
+    return []
 
 
 def _certificate_expiry(url: str, cert: Mapping[str, object] | None, target: str) -> list[Finding]:
@@ -1338,6 +1608,8 @@ _REDIRECT_PARAM_NAMES = {
     "returnto", "return_to", "dest", "destination", "continue", "redir", "goto", "u", "r",
 }
 _ACTIVE_OOB_HOST = "koda-open-redirect.example"
+# System-file signatures for path-traversal / LFI: /etc/passwd and win.ini.
+_LFI_RE = re.compile(r"root:.*?:0:0:|\bfor 16-bit app support\b", re.IGNORECASE)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -1405,6 +1677,21 @@ def active_probe(
                         recommendation="Use parameterized queries / prepared statements; never build SQL from raw input.",
                     )
                 )
+
+        # Path traversal / LFI: a traversal payload returns a known system file.
+        lfi_body = _probe_body(
+            opener, _with_query_param(parsed, name, "../../../../../../../../etc/passwd"), headers, timeout
+        )
+        if lfi_body and _LFI_RE.search(lfi_body):
+            findings.append(
+                _finding(
+                    "web.path-traversal-lfi", "high",
+                    "Path traversal / local file inclusion (system file contents returned)",
+                    url, target=target,
+                    evidence=f"param '{name}': a directory-traversal payload returned system file content",
+                    recommendation="Never build filesystem paths from user input; use an allow-list of identifiers and canonicalize before use.",
+                )
+            )
 
         # Open redirect: a redirect-like param that sends the browser off-site.
         if name.lower() in _REDIRECT_PARAM_NAMES:
@@ -1609,26 +1896,26 @@ def _access_control_check(
 
     if compare_unauth:
         meta = _fetch_meta(urllib.request.build_opener(), url, base_headers, timeout)
-        if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _similar(primary[1], meta[1]):
+        if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _responses_equivalent(primary[1], meta[1]):
             findings.append(
                 _finding(
                     "web.broken-access-control-unauth", "medium",
                     "Authenticated content is also served without authentication (review)",
                     url, target=target,
-                    evidence="authenticated and unauthenticated GET both returned 200 with similar content",
+                    evidence="authenticated and unauthenticated GET both returned 200 with structurally equivalent content",
                     recommendation="Require authentication/authorization server-side for this resource; verify it is not meant to be public.",
                 )
             )
 
     if secondary_headers:
         meta = _fetch_meta(urllib.request.build_opener(), url, {**base_headers, **secondary_headers}, timeout)
-        if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _similar(primary[1], meta[1]):
+        if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _responses_equivalent(primary[1], meta[1]):
             findings.append(
                 _finding(
                     "web.broken-access-control-cross-account", "high",
                     "A second account receives the first account's content (possible IDOR/BOLA, review)",
                     url, target=target,
-                    evidence="the secondary account's GET returned 200 with content similar to the primary account",
+                    evidence="the secondary account's GET returned 200 with content structurally equivalent to the primary account",
                     recommendation="Enforce per-object and per-function authorization so one user cannot read another's resource.",
                 )
             )
@@ -1642,14 +1929,62 @@ def _looks_like_login(body: str) -> bool:
     return ("login" in lowered or "sign in" in lowered or "로그인" in body) and "<form" in lowered
 
 
-def _similar(a: str, b: str, tolerance: float = 0.15) -> bool:
-    """True when two response prefixes are close in size (same underlying data)."""
+# Keys and tokens that legitimately differ between two requests for the SAME
+# data (per-request CSRF, session, and time values); stripped before comparison
+# so they neither hide a real access-control match nor fabricate a false one.
+_VOLATILE_JSON_KEY_RE = re.compile(r"csrf|xsrf|token|nonce|session|request[_-]?id|trace|timestamp|_at$|_time$", re.IGNORECASE)
+_HTML_VOLATILE_RE = re.compile(
+    r"""(?ix)
+    <input[^>]*\b(?:csrf|xsrf|token|nonce|authenticity)[^>]*> # CSRF hidden fields
+    | \b[A-Fa-f0-9]{24,}\b                                    # long hex tokens
+    | \b[A-Za-z0-9+/_-]{32,}={0,2}\b                          # long base64-ish tokens
+    | \d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}(?::\d{2})?             # ISO timestamps
+    """
+)
+
+
+def _strip_volatile_json(node: object) -> object:
+    if isinstance(node, dict):
+        return {k: _strip_volatile_json(v) for k, v in node.items() if not _VOLATILE_JSON_KEY_RE.search(k)}
+    if isinstance(node, list):
+        return [_strip_volatile_json(item) for item in node]
+    return node
+
+
+def _canonical_json(text: str) -> str | None:
+    """Canonical JSON (sorted keys, volatile keys dropped) or ``None`` if not JSON."""
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, (dict, list)):
+        return None
+    return json.dumps(_strip_volatile_json(data), sort_keys=True, separators=(",", ":"))
+
+
+def _normalize_body(text: str) -> str:
+    """Lower-cased, whitespace-collapsed text with volatile tokens removed."""
+    return re.sub(r"\s+", " ", _HTML_VOLATILE_RE.sub("", text)).strip().lower()
+
+
+def _responses_equivalent(a: str, b: str, threshold: float = 0.90) -> bool:
+    """Structural/content equivalence of two responses for access-control checks.
+
+    Stronger than a raw length ratio: JSON is compared by canonical keys+values
+    (volatile keys dropped), other bodies by normalized-content similarity after
+    removing CSRF tokens, nonces, and timestamps. This cuts both false positives
+    (two different-content pages of similar size) and false negatives (identical
+    data whose per-request token shifts the length).
+    """
     if not a or not b:
         return a == b
-    if a == b:
+    na = _canonical_json(a) or _normalize_body(a)
+    nb = _canonical_json(b) or _normalize_body(b)
+    if not na or not nb:
+        return na == nb
+    if na == nb:
         return True
-    longer = max(len(a), len(b))
-    return abs(len(a) - len(b)) / longer <= tolerance
+    return difflib.SequenceMatcher(None, na, nb).ratio() >= threshold
 
 
 def _same_host(seed_url: str, candidate: str) -> bool:

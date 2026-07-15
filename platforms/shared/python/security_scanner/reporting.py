@@ -147,6 +147,18 @@ TRANSLATIONS = {
         "web_headers_label": "Cookie / headers (one 'Name: value' per line)",
         "web_headers_placeholder": "Cookie: session=...",
         "web_pages_scanned": "pages scanned",
+        "zap_scan_title": "OWASP ZAP Deep Scan (Docker)",
+        "zap_scan_now": "Run ZAP Scan",
+        "zap_scan_note": "Runs a ZAP Automation plan (spider + optional AJAX spider + optional active scan) via Docker. Active scan sends attack traffic — authorized targets only.",
+        "zap_options_label": "ZAP options",
+        "zap_ajax": "AJAX spider (render JS-heavy apps)",
+        "zap_active": "Active scan (sends attack traffic)",
+        "zap_authorized": "I own or am explicitly authorized to actively test this target",
+        "zap_merge": "Merge results into the current report (combine with the code scan)",
+        "zap_include_label": "Include paths (one regex per line, e.g. https://site/.*)",
+        "zap_exclude_label": "Exclude paths (one regex per line, e.g. https://site/logout.*)",
+        "zap_login_legend": "Authenticated scan (optional): scan behind a login",
+        "zap_need_authorization": "Enable the authorization checkbox before running an active scan.",
         "prevention_kit_title": "Prevention Kit",
         "prevention_kit_note": "Writes baseline guardrails into the selected folder above.",
         "prevention_apply_toolkit": "Apply guardrail files",
@@ -327,6 +339,18 @@ TRANSLATIONS = {
         "web_headers_label": "쿠키 / 헤더 (한 줄에 'Name: value')",
         "web_headers_placeholder": "Cookie: session=...",
         "web_pages_scanned": "페이지 점검",
+        "zap_scan_title": "OWASP ZAP 심층 점검 (Docker)",
+        "zap_scan_now": "ZAP 점검 실행",
+        "zap_scan_note": "Docker로 ZAP Automation 계획(스파이더 + 선택적 AJAX 스파이더 + 선택적 능동 점검)을 실행합니다. 능동 점검은 실제 공격 트래픽을 보내므로 권한이 있는 대상에만 사용하세요.",
+        "zap_options_label": "ZAP 옵션",
+        "zap_ajax": "AJAX 스파이더 (JS 위주 앱 렌더링)",
+        "zap_active": "능동 점검 (공격 트래픽 전송)",
+        "zap_authorized": "본인이 소유했거나 명시적으로 능동 점검 허가를 받은 대상입니다",
+        "zap_merge": "현재 보고서에 결과 통합 (코드 점검 결과와 합치기)",
+        "zap_include_label": "포함 경로 (한 줄당 정규식, 예: https://site/.*)",
+        "zap_exclude_label": "제외 경로 (한 줄당 정규식, 예: https://site/logout.*)",
+        "zap_login_legend": "인증 점검 (선택): 로그인 이후 화면 점검",
+        "zap_need_authorization": "능동 점검을 실행하려면 먼저 권한 확인란을 선택하세요.",
         "prevention_kit_title": "예방 키트",
         "prevention_kit_note": "위에서 선택한 폴더에 기본 예방 가드레일 파일을 생성합니다.",
         "prevention_apply_toolkit": "가드레일 파일 생성",
@@ -1620,6 +1644,8 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_WEB_SCAN_TITLE__": html.escape(str(labels["web_scan_title"])),
         "__INITIAL_WEB_URL_PLACEHOLDER__": html.escape(str(labels["web_url_placeholder"]), quote=True),
         "__INITIAL_WEB_SCAN_NOW__": html.escape(str(labels["web_scan_now"])),
+        "__INITIAL_ZAP_SCAN_TITLE__": html.escape(str(labels["zap_scan_title"])),
+        "__INITIAL_ZAP_SCAN_NOW__": html.escape(str(labels["zap_scan_now"])),
         "__INITIAL_PREVENTION_KIT_TITLE__": html.escape(str(labels["prevention_kit_title"])),
         "__INITIAL_PREVENTION_APPLY_TOOLKIT__": html.escape(str(labels["prevention_apply_toolkit"])),
         "__INITIAL_PREVENTION_INSTALL_HOOK__": html.escape(str(labels["prevention_install_hook"])),
@@ -2079,6 +2105,7 @@ HTML_TEMPLATE = """<!doctype html>
       overflow-wrap: normal;
     }
     .scan-web-check input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; }
+    .scan-web-check.span-all { grid-column: 1 / -1; }
     .scan-web-login {
       grid-column: 1 / -1;
       display: flex;
@@ -2818,6 +2845,35 @@ HTML_TEMPLATE = """<!doctype html>
         <button id="web-scan-run" type="button">__INITIAL_WEB_SCAN_NOW__</button>
         <span id="web-scan-note" class="scan-note"></span>
       </div>
+      <div class="scan-web-form">
+        <span id="zap-scan-title" class="scan-web-title">__INITIAL_ZAP_SCAN_TITLE__</span>
+        <input id="zap-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
+        <details class="scan-web-options">
+          <summary id="zap-options-label"></summary>
+          <div class="scan-web-options-content">
+          <label class="scan-web-check"><input id="zap-ajax" type="checkbox"> <span id="zap-ajax-label"></span></label>
+          <label class="scan-web-check"><input id="zap-active" type="checkbox"> <span id="zap-active-label"></span></label>
+          <label class="scan-web-check span-all"><input id="zap-authorized" type="checkbox"> <span id="zap-authorized-label"></span></label>
+          <label class="scan-web-check span-all"><input id="zap-merge" type="checkbox"> <span id="zap-merge-label"></span></label>
+          <div class="scan-web-textareas">
+          <label class="scan-web-headers"><span id="zap-include-label"></span>
+            <textarea id="zap-include" rows="2" autocomplete="off"></textarea>
+          </label>
+          <label class="scan-web-headers"><span id="zap-exclude-label"></span>
+            <textarea id="zap-exclude" rows="2" autocomplete="off"></textarea>
+          </label>
+          </div>
+          <fieldset class="scan-web-login">
+            <legend id="zap-login-legend-label"></legend>
+            <label><span id="zap-login-url-label"></span> <input id="zap-login-url" type="url" autocomplete="off"></label>
+            <label><span id="zap-login-user-label"></span> <input id="zap-login-user" autocomplete="off"></label>
+            <label><span id="zap-login-pass-label"></span> <input id="zap-login-pass" type="password" autocomplete="off"></label>
+          </fieldset>
+          </div>
+        </details>
+        <button id="zap-scan-run" type="button">__INITIAL_ZAP_SCAN_NOW__</button>
+        <span id="zap-scan-note" class="scan-note"></span>
+      </div>
       <div class="scan-prevention-form">
         <span id="prevention-kit-title" class="scan-web-title">__INITIAL_PREVENTION_KIT_TITLE__</span>
         <button id="prevention-apply-toolkit" type="button">__INITIAL_PREVENTION_APPLY_TOOLKIT__</button>
@@ -3221,6 +3277,23 @@ HTML_TEMPLATE = """<!doctype html>
       setText("web-login-pass-label", activeLabels.web_login_pass);
       setText("web-headers-label", activeLabels.web_headers_label);
       byId("web-headers").placeholder = activeLabels.web_headers_placeholder;
+      setText("zap-scan-title", activeLabels.zap_scan_title);
+      byId("zap-url").placeholder = activeLabels.web_url_placeholder;
+      setText("zap-scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.zap_scan_now);
+      byId("zap-scan-run").disabled = state.scanRunning;
+      byId("zap-url").disabled = state.scanRunning;
+      setText("zap-scan-note", activeLabels.zap_scan_note);
+      setText("zap-options-label", activeLabels.zap_options_label);
+      setText("zap-ajax-label", activeLabels.zap_ajax);
+      setText("zap-active-label", activeLabels.zap_active);
+      setText("zap-authorized-label", activeLabels.zap_authorized);
+      setText("zap-merge-label", activeLabels.zap_merge);
+      setText("zap-include-label", activeLabels.zap_include_label);
+      setText("zap-exclude-label", activeLabels.zap_exclude_label);
+      setText("zap-login-legend-label", activeLabels.zap_login_legend);
+      setText("zap-login-url-label", activeLabels.web_login_url);
+      setText("zap-login-user-label", activeLabels.web_login_user);
+      setText("zap-login-pass-label", activeLabels.web_login_pass);
       setText("prevention-kit-title", activeLabels.prevention_kit_title);
       setText("prevention-kit-note", activeLabels.prevention_kit_note);
       setText("prevention-apply-toolkit", activeLabels.prevention_apply_toolkit);
@@ -3870,6 +3943,73 @@ HTML_TEMPLATE = """<!doctype html>
       }
     }
 
+    async function runZapScan() {
+      const activeLabels = labels();
+      const url = byId("zap-url").value.trim();
+      if (!url) {
+        state.scanStatus = activeLabels.web_url_placeholder;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+      const activeScan = byId("zap-active").checked;
+      const authorized = byId("zap-authorized").checked;
+      if (activeScan && !authorized) {
+        state.scanStatus = activeLabels.zap_need_authorization;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+
+      state.scanRunning = true;
+      state.scanStatus = activeLabels.scan_status_running;
+      state.scanStatusClass = "";
+      render();
+
+      const requestBody = {
+        url,
+        language: state.language,
+        min_severity: "info",
+        ajax_spider: byId("zap-ajax").checked,
+        active_scan: activeScan,
+        authorization_confirmed: authorized,
+        include_paths: byId("zap-include").value.split(/\\r?\\n/).map(function(s){return s.trim();}).filter(Boolean),
+        exclude_paths: byId("zap-exclude").value.split(/\\r?\\n/).map(function(s){return s.trim();}).filter(Boolean),
+        auth: {
+          login_url: byId("zap-login-url").value.trim(),
+          username: byId("zap-login-user").value,
+          password: byId("zap-login-pass").value,
+        },
+      };
+      // Fold ZAP findings into the report already on screen when requested and
+      // there is something to merge into (a prior code or web scan).
+      const current = (payload.findings_by_language && payload.findings_by_language.en) || [];
+      if (byId("zap-merge").checked && current.length > 0) {
+        requestBody.merge = payload;
+      }
+
+      try {
+        const response = await fetch(apiEndpoint("/api/zap-scan"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        const nextPayload = await parseJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(nextPayload.error || activeLabels.scan_status_failed);
+        }
+        state.scanRunning = false;
+        state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}`;
+        state.scanStatusClass = "ok";
+        applyPayload(nextPayload);
+      } catch (error) {
+        state.scanRunning = false;
+        state.scanStatus = `${activeLabels.scan_status_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
+        state.scanStatusClass = "error";
+        render();
+      }
+    }
+
     async function runScreenQualityScan() {
       const activeLabels = labels();
       const path = byId("scan-path").value.trim();
@@ -4029,6 +4169,14 @@ HTML_TEMPLATE = """<!doctype html>
     });
     byId("web-scan-run").addEventListener("click", () => {
       runWebScan();
+    });
+    byId("zap-scan-run").addEventListener("click", () => {
+      runZapScan();
+    });
+    byId("zap-url").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        runZapScan();
+      }
     });
     byId("screen-quality-run").addEventListener("click", () => {
       runScreenQualityScan();

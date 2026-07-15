@@ -134,8 +134,25 @@ class LinkAndHostTests(unittest.TestCase):
         self.assertTrue(web._looks_like_login('<form><input type="password"></form>'))
         self.assertTrue(web._looks_like_login("<form>please sign in</form>"))
         self.assertFalse(web._looks_like_login("<html>user dashboard, balance 500</html>"))
-        self.assertTrue(web._similar("a" * 100, "a" * 105))   # within tolerance
-        self.assertFalse(web._similar("a" * 100, "a" * 200))  # very different sizes
+
+    def test_responses_equivalent_structural(self):
+        # Same data, only a per-request CSRF token differs -> still equivalent
+        # (raw length comparison could miss this on short bodies).
+        a = '<form><input name="csrf" value="AAAAAAAAAAAAAAAAAAAAAAAAAAAA1"><p>Alice Kim balance 500</p></form>'
+        b = '<form><input name="csrf" value="BBBBBBBBBBBBBBBBBBBBBBBBBBBB2"><p>Alice Kim balance 500</p></form>'
+        self.assertTrue(web._responses_equivalent(a, b))
+        # Two different accounts' data of similar length -> NOT equivalent
+        # (the old 15%-length heuristic would have called these a match).
+        c = "<html><p>Alice Kim, account 1001, balance 500</p></html>"
+        d = "<html><p>Bob Lee, account 2002, balance 999</p></html>"
+        self.assertFalse(web._responses_equivalent(c, d))
+        # JSON: same keys+values but different volatile token -> equivalent
+        j1 = '{"user":"alice","role":"admin","token":"xyz111","updated_at":"2024-01-01T00:00:00"}'
+        j2 = '{"role":"admin","user":"alice","token":"zzz999","updated_at":"2025-09-09T09:09:09"}'
+        self.assertTrue(web._responses_equivalent(j1, j2))
+        # JSON: different user values -> NOT equivalent
+        j3 = '{"user":"bob","role":"user"}'
+        self.assertFalse(web._responses_equivalent(j1, j3))
 
     def test_api_spec_openapi_har_postman(self):
         import json
@@ -322,6 +339,145 @@ class LiveCrawlTests(unittest.TestCase):
         )
         self.assertEqual(payload["auth"]["status"], "authenticated")
         self.assertEqual(payload["page_results"][0]["auth_state"], "authenticated")
+
+    def test_cross_account_structural_detection(self):
+        # A server that serves the SAME record to any cookie (broken object-level
+        # auth) but varies only a per-request CSRF token — structural comparison
+        # must still flag it; a raw-length check could be thrown by the token.
+        class Idor(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                token = self.headers.get("Cookie", "x")[:8].ljust(8, "z")
+                body = (
+                    f'<html><input name="csrf" value="{token}CSRFTOKENVALUE1234567">'
+                    "<p>Record 42: Alice Kim, balance 500</p></html>"
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), Idor)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}/"
+            findings, _warnings, _pages = web.crawl_web(
+                base, max_pages=1, delay=0,
+                extra_headers={"Cookie": "session=acct1"},
+                secondary_headers={"Cookie": "session=acct2"},
+            )
+            rule_ids = {finding.rule_id for finding in findings}
+            self.assertIn("web.broken-access-control-cross-account", rule_ids)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_bundle_passive_and_perhost_checks(self):
+        import base64
+        import json as _json
+
+        def _jwt(header, payload):
+            def enc(data):
+                return base64.urlsafe_b64encode(_json.dumps(data).encode()).rstrip(b"=").decode()
+            return f"{enc(header)}.{enc(payload)}."
+
+        alg_none = _jwt({"alg": "none", "typ": "JWT"}, {"sub": "1"})
+
+        class Bundle(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                host = self.headers.get("Host", "")
+                body = f"<html>Traceback (most recent call last): boom. Host={host}</html>".encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Set-Cookie", f"session={alg_none}; Path=/")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_OPTIONS(self):
+                self.send_response(204)
+                self.send_header("Allow", "GET, POST, TRACE, PUT")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), Bundle)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}/"
+            findings, _warnings, _pages = web.crawl_web(base, max_pages=1, delay=0)
+            rule_ids = {finding.rule_id for finding in findings}
+            for rid in (
+                "web.error-stack-trace", "web.jwt-alg-none",
+                "web.http-trace-enabled", "web.http-methods-exposed", "web.host-header-injection",
+            ):
+                self.assertIn(rid, rule_ids)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_lfi_path_traversal_active(self):
+        class Reader(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                from urllib.parse import parse_qs, urlparse
+                value = (parse_qs(urlparse(self.path).query).get("file") or [""])[0]
+                body = b"root:x:0:0:root:/root:/bin/bash\n" if "etc/passwd" in value else b"ok"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), Reader)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}/read?file=readme"
+            findings, _warnings, _pages = web.crawl_web(base, max_pages=1, delay=0, active=True)
+            rule_ids = {finding.rule_id for finding in findings}
+            self.assertIn("web.path-traversal-lfi", rule_ids)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_cors_dynamic_origin_reflection(self):
+        class Reflector(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                origin = self.headers.get("Origin")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                if origin:  # echo any request Origin back (the misconfiguration)
+                    self.send_header("Access-Control-Allow-Origin", origin)
+                    self.send_header("Access-Control-Allow-Credentials", "true")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def log_message(self, *args):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), Reflector)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}/"
+            findings, _warnings, _pages = web.crawl_web(base, max_pages=1, delay=0)
+            rule_ids = {finding.rule_id for finding in findings}
+            self.assertIn("web.cors-origin-reflection-credentials", rule_ids)
+            self.assertIn("web.cors-null-origin", rule_ids)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_cors_probe_quiet_when_no_cors(self):
+        # A server that never emits CORS headers must not produce CORS findings.
+        findings, _warnings, _pages = web.crawl_web(self.base + "/b", max_pages=1, delay=0)
+        rule_ids = {finding.rule_id for finding in findings}
+        self.assertNotIn("web.cors-origin-reflection", rule_ids)
+        self.assertNotIn("web.cors-origin-reflection-credentials", rule_ids)
+        self.assertNotIn("web.cors-null-origin", rule_ids)
 
     def test_cross_origin_redirect_never_receives_credentials(self):
         received = {}
