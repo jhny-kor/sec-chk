@@ -2028,15 +2028,23 @@ HTML_TEMPLATE = """<!doctype html>
       white-space: nowrap;
     }
 
-    /* The crawl/login/active options span the full form width and stack
-       vertically so the growing list of checkboxes never overlaps or crams. */
+    /* Keep the crawl/login/active options full-width while the checkbox grid
+       owns its responsive columns. */
     .scan-web-options {
       grid-column: 1 / -1;
+      justify-self: stretch;
+      width: 100%;
+      min-width: 0;
+      max-width: none;
+      box-sizing: border-box;
+      padding: 8px 0 2px;
+    }
+    .scan-web-options-content {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px 12px;
       align-items: start;
-      padding: 8px 0 2px;
+      min-width: 0;
     }
     .scan-web-options > summary {
       grid-column: 1 / -1;
@@ -2065,7 +2073,11 @@ HTML_TEMPLATE = """<!doctype html>
       min-width: 0;
       line-height: 1.35;
     }
-    .scan-web-check span { overflow-wrap: anywhere; }
+    .scan-web-check span {
+      min-width: 0;
+      white-space: nowrap;
+      overflow-wrap: normal;
+    }
     .scan-web-check input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; }
     .scan-web-login {
       grid-column: 1 / -1;
@@ -2692,7 +2704,7 @@ HTML_TEMPLATE = """<!doctype html>
     @media (max-width: 1000px) {
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr 1fr; }
-      .scan-web-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .scan-web-options-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .scan-actions { align-items: stretch; }
       .standards-help { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
@@ -2709,7 +2721,7 @@ HTML_TEMPLATE = """<!doctype html>
       .language-toggle { position: absolute; top: 16px; right: 0; }
       .meta { text-align: left; white-space: normal; }
       .metrics, .filters, .scan-form, .scan-standard-form, .scan-web-form { grid-template-columns: 1fr; }
-      .scan-web-options { grid-template-columns: 1fr; }
+      .scan-web-options-content { grid-template-columns: 1fr; }
       .scan-web-headers, .scan-web-login { grid-column: 1 / -1; }
       .scan-actions { display: grid; grid-template-columns: 1fr; }
       .standard-head { grid-template-columns: 1fr; }
@@ -2758,6 +2770,7 @@ HTML_TEMPLATE = """<!doctype html>
         <input id="web-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
         <details class="scan-web-options">
           <summary id="web-crawl-options-label"></summary>
+          <div class="scan-web-options-content">
           <button id="web-options-select-all" class="scan-option-select-all" type="button"></button>
           <label class="scan-web-check"><input id="web-crawl" type="checkbox"> <span id="web-crawl-enable-label"></span></label>
           <label class="scan-web-check"><input id="web-render" type="checkbox"> <span id="web-render-enable-label"></span></label>
@@ -2790,6 +2803,7 @@ HTML_TEMPLATE = """<!doctype html>
           <label class="scan-web-headers"><span id="web-headers-label"></span>
             <textarea id="web-headers" rows="2" autocomplete="off"></textarea>
           </label>
+          </div>
         </details>
         <button id="web-scan-run" type="button">__INITIAL_WEB_SCAN_NOW__</button>
         <span id="web-scan-note" class="scan-note"></span>
