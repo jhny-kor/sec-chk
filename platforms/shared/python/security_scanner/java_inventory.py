@@ -25,6 +25,10 @@ class JavaComponent:
     identification_source: str
     identity_status: str
     manual_review_required: bool
+    version_source: str = ""
+    confidence: str = "unresolved"
+    filename_version: str = ""
+    filename_version_mismatch: bool = False
 
     def payload(self) -> dict[str, object]:
         return {
@@ -40,6 +44,10 @@ class JavaComponent:
             "identification_source": self.identification_source,
             "identity_status": self.identity_status,
             "manual_review_required": self.manual_review_required,
+            "version_source": self.version_source,
+            "confidence": self.confidence,
+            "filename_version": self.filename_version,
+            "filename_version_mismatch": self.filename_version_mismatch,
         }
 
 
@@ -61,6 +69,8 @@ def identify_archive(artifact: ArchiveArtifact) -> JavaComponent:
     group = ""
     name = artifact.filename
     version = ""
+    filename_name, filename_version = _filename_coordinates(artifact.filename)
+    name = filename_name or name
     source = "filename-unresolved"
     status = "unresolved"
     try:
@@ -82,12 +92,19 @@ def identify_archive(artifact: ArchiveArtifact) -> JavaComponent:
                 manifest = next((entry for entry in names if entry.upper() == "META-INF/MANIFEST.MF"), None)
                 if manifest:
                     values = _properties(archive.read(manifest).decode("utf-8", errors="replace"))
-                    name = values.get("Implementation-Title") or values.get("Bundle-SymbolicName") or artifact.filename
+                    name = values.get("Implementation-Title") or values.get("Bundle-SymbolicName") or name
                     version = values.get("Implementation-Version") or values.get("Bundle-Version") or ""
                     if name != artifact.filename or version:
                         source, status = "manifest", "partial"
     except (OSError, zipfile.BadZipFile, UnicodeError, ET.ParseError):
         source = "filename-unresolved"
+
+    if not version and filename_version:
+        version = filename_version
+        source, status = "filename", "inferred"
+    version_source = source if version else ""
+    confidence = "high" if source in {"pom.properties", "pom.xml"} else "medium" if source == "manifest" else "low" if source == "filename" else "unresolved"
+    filename_version_mismatch = bool(filename_version and version and filename_version != version)
 
     purl = _maven_purl(group, name, version) if status == "resolved" else ""
     return JavaComponent(
@@ -102,7 +119,11 @@ def identify_archive(artifact: ArchiveArtifact) -> JavaComponent:
         locations=(artifact.location.display(),),
         identification_source=source,
         identity_status=status,
-        manual_review_required=status != "resolved",
+        manual_review_required=status not in {"resolved", "inferred"} or filename_version_mismatch,
+        version_source=version_source,
+        confidence=confidence,
+        filename_version=filename_version,
+        filename_version_mismatch=filename_version_mismatch,
     )
 
 
@@ -135,6 +156,14 @@ def _properties(text: str) -> dict[str, str]:
 
 def _coordinates(values: dict[str, str]) -> tuple[str, str, str]:
     return values.get("groupId", ""), values.get("artifactId", ""), values.get("version", "")
+
+
+def _filename_coordinates(filename: str) -> tuple[str, str]:
+    stem = filename.rsplit(".", 1)[0]
+    match = re.match(r"^(?P<name>.+?)-(?P<version>\d[^-]*?(?:[-.][A-Za-z0-9]+)*)$", stem)
+    if not match:
+        return stem, ""
+    return match.group("name"), match.group("version")
 
 
 def _pom_xml_coordinates(payload: bytes) -> tuple[str, str, str]:
