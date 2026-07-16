@@ -2,7 +2,15 @@
 param(
     [string]$Version = "0.1.0",
     [switch]$SkipDependencyInstall,
-    [string]$InnoCompilerPath
+    [string]$InnoCompilerPath,
+
+    # Pinned security-tool versions. Override these parameters when upgrading.
+    [string]$SyftVersion = "1.46.0",
+    [string]$GrypeVersion = "0.115.0",
+
+    # Use these only when the build cache already contains the required files.
+    [switch]$SkipSecurityToolDownload,
+    [switch]$SkipGrypeDatabaseUpdate
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,22 +25,32 @@ $CliAppName = "KODA-CLI"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $SharedPythonRoot = Join-Path $RepoRoot "platforms\shared\python"
+
 $BuildRoot = Join-Path $RepoRoot ".build\koda-windows-installer"
 $VenvDir = Join-Path $BuildRoot ".venv"
+$VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 
-# Chromium for Playwright is downloaded once and bundled into the GUI app.
-# The CLI entry point reuses the GUI app's bundled Chromium at runtime.
+# Playwright Chromium is downloaded once and bundled into the GUI application.
 $BrowsersDir = Join-Path $BuildRoot "ms-playwright"
 
-$VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+# Syft, Grype and the Grype vulnerability database are staged here.
+$SecurityToolsCacheDir = Join-Path $BuildRoot "security-tools"
+$SecurityToolsDownloadDir = Join-Path $BuildRoot "security-tool-downloads"
+$SyftExe = Join-Path $SecurityToolsCacheDir "syft.exe"
+$GrypeExe = Join-Path $SecurityToolsCacheDir "grype.exe"
+$GrypeDbDir = Join-Path $SecurityToolsCacheDir "grype-db"
+$SecurityToolLicensesDir = Join-Path $SecurityToolsCacheDir "licenses"
 
 $GuiEntryPoint = Join-Path $RepoRoot "platforms\windows\scripts\koda-desktop.py"
 $CliEntryPoint = Join-Path $BuildRoot "koda-cli-entry.py"
+$RuntimeHook = Join-Path $BuildRoot "koda-runtime-env.py"
 
 $DistDir = Join-Path $RepoRoot "dist"
 $AppDistDir = Join-Path $DistDir $AppName
 $CliDistDir = Join-Path $AppDistDir $CliAppName
+$GuiExecutable = Join-Path $AppDistDir "KODA.exe"
 $CliExecutable = Join-Path $CliDistDir "$CliAppName.exe"
+$InstalledToolsDir = Join-Path $AppDistDir "tools"
 
 $InstallerOutDir = Join-Path $DistDir "Windows"
 $InnoScript = Join-Path $RepoRoot "platforms\windows\packaging\KODA.iss"
@@ -149,8 +167,238 @@ function Write-Utf8NoBomFile {
     [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
+function Invoke-KodaDownload {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )
+
+    $parent = Split-Path -Parent $Destination
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+
+    Write-Host "Downloading: $Uri"
+    Write-Host "Destination: $Destination"
+
+    # GitHub releases require modern TLS.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    Invoke-WebRequest `
+        -Uri $Uri `
+        -OutFile $Destination `
+        -UseBasicParsing
+
+    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        throw "Download did not create the expected file: $Destination"
+    }
+
+    $size = (Get-Item -LiteralPath $Destination).Length
+    if ($size -le 0) {
+        throw "Downloaded file is empty: $Destination"
+    }
+}
+
+function Install-ZippedSecurityTool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ToolName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DownloadUri,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ExecutableName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationExecutable
+    )
+
+    $toolDownloadDir = Join-Path $SecurityToolsDownloadDir $ToolName
+    $archivePath = Join-Path $toolDownloadDir "$ToolName-$Version-windows-amd64.zip"
+    $extractDir = Join-Path $toolDownloadDir "extracted"
+
+    if (Test-Path -LiteralPath $toolDownloadDir) {
+        Remove-Item -LiteralPath $toolDownloadDir -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $toolDownloadDir -Force | Out-Null
+
+    Invoke-KodaDownload -Uri $DownloadUri -Destination $archivePath
+
+    Write-Host "Extracting $ToolName $Version."
+    Expand-Archive `
+        -LiteralPath $archivePath `
+        -DestinationPath $extractDir `
+        -Force
+
+    $executable = Get-ChildItem `
+        -LiteralPath $extractDir `
+        -Filter $ExecutableName `
+        -File `
+        -Recurse |
+        Select-Object -First 1
+
+    if (-not $executable) {
+        throw "$ExecutableName was not found in downloaded $ToolName archive."
+    }
+
+    New-Item -ItemType Directory -Path $SecurityToolsCacheDir -Force | Out-Null
+    Copy-Item `
+        -LiteralPath $executable.FullName `
+        -Destination $DestinationExecutable `
+        -Force
+
+    # Preserve upstream license text when the release archive includes it.
+    $license = Get-ChildItem `
+        -LiteralPath $extractDir `
+        -File `
+        -Recurse |
+        Where-Object { $_.Name -match '^LICENSE(?:\..*)?$' } |
+        Select-Object -First 1
+
+    if ($license) {
+        New-Item -ItemType Directory -Path $SecurityToolLicensesDir -Force | Out-Null
+        Copy-Item `
+            -LiteralPath $license.FullName `
+            -Destination (Join-Path $SecurityToolLicensesDir "$ToolName-LICENSE.txt") `
+            -Force
+    }
+}
+
+function Test-SecurityTool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ToolName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Executable
+    )
+
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+        throw "$ToolName executable was not found: $Executable"
+    }
+
+    Write-Host "Checking $ToolName executable."
+    & $Executable --version
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$ToolName version check failed: $Executable"
+    }
+}
+
+function Update-GrypeDatabase {
+    if (Test-Path -LiteralPath $GrypeDbDir) {
+        Remove-Item -LiteralPath $GrypeDbDir -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $GrypeDbDir -Force | Out-Null
+
+    $previousCacheDir = $env:GRYPE_DB_CACHE_DIR
+    $previousAutoUpdate = $env:GRYPE_DB_AUTO_UPDATE
+    $previousValidateAge = $env:GRYPE_DB_VALIDATE_AGE
+    $previousCheckForAppUpdate = $env:GRYPE_CHECK_FOR_APP_UPDATE
+
+    try {
+        $env:GRYPE_DB_CACHE_DIR = $GrypeDbDir
+        $env:GRYPE_DB_AUTO_UPDATE = "true"
+        $env:GRYPE_DB_VALIDATE_AGE = "false"
+        $env:GRYPE_CHECK_FOR_APP_UPDATE = "false"
+
+        Write-Host "Downloading the Grype vulnerability database."
+        & $GrypeExe db update
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Grype vulnerability database update failed."
+        }
+
+        Write-Host "Validating the downloaded Grype vulnerability database."
+        $statusPath = Join-Path $SecurityToolsCacheDir "grype-db-status.json"
+        & $GrypeExe db status -o json |
+            Set-Content -LiteralPath $statusPath -Encoding UTF8
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Grype database status check failed."
+        }
+
+        $dbFiles = @(
+            Get-ChildItem `
+                -LiteralPath $GrypeDbDir `
+                -File `
+                -Recurse `
+                -ErrorAction SilentlyContinue
+        )
+
+        if ($dbFiles.Count -eq 0) {
+            throw "Grype database update completed without creating database files: $GrypeDbDir"
+        }
+    }
+    finally {
+        $env:GRYPE_DB_CACHE_DIR = $previousCacheDir
+        $env:GRYPE_DB_AUTO_UPDATE = $previousAutoUpdate
+        $env:GRYPE_DB_VALIDATE_AGE = $previousValidateAge
+        $env:GRYPE_CHECK_FOR_APP_UPDATE = $previousCheckForAppUpdate
+    }
+}
+
+function Confirm-GrypeDatabaseExists {
+    if (-not (Test-Path -LiteralPath $GrypeDbDir -PathType Container)) {
+        throw @"
+The Grype database cache does not exist:
+
+$GrypeDbDir
+
+Run the build without -SkipGrypeDatabaseUpdate while connected to the internet.
+"@
+    }
+
+    $dbFiles = @(
+        Get-ChildItem `
+            -LiteralPath $GrypeDbDir `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue
+    )
+
+    if ($dbFiles.Count -eq 0) {
+        throw "The Grype database cache is empty: $GrypeDbDir"
+    }
+}
+
+function Write-SecurityToolManifest {
+    $syftHash = (Get-FileHash -LiteralPath $SyftExe -Algorithm SHA256).Hash
+    $grypeHash = (Get-FileHash -LiteralPath $GrypeExe -Algorithm SHA256).Hash
+    $generatedAt = [DateTimeOffset]::UtcNow.ToString("o")
+
+    $manifest = @"
+KODA bundled security tools
+Generated at UTC: $generatedAt
+
+Syft version requested: $SyftVersion
+Syft executable: tools\syft.exe
+Syft SHA256: $syftHash
+
+Grype version requested: $GrypeVersion
+Grype executable: tools\grype.exe
+Grype SHA256: $grypeHash
+
+Grype database: tools\grype-db
+Grype database auto-update at runtime: disabled
+"@
+
+    Write-Utf8NoBomFile `
+        -Path (Join-Path $SecurityToolsCacheDir "TOOL-VERSIONS.txt") `
+        -Content $manifest
+}
+
 Write-Host "Preparing KODA Windows installer build."
 Write-Host "Repository: $RepoRoot"
+Write-Host "Syft version: $SyftVersion"
+Write-Host "Grype version: $GrypeVersion"
 
 if (-not (Test-Path -LiteralPath $GuiEntryPoint -PathType Leaf)) {
     throw "Missing GUI PyInstaller entry point: $GuiEntryPoint"
@@ -168,6 +416,7 @@ if (-not (Test-Path -LiteralPath $InnoScript -PathType Leaf)) {
 
 New-Item -ItemType Directory -Path $BuildRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $InstallerOutDir -Force | Out-Null
+New-Item -ItemType Directory -Path $SecurityToolsCacheDir -Force | Out-Null
 
 $python = Find-Python310
 $pythonCommand = $python.Command
@@ -202,8 +451,6 @@ if (-not $SkipDependencyInstall) {
 
     Write-Host "Installing build dependencies."
 
-    # pywebview: Windows GUI window using Edge WebView2
-    # playwright: optional SPA rendering during web scans
     & $VenvPython -m pip install --upgrade `
         pyinstaller `
         pywebview `
@@ -216,7 +463,6 @@ if (-not $SkipDependencyInstall) {
     Write-Host "Downloading Playwright Chromium for offline SPA rendering."
 
     $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
-
     & $VenvPython -m playwright install chromium
 
     if ($LASTEXITCODE -ne 0) {
@@ -224,7 +470,7 @@ if (-not $SkipDependencyInstall) {
     }
 }
 else {
-    Write-Host "Skipping dependency installation."
+    Write-Host "Skipping Python dependency installation."
 
     & $VenvPython -m PyInstaller --version *> $null
 
@@ -233,10 +479,52 @@ else {
     }
 }
 
-# Generate a small console entry point.
-# It imports the same security_scanner.cli.main() used by:
-# python -m security_scanner
-$cliEntrySource = @'
+# ---------------------------------------------------------------------------
+# Download Syft and Grype for Windows x86_64.
+# ---------------------------------------------------------------------------
+
+if (-not $SkipSecurityToolDownload) {
+    $syftUri = "https://github.com/anchore/syft/releases/download/v$SyftVersion/syft_${SyftVersion}_windows_amd64.zip"
+    $grypeUri = "https://github.com/anchore/grype/releases/download/v$GrypeVersion/grype_${GrypeVersion}_windows_amd64.zip"
+
+    Install-ZippedSecurityTool `
+        -ToolName "syft" `
+        -Version $SyftVersion `
+        -DownloadUri $syftUri `
+        -ExecutableName "syft.exe" `
+        -DestinationExecutable $SyftExe
+
+    Install-ZippedSecurityTool `
+        -ToolName "grype" `
+        -Version $GrypeVersion `
+        -DownloadUri $grypeUri `
+        -ExecutableName "grype.exe" `
+        -DestinationExecutable $GrypeExe
+}
+else {
+    Write-Host "Skipping Syft and Grype downloads. Using cached executables."
+}
+
+Test-SecurityTool -ToolName "Syft" -Executable $SyftExe
+Test-SecurityTool -ToolName "Grype" -Executable $GrypeExe
+
+if (-not $SkipGrypeDatabaseUpdate) {
+    Update-GrypeDatabase
+}
+else {
+    Write-Host "Skipping Grype database update. Using cached database."
+    Confirm-GrypeDatabaseExists
+}
+
+Write-SecurityToolManifest
+
+# ---------------------------------------------------------------------------
+# Generate runtime hook shared by GUI and CLI builds.
+#
+# The hook runs before application imports and points KODA at the bundled tools.
+# ---------------------------------------------------------------------------
+
+$runtimeHookSource = @'
 from __future__ import annotations
 
 import os
@@ -244,41 +532,65 @@ import sys
 from pathlib import Path
 
 
-def configure_bundled_chromium() -> None:
-    """Reuse Chromium bundled with the adjacent GUI installation."""
-    if not getattr(sys, "frozen", False):
-        return
-
+def _install_root() -> Path:
     executable_dir = Path(sys.executable).resolve().parent
 
-    # Installed layout:
-    # KODA\
-    #   KODA.exe
-    #   _internal\ms-playwright\
-    #   KODA-CLI\KODA-CLI.exe
-    install_root = executable_dir.parent
+    # GUI:
+    #   KODA\KODA.exe
+    #
+    # CLI:
+    #   KODA\KODA-CLI\KODA-CLI.exe
+    if executable_dir.name.casefold() == "koda-cli":
+        return executable_dir.parent
 
-    candidates = (
-        install_root / "_internal" / "ms-playwright",
-        install_root / "ms-playwright",
-    )
-
-    for candidate in candidates:
-        if candidate.is_dir():
-            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(candidate)
-            break
+    return executable_dir
 
 
-def run() -> int:
-    configure_bundled_chromium()
+root = _install_root()
+tools = root / "tools"
+syft = tools / "syft.exe"
+grype = tools / "grype.exe"
+grype_db = tools / "grype-db"
 
-    from security_scanner.cli import main
+if syft.is_file():
+    os.environ.setdefault("KODA_SYFT_BIN", str(syft))
 
-    return main()
+if grype.is_file():
+    os.environ.setdefault("KODA_GRYPE_BIN", str(grype))
+
+if grype_db.is_dir():
+    os.environ.setdefault("GRYPE_DB_CACHE_DIR", str(grype_db))
+
+# The installed product is intended to work without internet access.
+os.environ.setdefault("GRYPE_DB_AUTO_UPDATE", "false")
+os.environ.setdefault("GRYPE_DB_VALIDATE_AGE", "false")
+os.environ.setdefault("GRYPE_CHECK_FOR_APP_UPDATE", "false")
+
+# Reuse Chromium bundled in the GUI application from the CLI build as well.
+browser_candidates = (
+    root / "_internal" / "ms-playwright",
+    root / "ms-playwright",
+)
+
+for candidate in browser_candidates:
+    if candidate.is_dir():
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(candidate))
+        break
+'@
+
+Write-Utf8NoBomFile `
+    -Path $RuntimeHook `
+    -Content $runtimeHookSource
+
+# Console entry point for KODA-CLI.exe.
+$cliEntrySource = @'
+from __future__ import annotations
+
+from security_scanner.cli import main
 
 
 if __name__ == "__main__":
-    raise SystemExit(run())
+    raise SystemExit(main())
 '@
 
 Write-Utf8NoBomFile `
@@ -301,8 +613,6 @@ $guiPyInstallerArgs = @(
     "--noconfirm",
     "--clean",
     "--onedir",
-
-    # GUI application: do not show a console window.
     "--windowed",
 
     "--name", $AppName,
@@ -310,8 +620,8 @@ $guiPyInstallerArgs = @(
     "--workpath", $guiWorkPath,
     "--specpath", $guiSpecPath,
     "--paths", $SharedPythonRoot,
+    "--runtime-hook", $RuntimeHook,
 
-    # Report template used by HWPX export.
     "--add-data",
     (
         (
@@ -320,17 +630,12 @@ $guiPyInstallerArgs = @(
         ) + ";security_scanner\assets"
     ),
 
-    # Modules such as host posture, inventory, EOL, CPE and web scanning
-    # are imported lazily.
     "--collect-submodules", "security_scanner",
     "--hidden-import", "security_scanner.web",
 
-    # Native Windows GUI backend.
     "--collect-all", "webview",
     "--collect-all", "clr_loader",
     "--collect-all", "pythonnet",
-
-    # Playwright Python driver and package data.
     "--collect-all", "playwright",
 
     "--hidden-import", "tkinter",
@@ -338,7 +643,6 @@ $guiPyInstallerArgs = @(
     "--hidden-import", "tkinter.messagebox"
 )
 
-# Put Chromium inside the GUI application's _internal\ms-playwright directory.
 if (Test-Path -LiteralPath $BrowsersDir -PathType Container) {
     $guiPyInstallerArgs += @(
         "--add-data",
@@ -366,17 +670,14 @@ if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
 $guiPyInstallerArgs += $GuiEntryPoint
 
 Write-Host "Building KODA.exe with PyInstaller."
-
 & $VenvPython -m PyInstaller @guiPyInstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "KODA GUI PyInstaller build failed."
 }
 
-$guiExecutable = Join-Path $AppDistDir "KODA.exe"
-
-if (-not (Test-Path -LiteralPath $guiExecutable -PathType Leaf)) {
-    throw "KODA.exe was not created: $guiExecutable"
+if (-not (Test-Path -LiteralPath $GuiExecutable -PathType Leaf)) {
+    throw "KODA.exe was not created: $GuiExecutable"
 }
 
 # ---------------------------------------------------------------------------
@@ -390,18 +691,14 @@ $cliPyInstallerArgs = @(
     "--noconfirm",
     "--clean",
     "--onedir",
-
-    # CLI application: keep the console attached.
     "--console",
 
     "--name", $CliAppName,
-
-    # Using AppDistDir creates:
-    # dist\KODA\KODA-CLI\KODA-CLI.exe
     "--distpath", $AppDistDir,
     "--workpath", $cliWorkPath,
     "--specpath", $cliSpecPath,
     "--paths", $SharedPythonRoot,
+    "--runtime-hook", $RuntimeHook,
 
     "--add-data",
     (
@@ -413,10 +710,6 @@ $cliPyInstallerArgs = @(
 
     "--collect-submodules", "security_scanner",
     "--hidden-import", "security_scanner.web",
-
-    # CLI can use Playwright for web-scan --render.
-    # Chromium itself is not duplicated; the generated entry point points
-    # PLAYWRIGHT_BROWSERS_PATH to the GUI application's bundled browser.
     "--collect-all", "playwright",
 
     "--hidden-import", "tkinter",
@@ -434,7 +727,6 @@ if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
 $cliPyInstallerArgs += $CliEntryPoint
 
 Write-Host "Building KODA-CLI.exe with PyInstaller."
-
 & $VenvPython -m PyInstaller @cliPyInstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
@@ -445,8 +737,35 @@ if (-not (Test-Path -LiteralPath $CliExecutable -PathType Leaf)) {
     throw "KODA-CLI.exe was not created: $CliExecutable"
 }
 
-# Root-level launcher:
-# %LOCALAPPDATA%\KODA\KODA-CLI.cmd
+# ---------------------------------------------------------------------------
+# Copy Syft, Grype and the Grype DB into the installation tree.
+# ---------------------------------------------------------------------------
+
+if (Test-Path -LiteralPath $InstalledToolsDir) {
+    Remove-Item -LiteralPath $InstalledToolsDir -Recurse -Force
+}
+
+Copy-Item `
+    -LiteralPath $SecurityToolsCacheDir `
+    -Destination $InstalledToolsDir `
+    -Recurse `
+    -Force
+
+if (-not (Test-Path -LiteralPath (
+    Join-Path $InstalledToolsDir "syft.exe"
+) -PathType Leaf)) {
+    throw "Bundled syft.exe was not copied into the installer tree."
+}
+
+if (-not (Test-Path -LiteralPath (
+    Join-Path $InstalledToolsDir "grype.exe"
+) -PathType Leaf)) {
+    throw "Bundled grype.exe was not copied into the installer tree."
+}
+
+Confirm-GrypeDatabaseExists
+
+# Root-level CLI launcher.
 $cliLauncherPath = Join-Path $AppDistDir "KODA-CLI.cmd"
 
 $cliLauncherSource = @'
@@ -460,8 +779,7 @@ Set-Content `
     -Value $cliLauncherSource `
     -Encoding ASCII
 
-# Optional Start Menu shell. It keeps a command prompt open and makes
-# KODA-CLI.cmd available through the current session's PATH.
+# Start Menu shell that remains open.
 $cliShellPath = Join-Path $AppDistDir "KODA-CLI-Shell.cmd"
 
 $cliShellSource = @'
@@ -482,7 +800,7 @@ Set-Content `
     -Encoding ASCII
 
 # ---------------------------------------------------------------------------
-# Copy documentation and example configuration files
+# Copy documentation and example configuration files.
 # ---------------------------------------------------------------------------
 
 foreach ($fileName in @(
@@ -515,13 +833,12 @@ if (Test-Path -LiteralPath $docsPath -PathType Container) {
 }
 
 # ---------------------------------------------------------------------------
-# Build KODASetup.exe
+# Build KODASetup.exe.
 # ---------------------------------------------------------------------------
 
 $iscc = Find-InnoCompiler -RequestedPath $InnoCompilerPath
 
 Write-Host "Building KODASetup.exe with Inno Setup."
-
 & $iscc "/DMyAppVersion=$Version" $InnoScript
 
 if ($LASTEXITCODE -ne 0) {
@@ -536,14 +853,12 @@ if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) {
 
 Write-Host ""
 Write-Host "Build finished successfully."
-Write-Host "GUI executable: $guiExecutable"
+Write-Host "GUI executable: $GuiExecutable"
 Write-Host "CLI executable: $CliExecutable"
-Write-Host "CLI launcher: $cliLauncherPath"
+Write-Host "Bundled tools: $InstalledToolsDir"
 Write-Host "Installer: $setupPath"
 Write-Host ""
-Write-Host "Installed GUI:"
-Write-Host "  %LOCALAPPDATA%\KODA\KODA.exe"
+Write-Host "Installed CLI example:"
+Write-Host '  "%LOCALAPPDATA%\KODA\KODA-CLI.cmd" jar-scan --target . --output-dir output --fail-on high'
 Write-Host ""
-Write-Host "Installed CLI:"
-Write-Host "  %LOCALAPPDATA%\KODA\KODA-CLI.cmd --help"
-Write-Host "  %LOCALAPPDATA%\KODA\KODA-CLI\KODA-CLI.exe --help"
+Write-Host "Syft, Grype and the Grype DB will be detected automatically."
