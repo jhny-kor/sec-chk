@@ -28,11 +28,41 @@ done
 script_dir="$(CDPATH= cd -- "$(dirname -- "$source_path")" && pwd)"
 bundle_root="$(CDPATH= cd -- "$script_dir/.." && pwd)"
 
-# Prefer the bundled render venv (created by install.sh) so the optional SPA
-# rendering can import Playwright in-process. The scanner core is stdlib-only,
-# so running it from this venv is transparent when render is unused.
-if [ -x "$bundle_root/render-venv/bin/python" ]; then
-  python_bin="$bundle_root/render-venv/bin/python"
+if [ -f "$bundle_root/python-interpreter" ]; then
+  configured_python=''
+  IFS= read -r configured_python < "$bundle_root/python-interpreter" || true
+  if [ -n "$configured_python" ] \
+    && { command -v "$configured_python" >/dev/null 2>&1 || [ -x "$configured_python" ]; }; then
+    python_bin="$configured_python"
+  fi
+fi
+
+# Prefer the bundled renderer libraries so the optional SPA rendering can
+# import Playwright without pip, venv, or network access. The scanner core is
+# stdlib-only, so the same interpreter is used for every command.
+if [ -d "$bundle_root/render-lib" ]; then
+  export PYTHONPATH="$bundle_root/render-lib${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
+if [ -x "$bundle_root/tools/syft" ]; then
+  export KODA_SYFT_BIN="${KODA_SYFT_BIN:-$bundle_root/tools/syft}"
+fi
+if [ -x "$bundle_root/tools/grype" ]; then
+  export KODA_GRYPE_BIN="${KODA_GRYPE_BIN:-$bundle_root/tools/grype}"
+fi
+if [ -d "$bundle_root/grype-db/db" ]; then
+  export GRYPE_DB_CACHE_DIR="${GRYPE_DB_CACHE_DIR:-$bundle_root/grype-db/db}"
+  export GRYPE_DB_AUTO_UPDATE="${GRYPE_DB_AUTO_UPDATE:-false}"
+  export GRYPE_DB_VALIDATE_AGE="${GRYPE_DB_VALIDATE_AGE:-false}"
+fi
+if [ -d "$bundle_root/vuln-data/nvd" ]; then
+  export KODA_NVD_DATA="${KODA_NVD_DATA:-$bundle_root/vuln-data/nvd}"
+fi
+if [ -f "$bundle_root/vuln-data/known_exploited_vulnerabilities.json" ]; then
+  export KODA_CISA_KEV="${KODA_CISA_KEV:-$bundle_root/vuln-data/known_exploited_vulnerabilities.json}"
+fi
+if [ -f "$bundle_root/vuln-data/knvd-notices.json" ]; then
+  export KODA_KNVD_DATA="${KODA_KNVD_DATA:-$bundle_root/vuln-data/knvd-notices.json}"
 fi
 
 if [ -d "$bundle_root/app/security_scanner" ]; then

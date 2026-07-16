@@ -10,9 +10,22 @@ bundled Chromium renderer; the installer and offline packager therefore fail
 closed if the renderer cannot be installed.
 
 ```bash
-# Debian/Ubuntu example
-sudo apt-get update
-sudo apt-get install -y python3 python3-venv python3-pip \
+# Verify the already-provisioned server runtime. Do not run apt/yum in the
+# closed network unless the packages are supplied by an approved local mirror.
+python3 --version
+```
+
+The transferred archive contains the Python application dependencies, Syft,
+Grype, the Grype DB, NVD/CISA data, Playwright wheels, and Chromium. The
+server only needs Python 3.10+ and the distribution's native Chromium runtime
+libraries (GTK/NSS/GBM/ALSA); those are OS packages, not portable Python
+libraries. The offline installer does not require `python3-venv`, `pip`, or any
+Python package download.
+
+For a Debian/Ubuntu image, provision these packages before it is isolated:
+
+```bash
+sudo apt-get install -y python3 \
   libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 \
   libgtk-3-0 libasound2
 python3 --version
@@ -49,20 +62,19 @@ This command does not download tools, update a vulnerability database, or
 contact NVD, CISA, or KNVD. The full data-transfer procedure and report
 contract are in [the offline Java SBOM runbook](../security/java-sbom-vulnerability-scan.md).
 
-## Install From Source
+## Install Offline Bundle
 
 ```bash
 cd /path/to/koda
 bash platforms/linux/install.sh
-~/.local/bin/koda list-categories
-~/.local/bin/koda host-scan --format json
+/home/user0/koda/koda list-categories
+/home/user0/koda/koda host-scan --format json
 ```
 
-`install.sh` creates an isolated virtual environment, installs the shared KODA
-engine and Playwright, downloads the pinned Chromium browser, and writes the
-`koda` launcher. Re-run it after pulling an approved revision. If Chromium
-cannot be installed, fix the network/package mirror or use the offline tarball;
-the PDF path is intentionally not optional.
+`install.sh` creates `/home/user0/koda`, unpacks Playwright and its bundled
+dependencies from local wheels using Python's standard library, imports the
+bundled Grype DB, and uses the bundled Chromium browser. The offline bundle
+does not download anything; if a bundled file is missing, installation stops.
 
 Verify the installed command resolves to the intended prefix:
 
@@ -71,10 +83,17 @@ command -v koda
 koda list-categories >/tmp/koda-categories.txt
 ```
 
+If the command is not already on `PATH`:
+
+```bash
+export PATH=/home/user0/koda:$PATH
+command -v koda
+```
+
 For a managed server location:
 
 ```bash
-bash platforms/linux/install.sh --prefix /opt/koda --bin-dir /usr/local/bin
+bash platforms/linux/install.sh --prefix /srv/koda --bin-dir /usr/local/bin
 koda scan --target /deploy/app --format json --fail-on high
 koda host-scan --format json --min-severity info
 ```
@@ -182,12 +201,43 @@ Build on a connected machine:
 bash platforms/linux/package.sh
 ```
 
+On macOS, build the Linux package in Docker. Select `linux/arm64` for an
+ARM64 server or `linux/amd64` for an x86_64 server:
+
+```bash
+docker run --rm \
+  --platform linux/amd64 \
+  --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp/koda-home \
+  -v "$PWD:/src" -w /src \
+  python:3.10-bookworm \
+  bash -lc 'bash platforms/linux/package.sh'
+```
+
 Run `package.sh` on a connected build machine. It stages the shared source,
 Python wheels, Playwright wheels, and the Chromium browser into the tarball. A
 package without the renderer is rejected so that an offline installation cannot
 silently lose PDF downloads.
 
-Move the generated `dist/linux/koda-linux-x86_64-*.tar.gz` file to the target server, then install:
+To create one x86_64 archive containing Syft, Grype, the Grype DB, NVD JSON 2.0,
+and CISA KEV, use the offline builder on the connected MacBook. KNVD is optional:
+
+```bash
+KODA_NVD_START_YEAR=2025 \
+KODA_NVD_END_YEAR=2026 \
+bash platforms/linux/package-offline.sh
+```
+
+The generated bundle contains the selected NVD year feeds plus `recent` and
+`modified`. The builder verifies the Syft/Grype release checksums and Grype DB
+checksum, writes `manifest.sha256`, and produces one
+`dist/linux/koda-linux-x86_64-*.tar.gz` file. Omit the two NVD variables to
+download the full year range. If an approved KNVD file is available, add
+`--knvd-data /path/to/knvd-notices.json`.
+The target server needs Linux x86_64, Python 3.10+, and the approved native
+renderer libraries; no network access is used during installation or scanning.
+
+Move the generated `dist/linux/koda-linux-<arch>-*.tar.gz` file to the target server, then install:
 
 ```bash
 tar -xzf koda-linux-x86_64-*.tar.gz
@@ -195,6 +245,13 @@ cd koda-linux-x86_64-*
 bash install.sh
 koda list-categories
 ```
+
+When the archive was built with `package-offline.sh`, `install.sh` copies the
+offline tools and data below the selected KODA prefix, imports the bundled
+Grype DB, and configures `koda jar-scan` to use them automatically. The
+operator can still override the paths with `KODA_SYFT_BIN`, `KODA_GRYPE_BIN`,
+`KODA_NVD_DATA`, `KODA_CISA_KEV`, `KODA_KNVD_DATA`, and
+`GRYPE_DB_CACHE_DIR`.
 
 For an offline smoke test, start the dashboard on loopback and verify both the
 health endpoint and a PDF export from a completed sample scan before promoting

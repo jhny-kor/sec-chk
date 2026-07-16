@@ -35,7 +35,11 @@ def run_syft(target: Path, binary: Path | None, timeout: float) -> SyftResult:
         payload = json.loads(scan.stdout)
     except json.JSONDecodeError as exc:
         return SyftResult(None, version, f"Syft returned invalid JSON: {exc}", True)
-    if not isinstance(payload, dict) or payload.get("bomFormat") != "CycloneDX" or not isinstance(payload.get("components"), list):
+    if not isinstance(payload, dict) or payload.get("bomFormat") != "CycloneDX":
+        return SyftResult(None, version, "Syft returned an invalid CycloneDX document.", True)
+    if "components" not in payload:
+        payload["components"] = []
+    elif not isinstance(payload.get("components"), list):
         return SyftResult(None, version, "Syft returned an invalid CycloneDX document.", True)
     return SyftResult(payload, version, version_warning, False)
 

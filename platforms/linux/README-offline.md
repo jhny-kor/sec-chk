@@ -9,14 +9,23 @@ logic. Source installs and packages copy the shared Python engine from
 ```bash
 cd /path/to/koda
 bash platforms/linux/install.sh
-~/.local/bin/koda list-categories
+/home/user0/koda/koda list-categories
+```
+
+The offline installer defaults to `/home/user0/koda`. It creates the command
+link at `/home/user0/koda/koda`; add `/home/user0/koda` to `PATH` if the short
+`koda` command is preferred:
+
+```bash
+export PATH=/home/user0/koda:$PATH
+koda list-categories
 ```
 
 Use a custom install location when the server account has a managed application
 directory:
 
 ```bash
-KODA_PREFIX=/opt/koda KODA_BIN_DIR=/usr/local/bin bash platforms/linux/install.sh
+KODA_PREFIX=/srv/koda KODA_BIN_DIR=/usr/local/bin bash platforms/linux/install.sh
 ```
 
 ## Web Dashboard
@@ -54,6 +63,20 @@ Build on a connected machine, then move the tarball into the closed network.
 bash platforms/linux/package.sh
 ```
 
+For the complete closed-network Java package, build one x86_64 archive from the
+connected MacBook. KNVD is optional:
+
+```bash
+KODA_NVD_START_YEAR=2025 \
+KODA_NVD_END_YEAR=2026 \
+bash platforms/linux/package-offline.sh
+```
+
+This includes Syft, Grype, the Grype DB, NVD JSON feeds, and CISA KEV. Add
+`--knvd-data /path/to/knvd-notices.json` when an approved KNVD file is available.
+It verifies downloaded checksums, and the resulting archive is the only file
+that needs to be transferred.
+
 Install on the target Linux server:
 
 ```bash
@@ -62,6 +85,11 @@ cd koda-linux-x86_64-0.1.0
 bash install.sh
 koda scan --target /deploy/app --format json --output reports/koda.json --fail-on high
 ```
+
+The archive contains the KODA source, Syft, Grype, Grype DB, selected NVD/CISA
+data, Playwright wheels for Python 3.10 through 3.14, and Chromium. The
+installer uses only those local files and refuses network installation if an
+offline bundle file is missing.
 
 ## Deployment Gate
 
