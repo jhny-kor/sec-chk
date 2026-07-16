@@ -61,6 +61,8 @@ def _run(binary: Path, arguments: tuple[str, ...], timeout: float, extra_env: di
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env=env,
         )

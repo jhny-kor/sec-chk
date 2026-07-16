@@ -104,7 +104,7 @@ class SbomVerificationOptions:
     baseline_sbom: Path | None = None
     output_dir: Path = Path("reports/sbom-verification")
     excludes: tuple[str, ...] = ()
-    max_depth: int = 3
+    max_depth: int | None = None
     fail_on_mismatch: bool = False
     fail_on_version_conflict: bool = False
     fail_on_untracked: bool = False

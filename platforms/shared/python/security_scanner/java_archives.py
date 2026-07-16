@@ -11,9 +11,6 @@ from pathlib import Path, PurePosixPath
 
 
 ARCHIVE_SUFFIXES = (".jar", ".war", ".ear")
-DEFAULT_MAX_DEPTH = 3
-DEFAULT_MAX_ENTRIES = 10_000
-DEFAULT_MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 1_000
 
 
@@ -50,14 +47,14 @@ def scan_archives(
     target: Path,
     *,
     excludes: tuple[str, ...] = (),
-    max_depth: int = DEFAULT_MAX_DEPTH,
-    max_entries: int = DEFAULT_MAX_ENTRIES,
-    max_uncompressed_bytes: int = DEFAULT_MAX_UNCOMPRESSED_BYTES,
+    max_depth: int | None = None,
+    max_entries: int | None = None,
+    max_uncompressed_bytes: int | None = None,
 ) -> ArchiveScan:
     root = target.expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"Java scan target is not a directory: {target}")
-    if max_depth < 1 or max_entries < 1 or max_uncompressed_bytes < 1:
+    if any(limit is not None and limit < 1 for limit in (max_depth, max_entries, max_uncompressed_bytes)):
         raise ValueError("archive limits must be positive")
 
     artifacts: list[ArchiveArtifact] = []
@@ -96,9 +93,9 @@ def scan_archives(
 def _walk_archive(
     artifact: ArchiveArtifact,
     *,
-    max_depth: int,
-    max_entries: int,
-    max_uncompressed_bytes: int,
+    max_depth: int | None,
+    max_entries: int | None,
+    max_uncompressed_bytes: int | None,
     artifacts: list[ArchiveArtifact],
     warnings: list[str],
 ) -> None:
@@ -107,7 +104,7 @@ def _walk_archive(
         return
     try:
         with zipfile.ZipFile(BytesIO(artifact.payload)) as archive:
-            if len(archive.infolist()) > max_entries:
+            if max_entries is not None and len(archive.infolist()) > max_entries:
                 warnings.append(f"Archive entry limit exceeded: {artifact.location.display()}")
                 return
             total_size = 0
@@ -120,7 +117,7 @@ def _walk_archive(
                         warnings.append(f"ZIP symlink skipped: {artifact.location.display()}!/{member.filename}")
                     continue
                 total_size += member.file_size
-                if total_size > max_uncompressed_bytes:
+                if max_uncompressed_bytes is not None and total_size > max_uncompressed_bytes:
                     warnings.append(f"Archive uncompressed-size limit exceeded: {artifact.location.display()}")
                     break
                 if member.compress_size and member.file_size / member.compress_size > MAX_COMPRESSION_RATIO:
@@ -128,7 +125,7 @@ def _walk_archive(
                 if not _is_java_archive_name(member.filename):
                     continue
                 depth = artifact.location.nested_path.count("!/") + (2 if artifact.location.nested_path else 1)
-                if depth > max_depth:
+                if max_depth is not None and depth > max_depth:
                     warnings.append(f"Maximum nested archive depth reached: {artifact.location.display()}!/{member.filename}")
                     continue
                 if member.flag_bits & 0x1:

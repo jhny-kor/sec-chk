@@ -713,7 +713,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="base git ref for --changed-only, e.g. origin/main",
     )
 
-    jar_scan = subparsers.add_parser("jar-scan", help="offline Linux x86_64 JAR/WAR/EAR SBOM and vulnerability scan")
+    jar_scan = subparsers.add_parser("jar-scan", help="offline JAR/WAR/EAR SBOM and vulnerability scan")
     jar_scan.add_argument("--target", required=True, help="directory containing deployed JAR, WAR, and EAR files")
     jar_scan.add_argument("--output-dir", default="reports/java-scan", help="report directory")
     jar_scan.add_argument("--syft-bin", help="Syft executable; no automatic download")
@@ -722,7 +722,7 @@ def build_parser() -> argparse.ArgumentParser:
     jar_scan.add_argument("--cisa-kev", help="CISA known_exploited_vulnerabilities.json")
     jar_scan.add_argument("--knvd-data", help="KODA-normalized KNVD JSON")
     jar_scan.add_argument("--exclude", action="append", default=[], help="archive relative-path/name glob to skip")
-    jar_scan.add_argument("--max-depth", type=_positive_int, default=3, help="maximum nested archive depth")
+    jar_scan.add_argument("--max-depth", type=_positive_int, help="optional nested archive depth limit; the default scans all depths")
     jar_scan.add_argument("--timeout", type=_positive_float, default=300.0, help="Syft/Grype timeout in seconds")
     jar_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 at or above this severity")
     jar_scan.add_argument("--fail-on-kev", action="store_true", help="exit 1 when a CISA KEV match exists")
