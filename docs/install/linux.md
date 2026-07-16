@@ -30,6 +30,25 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner list-categories
 PYTHONPATH=platforms/shared/python python3 -m security_scanner host-scan --format json --min-severity info
 ```
 
+For the Linux x86_64 closed-network Java scan, prepare Syft, Grype, and the
+offline NVD/CISA/KNVD files on an approved connected host, then run:
+
+~~~bash
+PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
+  --target /jeus/domains/domain1/applications \
+  --output-dir reports/java-scan \
+  --syft-bin /opt/koda/tools/syft \
+  --grype-bin /opt/koda/tools/grype \
+  --nvd-data /opt/koda/vuln-data/nvd \
+  --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json \
+  --knvd-data /opt/koda/vuln-data/knvd-notices.json \
+  --fail-on high --fail-on-kev
+~~~
+
+This command does not download tools, update a vulnerability database, or
+contact NVD, CISA, or KNVD. The full data-transfer procedure and report
+contract are in [the offline Java SBOM runbook](../security/java-sbom-vulnerability-scan.md).
+
 ## Install From Source
 
 ```bash

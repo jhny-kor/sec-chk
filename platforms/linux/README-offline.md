@@ -104,3 +104,25 @@ directory and should run `koda deploy-check`.
   unless those services are routed to an approved internal mirror.
 - Keep shared scanner changes in `platforms/shared/python/security_scanner/`;
   keep Linux install, packaging, and deployment scripts in `platforms/linux/`.
+
+## Offline Java archive scan
+
+For Linux x86_64 application servers, stage Syft, Grype, and the approved
+NVD/CISA KEV/KNVD files inside the closed network, then run:
+
+~~~bash
+koda jar-scan \
+  --target /jeus/domains/domain1/applications \
+  --output-dir reports/java-scan \
+  --syft-bin /opt/koda/tools/syft \
+  --grype-bin /opt/koda/tools/grype \
+  --nvd-data /opt/koda/vuln-data/nvd \
+  --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json \
+  --knvd-data /opt/koda/vuln-data/knvd-notices.json \
+  --fail-on high --fail-on-kev
+~~~
+
+The scanner is read-only, includes nested libraries, and never infers a Maven
+version from a filename. Unknown identity, duplicate locations, input
+SHA-256, and data 기준일 remain visible in the generated reports. See
+docs/security/java-sbom-vulnerability-scan.md for the complete runbook.
