@@ -1469,9 +1469,9 @@ private enum SecurityStandardLocalization {
         ),
         "sw-dev-security-49": StandardText(
             title: "Korean Software Development Security 49",
-            subtitle: "Maps the 49 Korean software-development-security guide criteria to local rules.",
+            subtitle: "Tracks all 49 MOIS/KISA implementation-stage weaknesses individually. Automatable items run as local rules; the rest are marked partial, manual-review, or unsupported.",
             scope: "Korean secure-coding criteria",
-            coverage: "Automatic file-based checks"
+            coverage: "Automated and partial local checks; design, permission, and data-flow criteria need manual review or external SAST"
         ),
         "sw-dev-security-7-types": StandardText(
             title: "Korean Software Development Security 7 Types",
@@ -2731,9 +2731,9 @@ enum SecurityStandardCatalog {
         AppSecurityStandard(
             id: "sw-dev-security-49",
             title: "소프트웨어 개발보안 49",
-            subtitle: "국내 소프트웨어 개발보안 가이드 49개 기준을 로컬 룰에 매핑합니다.",
+            subtitle: "행정안전부·KISA 구현단계 보안약점 49개를 기준별로 표시합니다. 자동 확인 가능한 항목은 로컬 룰로 점검하고, 나머지는 부분 지원·수동 검토·미지원으로 구분합니다.",
             scope: "국내 시큐어코딩 기준",
-            coverage: "자동 점검",
+            coverage: "자동·부분 로컬 점검 (설계·권한·데이터 흐름 항목은 수동 검토 또는 외부 SAST 필요)",
             badge: "국내 기준",
             icon: "doc.text.magnifyingglass",
             accent: .blue,

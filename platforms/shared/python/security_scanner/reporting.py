@@ -23,8 +23,12 @@ from .standards import (
     SCREEN_QUALITY_RULE_IDS,
     SECRET_RULE_IDS,
     SECURITY_STANDARDS,
+    SENSITIVE_COMMENT_RULE_IDS,
+    SW49_STATUSES,
+    SW49_SUPPORT_LEVELS,
     rule_standard_mappings_payload,
     standards_payload,
+    sw49_payload,
 )
 from .vex import render_cyclonedx_vex
 
@@ -192,6 +196,45 @@ TRANSLATIONS = {
         "action": "Action",
         "no_findings_display": "No findings to display.",
         "no_findings_filter": "No findings match the current filters.",
+        "sw49_heading": "SW Development Security 49 Control Status",
+        "sw49_intro": "All 49 official implementation-stage weaknesses. Controls without automated coverage are never marked PASS.",
+        "sw49_zero_note": "No vulnerable items were detected within the automated checks that actually ran. Unsupported, manual-review, and not-scanned controls must be confirmed separately; this does not mean all 49 controls are satisfied.",
+        "sw49_columns": {
+            "official_id": "Control",
+            "category": "Type",
+            "title": "Weakness",
+            "cwe": "CWE",
+            "support": "Support",
+            "executed": "Executed",
+            "status": "Verdict",
+            "rules": "KODA rules",
+            "finding_count": "Findings",
+            "evidence": "Evidence",
+            "notes": "Limitations",
+        },
+        "sw49_status_labels": {
+            "PASS": "Pass",
+            "VULNERABLE": "Vulnerable",
+            "NEEDS_REVIEW": "Needs review",
+            "UNSUPPORTED": "Unsupported",
+            "NOT_APPLICABLE": "Not applicable",
+            "NOT_SCANNED": "Not scanned",
+        },
+        "sw49_support_labels": {
+            "automated": "Automated",
+            "partial": "Partial",
+            "manual-review": "Manual review",
+            "unsupported": "Unsupported",
+        },
+        "sw49_summary_labels": {
+            "total": "Official controls",
+            "automated": "Automated",
+            "partial": "Partial",
+            "manual-review": "Manual review",
+            "unsupported": "Unsupported",
+        },
+        "sw49_executed_yes": "Run",
+        "sw49_executed_no": "Not run",
         "no_targets_recorded": "No targets recorded.",
         "all_severities": "All severities",
         "all_categories": "All categories",
@@ -384,6 +427,45 @@ TRANSLATIONS = {
         "action": "조치",
         "no_findings_display": "표시할 발견 항목이 없습니다.",
         "no_findings_filter": "현재 필터와 일치하는 발견 항목이 없습니다.",
+        "sw49_heading": "소프트웨어 개발보안 49 기준 현황",
+        "sw49_intro": "공식 구현단계 보안약점 49개 전체 상태입니다. 자동 점검이 없는 기준은 통과로 표시하지 않습니다.",
+        "sw49_zero_note": "현재 실행된 자동 점검 범위에서는 취약 항목이 탐지되지 않았습니다. 미지원·수동 검토·미실행 기준은 별도로 확인해야 하며, 전체 49개 기준의 준수를 의미하지 않습니다.",
+        "sw49_columns": {
+            "official_id": "기준 ID",
+            "category": "분류",
+            "title": "기준명",
+            "cwe": "CWE",
+            "support": "지원 수준",
+            "executed": "실행 상태",
+            "status": "판정",
+            "rules": "연결 룰",
+            "finding_count": "발견 건수",
+            "evidence": "근거",
+            "notes": "제한사항",
+        },
+        "sw49_status_labels": {
+            "PASS": "통과",
+            "VULNERABLE": "취약",
+            "NEEDS_REVIEW": "수동 검토 필요",
+            "UNSUPPORTED": "미지원",
+            "NOT_APPLICABLE": "해당 없음",
+            "NOT_SCANNED": "미실행",
+        },
+        "sw49_support_labels": {
+            "automated": "자동",
+            "partial": "부분 자동",
+            "manual-review": "수동 검토",
+            "unsupported": "미지원",
+        },
+        "sw49_summary_labels": {
+            "total": "공식 기준",
+            "automated": "자동 지원",
+            "partial": "부분 지원",
+            "manual-review": "수동 검토",
+            "unsupported": "미지원",
+        },
+        "sw49_executed_yes": "실행됨",
+        "sw49_executed_no": "미실행",
         "no_targets_recorded": "기록된 대상이 없습니다.",
         "all_severities": "모든 심각도",
         "all_categories": "모든 종류",
@@ -1048,6 +1130,56 @@ RULE_TRANSLATIONS_KO = {
         "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다.",
         "recommendation": "DTD와 외부 엔티티 해석을 비활성화하거나 신뢰할 수 없는 XML에는 강화된 파서 설정을 사용하세요.",
     },
+    "code.open-redirect-user-input": {
+        "title": "사용자 입력 기반 오픈 리다이렉트 가능성",
+        "description": "리다이렉트 대상 URL이 허용 목록 없이 사용자 입력으로 구성되는 것으로 보입니다.",
+        "recommendation": "허용된 내부 경로로만 리다이렉트하거나, 사용자 입력을 고정된 목적지에 매핑하세요.",
+    },
+    "code.xml-injection": {
+        "title": "문자열 조립을 통한 XML 삽입 가능성",
+        "description": "사용자 입력이 이스케이프 없이 XML 본문에 문자열 연결로 삽입되는 것으로 보입니다.",
+        "recommendation": "XML 직렬화 라이브러리를 사용하거나 사용자 입력을 XML 규칙에 맞게 이스케이프하세요.",
+    },
+    "code.ldap-injection": {
+        "title": "LDAP 필터 조립을 통한 LDAP 삽입 가능성",
+        "description": "LDAP 검색 필터가 이스케이프 없이 동적 입력으로 조립되는 것으로 보입니다.",
+        "recommendation": "LDAP 필터 메타문자를 이스케이프하거나 파라미터화된 LDAP 질의 API를 사용하세요.",
+    },
+    "code.http-response-splitting": {
+        "title": "HTTP 응답분할 가능성",
+        "description": "사용자 입력이 CR/LF 필터링 없이 HTTP 응답 헤더로 전달되는 것으로 보입니다.",
+        "recommendation": "헤더에 쓰기 전 CR/LF 문자를 제거·거부하고 사용자 입력을 검증하세요.",
+    },
+    "code.format-string-user-input": {
+        "title": "포맷 스트링이 외부에서 제어될 가능성",
+        "description": "변수가 포맷 문자열로 직접 사용되어 포맷 지시자 삽입이 가능할 수 있습니다.",
+        "recommendation": "고정된 포맷 문자열을 사용하고 동적 데이터는 인자로 전달하세요. 예: printf(\"%s\", value)",
+    },
+    "code.insufficient-key-length": {
+        "title": "충분하지 않은 암호 키 길이",
+        "description": "비대칭 키가 2048비트 미만으로 생성되는 것으로 보입니다.",
+        "recommendation": "새 키는 RSA/DSA/DH 2048비트 이상 또는 최신 타원곡선 알고리즘을 사용하세요.",
+    },
+    "code.insecure-random-security-use": {
+        "title": "보안 문맥에서 비암호학적 난수 사용",
+        "description": "토큰·인증코드 등 보안 목적 값이 비암호학적 난수 API로 생성되는 것으로 보입니다.",
+        "recommendation": "토큰, 코드, 키, 솔트에는 CSPRNG(secrets, SecureRandom, crypto.randomBytes 등)를 사용하세요.",
+    },
+    "code.tls-certificate-verification-disabled": {
+        "title": "TLS 인증서 검증 비활성화",
+        "description": "외부 연결에서 인증서 또는 호스트명 검증이 꺼져 있는 것으로 보입니다.",
+        "recommendation": "인증서·호스트명 검증을 항상 유지하고, 검증을 끄는 대신 올바른 신뢰 앵커를 구성하세요.",
+    },
+    "code.password-hash-without-salt": {
+        "title": "솔트 없는 비밀번호 해시 가능성",
+        "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다.",
+        "recommendation": "bcrypt, scrypt, Argon2, PBKDF2 같은 솔트 적용 KDF로 비밀번호를 해싱하세요.",
+    },
+    "secret.sensitive-comment": {
+        "title": "주석 안에 포함된 민감정보",
+        "description": "주석에 자격증명으로 보이는 값이 남아 있습니다. 발견 증거는 마스킹되어 표시됩니다.",
+        "recommendation": "주석에서 자격증명을 제거하고, 실제 값이었다면 즉시 교체하세요.",
+    },
     "code.llm-prompt-user-concat": {
         "title": "LLM 프롬프트에 사용자 입력이 직접 결합됨",
         "description": "사용자 제어 입력이 system/developer prompt 또는 메시지 구성에 직접 섞이는 패턴입니다.",
@@ -1236,6 +1368,7 @@ def filter_disabled_rules(findings: list[Finding], disabled_rules: object) -> li
 # these (host-only / evidence-only mappings are excluded from the toggle list).
 _KNOWN_SECURITY_RULE_IDS = frozenset(
     SECRET_RULE_IDS
+    + SENSITIVE_COMMENT_RULE_IDS
     + DEPENDENCY_RULE_IDS
     + CONFIGURATION_RULE_IDS
     + CODE_PATTERN_RULE_IDS
@@ -1349,7 +1482,83 @@ def _finding_from_payload(item: dict[str, object]) -> Finding:
 def render_markdown_from_payload(payload: dict[str, object], language: str = "ko") -> str:
     findings = [_finding_from_payload(item) for item in _payload_findings(payload)]
     target_names = tuple(sorted({finding.target for finding in findings if finding.target}))
-    return render_markdown(findings, target_names, language)
+    report = render_markdown(findings, target_names, language)
+    sw49 = _payload_sw49(payload)
+    if sw49:
+        report = report.rstrip("\n") + "\n" + "\n".join(_sw49_markdown_lines(sw49, language)) + "\n"
+    return report
+
+
+def _payload_sw49(payload: dict[str, object]) -> dict[str, object] | None:
+    sw49 = payload.get("sw49")
+    if isinstance(sw49, dict) and isinstance(sw49.get("controls"), list) and sw49["controls"]:
+        return sw49
+    return None
+
+
+def _sw49_display_row(entry: dict[str, object], language: str) -> dict[str, str]:
+    labels = _labels(language)
+    status_labels = labels.get("sw49_status_labels", {})
+    support_labels = labels.get("sw49_support_labels", {})
+    category_labels = entry.get("category_labels", {})
+    title = entry.get("title", {})
+    notes = entry.get("notes", {})
+    status = str(entry.get("status", ""))
+    support = str(entry.get("support_level", ""))
+    return {
+        "official_id": str(entry.get("official_id", "")),
+        "category": str(category_labels.get(language) or category_labels.get("en") or entry.get("category_id", "")) if isinstance(category_labels, dict) else str(entry.get("category_id", "")),
+        "title": str(title.get(language) or title.get("en") or "") if isinstance(title, dict) else str(title),
+        "cwe": ", ".join(str(item) for item in entry.get("cwe_ids", [])),
+        "support": str(support_labels.get(support, support)) if isinstance(support_labels, dict) else support,
+        "executed": str(labels.get("sw49_executed_yes", "Run")) if entry.get("executed") else str(labels.get("sw49_executed_no", "Not run")),
+        "status": str(status_labels.get(status, status)) if isinstance(status_labels, dict) else status,
+        "rules": ", ".join(str(item) for item in entry.get("rule_ids", [])),
+        "finding_count": str(entry.get("finding_count", 0)),
+        "evidence": ", ".join(str(item) for item in entry.get("evidence", [])),
+        "notes": str(notes.get(language) or notes.get("en") or "") if isinstance(notes, dict) else "",
+    }
+
+
+_SW49_COLUMN_KEYS = ("official_id", "category", "title", "cwe", "support", "executed", "status", "rules", "finding_count", "evidence", "notes")
+
+
+def _sw49_summary_lines(sw49: dict[str, object], language: str) -> list[str]:
+    labels = _labels(language)
+    summary_labels = labels.get("sw49_summary_labels", {})
+    status_labels = labels.get("sw49_status_labels", {})
+    support_counts = sw49.get("support_counts", {})
+    status_counts = sw49.get("status_counts", {})
+    lines = [f"- {summary_labels.get('total', 'Official controls')}: {sw49.get('total', 0)}"]
+    if isinstance(support_counts, dict):
+        for level in SW49_SUPPORT_LEVELS:
+            lines.append(f"- {summary_labels.get(level, level)}: {support_counts.get(level, 0)}")
+    if isinstance(status_counts, dict):
+        for status in SW49_STATUSES:
+            lines.append(f"- {status_labels.get(status, status)}: {status_counts.get(status, 0)}")
+    return lines
+
+
+def _sw49_markdown_lines(sw49: dict[str, object], language: str) -> list[str]:
+    labels = _labels(language)
+    columns = labels.get("sw49_columns", {})
+    if not isinstance(columns, dict):
+        columns = {}
+    lines = ["", f"## {labels.get('sw49_heading', 'SW Development Security 49')}", "", str(labels.get("sw49_intro", "")), ""]
+    lines.extend(_sw49_summary_lines(sw49, language))
+    lines.append("")
+    header = [str(columns.get(key, key)) for key in _SW49_COLUMN_KEYS]
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("|" + " --- |" * len(header))
+    for entry in sw49.get("controls", []):
+        if not isinstance(entry, dict):
+            continue
+        row = _sw49_display_row(entry, language)
+        lines.append("| " + " | ".join(row[key].replace("|", "\\|") for key in _SW49_COLUMN_KEYS) + " |")
+    status_counts = sw49.get("status_counts", {})
+    if isinstance(status_counts, dict) and not status_counts.get("VULNERABLE"):
+        lines.extend(["", str(labels.get("sw49_zero_note", ""))])
+    return lines
 
 
 def _payload_findings(payload: dict[str, object]) -> list[dict[str, object]]:
@@ -1389,14 +1598,36 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
             ]
         )
 
-    sheet_rows = []
-    for r_index, row in enumerate(rows, start=1):
-        cells = "".join(_xlsx_cell(r_index, c_index, value) for c_index, value in enumerate(row))
-        sheet_rows.append(f'<row r="{r_index}">{cells}</row>')
-    sheet_xml = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
+    sheets: list[tuple[str, list[list[object]]]] = [("Findings", rows)]
+
+    sw49 = _payload_sw49(payload)
+    if sw49:
+        labels = _labels(language)
+        columns = labels.get("sw49_columns", {})
+        if not isinstance(columns, dict):
+            columns = {}
+        sw49_rows: list[list[object]] = [[str(columns.get(key, key)) for key in _SW49_COLUMN_KEYS]]
+        for entry in sw49.get("controls", []):
+            if not isinstance(entry, dict):
+                continue
+            row_data = _sw49_display_row(entry, language)
+            sw49_rows.append([row_data[key] for key in _SW49_COLUMN_KEYS])
+        sheets.append(("SW49", sw49_rows))
+
+    def _sheet_xml(sheet_rows_data: list[list[object]]) -> str:
+        sheet_rows = []
+        for r_index, row in enumerate(sheet_rows_data, start=1):
+            cells = "".join(_xlsx_cell(r_index, c_index, value) for c_index, value in enumerate(row))
+            sheet_rows.append(f'<row r="{r_index}">{cells}</row>')
+        return (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
+        )
+
+    sheet_overrides = "".join(
+        f'<Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        for index in range(1, len(sheets) + 1)
     )
     content_types = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -1404,7 +1635,7 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        f"{sheet_overrides}"
         "</Types>"
     )
     root_rels = (
@@ -1413,16 +1644,24 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
         "</Relationships>"
     )
+    sheet_entries = "".join(
+        f'<sheet name="{html.escape(name, quote=True)}" sheetId="{index}" r:id="rId{index}"/>'
+        for index, (name, _) in enumerate(sheets, start=1)
+    )
     workbook = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        '<sheets><sheet name="Findings" sheetId="1" r:id="rId1"/></sheets></workbook>'
+        f"<sheets>{sheet_entries}</sheets></workbook>"
+    )
+    workbook_rel_entries = "".join(
+        f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{index}.xml"/>'
+        for index in range(1, len(sheets) + 1)
     )
     workbook_rels = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        f"{workbook_rel_entries}"
         "</Relationships>"
     )
     members = {
@@ -1430,8 +1669,9 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
         "_rels/.rels": root_rels,
         "xl/workbook.xml": workbook,
         "xl/_rels/workbook.xml.rels": workbook_rels,
-        "xl/worksheets/sheet1.xml": sheet_xml,
     }
+    for index, (_, sheet_rows_data) in enumerate(sheets, start=1):
+        members[f"xl/worksheets/sheet{index}.xml"] = _sheet_xml(sheet_rows_data)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, data in members.items():
@@ -1543,6 +1783,34 @@ def render_hwpx(payload: dict[str, object], language: str = "ko") -> bytes:
             para_id += 1
             paragraphs.append(_hwpx_paragraph(text, "16", "25", para_id))
 
+    sw49 = _payload_sw49(payload)
+    if sw49:
+        para_id += 1
+        paragraphs.append(_hwpx_paragraph(str(labels.get("sw49_heading", "SW49")), "17", "24", para_id))
+        for line in _sw49_summary_lines(sw49, language):
+            para_id += 1
+            paragraphs.append(_hwpx_paragraph(line.lstrip("- "), "16", "25", para_id))
+        for entry in sw49.get("controls", []):
+            if not isinstance(entry, dict):
+                continue
+            row = _sw49_display_row(entry, language)
+            text = (
+                f"{row['official_id']} {row['title']} · {row['category']} · {row['support']} · "
+                f"{row['executed']} · {row['status']}"
+            )
+            if row["finding_count"] not in ("", "0"):
+                text += f" · {row['finding_count']}"
+            if row["evidence"]:
+                text += f" · {row['evidence']}"
+            if row["notes"]:
+                text += f" · {row['notes']}"
+            para_id += 1
+            paragraphs.append(_hwpx_paragraph(text, "16", "25", para_id))
+        status_counts = sw49.get("status_counts", {})
+        if isinstance(status_counts, dict) and not status_counts.get("VULNERABLE"):
+            para_id += 1
+            paragraphs.append(_hwpx_paragraph(str(labels.get("sw49_zero_note", "")), "16", "25", para_id))
+
     new_section = (prefix + "".join(paragraphs) + "</hs:sec>").encode("utf-8")
 
     buffer = io.BytesIO()
@@ -1588,13 +1856,20 @@ def build_dashboard_payload(
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
     components: tuple[DependencyComponent, ...] = (),
     enable_osv: bool = False,
+    scanned_categories: tuple[str, ...] = (),
 ) -> dict[str, object]:
     generated, generated_display = _generated_at()
     summary = _summary(findings, target_names, target_paths)
     summary["raw_finding_count"] = len(findings)
     summary["displayed_finding_count"] = len(findings)
     labels = _labels(language)
+    sw49 = (
+        sw49_payload(findings, scanned_categories, standard_category)
+        if standard == "sw-dev-security-49"
+        else None
+    )
     return {
+        "sw49": sw49,
         "generated_at": generated,
         "generated_display": generated_display,
         "language": labels["html_lang"],
@@ -1610,6 +1885,7 @@ def build_dashboard_payload(
             "path": scan_path or "",
             "standard": standard,
             "standard_category": standard_category,
+            "scanned_categories": list(scanned_categories),
             "warnings": list(warnings),
             "enable_osv": enable_osv,
             "coverage_message": "현재 활성화된 점검 범위에서 탐지된 항목입니다." if kind == "web" else "",
@@ -2969,6 +3245,17 @@ HTML_TEMPLATE = """<!doctype html>
       </table>
       <div id="empty" class="empty" hidden>__INITIAL_EMPTY__</div>
       </section>
+
+    <section id="sw49-section" class="table-wrap" hidden>
+      <h2 id="sw49-heading"></h2>
+      <p id="sw49-intro"></p>
+      <p id="sw49-summary" class="sw49-summary"></p>
+      <table class="coverage-table" id="sw49-table">
+        <thead><tr id="sw49-head-row"></tr></thead>
+        <tbody id="sw49-body"></tbody>
+      </table>
+      <p id="sw49-zero-note" hidden></p>
+    </section>
     </div>
 
     <section id="help-view" class="help-view" hidden>
@@ -3768,6 +4055,67 @@ HTML_TEMPLATE = """<!doctype html>
       state.helpRenderedLanguage = state.language;
     }
 
+    const SW49_COLUMN_KEYS = ["official_id", "category", "title", "cwe", "support", "executed", "status", "rules", "finding_count", "evidence", "notes"];
+
+    function renderSw49() {
+      const section = byId("sw49-section");
+      if (!section) return;
+      const sw49 = payload.sw49;
+      const isSw49Scan = payload.scan && payload.scan.standard === "sw-dev-security-49";
+      if (!sw49 || !isSw49Scan || !Array.isArray(sw49.controls) || !sw49.controls.length) {
+        section.hidden = true;
+        return;
+      }
+      const activeLabels = labels();
+      const columns = activeLabels.sw49_columns || {};
+      const statusLabels = activeLabels.sw49_status_labels || {};
+      const supportLabels = activeLabels.sw49_support_labels || {};
+      const summaryLabels = activeLabels.sw49_summary_labels || {};
+      const language = state.language;
+      section.hidden = false;
+      setText("sw49-heading", activeLabels.sw49_heading || "SW49");
+      setText("sw49-intro", activeLabels.sw49_intro || "");
+      const supportCounts = sw49.support_counts || {};
+      const statusCounts = sw49.status_counts || {};
+      const summaryParts = [`${summaryLabels.total || "Total"}: ${sw49.total || 0}`];
+      ["automated", "partial", "manual-review", "unsupported"].forEach((level) => {
+        summaryParts.push(`${summaryLabels[level] || level}: ${supportCounts[level] || 0}`);
+      });
+      Object.keys(statusLabels).forEach((status) => {
+        summaryParts.push(`${statusLabels[status] || status}: ${statusCounts[status] || 0}`);
+      });
+      setText("sw49-summary", summaryParts.join(" · "));
+      byId("sw49-head-row").innerHTML = SW49_COLUMN_KEYS.map((key) => `<th>${escapeText(columns[key] || key)}</th>`).join("");
+      byId("sw49-body").innerHTML = sw49.controls.map((entry) => {
+        const title = entry.title ? (entry.title[language] || entry.title.en || "") : "";
+        const category = entry.category_labels ? (entry.category_labels[language] || entry.category_labels.en || entry.category_id) : entry.category_id;
+        const notes = entry.notes ? (entry.notes[language] || entry.notes.en || "") : "";
+        const row = {
+          official_id: entry.official_id || "",
+          category,
+          title,
+          cwe: (entry.cwe_ids || []).join(", "),
+          support: supportLabels[entry.support_level] || entry.support_level || "",
+          executed: entry.executed ? (activeLabels.sw49_executed_yes || "Run") : (activeLabels.sw49_executed_no || "Not run"),
+          status: statusLabels[entry.status] || entry.status || "",
+          rules: (entry.rule_ids || []).join(", "),
+          finding_count: String(entry.finding_count || 0),
+          evidence: (entry.evidence || []).join(", "),
+          notes,
+        };
+        const statusClass = entry.status === "VULNERABLE" ? "pill-high" : entry.status === "PASS" ? "pill-info" : "pill-low";
+        return `<tr>${SW49_COLUMN_KEYS.map((key) => key === "status"
+          ? `<td><span class="severity-pill ${statusClass}">${escapeText(row[key])}</span></td>`
+          : `<td>${escapeText(row[key])}</td>`).join("")}</tr>`;
+      }).join("");
+      const zeroNote = byId("sw49-zero-note");
+      const hasVulnerable = (statusCounts.VULNERABLE || 0) > 0;
+      zeroNote.hidden = hasVulnerable;
+      if (!hasVulnerable) {
+        setText("sw49-zero-note", activeLabels.sw49_zero_note || "");
+      }
+    }
+
     function render() {
       renderChrome();
       renderScanStandards();
@@ -3781,6 +4129,7 @@ HTML_TEMPLATE = """<!doctype html>
       renderBars(items);
       renderProjects(items);
       renderTable(items);
+      renderSw49();
     }
 
     function applyPayload(nextPayload) {
