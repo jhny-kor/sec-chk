@@ -66,6 +66,12 @@ def main(argv: list[str] | None = None) -> int:
                     no_grype=args.no_grype,
                     builtin_only=args.builtin_only,
                     format=args.format,
+                    verify_sbom=args.verify_sbom,
+                    baseline_sbom=Path(args.baseline_sbom).expanduser() if args.baseline_sbom else None,
+                    fail_on_mismatch=args.fail_on_mismatch,
+                    fail_on_version_conflict=args.fail_on_version_conflict,
+                    fail_on_untracked=args.fail_on_untracked,
+                    strict_hash=args.strict_hash,
                 )
             )
         except (OSError, ValueError, RuntimeError) as exc:
@@ -76,6 +82,37 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Java scan: {result.archive_count} archive(s), {len(result.components)} component(s), "
             f"{len(result.vulnerabilities)} vulnerability finding(s).",
+            file=sys.stderr,
+        )
+        return result.exit_code
+
+    if args.command == "sbom-verify":
+        from .sbom_verification import SbomVerificationOptions, run_sbom_verification
+
+        try:
+            result = run_sbom_verification(
+                SbomVerificationOptions(
+                    target=expand_path(args.target, Path.cwd()),
+                    sbom=expand_path(args.sbom, Path.cwd()) if args.sbom else None,
+                    baseline_sbom=expand_path(args.baseline_sbom, Path.cwd()) if args.baseline_sbom else None,
+                    output_dir=expand_path(args.output_dir, Path.cwd()),
+                    excludes=tuple(args.exclude),
+                    max_depth=args.max_depth,
+                    fail_on_mismatch=args.fail_on_mismatch,
+                    fail_on_version_conflict=args.fail_on_version_conflict,
+                    fail_on_untracked=args.fail_on_untracked,
+                    strict_hash=args.strict_hash,
+                    format=args.format,
+                )
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"SBOM verification error: {exc}", file=sys.stderr)
+            return 2
+        for warning in result.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        print(
+            f"SBOM verification: {result.summary['actual_component_count']} actual component(s), "
+            f"{result.summary['matched']} matched, {len(result.results) - result.summary['matched']} review item(s).",
             file=sys.stderr,
         )
         return result.exit_code
@@ -691,7 +728,26 @@ def build_parser() -> argparse.ArgumentParser:
     jar_scan.add_argument("--fail-on-kev", action="store_true", help="exit 1 when a CISA KEV match exists")
     jar_scan.add_argument("--no-grype", action="store_true", help="write SBOM and skip vulnerability comparison")
     jar_scan.add_argument("--builtin-only", action="store_true", help="skip Syft and use the built-in Java identifier")
+    jar_scan.add_argument("--verify-sbom", action="store_true", help="compare the generated SBOM with deployed archives")
+    jar_scan.add_argument("--baseline-sbom", help="approved baseline CycloneDX SBOM")
+    jar_scan.add_argument("--fail-on-mismatch", action="store_true", help="with --verify-sbom, exit 1 for any mismatch")
+    jar_scan.add_argument("--fail-on-version-conflict", action="store_true", help="with --verify-sbom, exit 1 for version conflicts")
+    jar_scan.add_argument("--fail-on-untracked", action="store_true", help="with --verify-sbom, exit 1 for archives missing from the SBOM")
+    jar_scan.add_argument("--strict-hash", action="store_true", help="with --verify-sbom, require a SHA-256 in the SBOM")
     jar_scan.add_argument("--format", choices=("json", "html", "markdown"), default="html", help="primary report format; all six artifacts are written")
+
+    sbom_verify = subparsers.add_parser("sbom-verify", help="compare a CycloneDX SBOM with deployed JAR/WAR/EAR archives")
+    sbom_verify.add_argument("--target", required=True, help="directory containing deployed JAR, WAR, and EAR files")
+    sbom_verify.add_argument("--sbom", help="current CycloneDX SBOM")
+    sbom_verify.add_argument("--baseline-sbom", help="approved baseline CycloneDX SBOM")
+    sbom_verify.add_argument("--output-dir", default="reports/sbom-verification", help="verification report directory")
+    sbom_verify.add_argument("--exclude", action="append", default=[], help="archive relative-path/name glob to skip")
+    sbom_verify.add_argument("--max-depth", type=_positive_int, default=3, help="maximum nested archive depth")
+    sbom_verify.add_argument("--fail-on-mismatch", action="store_true", help="exit 1 when any mismatch is found")
+    sbom_verify.add_argument("--fail-on-version-conflict", action="store_true", help="exit 1 when a version conflict is found")
+    sbom_verify.add_argument("--fail-on-untracked", action="store_true", help="exit 1 when an archive is missing from the SBOM")
+    sbom_verify.add_argument("--strict-hash", action="store_true", help="treat a missing or different SBOM SHA-256 as a mismatch")
+    sbom_verify.add_argument("--format", choices=("json", "html", "markdown"), default="html", help="primary report format; all five artifacts are written")
 
     fix = subparsers.add_parser(
         "fix",
