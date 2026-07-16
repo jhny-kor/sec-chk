@@ -21,6 +21,7 @@ CODE_EXTENSIONS = {
     ".hpp",
     ".html",
     ".java",
+    ".jsp",
     ".js",
     ".jsx",
     ".kt",
@@ -467,6 +468,128 @@ CODE_PATTERN_RULES = (
         "The model appears able to call broad tools without an obvious allowlist or confirmation boundary.",
         "Constrain tools by task, validate tool arguments, require confirmation for side effects, and log tool decisions.",
         frozenset({".js", ".jsx", ".py", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.open-redirect-user-input",
+        "Potential open redirect from user input",
+        "medium",
+        re.compile(
+            rf"(\bsendRedirect\s*\([^#\n]*request\.getParameter|"
+            rf"\b(res|response|ctx)\.redirect\s*\([^#\n]*{UNTRUSTED_SOURCE}|"
+            rf"\bredirect\s*\(\s*[^#\n)]*{UNTRUSTED_SOURCE})",
+            re.IGNORECASE,
+        ),
+        "A redirect target appears to be built from user-controlled input without an allowlist.",
+        "Redirect only to allowlisted internal paths, or map user input to fixed destinations instead of raw URLs.",
+        frozenset({".java", ".jsp", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.xml-injection",
+        "Potential XML injection through string assembly",
+        "medium",
+        re.compile(
+            rf"([\"'`][^\"'`\n]*<[A-Za-z][\w:-]*>[^\"'`\n]*[\"'`]\s*(\+|%)\s*[^#\n]*{UNTRUSTED_SOURCE}|"
+            rf"f[\"'][^\"'\n]*<[A-Za-z][\w:-]*>[^\"'\n]*\{{[^}}\n]*(req|request|params|query|body|input))",
+            re.IGNORECASE,
+        ),
+        "User-controlled input appears to be concatenated into an XML document body without escaping.",
+        "Build XML with a serializer or escape user input for XML content instead of concatenating strings.",
+        frozenset({".java", ".js", ".jsx", ".kt", ".php", ".py", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.ldap-injection",
+        "Potential LDAP injection through filter assembly",
+        "high",
+        re.compile(
+            r"([\"']\(*[&|]?\(*(uid|cn|sAMAccountName|mail|memberOf|objectClass)=[^\"'\n]*[\"']\s*(\+|%|\.format\()|"
+            r"\b(LdapTemplate|DirContext|InitialDirContext|InitialLdapContext)\b[^#\n]*\bsearch\b[^#\n]*(\+|\.format\(|f[\"'])|"
+            r"\bldap\w*[^#\n]*\bsearch(_s|_ext)?\s*\([^#\n]*(%s|\+|\.format\(|f[\"']))",
+            re.IGNORECASE,
+        ),
+        "An LDAP filter appears to be assembled from dynamic input without escaping.",
+        "Escape LDAP filter metacharacters or use parameterized LDAP query APIs for user-supplied values.",
+        frozenset({".java", ".kt", ".py"}),
+    ),
+    CodePatternRule(
+        "code.http-response-splitting",
+        "Potential HTTP response splitting via header value",
+        "medium",
+        re.compile(
+            rf"\b(setHeader|addHeader|set_header|writeHead)\s*\([^#\n]*{UNTRUSTED_SOURCE}",
+            re.IGNORECASE,
+        ),
+        "User-controlled input appears to flow into an HTTP response header without CR/LF filtering.",
+        "Strip or reject CR/LF characters and validate user input before writing it into response headers.",
+        frozenset({".cs", ".go", ".java", ".jsp", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.format-string-user-input",
+        "Format string may be attacker-controlled",
+        "high",
+        re.compile(
+            r"(\b(printf|vprintf|syslog)\s*\(\s*[a-zA-Z_][\w>.\-\[\]]*\s*\)|"
+            r"\bf?printf\s*\(\s*(stderr|stdout)\s*,\s*[a-zA-Z_][\w>.\-\[\]]*\s*\)|"
+            r"\bString\.format\s*\(\s*(?!Locale\b)[a-zA-Z_][\w.\[\]]*\s*[,)])",
+            re.IGNORECASE,
+        ),
+        "A variable is used directly as a format string, which allows format specifier injection.",
+        "Pass a constant format string and supply dynamic data as arguments (e.g. printf(\"%s\", value)).",
+        frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".java", ".kt"}),
+    ),
+    CodePatternRule(
+        "code.insufficient-key-length",
+        "Cryptographic key length appears insufficient",
+        "medium",
+        re.compile(
+            r"(\bRSA\b[^#\n]{0,60}\b(512|768|1024)\b|\b(512|768|1024)\b[^#\n]{0,30}\bRSA\b|"
+            r"\bKeyPairGenerator\b[^#\n]*initialize\s*\(\s*(512|768|1024)\b|"
+            r"\b(DSA|DiffieHellman|DH)\b[^#\n]{0,40}\b(512|768|1024)\b)",
+            re.IGNORECASE,
+        ),
+        "An asymmetric key appears to be generated with fewer than 2048 bits.",
+        "Use RSA/DSA/DH keys of at least 2048 bits (or modern elliptic-curve algorithms) for new keys.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".py", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.insecure-random-security-use",
+        "Non-cryptographic randomness used in a security context",
+        "medium",
+        re.compile(
+            r"\b(token|otp|nonce|salt|session[_-]?id|secret|password|api[_-]?key|auth[_-]?code|verification[_-]?code|reset[_-]?code)\w*\s*[:=]"
+            r"[^#\n]*(Math\.random|java\.util\.Random|new\s+Random\s*\(|\brandom\.(random|randint|choice|choices|randrange|getrandbits)\s*\(|\brand\s*\(\s*\))",
+            re.IGNORECASE,
+        ),
+        "A security-purpose value appears to be generated with a non-cryptographic random API.",
+        "Use a CSPRNG (secrets, SecureRandom, crypto.randomBytes/getRandomValues) for tokens, codes, keys, and salts.",
+        frozenset({".cs", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.tls-certificate-verification-disabled",
+        "TLS certificate verification appears disabled",
+        "high",
+        re.compile(
+            r"(\bverify\s*=\s*False\b|rejectUnauthorized\s*[:=]\s*false|InsecureSkipVerify\s*:\s*true|"
+            r"NODE_TLS_REJECT_UNAUTHORIZED[\"']?\s*[:=]\s*[\"']?0|TrustAllCerts|ALLOW_ALL_HOSTNAME_VERIFIER|"
+            r"setHostnameVerifier\s*\([^)#\n]*->\s*true|CURLOPT_SSL_VERIFYPEER\s*,\s*(0|false)|"
+            r"check_hostname\s*=\s*False|ssl\.CERT_NONE)",
+            re.IGNORECASE,
+        ),
+        "TLS certificate or hostname verification appears to be turned off for an outbound connection.",
+        "Keep certificate and hostname verification enabled; pin or provision proper trust anchors instead of disabling checks.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.password-hash-without-salt",
+        "Password appears hashed without a salt or KDF",
+        "medium",
+        re.compile(
+            r"(\b(password|passwd|pwd|pin|credential)\w*\b[^#\n]*\b(hashlib\.(md5|sha1|sha256)|MessageDigest\.getInstance|DigestUtils\.(md5|sha1|sha256)\w*|crypto\.createHash)\b|"
+            r"\b(hashlib\.(md5|sha1|sha256)|crypto\.createHash)\b[^#\n]*\b(password|passwd|pwd|pin)\b)",
+            re.IGNORECASE,
+        ),
+        "A credential appears to be hashed directly with a fast hash instead of a salted password KDF.",
+        "Hash passwords with a dedicated KDF (bcrypt, scrypt, Argon2, PBKDF2) that applies a unique salt per credential.",
+        frozenset({".cs", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".ts", ".tsx"}),
     ),
     CodePatternRule(
         "code.llm-sensitive-data-in-prompt",

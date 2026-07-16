@@ -133,6 +133,7 @@ def scan_directory_payload(
         standard_category=standard_selection.category,
         components=scanner.components,
         enable_osv=enable_osv,
+        scanned_categories=scanner_categories,
     )
 
 
@@ -377,6 +378,9 @@ def zap_scan_payload(
             kind=str(prior_scan.get("kind") or "directory"),
             standard=str(prior_scan.get("standard") or DEFAULT_STANDARD),
             standard_category=str(prior_scan.get("standard_category") or DEFAULT_STANDARD_CATEGORY),
+            scanned_categories=tuple(
+                str(item) for item in (prior_scan.get("scanned_categories") or []) if isinstance(item, str)
+            ),
         )
         # SBOM/components are independent of findings; carry them over so a merged
         # report keeps the code scan's dependency inventory intact.

@@ -18,6 +18,11 @@ SECRET_RULE_IDS = (
     "secret.generic-assignment",
 )
 
+# Comment-scanning secret rule. Kept out of SECRET_RULE_IDS so profiles that map
+# "hard-coded secrets" (e.g. SW49 S-06) are not polluted by the comment rule,
+# which belongs to S-13 (sensitive information in comments).
+SENSITIVE_COMMENT_RULE_IDS = ("secret.sensitive-comment",)
+
 DEPENDENCY_RULE_IDS = (
     "dependency.package-json-invalid",
     "dependency.node-missing-lockfile",
@@ -111,6 +116,15 @@ CODE_PATTERN_RULE_IDS = (
     "code.llm-prompt-user-concat",
     "code.llm-tool-unrestricted",
     "code.llm-sensitive-data-in-prompt",
+    "code.open-redirect-user-input",
+    "code.xml-injection",
+    "code.ldap-injection",
+    "code.http-response-splitting",
+    "code.format-string-user-input",
+    "code.insufficient-key-length",
+    "code.insecure-random-security-use",
+    "code.tls-certificate-verification-disabled",
+    "code.password-hash-without-salt",
 )
 
 PREVENTION_RULE_IDS = (
@@ -258,15 +272,6 @@ LOGGING_MONITORING_RULE_IDS = (
 API_INVENTORY_RULE_IDS = (
     "code.unversioned-api-route",
     "prevention.api-security-plan-missing",
-)
-
-TIME_STATE_RULE_IDS = (
-    "code.insecure-temp-file",
-)
-
-ENCAPSULATION_RULE_IDS = (
-    "code.wildcard-cors",
-    "code.public-bind-all-interfaces",
 )
 
 MISCONFIGURATION_RULE_IDS = CONFIGURATION_RULE_IDS + (
@@ -684,75 +689,499 @@ OWASP_TOP_10_2021 = SecurityStandard(
 )
 
 
-_SW_DEV_SECURITY_CATEGORIES = (
-    StandardCategory(
-        "input-validation-expression",
-        {"en": "Input Data Validation and Representation", "ko": "입력데이터 검증 및 표현"},
-        scanner_categories=("code",),
-        # + CSRF (크로스사이트 요청 위조) belongs to this type in the KISA guide.
-        rule_ids=INPUT_VALIDATION_RULE_IDS + ("code.csrf-disabled",),
+# --- Korea SW Development Security 49 official implementation-stage controls -----
+#
+# Each of the 49 MOIS/KISA implementation-stage weaknesses is registered as an
+# independent SecurityControl. A control may map to several KODA rules; a rule
+# is only attached to the control it actually evidences. Controls that KODA
+# cannot judge from static patterns are marked manual-review or unsupported and
+# are never auto-passed.
+
+SW49_SUPPORT_LEVELS = ("automated", "partial", "manual-review", "unsupported")
+SW49_STATUSES = ("PASS", "VULNERABLE", "NEEDS_REVIEW", "UNSUPPORTED", "NOT_APPLICABLE", "NOT_SCANNED")
+
+SW49_CATEGORY_EXPECTED_COUNTS = {
+    "input-validation-expression": 17,
+    "security-features": 16,
+    "time-state": 2,
+    "error-handling": 3,
+    "code-error": 5,
+    "encapsulation": 4,
+    "api-misuse": 2,
+}
+
+SW49_CATEGORY_LABELS = {
+    "input-validation-expression": {"en": "Input Data Validation and Representation", "ko": "입력데이터 검증 및 표현"},
+    "security-features": {"en": "Security Features", "ko": "보안기능"},
+    "time-state": {"en": "Time and State", "ko": "시간 및 상태"},
+    "error-handling": {"en": "Error Handling", "ko": "에러처리"},
+    "code-error": {"en": "Code Error", "ko": "코드오류"},
+    "encapsulation": {"en": "Encapsulation", "ko": "캡슐화"},
+    "api-misuse": {"en": "API Misuse", "ko": "API 오용"},
+}
+
+# Active web-probe rules that can add verified evidence to a control when a web
+# scan has been run. They are not part of the local file-scan rule catalog.
+WEB_VERIFIED_RULE_IDS = (
+    "web.sql-injection-error-verified",
+    "web.reflected-xss-verified",
+    "web.open-redirect-verified",
+)
+
+
+@dataclass(frozen=True)
+class SecurityControl:
+    control_id: str
+    official_id: str
+    category_id: str
+    title: dict[str, str]
+    cwe_ids: tuple[str, ...] = ()
+    rule_ids: tuple[str, ...] = ()
+    support_level: str = "unsupported"
+    supported_languages: tuple[str, ...] = ()
+    notes: dict[str, str] = field(default_factory=dict)
+
+
+def _control(
+    official_id: str,
+    category_id: str,
+    ko: str,
+    en: str,
+    cwe_ids: tuple[str, ...],
+    rule_ids: tuple[str, ...] = (),
+    support_level: str = "unsupported",
+    supported_languages: tuple[str, ...] = (),
+    note_ko: str = "",
+    note_en: str = "",
+) -> SecurityControl:
+    prefix, number = official_id.split("-", 1)
+    return SecurityControl(
+        control_id=f"sw49.{prefix.lower()}{number}",
+        official_id=official_id,
+        category_id=category_id,
+        title={"en": en, "ko": ko},
+        cwe_ids=cwe_ids,
+        rule_ids=rule_ids,
+        support_level=support_level,
+        supported_languages=supported_languages,
+        notes=_text(note_en, note_ko) if (note_ko or note_en) else {},
+    )
+
+
+_WEB_LANGS = ("Java", "JSP", "JavaScript", "TypeScript", "Python", "PHP", "Ruby", "Kotlin", "C#", "Go", "Rust")
+_C_LANGS = ("C", "C++")
+
+SW49_CONTROLS: tuple[SecurityControl, ...] = (
+    # 입력데이터 검증 및 표현 (17)
+    _control(
+        "I-01", "input-validation-expression", "SQL 삽입", "SQL Injection", ("CWE-89",),
+        ("code.sql-dynamic-query", "web.sql-injection-error-verified"), "automated", _WEB_LANGS,
+        note_ko="동적 SQL 문자열 조립 패턴을 탐지합니다. ORM 내부 우회나 저장 프로시저는 수동 확인이 필요합니다.",
+        note_en="Detects dynamic SQL string assembly. ORM bypasses and stored procedures need manual review.",
     ),
-    StandardCategory(
-        "security-features",
-        {"en": "Security Features", "ko": "보안기능"},
-        scanner_categories=("secrets", "configuration", "dependencies", "code"),
-        rule_ids=SECRET_RULE_IDS
-        + (
+    _control(
+        "I-02", "input-validation-expression", "코드 삽입", "Code Injection", ("CWE-94", "CWE-95"),
+        ("code.eval-user-input",), "automated",
+        ("JavaScript", "TypeScript", "Python", "PHP", "Ruby", "HTML"),
+    ),
+    _control(
+        "I-03", "input-validation-expression", "경로 조작 및 자원 삽입", "Path Manipulation and Resource Injection", ("CWE-22", "CWE-99"),
+        ("code.path-traversal",), "automated", _WEB_LANGS,
+    ),
+    _control(
+        "I-04", "input-validation-expression", "크로스사이트 스크립트", "Cross-site Scripting", ("CWE-79", "CWE-80"),
+        ("code.xss-dom-sink", "web.reflected-xss-verified"), "automated",
+        ("HTML", "JavaScript", "TypeScript"),
+        note_ko="DOM 싱크 패턴과 웹 능동 점검(실행 시)으로 확인합니다. 서버측 템플릿 XSS는 부분적으로만 탐지됩니다.",
+        note_en="Covers DOM sinks and (when run) active web probes. Server-side template XSS is only partially detected.",
+    ),
+    _control(
+        "I-05", "input-validation-expression", "운영체제 명령어 삽입", "OS Command Injection", ("CWE-78",),
+        ("code.command-injection",), "automated", _WEB_LANGS,
+    ),
+    _control(
+        "I-06", "input-validation-expression", "위험한 형식 파일 업로드", "Unrestricted Dangerous File Upload", ("CWE-434",),
+        ("code.unrestricted-file-upload",), "partial",
+        ("JavaScript", "TypeScript", "PHP", "Python"),
+        note_ko="업로드 저장 패턴만 탐지합니다. 확장자·콘텐츠 검증 로직의 완전성은 수동 확인이 필요합니다.",
+        note_en="Detects upload-save patterns only; completeness of extension/content validation needs manual review.",
+    ),
+    _control(
+        "I-07", "input-validation-expression", "신뢰되지 않는 URL 주소로 자동접속 연결", "Open Redirect", ("CWE-601",),
+        ("code.open-redirect-user-input", "web.open-redirect-verified"), "automated", _WEB_LANGS,
+    ),
+    _control(
+        "I-08", "input-validation-expression", "부적절한 XML 외부 개체 참조", "Improper XML External Entity Reference", ("CWE-611",),
+        ("code.xml-external-entity",), "automated", ("Java", "Kotlin", "C#", "Python"),
+    ),
+    _control(
+        "I-09", "input-validation-expression", "XML 삽입", "XML Injection", ("CWE-91",),
+        ("code.xml-injection",), "partial", ("Java", "Kotlin", "JavaScript", "TypeScript", "Python", "PHP"),
+        note_ko="문자열 연결로 XML 본문을 조립하는 패턴만 탐지합니다. XXE(I-08)와는 별도 기준입니다.",
+        note_en="Detects string-assembled XML bodies only. Separate from XXE (I-08).",
+    ),
+    _control(
+        "I-10", "input-validation-expression", "LDAP 삽입", "LDAP Injection", ("CWE-90",),
+        ("code.ldap-injection",), "partial", ("Java", "Kotlin", "Python"),
+    ),
+    _control(
+        "I-11", "input-validation-expression", "크로스사이트 요청 위조", "Cross-Site Request Forgery", ("CWE-352",),
+        ("code.csrf-disabled",), "partial", _WEB_LANGS,
+        note_ko="CSRF 보호를 명시적으로 끄는 코드만 탐지합니다. 토큰 미구현 자체는 수동 확인이 필요합니다.",
+        note_en="Detects explicit CSRF-protection opt-outs only; missing token implementations need manual review.",
+    ),
+    _control(
+        "I-12", "input-validation-expression", "서버사이드 요청 위조", "Server-Side Request Forgery", ("CWE-918",),
+        ("code.ssrf-user-url",), "automated", _WEB_LANGS,
+    ),
+    _control(
+        "I-13", "input-validation-expression", "HTTP 응답분할", "HTTP Response Splitting", ("CWE-113",),
+        ("code.http-response-splitting",), "partial", _WEB_LANGS,
+    ),
+    _control(
+        "I-14", "input-validation-expression", "정수형 오버플로우", "Integer Overflow", ("CWE-190",),
+        (), "manual-review",
+        note_ko="정확한 판정에 데이터 흐름 분석이 필요해 자동 룰을 제공하지 않습니다. 외부 SAST 또는 수동 검토가 필요합니다.",
+        note_en="Accurate judgement needs data-flow analysis; no automatic rule is provided. Use external SAST or manual review.",
+    ),
+    _control(
+        "I-15", "input-validation-expression", "보안기능 결정에 사용되는 부적절한 입력값", "Improper Input in Security Decisions", ("CWE-807", "CWE-20"),
+        (), "manual-review",
+    ),
+    _control(
+        "I-16", "input-validation-expression", "메모리 버퍼 오버플로우", "Memory Buffer Overflow", ("CWE-119", "CWE-120", "CWE-121", "CWE-122"),
+        ("code.dangerous-c-buffer-api",), "partial", _C_LANGS,
+        note_ko="위험한 C 버퍼 API 사용만 탐지합니다. 경계 검증 여부는 수동 확인이 필요합니다.",
+        note_en="Detects dangerous C buffer APIs only; bounds-check adequacy needs manual review.",
+    ),
+    _control(
+        "I-17", "input-validation-expression", "포맷 스트링 삽입", "Format String Injection", ("CWE-134",),
+        ("code.format-string-user-input",), "partial", _C_LANGS + ("Java", "Kotlin"),
+    ),
+    # 보안기능 (16)
+    _control(
+        "S-01", "security-features", "적절한 인증 없는 중요기능 허용", "Missing Authentication for Critical Function", ("CWE-306",),
+        ("code.auth-disabled-endpoint", "code.api-route-missing-auth"), "partial", _WEB_LANGS,
+        note_ko="인증을 끄거나 빠뜨린 것으로 보이는 라우트 패턴만 탐지합니다. 기능의 중요도 판단은 수동 확인이 필요합니다.",
+        note_en="Detects routes that appear to disable or omit auth; criticality of the function needs manual review.",
+    ),
+    _control(
+        "S-02", "security-features", "부적절한 인가", "Improper Authorization", ("CWE-862", "CWE-863"),
+        (), "manual-review",
+        note_ko="객체·기능 수준 인가는 설계와 데이터 흐름 검토가 필요해 자동 판정하지 않습니다.",
+        note_en="Object/function-level authorization needs design and data-flow review and is not auto-judged.",
+    ),
+    _control(
+        "S-03", "security-features", "중요한 자원에 대한 잘못된 권한 설정", "Incorrect Permission for Critical Resource", ("CWE-732",),
+        (), "manual-review",
+    ),
+    _control(
+        "S-04", "security-features", "취약한 암호화 알고리즘 사용", "Use of Weak Cryptographic Algorithm", ("CWE-327",),
+        ("code.weak-hash",), "partial", _WEB_LANGS,
+        note_ko="MD5/SHA-1 호출 패턴만 탐지합니다. DES 등 대칭키 알고리즘 설정은 수동 확인이 필요합니다.",
+        note_en="Detects MD5/SHA-1 call patterns; symmetric-cipher configuration (e.g. DES) needs manual review.",
+    ),
+    _control(
+        "S-05", "security-features", "암호화되지 않은 중요정보", "Unencrypted Sensitive Data", ("CWE-311", "CWE-319"),
+        (
             "config.env-file-present",
             "config.private-key-like-file",
             "dependency.node-insecure-url",
             "dependency.python-insecure-url",
             "config.docker-add-http",
-            # Authentication / authorization (적절한 인증 없는 중요기능 허용, 부적절한 인가)
-            "code.auth-disabled-endpoint",
-            "code.api-route-missing-auth",
-            # Weak cryptography / hashing (취약한 암호화 알고리즘, 솔트 없는 해시)
-            "code.weak-hash",
-            "code.jwt-verification-disabled",
-            "code.jwt-none-algorithm",
-            # Cookie / session security (하드디스크 저장 쿠키, 세션 관리)
-            "code.insecure-cookie-settings",
-            "code.session-long-expiry",
         ),
+        "partial",
+        note_ko="평문 전송 URL과 저장소 내 민감 파일만 탐지합니다. 저장 데이터 암호화 여부는 수동 확인이 필요합니다.",
+        note_en="Detects plaintext transport URLs and sensitive files in the repo; at-rest encryption needs manual review.",
     ),
-    StandardCategory(
-        "time-state",
-        {"en": "Time and State", "ko": "시간 및 상태"},
-        scanner_categories=("code",),
-        rule_ids=TIME_STATE_RULE_IDS,
+    _control(
+        "S-06", "security-features", "하드코드된 중요정보", "Hard-coded Sensitive Information", ("CWE-798",),
+        SECRET_RULE_IDS, "automated",
     ),
-    StandardCategory(
-        "error-handling",
-        {"en": "Error Handling", "ko": "에러처리"},
-        scanner_categories=("configuration", "code"),
-        rule_ids=ERROR_HANDLING_RULE_IDS,
+    _control(
+        "S-07", "security-features", "충분하지 않은 키 길이 사용", "Insufficient Key Length", ("CWE-326",),
+        ("code.insufficient-key-length",), "partial", ("Java", "Kotlin", "Python", "Go", "C#", "JavaScript", "TypeScript"),
+        note_ko="RSA/DSA/DH 1024비트 이하 등 명시적 짧은 키 설정만 탐지합니다.",
+        note_en="Detects explicit short key sizes (RSA/DSA/DH <= 1024 bits) only.",
     ),
-    StandardCategory(
-        "code-error",
-        {"en": "Code Error", "ko": "코드오류"},
-        scanner_categories=("code",),
-        rule_ids=MEMORY_SAFETY_RULE_IDS,
+    _control(
+        "S-08", "security-features", "적절하지 않은 난수 값 사용", "Use of Insufficiently Random Values", ("CWE-330", "CWE-338"),
+        ("code.insecure-random-security-use",), "partial", ("Java", "Kotlin", "Python", "JavaScript", "TypeScript", "PHP", "Ruby", "C#"),
+        note_ko="보안 목적 변수에 비암호학적 난수를 대입하는 패턴만 탐지합니다.",
+        note_en="Detects non-cryptographic randomness assigned to security-purpose variables only.",
     ),
-    StandardCategory(
-        "encapsulation",
-        {"en": "Encapsulation", "ko": "캡슐화"},
-        scanner_categories=("code",),
-        # + information exposure (시스템/중요 데이터 정보 노출) fits this type.
-        rule_ids=ENCAPSULATION_RULE_IDS + ("code.logging-sensitive-data", "code.pii-logging"),
+    _control(
+        "S-09", "security-features", "취약한 비밀번호 허용", "Weak Password Requirements", ("CWE-521",),
+        (), "manual-review",
     ),
-    StandardCategory(
-        "api-misuse",
-        {"en": "API Misuse", "ko": "API 오용"},
-        scanner_categories=("dependencies", "configuration", "code"),
-        rule_ids=(
+    _control(
+        "S-10", "security-features", "부적절한 전자서명 확인", "Improper Verification of Digital Signature", ("CWE-347",),
+        ("code.jwt-verification-disabled", "code.jwt-none-algorithm"), "partial", _WEB_LANGS,
+        note_ko="JWT 서명 검증 비활성화만 탐지합니다. JWT 외 전자서명 검증은 수동 확인이 필요합니다.",
+        note_en="Covers disabled JWT verification only; non-JWT signature verification needs manual review.",
+    ),
+    _control(
+        "S-11", "security-features", "부적절한 인증서 유효성 검증", "Improper Certificate Validation", ("CWE-295",),
+        ("code.tls-certificate-verification-disabled",), "automated",
+        ("Java", "Kotlin", "Python", "Go", "JavaScript", "TypeScript", "C#", "PHP", "Ruby"),
+    ),
+    _control(
+        "S-12", "security-features", "사용자 하드디스크에 저장되는 쿠키를 통한 정보 노출", "Information Exposure Through Persistent Cookies", ("CWE-539",),
+        ("code.insecure-cookie-settings",), "partial", _WEB_LANGS,
+        note_ko="쿠키 보호 속성 약화만 탐지합니다. 쿠키에 실제 민감정보가 저장되는지는 수동 확인이 필요합니다.",
+        note_en="Detects weakened cookie attributes; whether sensitive data is actually stored needs manual review.",
+    ),
+    _control(
+        "S-13", "security-features", "주석문 안에 포함된 시스템 주요정보", "Sensitive Information in Comments", ("CWE-615",),
+        ("secret.sensitive-comment",), "partial",
+        note_ko="주석 내 자격증명 대입 패턴을 탐지하며 발견 증거는 마스킹됩니다.",
+        note_en="Detects credential assignments inside comments; evidence is redacted.",
+    ),
+    _control(
+        "S-14", "security-features", "솔트 없이 일방향 해시 함수 사용", "One-way Hash Without Salt", ("CWE-759",),
+        ("code.password-hash-without-salt",), "partial", ("Python", "Java", "Kotlin", "JavaScript", "TypeScript", "PHP", "Ruby", "C#"),
+        note_ko="비밀번호 문맥에서 해시를 직접 호출하는 패턴만 탐지합니다.",
+        note_en="Detects direct hash calls in password contexts only.",
+    ),
+    _control(
+        "S-15", "security-features", "무결성 검사 없는 코드 다운로드", "Download of Code Without Integrity Check", ("CWE-494",),
+        (
             "dependency.remote-shell-script",
             "dependency.docker-remote-shell",
             "config.docker-add-http",
-            "code.unsafe-deserialization",
-            "code.eval-user-input",
+            "prevention.github-actions-unpinned",
         ),
+        "partial",
+        note_ko="원격 스크립트 즉시 실행과 SHA 미고정 액션을 탐지합니다. 자체 업데이트 로직은 수동 확인이 필요합니다.",
+        note_en="Detects remote-script piping and unpinned actions; custom self-update logic needs manual review.",
+    ),
+    _control(
+        "S-16", "security-features", "반복된 인증시도 제한 기능 부재", "Missing Brute-force Protection", ("CWE-307",),
+        ("code.api-missing-rate-limit",), "partial", ("Java", "Kotlin", "Python", "JavaScript", "TypeScript"),
+        note_ko="속도 제한 부재 힌트만 제공합니다. 로그인 경로별 잠금 정책은 수동 확인이 필요합니다.",
+        note_en="Provides missing-rate-limit hints only; per-login lockout policy needs manual review.",
+    ),
+    # 시간 및 상태 (2)
+    _control(
+        "T-01", "time-state", "경쟁조건: 검사시점과 사용시점(TOCTOU)", "Race Condition: TOCTOU", ("CWE-367",),
+        ("code.insecure-temp-file",), "partial",
+        note_ko="예측 가능한 임시파일 사용만 탐지합니다. 일반 TOCTOU는 수동 검토가 필요합니다.",
+        note_en="Detects predictable temp-file use only; general TOCTOU needs manual review.",
+    ),
+    _control(
+        "T-02", "time-state", "종료되지 않는 반복문 또는 재귀 함수", "Uncontrolled Loop or Recursion", ("CWE-835", "CWE-674"),
+        (), "manual-review",
+        note_ko="종료 조건 부재는 제어 흐름 분석이 필요해 정규식으로 판정하지 않습니다.",
+        note_en="Missing termination conditions need control-flow analysis and are not judged by regex.",
+    ),
+    # 에러처리 (3)
+    _control(
+        "E-01", "error-handling", "오류 메시지 정보노출", "Error Message Information Exposure", ("CWE-209",),
+        ("config.debug-enabled", "code.stack-trace-exposure"), "automated",
+    ),
+    _control(
+        "E-02", "error-handling", "오류 상황 대응 부재", "Missing Error Handling", ("CWE-390", "CWE-755"),
+        ("code.empty-exception-handler",), "partial",
+    ),
+    _control(
+        "E-03", "error-handling", "부적절한 예외 처리", "Improper Exception Handling", ("CWE-755", "CWE-396", "CWE-397"),
+        ("code.empty-exception-handler", "code.stack-trace-exposure"), "partial",
+    ),
+    # 코드오류 (5)
+    _control(
+        "C-01", "code-error", "Null Pointer 역참조", "Null Pointer Dereference", ("CWE-476",),
+        (), "unsupported",
+        note_ko="흐름 분석이 필요해 로컬 룰로 점검하지 못합니다. 외부 SAST 연동이 필요합니다.",
+        note_en="Needs flow analysis; not checkable with local rules. Requires external SAST.",
+    ),
+    _control(
+        "C-02", "code-error", "부적절한 자원 해제", "Improper Resource Release", ("CWE-404", "CWE-772"),
+        (), "unsupported",
+        note_ko="자원 수명 추적이 필요해 로컬 룰로 점검하지 못합니다.",
+        note_en="Needs resource-lifetime tracking; not checkable with local rules.",
+    ),
+    _control(
+        "C-03", "code-error", "해제된 자원 사용", "Use After Free", ("CWE-416",),
+        (), "unsupported",
+    ),
+    _control(
+        "C-04", "code-error", "초기화되지 않은 변수 사용", "Use of Uninitialized Variable", ("CWE-457",),
+        (), "unsupported",
+    ),
+    _control(
+        "C-05", "code-error", "신뢰할 수 없는 데이터의 역직렬화", "Deserialization of Untrusted Data", ("CWE-502",),
+        ("code.unsafe-deserialization",), "automated", ("Python", "Java", "PHP", "Ruby", "C#"),
+    ),
+    # 캡슐화 (4)
+    _control(
+        "P-01", "encapsulation", "잘못된 세션에 의한 데이터 정보 노출", "Data Exposure Between Sessions", ("CWE-488",),
+        (), "manual-review",
+    ),
+    _control(
+        "P-02", "encapsulation", "제거되지 않고 남은 디버그 코드", "Leftover Debug Code", ("CWE-489",),
+        ("config.debug-enabled", "config.development-environment"), "partial",
+        note_ko="디버그 설정 활성화만 탐지합니다. 코드 내 디버그 출력 잔재는 수동 확인이 필요합니다.",
+        note_en="Detects enabled debug configuration only; leftover debug prints need manual review.",
+    ),
+    _control(
+        "P-03", "encapsulation", "Public 메소드로부터 반환된 Private 배열", "Private Array Returned From Public Method", ("CWE-495",),
+        (), "manual-review",
+    ),
+    _control(
+        "P-04", "encapsulation", "Private 배열에 Public 데이터 할당", "Public Data Assigned to Private Array", ("CWE-496",),
+        (), "manual-review",
+    ),
+    # API 오용 (2)
+    _control(
+        "A-01", "api-misuse", "DNS lookup에 의존한 보안 결정", "Security Decision Based on DNS Lookup", ("CWE-350", "CWE-247"),
+        (), "unsupported",
+        note_ko="DNS 결과가 보안 결정에 쓰이는지는 의미 분석이 필요해 점검하지 못합니다.",
+        note_en="Whether DNS results drive security decisions needs semantic analysis; not checkable.",
+    ),
+    _control(
+        "A-02", "api-misuse", "취약한 API 사용", "Use of Dangerous API", ("CWE-676",),
+        ("code.dangerous-c-buffer-api",), "partial", _C_LANGS,
+        note_ko="C/C++ 위험 API 목록(gets, strcpy, strcat, sprintf, vsprintf)만 탐지합니다.",
+        note_en="Covers the C/C++ banned-API list (gets, strcpy, strcat, sprintf, vsprintf) only.",
     ),
 )
+
+SW49_CONTROLS_BY_OFFICIAL_ID = {control.official_id: control for control in SW49_CONTROLS}
+
+_RULE_PREFIX_SCANNER_CATEGORY = {
+    "code": "code",
+    "secret": "secrets",
+    "config": "configuration",
+    "dependency": "dependencies",
+    "prevention": "prevention",
+}
+
+
+def _rule_scanner_category(rule_id: str) -> str | None:
+    return _RULE_PREFIX_SCANNER_CATEGORY.get(rule_id.split(".", 1)[0])
+
+
+def _sw49_category(category_id: str) -> StandardCategory:
+    rule_ids: list[str] = []
+    scanner_categories: list[str] = []
+    for control in SW49_CONTROLS:
+        if control.category_id != category_id:
+            continue
+        for rule_id in control.rule_ids:
+            scanner_category = _rule_scanner_category(rule_id)
+            if scanner_category is None:
+                continue  # web.* probe rules are not part of the local file scan
+            if rule_id not in rule_ids:
+                rule_ids.append(rule_id)
+            if scanner_category not in scanner_categories:
+                scanner_categories.append(scanner_category)
+    return StandardCategory(
+        category_id,
+        SW49_CATEGORY_LABELS[category_id],
+        scanner_categories=tuple(scanner_categories),
+        rule_ids=tuple(rule_ids),
+    )
+
+
+# The seven official type categories are derived from the 49 controls so the
+# profile filter and the per-control mapping can never drift apart.
+_SW_DEV_SECURITY_CATEGORIES = tuple(_sw49_category(category_id) for category_id in SW49_CATEGORY_EXPECTED_COUNTS)
+
+
+def evaluate_sw49_controls(
+    findings: list[Finding],
+    scanned_categories: tuple[str, ...] = (),
+    executed_rule_ids: frozenset[str] | None = None,
+) -> list[dict[str, object]]:
+    """Judge each of the 49 controls against scan results.
+
+    A control is never marked PASS just because nothing was found: PASS is only
+    given to fully automated controls whose rules actually ran. Partial
+    controls without findings stay NEEDS_REVIEW, and controls whose rules did
+    not run are NOT_SCANNED.
+    """
+    findings_by_rule: dict[str, list[Finding]] = {}
+    for finding in findings:
+        findings_by_rule.setdefault(finding.rule_id, []).append(finding)
+
+    scanned = set(scanned_categories)
+    results: list[dict[str, object]] = []
+    for control in SW49_CONTROLS:
+        matched = [f for rule_id in control.rule_ids for f in findings_by_rule.get(rule_id, [])]
+        executed = False
+        for rule_id in control.rule_ids:
+            scanner_category = _rule_scanner_category(rule_id)
+            if scanner_category is None or scanner_category not in scanned:
+                continue
+            if executed_rule_ids is not None and rule_id not in executed_rule_ids:
+                continue
+            executed = True
+            break
+
+        if matched:
+            status = "VULNERABLE"
+            executed = True
+        elif control.support_level == "unsupported":
+            status = "UNSUPPORTED"
+        elif control.support_level == "manual-review":
+            status = "NEEDS_REVIEW"
+        elif not executed:
+            status = "NOT_SCANNED"
+        elif control.support_level == "automated":
+            status = "PASS"
+        else:  # partial: automation only covers part of the criterion
+            status = "NEEDS_REVIEW"
+
+        evidence = []
+        for finding in matched[:5]:
+            location = str(finding.path)
+            if finding.line:
+                location = f"{location}:{finding.line}"
+            evidence.append(location)
+
+        results.append(
+            {
+                "control_id": control.control_id,
+                "official_id": control.official_id,
+                "category_id": control.category_id,
+                "category_labels": SW49_CATEGORY_LABELS[control.category_id],
+                "title": dict(control.title),
+                "cwe_ids": list(control.cwe_ids),
+                "rule_ids": list(control.rule_ids),
+                "support_level": control.support_level,
+                "supported_languages": list(control.supported_languages),
+                "executed": executed,
+                "status": status,
+                "finding_count": len(matched),
+                "evidence": evidence,
+                "notes": dict(control.notes),
+            }
+        )
+    return results
+
+
+def sw49_payload(
+    findings: list[Finding],
+    scanned_categories: tuple[str, ...] = (),
+    standard_category: str = DEFAULT_STANDARD_CATEGORY,
+) -> dict[str, object]:
+    """Dashboard/report payload: all 49 control judgements plus a status summary."""
+    executed_rule_ids: frozenset[str] | None = None
+    if standard_category not in ("", DEFAULT_STANDARD_CATEGORY):
+        category = _find_category(SW_DEV_SECURITY_49, standard_category)
+        executed_rule_ids = frozenset(category.rule_ids)
+    controls = evaluate_sw49_controls(findings, scanned_categories, executed_rule_ids)
+    status_counts = {status: 0 for status in SW49_STATUSES}
+    support_counts = {level: 0 for level in SW49_SUPPORT_LEVELS}
+    for entry in controls:
+        status_counts[str(entry["status"])] += 1
+        support_counts[str(entry["support_level"])] += 1
+    return {
+        "total": len(controls),
+        "status_counts": status_counts,
+        "support_counts": support_counts,
+        "controls": controls,
+    }
 
 SW_DEV_SECURITY_49 = SecurityStandard(
     "sw-dev-security-49",
@@ -765,12 +1194,12 @@ SW_DEV_SECURITY_49 = SecurityStandard(
         *_SW_DEV_SECURITY_CATEGORIES,
     ),
     description=_text(
-        "Korean software development security weakness areas grouped into the seven secure-coding types.",
-        "국내 소프트웨어 개발보안 보안약점을 7가지 시큐어코딩 유형으로 묶은 프로파일입니다.",
+        "Registers all 49 MOIS/KISA implementation-stage security weaknesses as individual controls. Items KODA can check automatically run as local rules; items that static analysis cannot judge are marked partial, manual-review, or unsupported.",
+        "행정안전부·KISA 구현단계 보안약점 49개를 기준별로 표시합니다. KODA가 자동으로 확인 가능한 항목은 로컬 룰로 점검하며, 정적 분석만으로 판단할 수 없는 항목은 부분 지원, 수동 검토 또는 미지원으로 구분합니다.",
     ),
     coverage=_text(
-        "Automatic file-based checks through local source, configuration, secret, and dependency checks.",
-        "소스, 설정, 비밀값, 의존성 로컬 점검을 자동으로 실행합니다.",
+        "Lists all 49 controls, but not every control is auto-diagnosed. Automated/partial controls are checked via source, configuration, secret, dependency, and optional web probes; design, permission, session, and complex data-flow controls need manual review or external SAST.",
+        "49개 전체 기준 목록을 제공하지만 모든 항목이 자동 진단되는 것은 아닙니다. 자동·부분 지원 항목은 소스, 설정, 비밀값, 의존성 및 선택적 웹 점검으로 확인하고, 설계·권한·세션·복잡한 데이터 흐름 관련 항목은 수동 검토나 외부 SAST가 필요합니다.",
     ),
     references=(
         _reference("KISA Software Development Security", "KISA 소프트웨어 개발보안", "https://www.kisa.or.kr/1051202"),

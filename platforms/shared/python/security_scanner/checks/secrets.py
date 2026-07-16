@@ -70,6 +70,21 @@ SECRET_RULES = (
         ),
         secret_group=2,
     ),
+    SecretRule(
+        # SW49 S-13: credential-like assignments left inside comments. The
+        # generic-assignment rule is anchored to line starts, so commented-out
+        # credentials need their own comment-aware pattern. Evidence is redacted
+        # by the shared _redact_line path like every other secret rule.
+        "secret.sensitive-comment",
+        "Sensitive data in a comment",
+        "medium",
+        re.compile(
+            r"(?i)^\s*(?:#|//|/\*|\*|<!--|;)\s*.*?\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?token|"
+            r"auth[_-]?token|client[_-]?secret|private[_-]?key)\b\s*[:=]\s*['\"]?([^'\"\s#;,]{8,})"
+        ),
+        secret_group=2,
+        recommendation="Remove credentials from comments and rotate the value if it was ever real.",
+    ),
 )
 
 
@@ -89,7 +104,7 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
                 if per_rule_counts.get(rule.rule_id, 0) >= 5:
                     continue
                 secret_value = match.group(rule.secret_group)
-                if rule.rule_id == "secret.generic-assignment" and _looks_like_secret_reference(line, secret_value):
+                if rule.rule_id in ("secret.generic-assignment", "secret.sensitive-comment") and _looks_like_secret_reference(line, secret_value):
                     continue
                 if _looks_like_placeholder(secret_value):
                     continue
