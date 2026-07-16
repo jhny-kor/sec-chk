@@ -40,6 +40,7 @@ Type: files; Name: "{app}\Uninstall-SecChk.ps1"
 Type: filesandordirs; Name: "{app}\KODA-CLI"
 Type: files; Name: "{app}\KODA-CLI.cmd"
 Type: files; Name: "{app}\KODA-CLI-Shell.cmd"
+Type: filesandordirs; Name: "{app}\tools"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -47,9 +48,9 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{group}\KODA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{userdocs}"; Comment: "KODA local security dashboard"
 Name: "{group}\KODA (Browser Mode)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--browser"; WorkingDir: "{userdocs}"; Comment: "Open KODA in the default browser if WebView2 is unavailable"
+Name: "{group}\KODA CLI"; Filename: "{app}\KODA-CLI-Shell.cmd"; WorkingDir: "{userdocs}"; Comment: "KODA command-line interface"
 Name: "{userdesktop}\KODA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{userdocs}"; Comment: "KODA local security dashboard"; Tasks: desktopicon
 Name: "{group}\KODA 제거"; Filename: "{uninstallexe}"
-Name: "{group}\KODA CLI"; Filename: "{app}\KODA-CLI-Shell.cmd"; WorkingDir: "{userdocs}"; Comment: "KODA command-line interface"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
