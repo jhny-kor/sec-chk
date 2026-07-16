@@ -52,17 +52,18 @@ def scan_archives(
     max_uncompressed_bytes: int | None = None,
 ) -> ArchiveScan:
     root = target.expanduser().resolve()
-    if not root.is_dir():
-        raise ValueError(f"Java scan target is not a directory: {target}")
+    if not root.is_dir() and not root.is_file():
+        raise ValueError(f"Java scan target does not exist: {target}")
     if any(limit is not None and limit < 1 for limit in (max_depth, max_entries, max_uncompressed_bytes)):
         raise ValueError("archive limits must be positive")
 
     artifacts: list[ArchiveArtifact] = []
     warnings: list[str] = []
-    for path in sorted(root.rglob("*")):
+    paths = (root,) if root.is_file() else tuple(sorted(root.rglob("*")))
+    for path in paths:
         if path.is_symlink() or not path.is_file() or path.suffix.lower() not in ARCHIVE_SUFFIXES:
             continue
-        relative = path.relative_to(root).as_posix()
+        relative = path.name if root.is_file() else path.relative_to(root).as_posix()
         if any(fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(path.name, pattern) for pattern in excludes):
             continue
         try:

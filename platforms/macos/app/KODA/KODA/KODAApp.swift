@@ -8,6 +8,7 @@ struct KODAApp: App {
     @NSApplicationDelegateAdaptor(KODAAppDelegate.self) private var appDelegate
 
     init() {
+        runHeadlessJavaScanIfRequested()
         runHeadlessScanIfRequested()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             KODAWindowCoordinator.shared.ensureMainWindowVisibleAfterLaunch()
@@ -28,6 +29,32 @@ struct KODAApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             KODAWindowCommands()
+        }
+    }
+
+    private func runHeadlessJavaScanIfRequested() {
+        let environment = ProcessInfo.processInfo.environment
+        guard let targetValue = environment["KODA_JAVA_SCAN_TARGETS"], !targetValue.isEmpty else {
+            return
+        }
+        let targets = targetValue
+            .split(separator: "\n")
+            .map { URL(fileURLWithPath: String($0)) }
+        let outputDirectory: URL
+        if let outputValue = environment["KODA_JAVA_SCAN_OUTPUT_DIR"], !outputValue.isEmpty {
+            outputDirectory = URL(fileURLWithPath: outputValue)
+        } else {
+            outputDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("KODA-headless-java-scan")
+        }
+
+        do {
+            let outcome = try BundledJavaArchiveScanner.scan(targets: targets, outputDirectory: outputDirectory)
+            print(outcome.sbomURL.path)
+            exit(outcome.exitCode)
+        } catch {
+            fputs("\(error.localizedDescription)\n", stderr)
+            exit(2)
         }
     }
 

@@ -475,6 +475,61 @@ final class ScannerBridge: ObservableObject {
         }
     }
 
+    func exportJavaArchiveSecurityPackage(language: AppLanguage) {
+        let targets = selectedTargets.filter { ["jar", "war", "ear"].contains($0.pathExtension.lowercased()) || $0.hasDirectoryPath }
+        guard !targets.isEmpty else {
+            setStatus(
+                ko: "JAR/WAR/EAR 파일 또는 포함 폴더를 선택하세요.",
+                en: "Choose a JAR, WAR, EAR file, or a folder containing Java archives."
+            )
+            statusColor = .red
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = language == .ko ? "저장 위치 선택" : "Choose Output Folder"
+        panel.message = language == .ko
+            ? "Java SBOM, Grype/NVD/CISA 취약점 보고서를 저장할 폴더를 선택하세요."
+            : "Choose a folder for the Java SBOM and Grype/NVD/CISA vulnerability reports."
+        guard panel.runModal() == .OK, let outputDirectory = panel.url else {
+            return
+        }
+
+        isRunning = true
+        setStatus(
+            ko: "번들된 Syft·Grype·취약점 DB로 Java 아카이브를 분석하고 있습니다.",
+            en: "Analyzing Java archives with bundled Syft, Grype, and vulnerability data."
+        )
+        statusColor = .secondary
+        Task {
+            do {
+                let outcome = try await Task.detached(priority: .userInitiated) {
+                    try BundledJavaArchiveScanner.scan(targets: targets, outputDirectory: outputDirectory)
+                }.value
+                isRunning = false
+                reportURL = outcome.sbomURL
+                setStatus(
+                    ko: "Java SBOM 및 취약점 분석 완료",
+                    en: "Java SBOM and vulnerability analysis complete"
+                )
+                setDetail(
+                    ko: "컴포넌트 \(outcome.componentCount)개 · 취약점 \(outcome.vulnerabilityCount)건 · \(outputDirectory.path)",
+                    en: "\(outcome.componentCount) component(s) · \(outcome.vulnerabilityCount) vulnerability finding(s) · \(outputDirectory.path)"
+                )
+                statusColor = outcome.exitCode == 0 ? .green : .orange
+            } catch {
+                isRunning = false
+                setStatus(ko: "Java 아카이브 분석 실패", en: "Java archive analysis failed")
+                setDetail(ko: error.localizedDescription, en: error.localizedDescription)
+                statusColor = .red
+            }
+        }
+    }
+
     func exportVEX(language: AppLanguage) {
         let targets = selectedTargets
         guard !targets.isEmpty else {

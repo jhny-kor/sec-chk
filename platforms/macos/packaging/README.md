@@ -8,7 +8,9 @@ This folder contains the first App Store packaging lane for the macOS app named 
 - `assets/KODA-AppStore-1024.png`: 1024 px App Store marketing icon source.
 - `KODA.entitlements`: App Sandbox entitlements required for Mac App Store distribution.
 - `../app/KODA/KODA.xcodeproj`: native SwiftUI macOS project for the App Store lane. The app supports folder selection, multiple file selection, and common archive inputs with a built-in Swift scanner.
-- `../scripts/build-koda-xcode-app.command`: builds the native Xcode app to `dist/macos/KODA.app`.
+- `../scripts/build-koda-xcode-app.command`: builds the native Xcode app to `dist/macos/KODA.app`, including the offline Java scanner assets.
+- `../scripts/prepare-java-scan-assets.command`: builds the embedded Python scanner, downloads checksum-verified Syft/Grype release binaries, and stages the offline Grype/NVD/CISA data pack.
+- `../scripts/archive-koda-app-store.command`: prepares the assets and creates an App Store archive.
 - `../scripts/build-koda-app.command`: legacy PyInstaller-based macOS app and package build script for non-store experiments.
 
 ## Requirements
@@ -34,11 +36,22 @@ For local command-line verification without signing:
 platforms/macos/scripts/build-koda-xcode-app.command
 ```
 
-The Xcode app uses the native Swift scanner in the app target. It does not require `python3` to launch or scan from the `.app` bundle. The local build output is:
+The Xcode app uses the native Swift scanner for its standard scan. Its Java archive scan menu uses an embedded Python helper plus bundled Syft, Grype, Grype DB, NVD, and CISA KEV data; the shipped app does not download or execute any scanner code at runtime. The local build output is:
 
 ```text
 dist/macos/KODA.app
 ```
+
+The release scripts default to `arm64`, matching the bundled scanner helper.
+Build an Intel asset pack on an Intel macOS build host and set
+`KODA_MACOS_ARCHS=x86_64` before producing an Intel release. The staging phase
+fails instead of shipping a universal app when a matching helper, Syft, or
+Grype binary is absent.
+
+`prepare-java-scan-assets.command` obtains NVD feeds from 2002 through the
+current year by default. The Java scan has no default archive-count, archive
+size, entry-count, or nesting-depth limit; any optional traversal limit must
+be supplied explicitly through the CLI.
 
 ### PyInstaller package lane
 
@@ -58,12 +71,7 @@ dist/macos/KODA-0.1.0-unsigned.pkg
 Use the native Xcode project as the App Store lane:
 
 ```zsh
-/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
-  -project platforms/macos/app/KODA/KODA.xcodeproj \
-  -scheme KODA \
-  -configuration Release \
-  -archivePath build/KODA.xcarchive \
-  archive
+platforms/macos/scripts/archive-koda-app-store.command
 ```
 
 Then upload the archive from Xcode Organizer or export it with an App Store
@@ -90,7 +98,7 @@ lane is intentionally changed back to the Python bundle.
 
 ## Current limitation
 
-The Xcode app is now the preferred App Store lane, and it can run scans from selected folders, selected files, and supported archives (`zip`, `jar`, `war`, `tar`, `tar.gz`, `tgz`, `gz`) without an external Python runtime. Before final App Review submission, run a full sandbox QA pass on a clean Mac and verify folder selection, multi-file scanning, archive extraction, and scanner access to user-selected folders.
+The Xcode app is the preferred App Store lane. The Java scan reads selected JAR/WAR/EAR files as data only; it never invokes Java or executes archive content. Before App Review submission, verify the signed archive with `codesign --verify --deep --strict --verbose=2`, inspect each helper entitlement, and run an offline JAR smoke test from the exported app.
 
 Apple references:
 

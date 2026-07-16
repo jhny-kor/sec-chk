@@ -208,6 +208,13 @@ struct ContentView: View {
                     .disabled(scanner.isRunning)
 
                     Button {
+                        scanner.exportJavaArchiveSecurityPackage(language: language)
+                    } label: {
+                        Label(language == .ko ? "Java SBOM · 취약점 분석" : "Java SBOM · Vulnerability Scan", systemImage: "archivebox.fill")
+                    }
+                    .disabled(scanner.isRunning)
+
+                    Button {
                         scanner.exportVEX(language: language)
                     } label: {
                         Label(language.generateVEXTitle, systemImage: "doc.text.magnifyingglass")

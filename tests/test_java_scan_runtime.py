@@ -17,6 +17,7 @@ if str(SHARED_PYTHON) not in sys.path:
 
 from security_scanner.grype_adapter import run_grype
 from security_scanner.java_archives import scan_archives
+from security_scanner.java_vulnerability_scan import JavaScanOptions, run_java_scan
 from security_scanner.syft_adapter import run_syft
 
 
@@ -27,6 +28,29 @@ def _write_jar(path: Path, files: dict[str, str | bytes]) -> None:
 
 
 class JavaScanRuntimeTests(unittest.TestCase):
+    def test_scan_archives_accepts_a_single_jar_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jar = root / "demo-1.2.3.jar"
+            _write_jar(jar, {"META-INF/maven/org.example/demo/pom.properties": "groupId=org.example\nartifactId=demo\nversion=1.2.3\n"})
+
+            result = scan_archives(jar)
+
+            self.assertEqual(len(result.artifacts), 1)
+            self.assertEqual(result.artifacts[0].location.outer_path, jar.resolve())
+
+    def test_java_scan_writes_an_sbom_for_a_single_jar_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jar = root / "demo-1.2.3.jar"
+            output = root / "reports"
+            _write_jar(jar, {"META-INF/maven/org.example/demo/pom.properties": "groupId=org.example\nartifactId=demo\nversion=1.2.3\n"})
+
+            result = run_java_scan(JavaScanOptions(target=jar, output_dir=output, builtin_only=True, no_grype=True))
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertTrue((output / "server-sbom.cdx.json").is_file())
+
     def test_default_scan_reads_all_archive_entries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -66,6 +90,24 @@ class JavaScanRuntimeTests(unittest.TestCase):
                 for invocation in runner.call_args_list:
                     self.assertEqual(invocation.kwargs["encoding"], "utf-8")
                     self.assertEqual(invocation.kwargs["errors"], "replace")
+
+    def test_syft_uses_a_file_source_for_a_single_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "syft"
+            jar = root / "demo.jar"
+            binary.write_text("placeholder", encoding="utf-8")
+            binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+            _write_jar(jar, {"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\n"})
+            with patch("security_scanner.syft_adapter.subprocess.run") as syft_run:
+                syft_run.side_effect = [
+                    subprocess.CompletedProcess([str(binary)], 0, "syft 1.0.0", ""),
+                    subprocess.CompletedProcess([str(binary)], 0, json.dumps({"bomFormat": "CycloneDX", "components": []}), ""),
+                ]
+
+                run_syft(jar, binary, 1)
+
+            self.assertEqual(syft_run.call_args_list[1].args[0][1], f"file:{jar}")
 
 
 if __name__ == "__main__":

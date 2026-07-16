@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 PROJECT="$REPO_ROOT/platforms/macos/app/KODA/KODA.xcodeproj"
 SCHEME="KODA"
 CONFIGURATION="${CONFIGURATION:-Release}"
+MACOS_ARCHS="${KODA_MACOS_ARCHS:-arm64}"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$REPO_ROOT/.build/koda-xcode-derived}"
 DIST_DIR="$REPO_ROOT/dist/macos"
 APP_SOURCE="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/KODA.app"
@@ -17,11 +18,16 @@ fi
 
 mkdir -p "$DIST_DIR"
 
+if [[ "${KODA_INCLUDE_JAVA_SCANNER:-1}" != "0" ]]; then
+  "$SCRIPT_DIR/prepare-java-scan-assets.command"
+fi
+
 "$XCODEBUILD" \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  ARCHS="$MACOS_ARCHS" \
   CODE_SIGNING_ALLOWED="${CODE_SIGNING_ALLOWED:-NO}" \
   build
 

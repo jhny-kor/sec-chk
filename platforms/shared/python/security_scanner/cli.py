@@ -714,7 +714,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     jar_scan = subparsers.add_parser("jar-scan", help="offline JAR/WAR/EAR SBOM and vulnerability scan")
-    jar_scan.add_argument("--target", required=True, help="directory containing deployed JAR, WAR, and EAR files")
+    jar_scan.add_argument("--target", required=True, help="JAR/WAR/EAR file or directory containing deployed Java archives")
     jar_scan.add_argument("--output-dir", default="reports/java-scan", help="report directory")
     jar_scan.add_argument("--syft-bin", help="Syft executable; no automatic download")
     jar_scan.add_argument("--grype-bin", help="Grype executable; no automatic download")
