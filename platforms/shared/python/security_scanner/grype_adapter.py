@@ -25,27 +25,43 @@ class GrypeMatch:
 class GrypeResult:
     matches: tuple[GrypeMatch, ...]
     version: str
+    database: dict[str, object]
     warning: str
     fatal: bool
 
 
 def run_grype(sbom_path: Path, binary: Path | None, timeout: float) -> GrypeResult:
     if binary is None:
-        return GrypeResult((), "", "Grype is not configured; vulnerability comparison was not run.", False)
+        return GrypeResult((), "", {}, "Grype is not configured; vulnerability comparison was not run.", False)
     validation = _validate_binary(binary)
     if validation:
-        return GrypeResult((), "", validation, True)
+        return GrypeResult((), "", {}, validation, True)
     version_result = _run(binary, ("--version",), timeout)
     version = version_result.stdout.strip() if version_result.returncode == 0 else ""
+    version_warning = "" if version_result.returncode == 0 else f"Grype version check failed: {version_result.stderr.strip() or 'unknown error'}"
+    database, database_warning = _database_status(binary, timeout)
     scan = _run(binary, (f"sbom:{sbom_path}", "-o", "json"), timeout)
     if scan.returncode != 0:
-        return GrypeResult((), version, f"Grype failed: {scan.stderr.strip() or 'unknown error'}", True)
+        return GrypeResult((), version, database, f"Grype failed: {scan.stderr.strip() or 'unknown error'}", True)
     try:
         payload = json.loads(scan.stdout)
         matches = tuple(_parse_match(value) for value in payload.get("matches", []) if isinstance(value, dict))
     except (json.JSONDecodeError, AttributeError, TypeError, KeyError) as exc:
-        return GrypeResult((), version, f"Grype returned invalid JSON: {exc}", True)
-    return GrypeResult(tuple(match for match in matches if match is not None), version, "", False)
+        return GrypeResult((), version, database, f"Grype returned invalid JSON: {exc}", True)
+    return GrypeResult(tuple(match for match in matches if match is not None), version, database, "; ".join(item for item in (version_warning, database_warning) if item), False)
+
+
+def _database_status(binary: Path, timeout: float) -> tuple[dict[str, object], str]:
+    status = _run(binary, ("db", "status", "-o", "json"), timeout)
+    if status.returncode != 0:
+        return {"status": "unavailable"}, f"Grype DB status is unavailable: {status.stderr.strip() or 'unknown error'}"
+    try:
+        payload = json.loads(status.stdout)
+    except json.JSONDecodeError as exc:
+        return {"status": "unavailable"}, f"Grype DB status is not JSON: {exc}"
+    if not isinstance(payload, dict):
+        return {"status": "unavailable"}, "Grype DB status has an invalid JSON shape."
+    return payload, ""
 
 
 def _parse_match(value: dict[str, object]) -> GrypeMatch | None:

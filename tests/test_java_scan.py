@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import gzip
+import socket
 import stat
 import subprocess
 import sys
@@ -19,6 +20,7 @@ if str(SHARED_PYTHON) not in sys.path:
 from security_scanner.java_archives import scan_archives
 from security_scanner.java_inventory import inventory_components
 from security_scanner.java_vulnerability_scan import JavaScanOptions, run_java_scan
+from security_scanner.grype_adapter import GrypeMatch, GrypeResult
 from security_scanner.syft_adapter import run_syft
 from security_scanner.offline_vuln_data import load_offline_data
 
@@ -106,6 +108,17 @@ class JavaInventoryTests(unittest.TestCase):
             self.assertTrue(any("Corrupt ZIP" in warning for warning in result.warnings))
             self.assertTrue(any("Maximum nested archive depth" in warning for warning in result.warnings))
 
+    def test_spring_boot_fat_jar_library_is_inventoried(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "spring-core.jar"
+            _write_jar(nested, {"META-INF/maven/org.springframework/spring-core/pom.properties": "groupId=org.springframework\nartifactId=spring-core\nversion=6.1.0\n"})
+            with zipfile.ZipFile(root / "application.jar", "w") as archive:
+                archive.writestr("BOOT-INF/lib/spring-core-6.1.0.jar", nested.read_bytes())
+
+            components = inventory_components(scan_archives(root))
+            self.assertIn("pkg:maven/org.springframework/spring-core@6.1.0", {component.purl for component in components})
+
 
 class JavaScanTests(unittest.TestCase):
     def test_offline_run_writes_all_reports_and_combines_local_feeds(self) -> None:
@@ -186,6 +199,7 @@ class JavaScanTests(unittest.TestCase):
             with patch("security_scanner.grype_adapter.subprocess.run") as run:
                 run.side_effect = [
                     type("Completed", (), {"returncode": 0, "stdout": "grype 0.80.0", "stderr": ""})(),
+                    type("Completed", (), {"returncode": 0, "stdout": json.dumps({"database": {"built": "2026-07-15T00:00:00Z"}}), "stderr": ""})(),
                     type("Completed", (), {"returncode": 0, "stdout": json.dumps(grype_payload), "stderr": ""})(),
                 ]
                 result = run_java_scan(
@@ -215,6 +229,11 @@ class JavaScanTests(unittest.TestCase):
             self.assertTrue((root / "reports/warnings.json").exists())
             metadata = json.loads((root / "reports/scan-metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(set(metadata["data_sources"]), {"nvd", "cisa_kev", "knvd"})
+            self.assertEqual(metadata["grype_database"]["database"]["built"], "2026-07-15T00:00:00Z")
+            self.assertTrue(all(len(source["files"][0]["sha256"]) == 64 for source in metadata["data_sources"].values()))
+            report = json.loads((root / "reports/server-vulnerabilities.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["archives"][0]["archive_type"], "jar")
+            self.assertEqual(report["target"], str(target.resolve()))
 
     def test_missing_explicit_grype_is_exit_two_without_network(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -226,6 +245,20 @@ class JavaScanTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 2)
             self.assertTrue(any("Grype" in warning for warning in result.warnings))
 
+    def test_builtin_only_scan_does_not_open_network_connections(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "app"
+            target.mkdir()
+            _write_jar(target / "demo.jar", {"META-INF/maven/org.example/demo/pom.properties": "groupId=org.example\nartifactId=demo\nversion=1.2.3\n"})
+            knvd = root / "knvd.json"
+            knvd.write_text(json.dumps({"notices": [{"notice_id": "NO-CVE", "product": "demo", "affected_versions": "1.2.3"}]}), encoding="utf-8")
+            with patch.object(socket, "create_connection", side_effect=AssertionError("network access is forbidden")):
+                result = run_java_scan(JavaScanOptions(target=target, output_dir=root / "reports", knvd_data=knvd, builtin_only=True, no_grype=True))
+            self.assertEqual(result.exit_code, 0)
+            report = json.loads((root / "reports/server-vulnerabilities.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["manual_review_candidates"][0]["notice"]["notice_id"], "NO-CVE")
+
     def test_nvd_gzip_and_knvd_without_cve_are_loaded_without_creating_a_match(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -233,10 +266,24 @@ class JavaScanTests(unittest.TestCase):
             with gzip.open(nvd, "wt", encoding="utf-8") as stream:
                 json.dump({"vulnerabilities": [{"cve": {"id": "CVE-2026-0001"}}]}, stream)
             knvd = root / "knvd.json"
-            knvd.write_text(json.dumps({"notices": [{"notice_id": "NO-CVE"}]}), encoding="utf-8")
+            knvd.write_text(json.dumps({"notices": [{"notice_id": "NO-CVE", "product": "demo", "affected_versions": "1.2.3"}]}), encoding="utf-8")
             loaded = load_offline_data(nvd, None, knvd, ("CVE-2026-0001",))
             self.assertIn("CVE-2026-0001", loaded.nvd)
             self.assertEqual(loaded.knvd, {})
+            self.assertEqual(loaded.knvd_manual_review[0]["notice_id"], "NO-CVE")
+
+    def test_fail_on_kev_returns_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "app"
+            target.mkdir()
+            _write_jar(target / "demo.jar", {"META-INF/maven/org.example/demo/pom.properties": "groupId=org.example\nartifactId=demo\nversion=1.2.3\n"})
+            kev = root / "kev.json"
+            kev.write_text(json.dumps({"vulnerabilities": [{"cveID": "CVE-2026-0001"}]}), encoding="utf-8")
+            match = GrypeMatch("CVE-2026-0001", ("CVE-2026-0001",), "demo", "1.2.3", "pkg:maven/org.example/demo@1.2.3", (), "low", (), ())
+            with patch("security_scanner.java_vulnerability_scan.run_grype", return_value=GrypeResult((match,), "test", {}, "", False)):
+                result = run_java_scan(JavaScanOptions(target=target, output_dir=root / "reports", cisa_kev=kev, fail_on_kev=True))
+            self.assertEqual(result.exit_code, 1)
 
     def test_syft_timeout_is_controlled_and_does_not_raise(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -248,6 +295,25 @@ class JavaScanTests(unittest.TestCase):
                 result = run_syft(root, binary, 1)
             self.assertTrue(result.fatal)
             self.assertIn("Syft failed", result.warning)
+
+    def test_syft_json_and_missing_binary_paths_are_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "syft"
+            binary.write_text("placeholder", encoding="utf-8")
+            binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+            payload = {"bomFormat": "CycloneDX", "components": []}
+            with patch("security_scanner.syft_adapter.subprocess.run") as run:
+                run.side_effect = [
+                    type("Completed", (), {"returncode": 0, "stdout": "syft 1.0.0", "stderr": ""})(),
+                    type("Completed", (), {"returncode": 0, "stdout": json.dumps(payload), "stderr": ""})(),
+                ]
+                result = run_syft(root, binary, 1)
+            self.assertFalse(result.fatal)
+            self.assertEqual(result.payload, payload)
+            missing = run_syft(root, root / "missing-syft", 1)
+            self.assertTrue(missing.fatal)
+            self.assertIn("not found", missing.warning)
 
 
 if __name__ == "__main__":
