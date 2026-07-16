@@ -13,17 +13,27 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 $AppName = "KODA"
+$CliAppName = "KODA-CLI"
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $SharedPythonRoot = Join-Path $RepoRoot "platforms\shared\python"
 $BuildRoot = Join-Path $RepoRoot ".build\koda-windows-installer"
 $VenvDir = Join-Path $BuildRoot ".venv"
-# Chromium build for the SPA-render feature is downloaded here, then bundled
-# into the app so rendering works offline (no separate 'playwright install').
+
+# Chromium for Playwright is downloaded once and bundled into the GUI app.
+# The CLI entry point reuses the GUI app's bundled Chromium at runtime.
 $BrowsersDir = Join-Path $BuildRoot "ms-playwright"
+
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
-$EntryPoint = Join-Path $RepoRoot "platforms\windows\scripts\koda-desktop.py"
+
+$GuiEntryPoint = Join-Path $RepoRoot "platforms\windows\scripts\koda-desktop.py"
+$CliEntryPoint = Join-Path $BuildRoot "koda-cli-entry.py"
+
 $DistDir = Join-Path $RepoRoot "dist"
 $AppDistDir = Join-Path $DistDir $AppName
+$CliDistDir = Join-Path $AppDistDir $CliAppName
+$CliExecutable = Join-Path $CliDistDir "$CliAppName.exe"
+
 $InstallerOutDir = Join-Path $DistDir "Windows"
 $InnoScript = Join-Path $RepoRoot "platforms\windows\packaging\KODA.iss"
 $IconPath = Join-Path $RepoRoot "platforms\windows\assets\KODA.ico"
@@ -43,8 +53,13 @@ function Find-Python310 {
             continue
         }
 
-        $testArgs = $prefixArgs + @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)")
+        $testArgs = $prefixArgs + @(
+            "-c",
+            "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+        )
+
         & $command @testArgs *> $null
+
         if ($LASTEXITCODE -eq 0) {
             return $candidate
         }
@@ -60,15 +75,22 @@ function Find-InnoCompiler {
         if (Test-Path -LiteralPath $RequestedPath -PathType Leaf) {
             return (Resolve-Path -LiteralPath $RequestedPath).Path
         }
+
         throw "Inno Setup compiler was not found at: $RequestedPath"
     }
 
     $candidates = @()
+
     if (${env:ProgramFiles(x86)}) {
-        $candidates += (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+        $candidates += (
+            Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+        )
     }
+
     if ($env:ProgramFiles) {
-        $candidates += (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+        $candidates += (
+            Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"
+        )
     }
 
     foreach ($candidate in $candidates) {
@@ -78,6 +100,7 @@ function Find-InnoCompiler {
     }
 
     $command = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+
     if ($command) {
         return $command.Source
     }
@@ -85,14 +108,57 @@ function Find-InnoCompiler {
     throw "Inno Setup 6 compiler was not found. Install Inno Setup 6 or pass -InnoCompilerPath."
 }
 
+function Ensure-VenvPip {
+    param([string]$PythonPath)
+
+    & $PythonPath -m pip --version *> $null
+
+    if ($LASTEXITCODE -eq 0) {
+        return
+    }
+
+    Write-Host "pip is missing from the build virtual environment. Running ensurepip."
+
+    & $PythonPath -m ensurepip --upgrade
+
+    if ($LASTEXITCODE -ne 0) {
+        throw @"
+The virtual environment does not contain pip, and ensurepip failed.
+Delete this directory and run the build again:
+
+$VenvDir
+
+If the problem continues, repair or reinstall Python with pip and venv enabled.
+"@
+    }
+
+    & $PythonPath -m pip --version *> $null
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "pip is still unavailable after running ensurepip."
+    }
+}
+
+function Write-Utf8NoBomFile {
+    param(
+        [string]$Path,
+        [string]$Content
+    )
+
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
 Write-Host "Preparing KODA Windows installer build."
 Write-Host "Repository: $RepoRoot"
 
-if (-not (Test-Path -LiteralPath $EntryPoint -PathType Leaf)) {
-    throw "Missing PyInstaller entry point: $EntryPoint"
+if (-not (Test-Path -LiteralPath $GuiEntryPoint -PathType Leaf)) {
+    throw "Missing GUI PyInstaller entry point: $GuiEntryPoint"
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $SharedPythonRoot "security_scanner") -PathType Container)) {
+if (-not (Test-Path -LiteralPath (
+    Join-Path $SharedPythonRoot "security_scanner"
+) -PathType Container)) {
     throw "security_scanner package was not found. Run this script from the full repository."
 }
 
@@ -109,126 +175,375 @@ $pythonArgs = @($python.Args)
 
 if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
     Write-Host "Creating build virtual environment."
-    & $pythonCommand @($pythonArgs + @("-m", "venv", $VenvDir))
+
+    & $pythonCommand @(
+        $pythonArgs + @(
+            "-m",
+            "venv",
+            $VenvDir
+        )
+    )
+
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create build virtual environment."
     }
 }
 
+Ensure-VenvPip -PythonPath $VenvPython
+
 if (-not $SkipDependencyInstall) {
+    Write-Host "Upgrading pip."
+
+    & $VenvPython -m pip install --upgrade pip
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to upgrade pip."
+    }
+
     Write-Host "Installing build dependencies."
-    # pywebview hosts the dashboard in a single native window (Edge WebView2),
-    # so KODA opens like the macOS app instead of a console + browser tab.
-    # playwright (pinned) powers the optional SPA-render web crawl.
-    & $VenvPython -m pip install --upgrade pip pyinstaller pywebview "playwright==1.61.0"
+
+    # pywebview: Windows GUI window using Edge WebView2
+    # playwright: optional SPA rendering during web scans
+    & $VenvPython -m pip install --upgrade `
+        pyinstaller `
+        pywebview `
+        "playwright==1.61.0"
+
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install PyInstaller, pywebview, and playwright."
     }
 
-    Write-Host "Downloading Playwright Chromium to bundle for offline SPA rendering."
+    Write-Host "Downloading Playwright Chromium for offline SPA rendering."
+
     $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
+
     & $VenvPython -m playwright install chromium
+
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to download Playwright Chromium."
     }
 }
+else {
+    Write-Host "Skipping dependency installation."
+
+    & $VenvPython -m PyInstaller --version *> $null
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "PyInstaller is not installed in the build virtual environment. Run again without -SkipDependencyInstall."
+    }
+}
+
+# Generate a small console entry point.
+# It imports the same security_scanner.cli.main() used by:
+# python -m security_scanner
+$cliEntrySource = @'
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+def configure_bundled_chromium() -> None:
+    """Reuse Chromium bundled with the adjacent GUI installation."""
+    if not getattr(sys, "frozen", False):
+        return
+
+    executable_dir = Path(sys.executable).resolve().parent
+
+    # Installed layout:
+    # KODA\
+    #   KODA.exe
+    #   _internal\ms-playwright\
+    #   KODA-CLI\KODA-CLI.exe
+    install_root = executable_dir.parent
+
+    candidates = (
+        install_root / "_internal" / "ms-playwright",
+        install_root / "ms-playwright",
+    )
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(candidate)
+            break
+
+
+def run() -> int:
+    configure_bundled_chromium()
+
+    from security_scanner.cli import main
+
+    return main()
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())
+'@
+
+Write-Utf8NoBomFile `
+    -Path $CliEntryPoint `
+    -Content $cliEntrySource
 
 if (Test-Path -LiteralPath $AppDistDir) {
+    Write-Host "Removing previous application build: $AppDistDir"
     Remove-Item -LiteralPath $AppDistDir -Recurse -Force
 }
 
-$workPath = Join-Path $BuildRoot "pyinstaller-work"
-$specPath = Join-Path $BuildRoot "pyinstaller-spec"
+# ---------------------------------------------------------------------------
+# Build GUI application: dist\KODA\KODA.exe
+# ---------------------------------------------------------------------------
 
-$pyInstallerArgs = @(
+$guiWorkPath = Join-Path $BuildRoot "pyinstaller-gui-work"
+$guiSpecPath = Join-Path $BuildRoot "pyinstaller-gui-spec"
+
+$guiPyInstallerArgs = @(
     "--noconfirm",
     "--clean",
     "--onedir",
-    # --windowed (no console): KODA launches as a single GUI window, with no
-    # terminal window behind it -- matching the macOS KODA app.
+
+    # GUI application: do not show a console window.
     "--windowed",
+
     "--name", $AppName,
     "--distpath", $DistDir,
-    "--workpath", $workPath,
-    "--specpath", $specPath,
+    "--workpath", $guiWorkPath,
+    "--specpath", $guiSpecPath,
     "--paths", $SharedPythonRoot,
-    # Bundle the 한글(HWPX) report template so the /api/export hwpx download works
-    # in the frozen app (read at runtime via security_scanner/assets/).
-    "--add-data", ((Join-Path $SharedPythonRoot "security_scanner\assets\koda-hwpx-template.hwpx") + ";security_scanner\assets"),
-    # Host posture, inventory, EOL, and CPE modules are imported lazily, so they
-    # must be force-collected or PyInstaller's static analysis drops them.
+
+    # Report template used by HWPX export.
+    "--add-data",
+    (
+        (
+            Join-Path $SharedPythonRoot `
+                "security_scanner\assets\koda-hwpx-template.hwpx"
+        ) + ";security_scanner\assets"
+    ),
+
+    # Modules such as host posture, inventory, EOL, CPE and web scanning
+    # are imported lazily.
     "--collect-submodules", "security_scanner",
-    # Live web posture scan (headers/TLS/cookies/CORS) is reached from the
-    # dashboard via /api/web-scan and imported lazily; force-include it so the
-    # feature ships in KODA.exe even if the collect flag above is narrowed later.
     "--hidden-import", "security_scanner.web",
-    # pywebview + its Windows Edge WebView2 backend (pythonnet/clr) must be
-    # bundled fully or the native window backend fails to load at runtime.
+
+    # Native Windows GUI backend.
     "--collect-all", "webview",
     "--collect-all", "clr_loader",
     "--collect-all", "pythonnet",
-    # playwright ships a bundled node driver as package data; collect it all so
-    # the frozen app can drive the bundled Chromium for SPA rendering.
+
+    # Playwright Python driver and package data.
     "--collect-all", "playwright",
+
     "--hidden-import", "tkinter",
     "--hidden-import", "tkinter.filedialog",
     "--hidden-import", "tkinter.messagebox"
 )
 
-# Bundle the downloaded Chromium under ms-playwright/ so it ships inside the app;
-# security_scanner.web points PLAYWRIGHT_BROWSERS_PATH at it at runtime.
+# Put Chromium inside the GUI application's _internal\ms-playwright directory.
 if (Test-Path -LiteralPath $BrowsersDir -PathType Container) {
-    $pyInstallerArgs += @("--add-data", ($BrowsersDir + ";ms-playwright"))
-} else {
-    Write-Warning "Chromium browser folder not found at $BrowsersDir; SPA rendering will be unavailable in this build. Re-run without -SkipDependencyInstall."
+    $guiPyInstallerArgs += @(
+        "--add-data",
+        ($BrowsersDir + ";ms-playwright")
+    )
+}
+else {
+    Write-Warning @"
+Chromium was not found at:
+
+$BrowsersDir
+
+KODA will still build, but Playwright SPA rendering will not be available.
+Run the script again without -SkipDependencyInstall to download Chromium.
+"@
 }
 
 if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
-    $pyInstallerArgs += @("--icon", $IconPath)
+    $guiPyInstallerArgs += @(
+        "--icon",
+        $IconPath
+    )
 }
 
-$pyInstallerArgs += $EntryPoint
+$guiPyInstallerArgs += $GuiEntryPoint
 
 Write-Host "Building KODA.exe with PyInstaller."
-& $VenvPython -m PyInstaller @pyInstallerArgs
+
+& $VenvPython -m PyInstaller @guiPyInstallerArgs
 
 if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller build failed."
+    throw "KODA GUI PyInstaller build failed."
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $AppDistDir "KODA.exe") -PathType Leaf)) {
-    throw "KODA.exe was not created."
+$guiExecutable = Join-Path $AppDistDir "KODA.exe"
+
+if (-not (Test-Path -LiteralPath $guiExecutable -PathType Leaf)) {
+    throw "KODA.exe was not created: $guiExecutable"
 }
 
-foreach ($fileName in @("README.md", "scanner_config.example.json", "scanner_config.documents.example.json")) {
+# ---------------------------------------------------------------------------
+# Build CLI application: dist\KODA\KODA-CLI\KODA-CLI.exe
+# ---------------------------------------------------------------------------
+
+$cliWorkPath = Join-Path $BuildRoot "pyinstaller-cli-work"
+$cliSpecPath = Join-Path $BuildRoot "pyinstaller-cli-spec"
+
+$cliPyInstallerArgs = @(
+    "--noconfirm",
+    "--clean",
+    "--onedir",
+
+    # CLI application: keep the console attached.
+    "--console",
+
+    "--name", $CliAppName,
+
+    # Using AppDistDir creates:
+    # dist\KODA\KODA-CLI\KODA-CLI.exe
+    "--distpath", $AppDistDir,
+    "--workpath", $cliWorkPath,
+    "--specpath", $cliSpecPath,
+    "--paths", $SharedPythonRoot,
+
+    "--add-data",
+    (
+        (
+            Join-Path $SharedPythonRoot `
+                "security_scanner\assets\koda-hwpx-template.hwpx"
+        ) + ";security_scanner\assets"
+    ),
+
+    "--collect-submodules", "security_scanner",
+    "--hidden-import", "security_scanner.web",
+
+    # CLI can use Playwright for web-scan --render.
+    # Chromium itself is not duplicated; the generated entry point points
+    # PLAYWRIGHT_BROWSERS_PATH to the GUI application's bundled browser.
+    "--collect-all", "playwright",
+
+    "--hidden-import", "tkinter",
+    "--hidden-import", "tkinter.filedialog",
+    "--hidden-import", "tkinter.messagebox"
+)
+
+if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
+    $cliPyInstallerArgs += @(
+        "--icon",
+        $IconPath
+    )
+}
+
+$cliPyInstallerArgs += $CliEntryPoint
+
+Write-Host "Building KODA-CLI.exe with PyInstaller."
+
+& $VenvPython -m PyInstaller @cliPyInstallerArgs
+
+if ($LASTEXITCODE -ne 0) {
+    throw "KODA CLI PyInstaller build failed."
+}
+
+if (-not (Test-Path -LiteralPath $CliExecutable -PathType Leaf)) {
+    throw "KODA-CLI.exe was not created: $CliExecutable"
+}
+
+# Root-level launcher:
+# %LOCALAPPDATA%\KODA\KODA-CLI.cmd
+$cliLauncherPath = Join-Path $AppDistDir "KODA-CLI.cmd"
+
+$cliLauncherSource = @'
+@echo off
+"%~dp0KODA-CLI\KODA-CLI.exe" %*
+exit /b %ERRORLEVEL%
+'@
+
+Set-Content `
+    -LiteralPath $cliLauncherPath `
+    -Value $cliLauncherSource `
+    -Encoding ASCII
+
+# Optional Start Menu shell. It keeps a command prompt open and makes
+# KODA-CLI.cmd available through the current session's PATH.
+$cliShellPath = Join-Path $AppDistDir "KODA-CLI-Shell.cmd"
+
+$cliShellSource = @'
+@echo off
+title KODA CLI
+cd /d "%USERPROFILE%"
+set "PATH=%~dp0;%PATH%"
+echo.
+echo KODA CLI
+echo Run: KODA-CLI.cmd --help
+echo.
+%COMSPEC% /K
+'@
+
+Set-Content `
+    -LiteralPath $cliShellPath `
+    -Value $cliShellSource `
+    -Encoding ASCII
+
+# ---------------------------------------------------------------------------
+# Copy documentation and example configuration files
+# ---------------------------------------------------------------------------
+
+foreach ($fileName in @(
+    "README.md",
+    "scanner_config.example.json",
+    "scanner_config.documents.example.json"
+)) {
     $source = Join-Path $SharedPythonRoot $fileName
+
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
         $source = Join-Path $RepoRoot $fileName
     }
+
     if (Test-Path -LiteralPath $source -PathType Leaf) {
-        Copy-Item -LiteralPath $source -Destination $AppDistDir -Force
+        Copy-Item `
+            -LiteralPath $source `
+            -Destination $AppDistDir `
+            -Force
     }
 }
 
-if (Test-Path -LiteralPath (Join-Path $RepoRoot "docs") -PathType Container) {
-    Copy-Item -LiteralPath (Join-Path $RepoRoot "docs") -Destination $AppDistDir -Recurse -Force
+$docsPath = Join-Path $RepoRoot "docs"
+
+if (Test-Path -LiteralPath $docsPath -PathType Container) {
+    Copy-Item `
+        -LiteralPath $docsPath `
+        -Destination $AppDistDir `
+        -Recurse `
+        -Force
 }
+
+# ---------------------------------------------------------------------------
+# Build KODASetup.exe
+# ---------------------------------------------------------------------------
 
 $iscc = Find-InnoCompiler -RequestedPath $InnoCompilerPath
 
 Write-Host "Building KODASetup.exe with Inno Setup."
+
 & $iscc "/DMyAppVersion=$Version" $InnoScript
+
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup build failed."
 }
 
 $setupPath = Join-Path $InstallerOutDir "KODASetup.exe"
+
 if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) {
     throw "Installer was not created: $setupPath"
 }
 
 Write-Host ""
 Write-Host "Build finished successfully."
+Write-Host "GUI executable: $guiExecutable"
+Write-Host "CLI executable: $CliExecutable"
+Write-Host "CLI launcher: $cliLauncherPath"
 Write-Host "Installer: $setupPath"
-Write-Host "Installed users will run KODA from the Start Menu or desktop shortcut."
-Write-Host "Double-clicking KODA opens a single native window (no console, no separate browser tab)."
+Write-Host ""
+Write-Host "Installed GUI:"
+Write-Host "  %LOCALAPPDATA%\KODA\KODA.exe"
+Write-Host ""
+Write-Host "Installed CLI:"
+Write-Host "  %LOCALAPPDATA%\KODA\KODA-CLI.cmd --help"
+Write-Host "  %LOCALAPPDATA%\KODA\KODA-CLI\KODA-CLI.exe --help"
