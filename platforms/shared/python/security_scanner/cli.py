@@ -45,6 +45,41 @@ def main(argv: list[str] | None = None) -> int:
             print(category)
         return 0
 
+    if args.command == "jar-scan":
+        from .java_vulnerability_scan import JavaScanOptions, run_java_scan
+
+        try:
+            result = run_java_scan(
+                JavaScanOptions(
+                    target=expand_path(args.target, Path.cwd()),
+                    output_dir=expand_path(args.output_dir, Path.cwd()),
+                    syft_bin=Path(args.syft_bin).expanduser() if args.syft_bin else None,
+                    grype_bin=Path(args.grype_bin).expanduser() if args.grype_bin else None,
+                    nvd_data=Path(args.nvd_data).expanduser() if args.nvd_data else None,
+                    cisa_kev=Path(args.cisa_kev).expanduser() if args.cisa_kev else None,
+                    knvd_data=Path(args.knvd_data).expanduser() if args.knvd_data else None,
+                    excludes=tuple(args.exclude),
+                    max_depth=args.max_depth,
+                    timeout=args.timeout,
+                    fail_on=args.fail_on,
+                    fail_on_kev=args.fail_on_kev,
+                    no_grype=args.no_grype,
+                    builtin_only=args.builtin_only,
+                    format=args.format,
+                )
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"Java archive scan error: {exc}", file=sys.stderr)
+            return 2
+        for warning in result.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        print(
+            f"Java scan: {result.archive_count} archive(s), {len(result.components)} component(s), "
+            f"{len(result.vulnerabilities)} vulnerability finding(s).",
+            file=sys.stderr,
+        )
+        return result.exit_code
+
     if args.command == "discover":
         from .discovery import discover_projects
 
@@ -563,6 +598,20 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be positive")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be positive")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="local-security-scan",
@@ -626,6 +675,23 @@ def build_parser() -> argparse.ArgumentParser:
         dest="base",
         help="base git ref for --changed-only, e.g. origin/main",
     )
+
+    jar_scan = subparsers.add_parser("jar-scan", help="offline Linux x86_64 JAR/WAR/EAR SBOM and vulnerability scan")
+    jar_scan.add_argument("--target", required=True, help="directory containing deployed JAR, WAR, and EAR files")
+    jar_scan.add_argument("--output-dir", default="reports/java-scan", help="report directory")
+    jar_scan.add_argument("--syft-bin", help="Syft executable; no automatic download")
+    jar_scan.add_argument("--grype-bin", help="Grype executable; no automatic download")
+    jar_scan.add_argument("--nvd-data", help="NVD JSON 2.0 file, .json.gz file, or directory")
+    jar_scan.add_argument("--cisa-kev", help="CISA known_exploited_vulnerabilities.json")
+    jar_scan.add_argument("--knvd-data", help="KODA-normalized KNVD JSON")
+    jar_scan.add_argument("--exclude", action="append", default=[], help="archive relative-path/name glob to skip")
+    jar_scan.add_argument("--max-depth", type=_positive_int, default=3, help="maximum nested archive depth")
+    jar_scan.add_argument("--timeout", type=_positive_float, default=300.0, help="Syft/Grype timeout in seconds")
+    jar_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 at or above this severity")
+    jar_scan.add_argument("--fail-on-kev", action="store_true", help="exit 1 when a CISA KEV match exists")
+    jar_scan.add_argument("--no-grype", action="store_true", help="write SBOM and skip vulnerability comparison")
+    jar_scan.add_argument("--builtin-only", action="store_true", help="skip Syft and use the built-in Java identifier")
+    jar_scan.add_argument("--format", choices=("json", "html", "markdown"), default="html", help="primary report format; all six artifacts are written")
 
     fix = subparsers.add_parser(
         "fix",
