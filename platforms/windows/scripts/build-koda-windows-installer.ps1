@@ -561,6 +561,20 @@ if grype.is_file():
 if grype_db.is_dir():
     os.environ.setdefault("GRYPE_DB_CACHE_DIR", str(grype_db))
 
+# NVD and CISA KEV ship as a separate data package because they change daily
+# while the application does not. Unzip koda-vuln-data-<date>.zip into the
+# install directory and jar-scan picks it up here; without it the scan still
+# runs on Grype alone.
+vuln_data = root / "vuln-data"
+nvd_data = vuln_data / "nvd"
+cisa_kev = vuln_data / "known_exploited_vulnerabilities.json"
+
+if nvd_data.is_dir():
+    os.environ.setdefault("KODA_NVD_DATA", str(nvd_data))
+
+if cisa_kev.is_file():
+    os.environ.setdefault("KODA_CISA_KEV", str(cisa_kev))
+
 # The installed product is intended to work without internet access.
 os.environ.setdefault("GRYPE_DB_AUTO_UPDATE", "false")
 os.environ.setdefault("GRYPE_DB_VALIDATE_AGE", "false")

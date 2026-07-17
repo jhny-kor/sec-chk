@@ -17,6 +17,49 @@ The build creates:
 
 Target users install with `KODASetup.exe`. It installs to `%LOCALAPPDATA%\KODA` and creates Start Menu shortcuts for `KODA` and `KODA (Browser Mode)`.
 
+## Vulnerability Data Package
+
+The installer bundles Syft, Grype, and the Grype DB, but not the NVD and CISA
+KEV feeds. Those change daily while the application does not, so they ship as a
+separate package that is refreshed without rebuilding or redistributing the
+installer.
+
+Build it on a connected macOS/Linux host (it reuses the same download cache and
+`.meta` verification as the Linux offline bundle):
+
+```bash
+bash platforms/linux/package-offline.sh --vuln-data-only
+# → dist/Windows/koda-vuln-data-<date>.zip  (about 210 MB, NVD 2002-current + KEV)
+```
+
+The script prints the archive SHA-256; compare it on the target machine with
+`Get-FileHash` before extracting. Extract the zip into the install directory so
+that the folders line up:
+
+```powershell
+Expand-Archive -Path koda-vuln-data-<date>.zip -DestinationPath $env:LOCALAPPDATA\KODA -Force
+# → %LOCALAPPDATA%\KODA\vuln-data\nvd\...
+#   %LOCALAPPDATA%\KODA\vuln-data\known_exploited_vulnerabilities.json
+#   %LOCALAPPDATA%\KODA\vuln-data\versions.txt   (feed 기준일)
+```
+
+`KODA.exe` and `KODA-CLI.exe` detect `vuln-data\` on startup and set
+`KODA_NVD_DATA` and `KODA_CISA_KEV` automatically, exactly as they already do
+for `tools\`. No path arguments are needed:
+
+```bat
+"%LOCALAPPDATA%\KODA\KODA-CLI.cmd" jar-scan --target D:\apps ^
+  --output-dir reports --fail-on high --fail-on-kev
+```
+
+Without the data package `jar-scan` still runs on Grype alone, but reports carry
+no CVSS or exploited-vulnerability detail, and `--fail-on-kev` exits `2` rather
+than passing a gate it cannot evaluate.
+
+Refresh the data by extracting a newer zip over the old one. Upgrading KODA does
+not delete `vuln-data\`; uninstalling KODA removes it with the rest of the
+install directory.
+
 ## Run From Source
 
 ```bat

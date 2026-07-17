@@ -14,17 +14,23 @@ cisa_url="${KODA_CISA_URL:-https://www.cisa.gov/sites/default/files/feeds/known_
 grype_db_latest_url="${KODA_GRYPE_DB_LATEST_URL:-https://grype.anchore.io/databases/v6/latest.json}"
 
 refresh=0
+vuln_data_only=0
+vuln_data_dir="${KODA_VULN_DATA_DIR:-$repo_root/dist/Windows}"
 
 usage() {
   cat <<'EOF'
-Usage: package-offline.sh [--refresh]
+Usage: package-offline.sh [--refresh] [--vuln-data-only]
 
 Builds dist/linux/koda-linux-x86_64-<version>.tar.gz on a connected
 macOS/Linux host.
 
 Options:
-  --refresh  re-validate cached yearly NVD feeds against their .meta files
-             and re-download the Grype DB latest metadata
+  --refresh         re-validate cached yearly NVD feeds against their .meta
+                    files and re-download the Grype DB latest metadata
+  --vuln-data-only  download only NVD and CISA KEV, then write
+                    dist/Windows/koda-vuln-data-<date>.zip for the Windows
+                    installer. Skips Syft, Grype, the Grype DB, and the Linux
+                    tarball, which the Windows installer already carries.
 
 Mutable feeds (NVD recent/modified, CISA KEV) are re-downloaded on every
 build regardless of --refresh. Version-pinned Syft/Grype releases always
@@ -33,6 +39,7 @@ reuse the cache.
 Environment:
   KODA_OFFLINE_CACHE_DIR download cache, default .build/koda-offline-cache
   KODA_LINUX_DIST_DIR    output directory, default dist/linux
+  KODA_VULN_DATA_DIR     --vuln-data-only output directory, default dist/Windows
   KODA_SYFT_VERSION      default 1.46.0
   KODA_GRYPE_VERSION     default 0.115.0
   KODA_NVD_START_YEAR    default 2002
@@ -44,6 +51,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --refresh)
       refresh=1
+      shift
+      ;;
+    --vuln-data-only)
+      vuln_data_only=1
       shift
       ;;
     -h|--help)
@@ -157,6 +168,8 @@ download_tool() {
   rm -rf "$tmp"
 }
 
+if [ "$vuln_data_only" -eq 0 ]; then
+
 download_tool syft "$syft_version"
 download_tool grype "$grype_version"
 
@@ -201,6 +214,8 @@ if actual != expected:
 print(f"verified {path.name}: {actual}")
 PY
 
+fi
+
 download_nvd_feed() {
   local feed="$1" mutable="${2:-0}"
   local nvd_file="$asset_dir/vuln-data/nvd/nvdcve-2.0-$feed.json.gz"
@@ -241,6 +256,53 @@ done
 cisa_file="$asset_dir/vuln-data/known_exploited_vulnerabilities.json"
 invalidate "$cisa_file"
 download "$cisa_url" "$cisa_file"
+
+# The Windows installer already bundles Syft, Grype, and the Grype DB, so its
+# data package carries only the feeds that change daily.
+if [ "$vuln_data_only" -eq 1 ]; then
+  mkdir -p "$vuln_data_dir"
+  vuln_data_dir="$(CDPATH= cd -- "$vuln_data_dir" && pwd)"
+  python3 - "$asset_dir/vuln-data/versions.txt" "$nvd_start_year" "$nvd_end_year" "$cisa_file" <<'PY'
+import datetime
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+kev = json.loads(pathlib.Path(sys.argv[4]).read_text(encoding="utf-8"))
+path.write_text(
+    "KODA offline vulnerability data (NVD + CISA KEV)\n"
+    f"built_at={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
+    f"nvd_start_year={sys.argv[2]}\n"
+    f"nvd_end_year={sys.argv[3]}\n"
+    f"cisa_kev_date_released={kev.get('dateReleased', 'unknown')}\n"
+    f"cisa_kev_catalog_version={kev.get('catalogVersion', 'unknown')}\n",
+    encoding="utf-8",
+)
+PY
+  zip_path="$vuln_data_dir/koda-vuln-data-$(date -u +%Y-%m-%d).zip"
+  rm -f "$zip_path"
+  # Entries are vuln-data/..., so the zip extracts straight into the install
+  # directory that the Windows runtime hook probes.
+  (cd "$asset_dir" && python3 -m zipfile -c "$zip_path" vuln-data)
+  # Keep it out of the shared cache; a full build writes its own versions.txt
+  # and must not inherit this one's build date.
+  rm -f "$asset_dir/vuln-data/versions.txt"
+  python3 - "$zip_path" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+with path.open("rb") as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+print(f"sha256={digest.hexdigest()}", file=sys.stderr)
+PY
+  echo "$zip_path"
+  exit 0
+fi
 
 python3 - "$asset_dir/versions.txt" "$syft_version" "$grype_version" "$db_path" "$db_checksum" "$nvd_start_year" "$nvd_end_year" "$cisa_file" <<'PY'
 import datetime
