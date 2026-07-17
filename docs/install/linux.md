@@ -44,7 +44,7 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner host-scan --forma
 ```
 
 For the Linux x86_64 closed-network Java scan, prepare Syft, Grype, and the
-offline NVD/CISA/KNVD files on an approved connected host, then run:
+offline NVD/CISA files on an approved connected host, then run:
 
 ~~~bash
 PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
@@ -54,12 +54,11 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
   --grype-bin /opt/koda/tools/grype \
   --nvd-data /opt/koda/vuln-data/nvd \
   --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json \
-  --knvd-data /opt/koda/vuln-data/knvd-notices.json \
   --fail-on high --fail-on-kev
 ~~~
 
 This command does not download tools, update a vulnerability database, or
-contact NVD, CISA, or KNVD. The full data-transfer procedure and report
+contact NVD or CISA. The full data-transfer procedure and report
 contract are in [the offline Java SBOM runbook](../security/java-sbom-vulnerability-scan.md).
 
 ## Install Offline Bundle
@@ -220,7 +219,7 @@ package without the renderer is rejected so that an offline installation cannot
 silently lose PDF downloads.
 
 To create one x86_64 archive containing Syft, Grype, the Grype DB, NVD JSON 2.0,
-and CISA KEV, use the offline builder on the connected MacBook. KNVD is optional:
+and CISA KEV, use the offline builder on the connected MacBook:
 
 ```bash
 KODA_NVD_START_YEAR=2025 \
@@ -232,8 +231,7 @@ The generated bundle contains the selected NVD year feeds plus `recent` and
 `modified`. The builder verifies the Syft/Grype release checksums and Grype DB
 checksum, writes `manifest.sha256`, and produces one
 `dist/linux/koda-linux-x86_64-*.tar.gz` file. Omit the two NVD variables to
-download the full year range. If an approved KNVD file is available, add
-`--knvd-data /path/to/knvd-notices.json`.
+download the full year range.
 The target server needs Linux x86_64, Python 3.10+, and the approved native
 renderer libraries; no network access is used during installation or scanning.
 
@@ -250,8 +248,7 @@ When the archive was built with `package-offline.sh`, `install.sh` copies the
 offline tools and data below the selected KODA prefix, imports the bundled
 Grype DB, and configures `koda jar-scan` to use them automatically. The
 operator can still override the paths with `KODA_SYFT_BIN`, `KODA_GRYPE_BIN`,
-`KODA_NVD_DATA`, `KODA_CISA_KEV`, `KODA_KNVD_DATA`, and
-`GRYPE_DB_CACHE_DIR`.
+`KODA_NVD_DATA`, `KODA_CISA_KEV`, and `GRYPE_DB_CACHE_DIR`.
 
 For an offline smoke test, start the dashboard on loopback and verify both the
 health endpoint and a PDF export from a completed sample scan before promoting
@@ -266,6 +263,43 @@ Stop the foreground server with `Ctrl+C`. For a long-running service, run KODA
 under the platform's service manager with a dedicated unprivileged account,
 `WorkingDirectory` set to the application directory, and loopback binding
 unless remote access is explicitly required.
+
+## Docker Closed-Network Deliverable
+
+When the target server already runs Docker Engine, build one self-contained
+Docker deliverable instead of installing KODA on the host:
+
+```bash
+bash platforms/linux/package-docker-offline.sh --refresh
+```
+
+This wraps the offline tarball in a multi-stage `linux/amd64` image
+(Syft, Grype, pre-imported Grype DB, NVD, CISA KEV, Chromium included),
+smoke-tests it offline, and produces
+`dist/linux/koda-docker-offline-x86_64-<version>.tar.gz`. `--refresh`
+re-validates the mutable feeds (Grype DB metadata, NVD yearly `.meta`,
+NVD recent/modified, CISA KEV) before packaging.
+
+On the closed-network server:
+
+```bash
+cd /home/user0/projects/koda
+tar -xzf koda-docker-offline-x86_64-<version>.tar.gz
+cd koda-docker-offline-x86_64-<version>
+bash install.sh
+/home/user0/projects/koda/koda-docker jar-scan \
+  --target /jeus/domains/domain1/applications \
+  --output-dir /home/user0/projects/koda/reports/java-scan
+```
+
+Every wrapper run uses `--network none`, a read-only root filesystem, a
+non-root user, dropped capabilities, and CPU/memory/PID limits; scan targets
+are mounted read-only and only the report directory is writable. The
+`audit` convenience command combines `jar-scan --verify-sbom` with the
+baseline SBOM, hash, and KEV gates, and `dashboard start|status|logs|stop`
+manages the loopback-bound dashboard container. Operations, update/rollback,
+and optional GitLab registry upload are documented in
+`platforms/linux/docker/README.md`.
 
 ## Update and Rollback
 

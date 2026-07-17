@@ -64,7 +64,7 @@ bash platforms/linux/package.sh
 ```
 
 For the complete closed-network Java package, build one x86_64 archive from the
-connected MacBook. KNVD is optional:
+connected MacBook:
 
 ```bash
 KODA_NVD_START_YEAR=2025 \
@@ -72,9 +72,8 @@ KODA_NVD_END_YEAR=2026 \
 bash platforms/linux/package-offline.sh
 ```
 
-This includes Syft, Grype, the Grype DB, NVD JSON feeds, and CISA KEV. Add
-`--knvd-data /path/to/knvd-notices.json` when an approved KNVD file is available.
-It verifies downloaded checksums, and the resulting archive is the only file
+This includes Syft, Grype, the Grype DB, NVD JSON feeds, and CISA KEV. It
+verifies downloaded checksums, and the resulting archive is the only file
 that needs to be transferred.
 
 Install on the target Linux server:
@@ -115,6 +114,28 @@ koda manifest compare --baseline reports/approved-manifest.json --target /app/cu
 
 For a full example, see `examples/deploy-gate.sh`.
 
+## Docker Single Deliverable
+
+For servers that already run Docker Engine, build the closed-network Docker
+deliverable instead of a host install:
+
+```bash
+bash platforms/linux/package-docker-offline.sh --refresh
+```
+
+It reuses `dist/linux/koda-linux-x86_64-<version>.tar.gz` (building it first
+when missing), installs it inside a multi-stage `linux/amd64` image with the
+Grype DB pre-imported, smoke-tests the image with `--network none`, and emits
+`dist/linux/koda-docker-offline-x86_64-<version>.tar.gz` containing the image
+tar, `install.sh`, and the `koda-docker` isolation wrapper (network none,
+read-only rootfs, non-root, resource limits, ro target / rw report mounts).
+See `platforms/linux/docker/README.md` for closed-network installation,
+`audit`/`dashboard` usage, rollback, and optional GitLab registry upload.
+
+`package-offline.sh --refresh` re-validates cached yearly NVD feeds against
+their `.meta` files; NVD `recent`/`modified` and CISA KEV are re-downloaded on
+every build.
+
 ## GitLab CI
 
 Use `examples/gitlab-ci.yml` as a starter job. It installs KODA locally in the
@@ -136,7 +157,7 @@ directory and should run `koda deploy-check`.
 ## Offline Java archive scan
 
 For Linux x86_64 application servers, stage Syft, Grype, and the approved
-NVD/CISA KEV/KNVD files inside the closed network, then run:
+NVD/CISA KEV files inside the closed network, then run:
 
 ~~~bash
 koda jar-scan \
@@ -146,7 +167,6 @@ koda jar-scan \
   --grype-bin /opt/koda/tools/grype \
   --nvd-data /opt/koda/vuln-data/nvd \
   --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json \
-  --knvd-data /opt/koda/vuln-data/knvd-notices.json \
   --fail-on high --fail-on-kev
 ~~~
 
