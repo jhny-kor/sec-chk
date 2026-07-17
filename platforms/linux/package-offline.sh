@@ -10,20 +10,27 @@ syft_version="${KODA_SYFT_VERSION:-1.46.0}"
 grype_version="${KODA_GRYPE_VERSION:-0.115.0}"
 nvd_start_year="${KODA_NVD_START_YEAR:-2002}"
 nvd_end_year="${KODA_NVD_END_YEAR:-$(date +%Y)}"
-knvd_source="${KODA_KNVD_SOURCE:-}"
 cisa_url="${KODA_CISA_URL:-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}"
 grype_db_latest_url="${KODA_GRYPE_DB_LATEST_URL:-https://grype.anchore.io/databases/v6/latest.json}"
 
+refresh=0
+
 usage() {
   cat <<'EOF'
-Usage: package-offline.sh [--knvd-data FILE]
+Usage: package-offline.sh [--refresh]
 
 Builds dist/linux/koda-linux-x86_64-<version>.tar.gz on a connected
-macOS/Linux host. KNVD is optional and is not downloaded from an invented
-public endpoint.
+macOS/Linux host.
+
+Options:
+  --refresh  re-validate cached yearly NVD feeds against their .meta files
+             and re-download the Grype DB latest metadata
+
+Mutable feeds (NVD recent/modified, CISA KEV) are re-downloaded on every
+build regardless of --refresh. Version-pinned Syft/Grype releases always
+reuse the cache.
 
 Environment:
-  KODA_KNVD_SOURCE       same as --knvd-data
   KODA_OFFLINE_CACHE_DIR download cache, default .build/koda-offline-cache
   KODA_LINUX_DIST_DIR    output directory, default dist/linux
   KODA_SYFT_VERSION      default 1.46.0
@@ -35,9 +42,9 @@ EOF
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --knvd-data)
-      knvd_source="$2"
-      shift 2
+    --refresh)
+      refresh=1
+      shift
       ;;
     -h|--help)
       usage
@@ -50,11 +57,6 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
-
-if [ -n "$knvd_source" ] && [ ! -f "$knvd_source" ]; then
-  echo "error: KNVD file not found: $knvd_source" >&2
-  exit 2
-fi
 
 command -v curl >/dev/null 2>&1 || { echo "error: curl is required." >&2; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 is required." >&2; exit 2; }
@@ -76,6 +78,41 @@ download() {
   fi
   mv "$partial" "$destination"
   touch "$marker"
+}
+
+# Drop the completion marker so the next download() call re-fetches the file.
+invalidate() {
+  rm -f "$cache_dir/.complete/$(basename -- "$1").done"
+}
+
+# Verify a cached NVD .json.gz feed against the freshly downloaded .meta
+# (sha256 in .meta is over the uncompressed JSON). Returns 1 on mismatch.
+verify_nvd_meta() {
+  local feed_file="$1" meta_file="$2"
+  python3 - "$feed_file" "$meta_file" <<'PY'
+import gzip
+import hashlib
+import pathlib
+import sys
+
+feed = pathlib.Path(sys.argv[1])
+expected = None
+for line in pathlib.Path(sys.argv[2]).read_text(encoding="utf-8").splitlines():
+    key, _, value = line.strip().partition(":")
+    if key.lower() == "sha256":
+        expected = value.strip().lower()
+        break
+if not expected:
+    raise SystemExit(f"no sha256 entry in {sys.argv[2]}")
+digest = hashlib.sha256()
+with gzip.open(feed, "rb") as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+if digest.hexdigest() != expected:
+    print(f"stale NVD feed {feed.name}: {digest.hexdigest()} != {expected}", file=sys.stderr)
+    raise SystemExit(1)
+print(f"verified {feed.name} against .meta")
+PY
 }
 
 verify_release_checksum() {
@@ -124,6 +161,9 @@ download_tool syft "$syft_version"
 download_tool grype "$grype_version"
 
 latest_json="$cache_dir/grype-db-latest.json"
+if [ "$refresh" -eq 1 ]; then
+  invalidate "$latest_json"
+fi
 download "$grype_db_latest_url" "$latest_json"
 read -r db_path db_checksum db_url <<EOF
 $(python3 - "$latest_json" <<'PY'
@@ -162,9 +202,25 @@ print(f"verified {path.name}: {actual}")
 PY
 
 download_nvd_feed() {
-  local feed="$1"
+  local feed="$1" mutable="${2:-0}"
   local nvd_file="$asset_dir/vuln-data/nvd/nvdcve-2.0-$feed.json.gz"
-  download "https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-$feed.json.gz" "$nvd_file"
+  local nvd_url="https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-$feed.json.gz"
+  local meta_file="$cache_dir/nvd-meta/nvdcve-2.0-$feed.meta"
+  if [ "$mutable" -eq 1 ]; then
+    invalidate "$nvd_file"
+  fi
+  download "$nvd_url" "$nvd_file"
+  if [ "$mutable" -eq 1 ] || [ "$refresh" -eq 1 ]; then
+    invalidate "$meta_file"
+    download "https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-$feed.meta" "$meta_file"
+    if ! verify_nvd_meta "$nvd_file" "$meta_file"; then
+      invalidate "$nvd_file"
+      rm -f "$nvd_file"
+      download "$nvd_url" "$nvd_file"
+      verify_nvd_meta "$nvd_file" "$meta_file" \
+        || { echo "error: NVD feed $feed does not match its .meta after re-download." >&2; exit 2; }
+    fi
+  fi
 }
 
 feed_batch=()
@@ -179,33 +235,21 @@ done
 for pid in "${feed_batch[@]}"; do wait "$pid"; done
 
 for feed in recent modified; do
-  download_nvd_feed "$feed"
+  download_nvd_feed "$feed" 1
 done
 
-download "$cisa_url" "$asset_dir/vuln-data/known_exploited_vulnerabilities.json"
-if [ -n "$knvd_source" ]; then
-python3 - "$knvd_source" "$asset_dir/vuln-data/knvd-notices.json" <<'PY'
-import json
-import pathlib
-import shutil
-import sys
+cisa_file="$asset_dir/vuln-data/known_exploited_vulnerabilities.json"
+invalidate "$cisa_file"
+download "$cisa_url" "$cisa_file"
 
-source = pathlib.Path(sys.argv[1])
-payload = json.loads(source.read_text(encoding="utf-8"))
-if not isinstance(payload, dict) or not isinstance(payload.get("notices"), list):
-    raise SystemExit("KNVD JSON must have a top-level notices list")
-shutil.copyfile(source, sys.argv[2])
-PY
-else
-  rm -f "$asset_dir/vuln-data/knvd-notices.json"
-fi
-
-python3 - "$asset_dir/versions.txt" "$syft_version" "$grype_version" "$db_path" "$db_checksum" "$nvd_start_year" "$nvd_end_year" <<'PY'
+python3 - "$asset_dir/versions.txt" "$syft_version" "$grype_version" "$db_path" "$db_checksum" "$nvd_start_year" "$nvd_end_year" "$cisa_file" <<'PY'
 import datetime
+import json
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
+kev = json.loads(pathlib.Path(sys.argv[8]).read_text(encoding="utf-8"))
 path.write_text(
     "KODA offline Linux x86_64 bundle\n"
     f"built_at={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
@@ -214,7 +258,9 @@ path.write_text(
     f"grype_db={sys.argv[4]}\n"
     f"grype_db_checksum={sys.argv[5]}\n"
     f"nvd_start_year={sys.argv[6]}\n"
-    f"nvd_end_year={sys.argv[7]}\n",
+    f"nvd_end_year={sys.argv[7]}\n"
+    f"cisa_kev_date_released={kev.get('dateReleased', 'unknown')}\n"
+    f"cisa_kev_catalog_version={kev.get('catalogVersion', 'unknown')}\n",
     encoding="utf-8",
 )
 PY

@@ -195,11 +195,17 @@ if not any(path.name.startswith("greenlet-") for path in selected):
 
 for wheel in selected:
     with zipfile.ZipFile(wheel) as archive:
-        for member in archive.namelist():
-            relative = pathlib.PurePosixPath(member)
+        for member in archive.infolist():
+            relative = pathlib.PurePosixPath(member.filename)
             if relative.is_absolute() or ".." in relative.parts:
-                raise SystemExit(f"unsafe wheel member: {member}")
-        archive.extractall(destination)
+                raise SystemExit(f"unsafe wheel member: {member.filename}")
+        for member in archive.infolist():
+            archive.extract(member, destination)
+            # zipfile drops POSIX modes; restore them so bundled executables
+            # (e.g. playwright/driver/node) stay runnable.
+            mode = (member.external_attr >> 16) & 0o7777
+            if mode and not member.is_dir():
+                (destination / member.filename).chmod(mode)
 PY
   fi
 
