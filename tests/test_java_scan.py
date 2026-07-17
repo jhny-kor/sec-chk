@@ -258,6 +258,18 @@ class JavaScanTests(unittest.TestCase):
                 result = run_java_scan(JavaScanOptions(target=target, output_dir=root / "reports", cisa_kev=kev, fail_on_kev=True))
             self.assertEqual(result.exit_code, 1)
 
+    def test_fail_on_kev_without_kev_data_is_exit_two(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "app"
+            target.mkdir()
+            _write_jar(target / "demo.jar", {"META-INF/maven/org.example/demo/pom.properties": "groupId=org.example\nartifactId=demo\nversion=1.2.3\n"})
+            match = GrypeMatch("CVE-2026-0001", ("CVE-2026-0001",), "demo", "1.2.3", "pkg:maven/org.example/demo@1.2.3", (), "low", (), ())
+            with patch("security_scanner.java_vulnerability_scan.run_grype", return_value=GrypeResult((match,), "test", {}, "", False)):
+                result = run_java_scan(JavaScanOptions(target=target, output_dir=root / "reports", fail_on_kev=True))
+            self.assertEqual(result.exit_code, 2)
+            self.assertTrue(any("--fail-on-kev requires CISA KEV data" in warning for warning in result.warnings))
+
     def test_syft_timeout_is_controlled_and_does_not_raise(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

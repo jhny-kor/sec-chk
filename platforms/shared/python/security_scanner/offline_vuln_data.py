@@ -28,6 +28,10 @@ class OfflineVulnerabilityData:
     warnings: tuple[str, ...]
     fatal: bool
 
+    def loaded(self, name: str) -> bool:
+        """Report whether a named feed was read, separating "no matches" from "no data"."""
+        return any(source.status == "loaded" and source.metadata.get("name") == name for source in self.sources)
+
 
 def load_offline_data(
     nvd_source: Path | None,
