@@ -11,7 +11,7 @@ struct BundledJavaScanOutcome {
 enum BundledJavaArchiveScanner {
     private static let archiveExtensions = Set(["jar", "war", "ear"])
 
-    static func scan(targets: [URL], outputDirectory: URL) throws -> BundledJavaScanOutcome {
+    static func scan(targets: [URL], outputDirectory: URL, language: AppLanguage) throws -> BundledJavaScanOutcome {
         guard !targets.isEmpty else {
             throw JavaScanError.noTargets
         }
@@ -30,7 +30,7 @@ enum BundledJavaArchiveScanner {
 
         let result = try run(
             executable: assets.scanner,
-            arguments: ["jar-scan", "--target", stagingDirectory.path, "--output-dir", outputDirectory.path],
+            arguments: ["jar-scan", "--target", stagingDirectory.path, "--output-dir", outputDirectory.path, "--language", language.rawValue],
             environment: [
                 "KODA_SYFT_BIN": assets.syft.path,
                 "KODA_GRYPE_BIN": assets.grype.path,

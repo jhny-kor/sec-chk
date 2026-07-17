@@ -49,7 +49,8 @@ struct KODAApp: App {
         }
 
         do {
-            let outcome = try BundledJavaArchiveScanner.scan(targets: targets, outputDirectory: outputDirectory)
+            let language: AppLanguage = environment["KODA_JAVA_SCAN_LANGUAGE"] == "en" ? .en : .ko
+            let outcome = try BundledJavaArchiveScanner.scan(targets: targets, outputDirectory: outputDirectory, language: language)
             print(outcome.sbomURL.path)
             exit(outcome.exitCode)
         } catch {

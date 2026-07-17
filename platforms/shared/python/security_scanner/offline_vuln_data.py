@@ -23,8 +23,6 @@ class DataSource:
 class OfflineVulnerabilityData:
     nvd: dict[str, dict[str, object]]
     cisa_kev: dict[str, dict[str, object]]
-    knvd: dict[str, tuple[dict[str, object], ...]]
-    knvd_manual_review: tuple[dict[str, object], ...]
     sources: tuple[DataSource, ...]
     data_as_of: str
     warnings: tuple[str, ...]
@@ -34,7 +32,6 @@ class OfflineVulnerabilityData:
 def load_offline_data(
     nvd_source: Path | None,
     cisa_source: Path | None,
-    knvd_source: Path | None,
     cve_ids: Iterable[str],
 ) -> OfflineVulnerabilityData:
     requested = {value.upper() for value in cve_ids}
@@ -44,18 +41,14 @@ def load_offline_data(
     sources.append(nvd_info)
     kev, kev_info, kev_dates, kev_fatal = _load_kev(cisa_source, requested, warnings)
     sources.append(kev_info)
-    knvd, knvd_manual_review, knvd_info, knvd_dates, knvd_fatal = _load_knvd(knvd_source, requested, warnings)
-    sources.append(knvd_info)
-    dates = sorted(value for value in (*nvd_dates, *kev_dates, *knvd_dates) if value)
+    dates = sorted(value for value in (*nvd_dates, *kev_dates) if value)
     return OfflineVulnerabilityData(
         nvd=nvd,
         cisa_kev=kev,
-        knvd=knvd,
-        knvd_manual_review=knvd_manual_review,
         sources=tuple(sources),
         data_as_of=dates[-1] if dates else "unknown",
         warnings=tuple(warnings),
-        fatal=nvd_fatal or kev_fatal or knvd_fatal,
+        fatal=nvd_fatal or kev_fatal,
     )
 
 
@@ -115,37 +108,6 @@ def _load_kev(
     except (OSError, EOFError, json.JSONDecodeError, UnicodeDecodeError, AttributeError, TypeError, ValueError) as exc:
         warnings.append(f"Could not load CISA KEV data {source}: {exc}")
         return {}, _source_info(source, "invalid", {"name": "cisa_kev"}), (), True
-
-
-def _load_knvd(
-    source: Path | None,
-    requested: set[str],
-    warnings: list[str],
-) -> tuple[dict[str, tuple[dict[str, object], ...]], tuple[dict[str, object], ...], DataSource, tuple[str, ...], bool]:
-    if source is None:
-        return {}, (), _not_provided("knvd"), (), False
-    try:
-        payload = _read_json(source)
-        notices = payload.get("notices", [])
-        records: dict[str, list[dict[str, object]]] = {}
-        manual_review: list[dict[str, object]] = []
-        if isinstance(notices, list):
-            for notice in notices:
-                if not isinstance(notice, dict):
-                    continue
-                cve_ids = notice.get("cve_ids")
-                if not isinstance(cve_ids, list) or not cve_ids:
-                    manual_review.append(notice)
-                    continue
-                for cve_id in cve_ids:
-                    normalized = str(cve_id).upper()
-                    if normalized in requested:
-                        records.setdefault(normalized, []).append(notice)
-        dates = _date_values(payload, ("generated_at",))
-        return {key: tuple(value) for key, value in records.items()}, tuple(manual_review), _source_info(source, "loaded", {"name": "knvd", "generated_at": payload.get("generated_at", "")}), dates, False
-    except (OSError, EOFError, json.JSONDecodeError, UnicodeDecodeError, AttributeError, TypeError, ValueError) as exc:
-        warnings.append(f"Could not load KNVD data {source}: {exc}")
-        return {}, (), _source_info(source, "invalid", {"name": "knvd"}), (), True
 
 
 def _read_json(path: Path) -> dict[str, object]:

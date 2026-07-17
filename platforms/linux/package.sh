@@ -65,9 +65,6 @@ if [ -n "$offline_asset_dir" ]; then
   cp -R "$offline_asset_dir/tools" "$stage/tools"
   cp -R "$offline_asset_dir/grype-db" "$stage/grype-db"
   cp -R "$offline_asset_dir/vuln-data" "$stage/vuln-data"
-  if [ ! -f "$offline_asset_dir/vuln-data/knvd-notices.json" ]; then
-    rm -f "$stage/vuln-data/knvd-notices.json"
-  fi
   if [ -f "$offline_asset_dir/manifest.sha256" ]; then
     cp "$offline_asset_dir/manifest.sha256" "$stage/manifest.sha256"
   fi

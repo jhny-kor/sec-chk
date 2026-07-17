@@ -508,7 +508,7 @@ final class ScannerBridge: ObservableObject {
         Task {
             do {
                 let outcome = try await Task.detached(priority: .userInitiated) {
-                    try BundledJavaArchiveScanner.scan(targets: targets, outputDirectory: outputDirectory)
+                    try BundledJavaArchiveScanner.scan(targets: targets, outputDirectory: outputDirectory, language: language)
                 }.value
                 isRunning = false
                 reportURL = outcome.sbomURL

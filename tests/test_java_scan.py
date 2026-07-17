@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import gzip
 import socket
 import stat
 import subprocess
@@ -22,7 +21,6 @@ from security_scanner.java_inventory import inventory_components
 from security_scanner.java_vulnerability_scan import JavaScanOptions, run_java_scan
 from security_scanner.grype_adapter import GrypeMatch, GrypeResult
 from security_scanner.syft_adapter import run_syft
-from security_scanner.offline_vuln_data import load_offline_data
 
 
 def _write_jar(path: Path, files: dict[str, str | bytes]) -> None:
@@ -169,19 +167,6 @@ class JavaScanTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            knvd = root / "knvd.json"
-            knvd.write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "notices": [
-                            {"notice_id": "KNVD-1", "cve_ids": ["CVE-2021-44228"]},
-                            {"notice_id": "KNVD-NO-CVE"},
-                        ],
-                    }
-                ),
-                encoding="utf-8",
-            )
             fake_grype = root / "grype"
             fake_grype.write_text("#!/bin/sh\n", encoding="utf-8")
             fake_grype.chmod(fake_grype.stat().st_mode | stat.S_IXUSR)
@@ -209,7 +194,7 @@ class JavaScanTests(unittest.TestCase):
                         grype_bin=fake_grype,
                         nvd_data=nvd,
                         cisa_kev=kev,
-                        knvd_data=knvd,
+                        language="ko",
                         fail_on="high",
                     )
                 )
@@ -220,7 +205,6 @@ class JavaScanTests(unittest.TestCase):
             self.assertTrue(vulnerability.known_exploited)
             self.assertEqual(vulnerability.cisa_kev["kev_date_added"], "2021-12-10")
             self.assertEqual(vulnerability.cisa_kev["kev_required_action"], "Patch")
-            self.assertEqual(vulnerability.knvd[0]["notice_id"], "KNVD-1")
             self.assertTrue((root / "reports/server-sbom.cdx.json").exists())
             self.assertTrue((root / "reports/server-vulnerabilities.json").exists())
             self.assertTrue((root / "reports/server-library-report.html").exists())
@@ -228,12 +212,18 @@ class JavaScanTests(unittest.TestCase):
             self.assertTrue((root / "reports/scan-metadata.json").exists())
             self.assertTrue((root / "reports/warnings.json").exists())
             metadata = json.loads((root / "reports/scan-metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(set(metadata["data_sources"]), {"nvd", "cisa_kev", "knvd"})
+            self.assertEqual(set(metadata["data_sources"]), {"nvd", "cisa_kev"})
             self.assertEqual(metadata["grype_database"]["database"]["built"], "2026-07-15T00:00:00Z")
             self.assertTrue(all(len(source["files"][0]["sha256"]) == 64 for source in metadata["data_sources"].values()))
             report = json.loads((root / "reports/server-vulnerabilities.json").read_text(encoding="utf-8"))
             self.assertEqual(report["archives"][0]["archive_type"], "jar")
             self.assertEqual(report["target"], str(target.resolve()))
+            self.assertNotIn("kn" + "vd", report)
+            self.assertNotIn("manual_review_candidates", report)
+            rendered = (root / "reports/server-library-report.html").read_text(encoding="utf-8")
+            self.assertIn('<html lang="ko">', rendered)
+            self.assertIn('id="report-help"', rendered)
+            self.assertNotIn("KN" + "VD", rendered)
 
     def test_missing_explicit_grype_is_exit_two_without_network(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -251,26 +241,9 @@ class JavaScanTests(unittest.TestCase):
             target = root / "app"
             target.mkdir()
             _write_jar(target / "demo.jar", {"META-INF/maven/org.example/demo/pom.properties": "groupId=org.example\nartifactId=demo\nversion=1.2.3\n"})
-            knvd = root / "knvd.json"
-            knvd.write_text(json.dumps({"notices": [{"notice_id": "NO-CVE", "product": "demo", "affected_versions": "1.2.3"}]}), encoding="utf-8")
             with patch.object(socket, "create_connection", side_effect=AssertionError("network access is forbidden")):
-                result = run_java_scan(JavaScanOptions(target=target, output_dir=root / "reports", knvd_data=knvd, builtin_only=True, no_grype=True))
+                result = run_java_scan(JavaScanOptions(target=target, output_dir=root / "reports", builtin_only=True, no_grype=True))
             self.assertEqual(result.exit_code, 0)
-            report = json.loads((root / "reports/server-vulnerabilities.json").read_text(encoding="utf-8"))
-            self.assertEqual(report["manual_review_candidates"][0]["notice"]["notice_id"], "NO-CVE")
-
-    def test_nvd_gzip_and_knvd_without_cve_are_loaded_without_creating_a_match(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            nvd = root / "nvd.json.gz"
-            with gzip.open(nvd, "wt", encoding="utf-8") as stream:
-                json.dump({"vulnerabilities": [{"cve": {"id": "CVE-2026-0001"}}]}, stream)
-            knvd = root / "knvd.json"
-            knvd.write_text(json.dumps({"notices": [{"notice_id": "NO-CVE", "product": "demo", "affected_versions": "1.2.3"}]}), encoding="utf-8")
-            loaded = load_offline_data(nvd, None, knvd, ("CVE-2026-0001",))
-            self.assertIn("CVE-2026-0001", loaded.nvd)
-            self.assertEqual(loaded.knvd, {})
-            self.assertEqual(loaded.knvd_manual_review[0]["notice_id"], "NO-CVE")
 
     def test_fail_on_kev_returns_one(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

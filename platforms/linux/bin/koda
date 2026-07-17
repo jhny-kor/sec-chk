@@ -61,10 +61,6 @@ fi
 if [ -f "$bundle_root/vuln-data/known_exploited_vulnerabilities.json" ]; then
   export KODA_CISA_KEV="${KODA_CISA_KEV:-$bundle_root/vuln-data/known_exploited_vulnerabilities.json}"
 fi
-if [ -f "$bundle_root/vuln-data/knvd-notices.json" ]; then
-  export KODA_KNVD_DATA="${KODA_KNVD_DATA:-$bundle_root/vuln-data/knvd-notices.json}"
-fi
-
 if [ -d "$bundle_root/app/security_scanner" ]; then
   app_root="$bundle_root/app"
 elif [ -d "$bundle_root/../security_scanner" ]; then

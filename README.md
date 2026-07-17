@@ -149,7 +149,7 @@ For Microsoft Store distribution, the current Inno Setup installer is not the fi
 
 Server-only mode is still available:
 
-For a closed-network Linux x86_64 server, use the offline Java archive scanner. It reads JAR/WAR/EAR files, including nested libraries, and writes CycloneDX, Grype, NVD, CISA KEV, KNVD, HTML, Markdown, and metadata outputs without online lookups:
+For a closed-network Linux x86_64 server, use the offline Java archive scanner. It reads JAR/WAR/EAR files, including nested libraries, and writes CycloneDX, Grype, NVD, CISA KEV, HTML, Markdown, and metadata outputs without online lookups:
 
 ~~~bash
 PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
@@ -159,7 +159,6 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
   --grype-bin /opt/koda/tools/grype \
   --nvd-data /opt/koda/vuln-data/nvd \
   --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json \
-  --knvd-data /opt/koda/vuln-data/knvd-notices.json \
   --fail-on high --fail-on-kev
 ~~~
 

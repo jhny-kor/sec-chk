@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
                     grype_bin=Path(args.grype_bin).expanduser() if args.grype_bin else None,
                     nvd_data=Path(args.nvd_data).expanduser() if args.nvd_data else None,
                     cisa_kev=Path(args.cisa_kev).expanduser() if args.cisa_kev else None,
-                    knvd_data=Path(args.knvd_data).expanduser() if args.knvd_data else None,
+                    language=args.language,
                     excludes=tuple(args.exclude),
                     max_depth=args.max_depth,
                     timeout=args.timeout,
@@ -720,7 +720,7 @@ def build_parser() -> argparse.ArgumentParser:
     jar_scan.add_argument("--grype-bin", help="Grype executable; no automatic download")
     jar_scan.add_argument("--nvd-data", help="NVD JSON 2.0 file, .json.gz file, or directory")
     jar_scan.add_argument("--cisa-kev", help="CISA known_exploited_vulnerabilities.json")
-    jar_scan.add_argument("--knvd-data", help="KODA-normalized KNVD JSON")
+    jar_scan.add_argument("--language", choices=("ko", "en"), default="en", help="language for generated HTML and Markdown reports")
     jar_scan.add_argument("--exclude", action="append", default=[], help="archive relative-path/name glob to skip")
     jar_scan.add_argument("--max-depth", type=_positive_int, help="optional nested archive depth limit; the default scans all depths")
     jar_scan.add_argument("--timeout", type=_positive_float, default=300.0, help="Syft/Grype timeout in seconds")
