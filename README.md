@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://apps.apple.com/kr/app/koda/id6770264012?mt=12">Download KODA on the Mac App Store</a>
+</p>
+
+<p align="center">
   <img src="docs/assets/readme/koda-architecture-overview.png" alt="KODA scanner architecture and output flow" width="100%">
 </p>
 
@@ -68,6 +72,7 @@ Install quickly:
 
 | OS | Installer | Result |
 | --- | --- | --- |
+| macOS (App Store) | Install [KODA from the Mac App Store](https://apps.apple.com/kr/app/koda/id6770264012?mt=12) | Native KODA app with the built-in Swift scanner; no Python required |
 | macOS | Double-click `platforms/macos/scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
 | Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut. Launches as a single native window (no console, no separate browser tab), matching the macOS app. NVD/CISA KEV data ships separately as `koda-vuln-data-<date>.zip`; see `docs/install/vuln-data-refresh.md`. |
 | Linux (closed network) | Extract `dist/linux/koda-docker-offline-x86_64-<version>.tar.gz` (Docker) or `koda-linux-x86_64-<version>.tar.gz` (host install), then run the bundled `install.sh` | One-file offline deliverable with Syft, Grype, pre-imported Grype DB, NVD, and CISA KEV; see `docs/install/offline-delivery.md`. |
@@ -141,7 +146,7 @@ macOS users can install SecChk without administrator privileges:
 
 The macOS installer copies the app to `~/Library/Application Support/SecChk`, creates a private Python virtual environment, and creates `~/Applications/SecChk.command`. To remove it, run `~/Library/Application Support/SecChk/Uninstall-SecChk.command` or double-click `platforms/macos/scripts/uninstall-macos.command` from the downloaded repository.
 
-Mac App Store packaging for the native macOS app name `KODA` lives in `platforms/macos/packaging`, with the Xcode project at `platforms/macos/app/KODA/KODA.xcodeproj`. The app supports folder selection, multiple file selection, common archive inputs, and in-app prevention guardrail creation with a built-in Swift scanner, so `.app` scanning and baseline template setup do not require Python. See `docs/store-release.md` for the store checklist.
+The native macOS app `KODA` is [available on the Mac App Store](https://apps.apple.com/kr/app/koda/id6770264012?mt=12). Its packaging lives in `platforms/macos/packaging`, with the Xcode project at `platforms/macos/app/KODA/KODA.xcodeproj`. The app supports folder selection, multiple file selection, common archive inputs, and in-app prevention guardrail creation with a built-in Swift scanner, so `.app` scanning and baseline template setup do not require Python. See `docs/store-release.md` for the store checklist.
 
 The native KODA app also includes the prevention workflow that previously required terminal commands: an auto-fix wizard for missing guardrail files, in-app pre-commit gate installation, threat model wizard, compliance dashboard, GitHub repository security checklist export, SLSA/Sigstore release signing plan export, NIST SSDF workflow plan export, NIST CSF 2.0 profile export, CISA Secure by Design plan export, CISA secure software development attestation checklist export, API security plan export, OWASP SCVS plan export, privacy data map export, security roadmap export, evidence register export, security headers baseline export, container hardening baseline export, Cloud/IaC security plan export, AI/LLM security plan export, mobile security plan export, secret rotation runbook export, in-app CycloneDX SBOM export, in-app OSV/CVE lookup enriched with CISA KEV and FIRST EPSS where CVEs are available, CycloneDX VEX draft export, ZAP DAST plan generation and Docker-based ZAP baseline execution for authorized URLs, manual evidence checklists for standards that require evidence review, release security packages, `koda-ignore.yml` exception templates with owner/reason/expiry checks, scan change reports, local score history with latest-vs-previous comparison, remediation guide screens, and saved project profiles for frequently scanned target sets. SBOM and OSV inputs include `requirements.txt`, `requirements.in`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, and `pnpm-lock.yaml`.
 
@@ -395,6 +400,7 @@ Security-standard selections are mapping profiles over the local rules. The dash
 
 | OS | 설치 파일 | 설치 결과 |
 | --- | --- | --- |
+| macOS (App Store) | [Mac App Store에서 KODA 설치](https://apps.apple.com/kr/app/koda/id6770264012?mt=12) | 내장 Swift 스캐너를 갖춘 네이티브 KODA 앱, Python 불필요 |
 | macOS | `platforms/macos/scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
 | Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성. macOS 앱과 동일하게 단일 네이티브 창으로 실행되며(터미널 창·별도 브라우저 탭 없음). NVD/CISA KEV 자료는 별도 `koda-vuln-data-<date>.zip`으로 반입 (`docs/install/vuln-data-refresh.md`) |
 | Linux (폐쇄망) | `dist/linux/koda-docker-offline-x86_64-<version>.tar.gz`(Docker) 또는 `koda-linux-x86_64-<version>.tar.gz`(호스트 설치)를 풀고 동봉된 `install.sh` 실행 | Syft·Grype·사전 import된 Grype DB·NVD·CISA KEV를 포함한 단일 오프라인 전달물 (`docs/install/offline-delivery.md`) |
@@ -451,7 +457,7 @@ macOS에서는 관리자 권한 없이 설치할 수 있습니다.
 
 macOS 설치 스크립트는 앱을 `~/Library/Application Support/SecChk`로 복사하고, 전용 Python 가상환경을 만든 뒤 `~/Applications/SecChk.command` 바로가기를 생성합니다. 삭제하려면 `~/Library/Application Support/SecChk/Uninstall-SecChk.command`를 실행하거나, 다운로드한 저장소의 `platforms/macos/scripts/uninstall-macos.command`를 더블클릭하면 됩니다.
 
-Mac App Store 출시 준비용 macOS 앱 이름은 `KODA`이며, `platforms/macos/packaging`에 KODA 아이콘과 샌드박스 entitlements를 추가했고 `platforms/macos/app/KODA/KODA.xcodeproj`에 Xcode 프로젝트를 추가했습니다. 앱에서는 Python 없이 내장 Swift 스캐너로 폴더 선택, 여러 파일 선택, 일반 압축파일 입력, 보안 예방 가드레일 파일 생성을 지원합니다. 스토어 출시 체크리스트는 `docs/store-release.md`에서 확인할 수 있습니다.
+네이티브 macOS 앱 `KODA`는 [Mac App Store에서 설치](https://apps.apple.com/kr/app/koda/id6770264012?mt=12)할 수 있습니다. `platforms/macos/packaging`에 KODA 아이콘과 샌드박스 entitlements가 있고 `platforms/macos/app/KODA/KODA.xcodeproj`에 Xcode 프로젝트가 있습니다. 앱에서는 Python 없이 내장 Swift 스캐너로 폴더 선택, 여러 파일 선택, 일반 압축파일 입력, 보안 예방 가드레일 파일 생성을 지원합니다. 스토어 출시 체크리스트는 `docs/store-release.md`에서 확인할 수 있습니다.
 
 네이티브 KODA 앱에서는 터미널 명령 없이도 예방 워크플로를 실행할 수 있습니다. `자동 수정 마법사`로 누락된 가드레일 파일을 미리 보고 적용하고, 앱 안에서 pre-commit 차단 훅 설치, 위협 모델 마법사, 컴플라이언스 대시보드, GitHub 저장소 보안 설정 체크리스트 저장, SLSA/Sigstore 릴리스 서명 계획 저장, NIST SSDF workflow 계획 저장, NIST CSF 2.0 프로파일 저장, CISA Secure by Design 예방 계획 저장, CISA 보안 소프트웨어 개발 증명 체크리스트 저장, API 보안 계획 저장, OWASP SCVS 계획 저장, 개인정보 데이터 맵 저장, 보안 로드맵 저장, 보안 증적 대장 저장, 보안 헤더 기준 저장, 컨테이너 하드닝 기준 저장, Cloud/IaC 보안 계획 저장, AI/LLM 보안 계획 저장, 모바일 보안 계획 저장, 비밀값 로테이션 런북 저장, CycloneDX SBOM 생성, CISA KEV와 FIRST EPSS가 붙는 OSV/CVE 조회, CycloneDX VEX 초안 생성, 권한 있는 URL을 위한 ZAP DAST 계획 생성과 Docker 기반 ZAP baseline 실행, 증적 확인 필요 기준의 수동 증적 체크리스트, 릴리스 보안 패키지, owner/reason/expiry 검사를 포함한 `koda-ignore.yml` 예외 파일 생성, 스캔 변화 리포트, 보안 점수 추적을 사용할 수 있습니다. SBOM과 OSV 입력은 `requirements.txt`, `requirements.in`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`을 지원합니다.
 
