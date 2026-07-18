@@ -69,7 +69,8 @@ Install quickly:
 | OS | Installer | Result |
 | --- | --- | --- |
 | macOS | Double-click `platforms/macos/scripts/install-macos.command` | Installs to `~/Library/Application Support/SecChk` and creates `~/Applications/SecChk.command` |
-| Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut. Launches as a single native window (no console, no separate browser tab), matching the macOS app. |
+| Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut. Launches as a single native window (no console, no separate browser tab), matching the macOS app. NVD/CISA KEV data ships separately as `koda-vuln-data-<date>.zip`; see `docs/install/vuln-data-refresh.md`. |
+| Linux (closed network) | Extract `dist/linux/koda-docker-offline-x86_64-<version>.tar.gz` (Docker) or `koda-linux-x86_64-<version>.tar.gz` (host install), then run the bundled `install.sh` | One-file offline deliverable with Syft, Grype, pre-imported Grype DB, NVD, and CISA KEV; see `docs/install/offline-delivery.md`. |
 
 ## What It Checks
 
@@ -81,8 +82,6 @@ Install quickly:
 - `screen_quality`: static screen-source quality checks for HTML/JSP/CLX/JS/Vue/React markup, including language and viewport metadata, image alt text, input labels, explicit button types, placeholder links, sensitive text exposure, and leaked system paths.
 
 Security scans run `secrets`, `dependencies`, `configuration`, `code`, and `prevention` by default. Run `screen_quality` from the separate screen quality button or by selecting that category explicitly.
-
-## Quick Start
 
 ## Web Scan Coverage
 
@@ -100,6 +99,8 @@ KODA's lightweight web scan follows discovered same-origin child pages and recor
 | Business-logic vulnerabilities | not supported | not supported | manual review required |
 
 The dashboard's lightweight web scan is read-only by default. OWASP ZAP is a separate, authorized DAST workflow; it does not run merely because a lightweight scan completes.
+
+## Quick Start
 
 Run it like a local app:
 
@@ -139,7 +140,7 @@ renderer and health/PDF smoke tests, are documented in [`docs/install/linux.md`]
 3. Download or clone this repository on the Windows build PC.
 4. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\platforms\windows\scripts\build-koda-windows-installer.ps1`.
 
-The build creates `dist\KODA\KODA.exe` and `dist\Windows\KODASetup.exe`. Target users only need `KODASetup.exe`; it installs to `%LOCALAPPDATA%\KODA` and adds Start Menu shortcuts named `KODA` and `KODA (Browser Mode)`. Double-clicking `KODA` opens one native window powered by Edge WebView2 — no console window and no separate browser tab — so it behaves like the macOS KODA app. If the Edge WebView2 runtime is missing, KODA falls back to opening the dashboard in the default browser. On managed PCs where WebView2 is blocked or broken, use `KODA (Browser Mode)` to skip WebView2 and open directly in the default browser.
+The build creates `dist\KODA\KODA.exe` and `dist\Windows\KODASetup.exe`. Target users only need `KODASetup.exe`; it installs to `%LOCALAPPDATA%\KODA` and adds Start Menu shortcuts named `KODA` and `KODA (Browser Mode)`. The installer bundles Syft, Grype, and the Grype DB for offline `jar-scan`; the daily-changing NVD and CISA KEV feeds ship separately as `koda-vuln-data-<date>.zip` extracted into the install directory (see [`docs/install/vuln-data-refresh.md`](docs/install/vuln-data-refresh.md)). Double-clicking `KODA` opens one native window powered by Edge WebView2 — no console window and no separate browser tab — so it behaves like the macOS KODA app. If the Edge WebView2 runtime is missing, KODA falls back to opening the dashboard in the default browser. On managed PCs where WebView2 is blocked or broken, use `KODA (Browser Mode)` to skip WebView2 and open directly in the default browser.
 
 The active Windows installer files are `platforms/windows/scripts/build-koda-windows-installer.ps1`,
 `platforms/windows/scripts/build-koda-windows-installer.bat`, and `platforms/windows/packaging/KODA.iss`.
@@ -151,20 +152,23 @@ For Microsoft Store distribution, the current Inno Setup installer is not the fi
 
 Server-only mode is still available:
 
-For a closed-network Linux x86_64 server, use the offline Java archive scanner. It reads JAR/WAR/EAR files, including nested libraries, and writes CycloneDX, Grype, NVD, CISA KEV, HTML, Markdown, and metadata outputs without online lookups:
+For a closed-network Linux x86_64 server, use the offline Java archive scanner. It reads JAR/WAR/EAR files, including nested libraries, and writes CycloneDX, Grype, NVD, CISA KEV, HTML, Markdown, and metadata outputs without online lookups. Three deliverables cover the closed-network paths (see [`docs/install/offline-delivery.md`](docs/install/offline-delivery.md) for the full comparison):
+
+- **Docker deliverable** (`platforms/linux/package-docker-offline.sh`) — one tar.gz containing a `linux/amd64` image with Syft, Grype, a pre-imported Grype DB, NVD, and CISA KEV. The bundled `koda-docker` wrapper runs every scan with `--network none`, a read-only root filesystem, a non-root user, and read-only target mounts, and adds `audit` (jar-scan + baseline SBOM + KEV gate in one command) and `dashboard start|status|logs|stop`.
+- **Linux host tarball** (`platforms/linux/package-offline.sh`) — the same engine and data installed directly under a user-owned prefix for servers without Docker.
+- **Windows installer + data package** — `KODASetup.exe` bundles the tools; NVD/CISA KEV arrive separately as `koda-vuln-data-<date>.zip` (built with `package-offline.sh --vuln-data-only`) so data refreshes never require an installer rebuild.
 
 ~~~bash
-PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
-  --target /jeus/domains/domain1/applications \
-  --output-dir reports/java-scan \
-  --syft-bin /opt/koda/tools/syft \
-  --grype-bin /opt/koda/tools/grype \
-  --nvd-data /opt/koda/vuln-data/nvd \
-  --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json \
-  --fail-on high --fail-on-kev
+# Docker deliverable
+./koda-docker jar-scan --target /jeus/domains/domain1/applications \
+  --output-dir reports/java-scan --fail-on high --fail-on-kev
+
+# Host install (paths are detected automatically after install.sh)
+/home/user0/koda/koda jar-scan --target /jeus/domains/domain1/applications \
+  --output-dir reports/java-scan --fail-on high --fail-on-kev
 ~~~
 
-See [the offline Java SBOM runbook](docs/security/java-sbom-vulnerability-scan.md) for the preparation and update procedure.
+`sbom-verify` compares an approved CycloneDX SBOM against the deployed archives (version, Maven PURL, and SHA-256), and `jar-scan --verify-sbom` chains scan plus verification. With `--fail-on-kev`, missing CISA KEV data exits `2` instead of silently passing the gate. See [the offline Java SBOM runbook](docs/security/java-sbom-vulnerability-scan.md) for the preparation and update procedure.
 
 ```bash
 export PYTHONPATH="$PWD/platforms/shared/python"
@@ -258,6 +262,8 @@ python3 -m security_scanner diff-reports --baseline reports/old.json --current r
 python3 -m security_scanner manifest create --target /deploy/app --output reports/approved-manifest.json
 python3 -m security_scanner manifest compare --baseline reports/approved-manifest.json --target /app/current --output reports/manifest-compare.json
 python3 -m security_scanner deploy-check --target /deploy/app --output-dir reports/koda-deploy --fail-on high
+python3 -m security_scanner jar-scan --target /deploy/apps --output-dir reports/java-scan --fail-on high --fail-on-kev
+python3 -m security_scanner sbom-verify --target /deploy/apps --sbom reports/approved-sbom.cdx.json --output-dir reports/sbom-verification --strict-hash --fail-on-mismatch
 python3 -m security_scanner dependency-track-command --server-url https://dependency-track.example.com --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 python3 -m security_scanner upload-sbom --server-url https://dependency-track.example.com --api-key-env DEPENDENCY_TRACK_API_KEY --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scanner_config.documents.example.json --language ko
@@ -370,7 +376,8 @@ Security-standard selections are mapping profiles over the local rules. The dash
 | OS | 설치 파일 | 설치 결과 |
 | --- | --- | --- |
 | macOS | `platforms/macos/scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
-| Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성. macOS 앱과 동일하게 단일 네이티브 창으로 실행되며(터미널 창·별도 브라우저 탭 없음) |
+| Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성. macOS 앱과 동일하게 단일 네이티브 창으로 실행되며(터미널 창·별도 브라우저 탭 없음). NVD/CISA KEV 자료는 별도 `koda-vuln-data-<date>.zip`으로 반입 (`docs/install/vuln-data-refresh.md`) |
+| Linux (폐쇄망) | `dist/linux/koda-docker-offline-x86_64-<version>.tar.gz`(Docker) 또는 `koda-linux-x86_64-<version>.tar.gz`(호스트 설치)를 풀고 동봉된 `install.sh` 실행 | Syft·Grype·사전 import된 Grype DB·NVD·CISA KEV를 포함한 단일 오프라인 전달물 (`docs/install/offline-delivery.md`) |
 
 ### 점검 항목
 
@@ -415,7 +422,7 @@ Windows에서는 빌드된 설치 파일로 관리자 권한 없이 KODA를 설�
 3. Windows 빌드 PC에서 이 저장소를 다운로드하거나 clone합니다.
 4. `powershell -NoProfile -ExecutionPolicy Bypass -File .\platforms\windows\scripts\build-koda-windows-installer.ps1`를 실행합니다.
 
-빌드 결과는 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다. 최종 사용자는 `KODASetup.exe`만 실행하면 되고, 설치 후 `%LOCALAPPDATA%\KODA`와 시작 메뉴 `KODA`, `KODA (Browser Mode)` 바로가기가 생성됩니다. `KODA`를 더블클릭하면 Edge WebView2 기반 단일 네이티브 창 하나만 열립니다. 터미널 창이나 별도 브라우저 탭이 뜨지 않아 macOS KODA 앱과 동일하게 동작합니다. Edge WebView2 런타임이 없으면 기본 브라우저로 대시보드를 여는 방식으로 자동 전환됩니다. 회사/관리형 PC에서 WebView2가 차단되거나 손상된 경우에는 `KODA (Browser Mode)`를 실행하면 WebView2를 건너뛰고 기본 브라우저로 바로 열 수 있습니다.
+빌드 결과는 `dist\KODA\KODA.exe`와 `dist\Windows\KODASetup.exe`입니다. 최종 사용자는 `KODASetup.exe`만 실행하면 되고, 설치 후 `%LOCALAPPDATA%\KODA`와 시작 메뉴 `KODA`, `KODA (Browser Mode)` 바로가기가 생성됩니다. 설치본에는 오프라인 `jar-scan`용 Syft·Grype·Grype DB가 포함되며, 매일 바뀌는 NVD·CISA KEV 자료는 별도 `koda-vuln-data-<date>.zip`으로 만들어(`package-offline.sh --vuln-data-only`) 설치 폴더에 압축 해제합니다. 데이터 갱신 절차는 [`docs/install/vuln-data-refresh.md`](docs/install/vuln-data-refresh.md)를 참고하세요. `KODA`를 더블클릭하면 Edge WebView2 기반 단일 네이티브 창 하나만 열립니다. 터미널 창이나 별도 브라우저 탭이 뜨지 않아 macOS KODA 앱과 동일하게 동작합니다. Edge WebView2 런타임이 없으면 기본 브라우저로 대시보드를 여는 방식으로 자동 전환됩니다. 회사/관리형 PC에서 WebView2가 차단되거나 손상된 경우에는 `KODA (Browser Mode)`를 실행하면 WebView2를 건너뛰고 기본 브라우저로 바로 열 수 있습니다.
 
 현재 활성 Windows 설치 파일은 `platforms/windows/scripts/build-koda-windows-installer.ps1`,
 `platforms/windows/scripts/build-koda-windows-installer.bat`, `platforms/windows/packaging/KODA.iss`입니다.
@@ -424,6 +431,19 @@ Windows에서는 빌드된 설치 파일로 관리자 권한 없이 KODA를 설�
 빌더와 `KODASetup.exe`에 맞춰져 있습니다.
 
 Microsoft Store에 출시하려면 현재의 Inno Setup 설치 파일이 아니라 MSIX 패키지와 `.msixupload` 제출 파일을 준비해야 합니다. 자세한 절차는 `platforms/windows/README.md`와 `docs/store-release.md`에 정리했습니다.
+
+폐쇄망 Linux x86_64 서버에서는 오프라인 Java 아카이브 스캐너를 사용합니다. JAR/WAR/EAR(내부 중첩 라이브러리 포함)을 읽어 CycloneDX SBOM, Grype 매칭, NVD·CISA KEV 결합, HTML/Markdown 보고서를 인터넷 없이 생성합니다. 전달 방식은 세 가지입니다(비교와 상세 절차는 [`docs/install/offline-delivery.md`](docs/install/offline-delivery.md)):
+
+- **Docker 전달물** — 이미지·도구·데이터가 든 tar.gz 하나. 동봉된 `koda-docker` 래퍼가 모든 스캔을 `--network none`, read-only rootfs, 비루트로 실행하고 `audit`(jar-scan + 기준 SBOM 검증 + KEV 게이트), `dashboard start|status|logs|stop`를 제공합니다.
+- **Linux 호스트 tarball** — Docker가 없는 서버용. 같은 엔진과 데이터를 사용자 소유 경로에 직접 설치합니다.
+- **Windows 설치본 + 데이터 zip** — 설치본에 도구가 들어가고 NVD·KEV는 zip으로 분리되어 데이터 갱신 시 설치본 재빌드가 필요 없습니다.
+
+```bash
+./koda-docker jar-scan --target /jeus/domains/domain1/applications \
+  --output-dir reports/java-scan --fail-on high --fail-on-kev
+```
+
+`sbom-verify`는 승인된 CycloneDX SBOM과 실제 배포 파일을 버전·Maven PURL·SHA-256 기준으로 비교하고, `jar-scan --verify-sbom`은 스캔과 검증을 한 번에 수행합니다. `--fail-on-kev`를 켰는데 CISA KEV 자료가 없으면 게이트를 통과시키지 않고 종료 코드 2를 반환합니다.
 
 서버만 직접 띄우려면:
 
@@ -517,6 +537,8 @@ python3 -m security_scanner diff-reports --baseline reports/old.json --current r
 python3 -m security_scanner manifest create --target /deploy/app --output reports/approved-manifest.json
 python3 -m security_scanner manifest compare --baseline reports/approved-manifest.json --target /app/current --output reports/manifest-compare.json
 python3 -m security_scanner deploy-check --target /deploy/app --output-dir reports/koda-deploy --fail-on high
+python3 -m security_scanner jar-scan --target /deploy/apps --output-dir reports/java-scan --fail-on high --fail-on-kev
+python3 -m security_scanner sbom-verify --target /deploy/apps --sbom reports/approved-sbom.cdx.json --output-dir reports/sbom-verification --strict-hash --fail-on-mismatch
 python3 -m security_scanner dependency-track-command --server-url https://dependency-track.example.com --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 python3 -m security_scanner upload-sbom --server-url https://dependency-track.example.com --api-key-env DEPENDENCY_TRACK_API_KEY --project-name my-project --project-version main --sbom reports/sbom.cdx.json
 SEC_CHK_TARGET=/path/to/projects python3 -m security_scanner scan --config scanner_config.documents.example.json --language ko
