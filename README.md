@@ -72,6 +72,26 @@ Install quickly:
 | Windows | Run `dist/Windows/KODASetup.exe` after the Windows build | Installs to `%LOCALAPPDATA%\KODA` and creates a `KODA` Start Menu shortcut. Launches as a single native window (no console, no separate browser tab), matching the macOS app. NVD/CISA KEV data ships separately as `koda-vuln-data-<date>.zip`; see `docs/install/vuln-data-refresh.md`. |
 | Linux (closed network) | Extract `dist/linux/koda-docker-offline-x86_64-<version>.tar.gz` (Docker) or `koda-linux-x86_64-<version>.tar.gz` (host install), then run the bundled `install.sh` | One-file offline deliverable with Syft, Grype, pre-imported Grype DB, NVD, and CISA KEV; see `docs/install/offline-delivery.md`. |
 
+## Feature Availability by Platform
+
+Support by installed deliverable. Running the Python engine from source (`PYTHONPATH=platforms/shared/python`) provides every CLI feature on any OS, including macOS; the macOS app column describes the native Swift app only.
+
+| Feature | macOS app | Windows installer | Linux tarball | Linux Docker deliverable |
+| --- | --- | --- | --- | --- |
+| Source security scan (secrets, dependencies, configuration, code, prevention) | ✅ built-in Swift scanner | ✅ | ✅ | ✅ read-only target mount |
+| Screen quality scan (`screen_quality`) | ✅ | ✅ | ✅ | ✅ |
+| Dashboard UI | ✅ native app window | ✅ WebView2 single window | ✅ `koda serve` | ✅ `koda-docker dashboard`, loopback-bound |
+| JAR/WAR/EAR SBOM + vulnerability scan (`jar-scan`) | ✅ bundled Syft/Grype/DB/NVD/KEV | ✅ tools bundled; needs `koda-vuln-data-<date>.zip` for NVD/KEV | ✅ all data bundled | ✅ all data in image |
+| Baseline SBOM verification (`sbom-verify`, `--verify-sbom`) | ❌ | ✅ | ✅ | ✅ incl. `audit` shortcut |
+| Host posture scan (`host-scan`) | ❌ | ✅ | ✅ | ❌ out of scope (container ≠ host) |
+| Live web scan (`web-scan`) | ❌ | ✅ | ✅ | ❌ runs with `--network none` |
+| OSV/CVE + KEV/EPSS online lookup | ✅ in-app | ✅ internet required | ✅ internet required | ❌ offline by design |
+| ZAP baseline (`zap-run`) | ✅ via Docker | ✅ via Docker | ✅ via Docker | ❌ no Docker socket in container |
+| Prevention guardrail generation (`init-security`, prevention kit) | ✅ | ✅ | ✅ | ❌ target mounts are read-only |
+| Auto-fix (`fix --apply`) | ❌ | ✅ | ✅ | ❌ target mounts are read-only |
+| Dashboard PDF export (bundled Chromium) | n/a (native reports) | ✅ | ✅ | ✅ |
+| Vulnerability data refresh | app update | replace `koda-vuln-data-<date>.zip` | replace tarball | replace image |
+
 ## What It Checks
 
 - `secrets`: likely API keys, private keys, access tokens, and hard-coded secret assignments.
@@ -378,6 +398,26 @@ Security-standard selections are mapping profiles over the local rules. The dash
 | macOS | `platforms/macos/scripts/install-macos.command` 더블클릭 | `~/Library/Application Support/SecChk`에 설치하고 `~/Applications/SecChk.command` 생성 |
 | Windows | Windows 빌드 후 `dist/Windows/KODASetup.exe` 실행 | `%LOCALAPPDATA%\KODA`에 설치하고 시작 메뉴 `KODA` 바로가기 생성. macOS 앱과 동일하게 단일 네이티브 창으로 실행되며(터미널 창·별도 브라우저 탭 없음). NVD/CISA KEV 자료는 별도 `koda-vuln-data-<date>.zip`으로 반입 (`docs/install/vuln-data-refresh.md`) |
 | Linux (폐쇄망) | `dist/linux/koda-docker-offline-x86_64-<version>.tar.gz`(Docker) 또는 `koda-linux-x86_64-<version>.tar.gz`(호스트 설치)를 풀고 동봉된 `install.sh` 실행 | Syft·Grype·사전 import된 Grype DB·NVD·CISA KEV를 포함한 단일 오프라인 전달물 (`docs/install/offline-delivery.md`) |
+
+### OS별 기능 지원 표
+
+설치된 배포물 기준입니다. 소스 실행(`PYTHONPATH=platforms/shared/python`)은 macOS를 포함한 모든 OS에서 전체 CLI 기능을 제공하며, macOS 앱 열은 네이티브 Swift 앱만을 설명합니다.
+
+| 기능 | macOS 앱 | Windows 설치본 | Linux tarball | Linux Docker 전달물 |
+| --- | --- | --- | --- | --- |
+| 소스 보안 점검 (secrets·dependencies·configuration·code·prevention) | ✅ 내장 Swift 스캐너 | ✅ | ✅ | ✅ 대상 읽기 전용 마운트 |
+| 화면품질 점검 (`screen_quality`) | ✅ | ✅ | ✅ | ✅ |
+| 대시보드 UI | ✅ 네이티브 앱 창 | ✅ WebView2 단일 창 | ✅ `koda serve` | ✅ `koda-docker dashboard`, 127.0.0.1 바인딩 |
+| JAR/WAR/EAR SBOM·취약점 점검 (`jar-scan`) | ✅ Syft/Grype/DB/NVD/KEV 번들 | ✅ 도구 내장, NVD/KEV는 `koda-vuln-data-<date>.zip` 필요 | ✅ 전체 데이터 번들 | ✅ 전체 데이터 이미지 내장 |
+| 기준 SBOM 검증 (`sbom-verify`, `--verify-sbom`) | ❌ | ✅ | ✅ | ✅ `audit` 단축 명령 포함 |
+| 호스트 보안 점검 (`host-scan`) | ❌ | ✅ | ✅ | ❌ 범위 제외 (컨테이너 ≠ 호스트) |
+| 웹 실시간 점검 (`web-scan`) | ❌ | ✅ | ✅ | ❌ `--network none` 실행 |
+| OSV/CVE + KEV/EPSS 온라인 조회 | ✅ 앱 내 조회 | ✅ 인터넷 필요 | ✅ 인터넷 필요 | ❌ 오프라인 설계 |
+| ZAP baseline (`zap-run`) | ✅ Docker 필요 | ✅ Docker 필요 | ✅ Docker 필요 | ❌ 컨테이너에 Docker 소켓 없음 |
+| 예방 가드레일 생성 (`init-security`, 예방 키트) | ✅ | ✅ | ✅ | ❌ 대상이 읽기 전용 마운트 |
+| 자동 교정 (`fix --apply`) | ❌ | ✅ | ✅ | ❌ 대상이 읽기 전용 마운트 |
+| 대시보드 PDF 내보내기 (Chromium 번들) | 해당 없음 (네이티브 보고서) | ✅ | ✅ | ✅ |
+| 취약점 데이터 갱신 | 앱 업데이트 | `koda-vuln-data-<date>.zip` 교체 | tarball 교체 | 이미지 교체 |
 
 ### 점검 항목
 
