@@ -13,6 +13,7 @@ KODA 프로젝트 문서 모음입니다. 설치·운영 절차, 보안 연동 �
 | [linux.md](install/linux.md) | Linux 설치·운영 가이드 (호스트 설치, 대시보드, Docker 전달물) |
 | [windows.md](install/windows.md) | Windows 설치본 빌드·설치 및 취약점 데이터 패키지 연결 |
 | [vuln-data-refresh.md](install/vuln-data-refresh.md) | Windows 취약점 데이터(`koda-vuln-data-<date>.zip`) 현행화 절차 |
+| [usage.md](usage.md) | 공통 Python CLI 사용법 — 설정, 보고서, CI, 자동 교정과 권한 있는 네트워크 점검 |
 
 폐쇄망 Docker 래퍼의 운영 상세는
 [platforms/linux/docker/README.md](../platforms/linux/docker/README.md),
