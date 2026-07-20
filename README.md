@@ -1,7 +1,7 @@
 # KODA
 
 <p align="center">
-  <img src="docs/assets/readme/koda-readme-hero.png" alt="KODA local security scanner overview" width="100%">
+  <img src="docs/assets/readme/koda-readme-poster-en.svg" alt="KODA offline-first security and quality scanner poster" width="620">
 </p>
 
 <p align="center">
