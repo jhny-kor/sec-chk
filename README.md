@@ -101,8 +101,12 @@ The [documentation index](docs/README.md) is the complete map. Common references
 | `docs/` | Installation, operating, security-integration, and product documentation. |
 | `tests/` | Shared engine, wrapper, and report-contract tests. |
 
-Generated outputs such as `dist/`, `reports/`, and `.build/` are not primary source. Legacy material is retained under `archive/` for reference.
+Generated outputs such as `dist/`, `reports/`, and `.build/` are not primary source.
 
 ## Scope and safety
 
 KODA is a local scanner and workflow aid. It does not replace full SAST, authenticated DAST, dependency advisory services, container scanning, CVSS scoring, or manual security review. Run live web and ZAP scans only against systems you own or are explicitly authorized to test.
+
+## License
+
+[MIT](LICENSE). See [SECURITY.md](SECURITY.md) for vulnerability reporting and [PRIVACY.md](PRIVACY.md) for the privacy policy.
