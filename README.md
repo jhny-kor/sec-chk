@@ -9,12 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://apps.apple.com/kr/app/koda/id6770264012?mt=12">Download KODA on the Mac App Store</a>
+  <a href="https://apps.apple.com/kr/app/koda/id6770264012?mt=12">Download KODA on the Mac App Store</a> ·
+  <a href="docs/README.md">🇰🇷 한국어 설치·운영 문서</a>
 </p>
 
 KODA keeps scans local by default. The native macOS app has its own Swift scanner; Linux, Windows, CI, and server deployments use the shared Python engine in [`platforms/shared/python/`](platforms/shared/python/).
-
-한국어 설치·운영 문서는 [문서 인덱스](docs/README.md)에서 볼 수 있습니다.
 
 ## Choose your path
 
@@ -43,32 +42,40 @@ The Python engine can run from source on any OS. The macOS column above refers o
 
 ## Quick start
 
-Run the local dashboard from a source checkout:
+Requires Python 3.10 or later — the engine uses only the standard library, so there is no `pip install` step.
 
 ```bash
+git clone https://github.com/jhny-kor/sec-chk.git
+cd sec-chk
 export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner app
 ```
 
-Or generate a static report:
+This starts the local dashboard at `http://127.0.0.1:8765` (loopback only; nothing leaves your machine).
+
+To scan your own project, copy the example config, point `targets[].path` at your project folder, and run a scan:
 
 ```bash
-PYTHONPATH=platforms/shared/python \
-  python3 -m security_scanner scan \
-  --config platforms/shared/python/scanner_config.example.json
+cp platforms/shared/python/scanner_config.example.json my-config.json
+# edit my-config.json: change "path": "." to your project folder
+python3 -m security_scanner scan --config my-config.json
 ```
+
+The HTML report is written to `reports/security-dashboard.html`.
 
 Use a narrow target before scanning large folders. Normal scans are read-only. `fix --apply`, prevention-template generation, and authorized web or ZAP scans can change files or contact a target; see [CLI and local usage](docs/usage.md) before using them.
 
-## What KODA checks
+## What KODA helps you do
 
-- Secrets, dependency manifests, lockfiles, configuration, code patterns, and prevention guardrails.
-- Screen-quality issues in HTML/JSP/CLX/JS/Vue/React markup.
-- Optional OSV/CVE, CISA KEV, and FIRST EPSS dependency intelligence.
-- Offline Java archive inventory, CycloneDX SBOM generation, vulnerability matching, and deployed-SBOM verification.
-- Optional host posture and authorized web/ZAP checks.
+| When you need to… | KODA provides | Result |
+| --- | --- | --- |
+| Find common project risks before review or release | Local source, dependency, configuration, secret, and prevention checks | A prioritized local report and an optional CI gate. |
+| Check whether a UI has basic quality issues | `screen_quality` checks for markup accessibility and exposure problems | A focused quality report for HTML/JSP/CLX/JS/Vue/React sources. |
+| Prioritize dependency findings | Optional OSV/CVE, CISA KEV, FIRST EPSS, reachability, and AI triage | More context without changing the original finding severity. |
+| Audit deployed Java archives offline | JAR/WAR/EAR inventory, CycloneDX SBOM, vulnerability matching, and baseline comparison | Evidence for what is deployed and whether it matches an approved SBOM. |
+| Check a workstation or an authorized web target | Optional host posture, web posture, and ZAP workflows | A bounded security posture report; active checks require explicit authorization. |
 
-Security scans run `secrets`, `dependencies`, `configuration`, `code`, and `prevention` by default. `screen_quality` is a separate category. A zero-finding result is not a security guarantee; coverage depends on selected checks, reachable targets, and available data.
+Security scans run `secrets`, `dependencies`, `configuration`, `code`, and `prevention` by default. `screen_quality` and `host` are separate categories. A zero-finding result is not a security guarantee; coverage depends on selected checks, reachable targets, and available data.
 
 ## Documentation
 
