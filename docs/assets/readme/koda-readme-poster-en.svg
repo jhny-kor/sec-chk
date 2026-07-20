@@ -11,14 +11,21 @@
 </defs>
 <rect width="1200" height="1697" fill="url(#bg)"/>
 
-<!-- Product wordmark: Inter Display ExtraBold converted to vector paths -->
-<g fill="#07398a"><path d="M96 0H456V379L645 605L1028 0H1440L880 848L1419 1490H996L663 1082C594 996 525 911 456 825V1490H96Z" transform="translate(140.00 330) scale(0.149813 -0.149813)"/>
-<path d="M765 -24C1167 -24 1477 259 1477 744C1477 1230 1167 1514 765 1514C361 1514 52 1230 52 744C52 261 361 -24 765 -24ZM765 290C551 290 414 456 414 744C414 1033 551 1200 765 1200C978 1200 1115 1033 1115 744C1115 456 978 290 765 290Z" transform="translate(367.12 330) scale(0.149813 -0.149813)"/>
-<path d="M649 0C1107 0 1393 290 1393 745C1393 1200 1103 1490 649 1490H96V0ZM456 300V1190H627C901 1190 1031 1039 1031 745C1031 452 904 300 631 300Z" transform="translate(606.67 330) scale(0.149813 -0.149813)"/>
-<path d="M5 0H396L487 287H1016L1104 0H1506L991 1490H517ZM577 568 604 655C656 821 704 984 755 1167C805 984 853 821 902 655L929 568Z" transform="translate(833.63 330) scale(0.149813 -0.149813)"/></g>
+<!-- Custom geometric KODA wordmark, matching the selected logo style -->
+<g fill="#07398a">
+  <path d="M145 110H190V198L315 110H374L226 215L380 320H319L190 232V320H145Z"/>
+  <path fill-rule="evenodd" d="M500 105C430 105 382 150 382 215C382 280 430 325 500 325C570 325 618 280 618 215C618 150 570 105 500 105ZM500 148C545 148 574 173 574 215C574 257 545 282 500 282C455 282 426 257 426 215C426 173 455 148 500 148Z"/>
+  <path fill-rule="evenodd" d="M650 110H770C857 110 908 150 908 215C908 280 857 320 770 320H650ZM695 151V279H767C827 279 863 257 863 215C863 173 827 151 767 151Z"/>
+  <path d="M922 320L1018 110H1064L1160 320H1110L1041 160L972 320Z"/>
+</g>
 <text x="600" y="410" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="42" font-weight="650" fill="#102d55">Offline-First Security &amp; Quality Scanner</text>
 <rect x="555" y="448" width="90" height="5" rx="2.5" fill="url(#accent)"/>
-<text x="600" y="515" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="27" font-weight="600" letter-spacing="5" fill="#083a86">SCAN <tspan fill="#16bfc9">·</tspan> ANALYZE <tspan fill="#16bfc9">·</tspan> REPORT <tspan fill="#16bfc9">·</tspan> PREVENT</text>
+<g font-family="Inter,Arial,sans-serif" font-size="27" font-weight="600" letter-spacing="4" fill="#083a86" text-anchor="middle">
+  <text x="270" y="515">SCAN</text><circle cx="375" cy="506" r="4" fill="#16bfc9"/>
+  <text x="485" y="515">ANALYZE</text><circle cx="600" cy="506" r="4" fill="#16bfc9"/>
+  <text x="710" y="515">REPORT</text><circle cx="820" cy="506" r="4" fill="#16bfc9"/>
+  <text x="950" y="515">PREVENT</text>
+</g>
 
 <!-- subtle data wave -->
 <g fill="none" stroke="#65b7ef" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 10" opacity=".42">
@@ -75,10 +82,12 @@
 </g>
 
 <!-- trust footer -->
-<g font-family="Inter,Arial,sans-serif" fill="#083a86" font-size="20" font-weight="650" letter-spacing="5">
-  <line x1="145" y1="1607" x2="270" y2="1607" stroke="#bfd8ed" stroke-width="2"/><text x="290" y="1615">LOCAL BY DEFAULT</text>
-  <path d="M600 1568C622 1580 637 1583 650 1587V1627C650 1660 628 1678 600 1690C572 1678 550 1660 550 1627V1587C563 1583 578 1580 600 1568Z" fill="#fff" stroke="#083a86" stroke-width="4" transform="scale(.7) translate(257 684)"/>
-  <path d="M577 1625L593 1641L624 1606" fill="none" stroke="#16bdc8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" transform="scale(.7) translate(257 684)"/>
-  <text x="680" y="1615">TRUSTED RESULTS</text><line x1="925" y1="1607" x2="1055" y2="1607" stroke="#bfd8ed" stroke-width="2"/>
+<g font-family="Inter,Arial,sans-serif" fill="#083a86" font-size="20" font-weight="650" letter-spacing="4" text-anchor="middle">
+  <line x1="90" y1="1607" x2="205" y2="1607" stroke="#bfd8ed" stroke-width="2"/>
+  <text x="360" y="1615">LOCAL BY DEFAULT</text>
+  <path d="M600 1570C620 1581 635 1584 647 1588V1625C647 1654 626 1670 600 1681C574 1670 553 1654 553 1625V1588C565 1584 580 1581 600 1570Z" fill="#fff" stroke="#083a86" stroke-width="4"/>
+  <path d="M580 1622L594 1636L620 1607" fill="none" stroke="#16bdc8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="840" y="1615">TRUSTED RESULTS</text>
+  <line x1="995" y1="1607" x2="1110" y2="1607" stroke="#bfd8ed" stroke-width="2"/>
 </g>
 </svg>
