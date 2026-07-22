@@ -28,14 +28,39 @@ nvd_end_year=2026                                  ← 포함된 마지막 NVD �
 
 ## 준비물
 
-* **인터넷에 연결된 빌드 PC** (macOS 또는 Linux). NVD·CISA에서 자료를 내려받아야
-  하므로 폐쇄망 서버에서는 만들 수 없습니다.
+* **인터넷에 연결된 빌드 PC** (Windows, macOS 또는 Linux). NVD·CISA에서 자료를
+  내려받아야 하므로 폐쇄망 서버에서는 만들 수 없습니다.
 * 이 저장소(sec-chk) 체크아웃.
-* Python 3, curl. (저장소 빌드 환경에 이미 있습니다.)
+* Windows: PowerShell 5.1 또는 PowerShell 7. Python, Docker, Inno Setup은
+  필요하지 않습니다.
+* macOS/Linux: Python 3, curl. (저장소 빌드 환경에 이미 있습니다.)
 
 ## 절차
 
 ### 1. 빌드 PC에서 새 데이터 zip 생성
+
+#### Windows에서 생성
+
+저장소 체크아웃 폴더에서 PowerShell 5.1 또는 PowerShell 7로 실행합니다.
+Python, Docker, Inno Setup은 필요하지 않습니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\platforms\windows\scripts\build-koda-vuln-data.ps1
+```
+
+결과는 `dist\Windows\koda-vuln-data-<date>.zip`입니다. 연도별 NVD 피드는
+`.build\koda-vuln-data-cache`에 캐시되며, 매 실행 시 `.meta`의 SHA-256으로
+검증됩니다. `recent`, `modified`, CISA KEV는 매번 새로 내려받습니다.
+처음부터 연도별 피드를 다시 받으려면 `-Refresh`를 추가하십시오.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\platforms\windows\scripts\build-koda-vuln-data.ps1 `
+  -Refresh
+```
+
+#### macOS/Linux에서 생성
 
 ```bash
 cd /path/to/sec-chk

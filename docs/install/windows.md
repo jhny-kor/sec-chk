@@ -32,6 +32,30 @@ bash platforms/linux/package-offline.sh --vuln-data-only
 # → dist/Windows/koda-vuln-data-<date>.zip  (about 210 MB, NVD 2002-current + KEV)
 ```
 
+You can also build the package directly on an internet-connected Windows PC.
+This does not require Python, Docker, or the KODA installer build tools; it
+uses PowerShell 5.1 or PowerShell 7:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\platforms\windows\scripts\build-koda-vuln-data.ps1
+# → dist\Windows\koda-vuln-data-<date>.zip
+```
+
+The Windows script caches yearly NVD feeds under
+`.build\koda-vuln-data-cache\` and verifies each cached feed against its
+downloaded `.meta` SHA-256 before using it. The
+`recent` and `modified` NVD feeds and the CISA KEV catalog are downloaded and
+verified on every run. Add `-Refresh` to download all yearly feeds again. To
+limit the data range, use for example `-StartYear 2025 -EndYear 2026`; the
+default is the complete NVD range from 2002 through the current UTC year.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\platforms\windows\scripts\build-koda-vuln-data.ps1 `
+  -Refresh -StartYear 2025 -EndYear 2026
+```
+
 The script prints the archive SHA-256; compare it on the target machine with
 `Get-FileHash` before extracting. Extract the zip into the install directory so
 that the folders line up:

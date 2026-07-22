@@ -126,6 +126,19 @@ bash platforms/linux/package-offline.sh --vuln-data-only
 # → dist/Windows/koda-vuln-data-<date>.zip
 ```
 
+Windows에서 직접 생성하려면 다음 PowerShell 스크립트를 사용합니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\platforms\windows\scripts\build-koda-vuln-data.ps1
+# → dist\Windows\koda-vuln-data-<date>.zip
+```
+
+스크립트는 연도별 NVD 피드를 `.meta` SHA-256으로 검증하고, NVD
+`recent`/`modified`와 CISA KEV를 새로 받아 동일한 `vuln-data\` 내부 구조로
+압축합니다. 상세 옵션은 [Windows 설치](windows.md)와
+[데이터 현행화 절차](vuln-data-refresh.md)를 참고하십시오.
+
 ```powershell
 # 데이터 반입: 설치 폴더에 압축 해제
 Expand-Archive koda-vuln-data-<date>.zip -DestinationPath $env:LOCALAPPDATA\KODA -Force
@@ -162,6 +175,7 @@ git 저장소에 대용량 전달물을 직접 커밋하지 마십시오. 상세
 | `package-docker-offline.sh [--refresh]` | `dist/linux/koda-docker-offline-*.tar.gz` | Docker 전달물 |
 | `package-offline.sh [--refresh]` | `dist/linux/koda-linux-x86_64-*.tar.gz` | Linux tarball |
 | `package-offline.sh --vuln-data-only` | `dist/Windows/koda-vuln-data-<date>.zip` | Windows 데이터 |
+| `build-koda-vuln-data.ps1` | `dist\Windows\koda-vuln-data-<date>.zip` | Windows에서 직접 생성하는 데이터 |
 | `build-koda-windows-installer.ps1` | `dist/Windows/KODASetup.exe` | Windows 설치본 |
 
 `--refresh`는 캐시된 연도별 NVD 피드를 `.meta`로 재검증하고 Grype DB 메타데이터를
