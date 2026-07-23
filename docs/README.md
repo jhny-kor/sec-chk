@@ -6,6 +6,15 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 제품 개요와 플랫폼 선택은 [영문 루트 README](../README.md), 실제 명령 전체는
 [CLI 및 로컬 사용법](usage.ko.md)에 있습니다.
 
+## 기능과 구현 구조
+
+[![KODA로 가능한 작업, 구현 구조, 달성 효과](assets/readme/koda-capabilities-architecture-outcomes-ko.png)](assets/readme/koda-capabilities-architecture-outcomes-ko.png)
+
+위 도식은 KODA가 지원하는 점검 흐름, macOS 네이티브 앱과 공통 Python 엔진의
+실행 경로, 생성되는 증적을 한눈에 정리합니다. 도식을 클릭하면 원본 크기로 볼 수
+있습니다. `Python 불필요`는 macOS 네이티브 사용자가 Python을 별도로 설치할
+필요가 없다는 뜻이며, 플랫폼별 내부 구성은 각 설치 문서에서 설명합니다.
+
 ## 목적별 빠른 시작
 
 | 목적 | 얻는 결과 | 시작 문서 |

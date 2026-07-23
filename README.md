@@ -66,6 +66,12 @@ The HTML report is written to `reports/security-dashboard.html`.
 
 Use a narrow target before scanning large folders. Normal scans are read-only. `fix --apply`, prevention-template generation, and authorized web or ZAP scans can change files or contact a target; see [CLI and local usage](docs/usage.md) before using them.
 
+## Capabilities and architecture
+
+[![KODA capabilities, architecture, and outcomes](docs/assets/readme/koda-capabilities-architecture-outcomes-en.png)](docs/assets/readme/koda-capabilities-architecture-outcomes-en.png)
+
+The diagram summarizes KODA's supported workflows, the native macOS and shared Python runtime lanes, and the evidence they produce. Click it to open the full-resolution version. “No Python runtime” means the native macOS workflow does not require users to install Python separately; platform-specific internals are described in the installation guides.
+
 ## What KODA helps you do
 
 | When you need to… | KODA provides | Result |
