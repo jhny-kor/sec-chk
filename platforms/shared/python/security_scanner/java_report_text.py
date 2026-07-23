@@ -8,6 +8,8 @@ ReportLanguage = Literal["ko", "en"]
 _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
     "en": {
         "title": "KODA Java Library Vulnerability Report",
+        "eyebrow": "Offline Java security audit",
+        "offline_complete": "Offline analysis complete",
         "target": "Target",
         "completed": "Completed",
         "data_as_of": "Data as of",
@@ -24,6 +26,8 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "all": "All",
         "review": "Review",
         "search": "Search",
+        "search_placeholder": "Search library, vulnerability ID, or path",
+        "summary_heading": "Scan summary",
         "resize_column": "Drag or use Left/Right arrow keys to resize this column",
         "vulnerabilities": "Vulnerabilities",
         "raw_matches": "Raw matches",
@@ -48,9 +52,22 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "update_final": "Upgrade to the verified final version {version}.",
         "unknown": "Unknown",
         "kev_priority": "Prioritize this item because it is listed in CISA KEV.",
+        "findings_heading": "Remediation by library",
+        "findings_intro": "Vulnerabilities are consolidated by library and installed version.",
+        "key_observation": "Key observation",
+        "key_observation_body": "Alias and repeated-path matches are consolidated by library and installed version. Fixed is the first release named by each advisory; Final is the lowest candidate with no known vulnerability in the same database.",
+        "priority_heading": "Priority recommendation",
+        "priority_kev": "Start with the CISA KEV findings, then validate compatibility and move to the verified Final versions.",
+        "priority_default": "Address Critical and High findings first, then validate compatibility before applying the verified Final versions.",
+        "interpretation_heading": "Interpretation note",
+        "interpretation_body": "Final is a candidate with no known vulnerability as of the report's Grype database date. It does not guarantee application compatibility or future safety. Review any identity that is not Resolved before remediation.",
+        "showing_items": "Showing {visible} of {total} items",
+        "column_width_note": "Column widths reset when the report is reopened.",
     },
     "ko": {
         "title": "KODA Java 라이브러리 취약점 보고서",
+        "eyebrow": "오프라인 Java 보안 감사",
+        "offline_complete": "오프라인 분석 완료",
         "target": "점검 대상",
         "completed": "완료 시각",
         "data_as_of": "데이터 기준일",
@@ -67,6 +84,8 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "all": "전체",
         "review": "검토",
         "search": "검색",
+        "search_placeholder": "라이브러리, 취약점 ID 또는 경로 검색",
+        "summary_heading": "점검 요약",
         "resize_column": "드래그하거나 좌우 방향키로 컬럼 너비 조정",
         "vulnerabilities": "취약점",
         "raw_matches": "원본 매치",
@@ -91,6 +110,17 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "update_final": "검증된 최종 버전 {version}(으)로 업데이트하세요.",
         "unknown": "확인 불가",
         "kev_priority": "CISA KEV에 등재되어 있으므로 우선 조치하세요.",
+        "findings_heading": "라이브러리별 조치 현황",
+        "findings_intro": "동일 라이브러리·설치 버전의 취약점을 한 행으로 통합했습니다.",
+        "key_observation": "핵심 관찰",
+        "key_observation_body": "취약점 별칭과 여러 경로에서 반복된 결과를 라이브러리·설치 버전 단위로 통합했습니다. 수정 버전은 각 권고문의 최초 안내이며, 최종 버전은 동일 DB에서 알려진 취약점이 없는 가장 낮은 후보입니다.",
+        "priority_heading": "우선 조치 권고",
+        "priority_kev": "CISA KEV 항목부터 호환성을 검토하고, 검증된 최종 버전으로 먼저 변경하세요.",
+        "priority_default": "치명적·높음 항목부터 검토하고, 호환성을 확인한 뒤 검증된 최종 버전을 적용하세요.",
+        "interpretation_heading": "해석 시 유의사항",
+        "interpretation_body": "최종 버전은 보고서의 Grype DB 기준일에 알려진 취약점이 없는 후보입니다. 애플리케이션 호환성이나 이후 공개될 취약점까지 보장하지 않으며, 식별 상태가 확인됨이 아닌 항목은 조치 전에 별도 검토가 필요합니다.",
+        "showing_items": "전체 {total}개 중 {visible}개 항목 표시",
+        "column_width_note": "컬럼 너비는 보고서를 다시 열면 초기화됩니다.",
     },
 }
 
@@ -147,7 +177,8 @@ def identity_label(language: ReportLanguage, status: str) -> str:
     return values[0] if language == "ko" else values[1]
 
 
-def help_html(language: ReportLanguage, element_id: str = "report-help") -> str:
+def help_html(language: ReportLanguage, element_id: str = "report-help", open_by_default: bool = True) -> str:
     title, introduction, items = _HELP[language]
     details = "".join(f"<dt>{heading}</dt><dd>{description}</dd>" for heading, description in items)
-    return f"<details id=\"{element_id}\" open><summary>{title}</summary><p>{introduction}</p><dl>{details}</dl></details>"
+    open_attribute = " open" if open_by_default else ""
+    return f"<details id=\"{element_id}\"{open_attribute}><summary>{title}</summary><p>{introduction}</p><dl>{details}</dl></details>"

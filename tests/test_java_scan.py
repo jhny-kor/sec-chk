@@ -267,6 +267,9 @@ class JavaScanTests(unittest.TestCase):
         expected = "CVE-2026-0201: 1.1.0<br>CVE-2026-0202: 1.2.0"
         self.assertIn(expected, html_report)
         self.assertIn(expected, markdown_report)
+        self.assertIn('data-severity="high"', html_report)
+        self.assertIn(">높음</span>", html_report)
+        self.assertNotIn('data-severity="높음"', html_report)
 
     def test_offline_run_writes_all_reports_and_combines_local_feeds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
