@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ class GrypeMatch:
     severity: str
     locations: tuple[str, ...]
     match_details: tuple[str, ...]
+    vulnerability_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,15 +42,43 @@ def run_grype(sbom_path: Path, binary: Path | None, timeout: float) -> GrypeResu
     version = version_result.stdout.strip() if version_result.returncode == 0 else ""
     version_warning = "" if version_result.returncode == 0 else f"Grype version check failed: {version_result.stderr.strip() or 'unknown error'}"
     database, database_warning = _database_status(binary, timeout)
-    scan = _run(binary, (f"sbom:{sbom_path}", "-o", "json"), timeout)
+    matches, warning, fatal = _scan_target(binary, f"sbom:{sbom_path}", timeout)
+    if fatal:
+        return GrypeResult((), version, database, warning, True)
+    return GrypeResult(tuple(matches), version, database, "; ".join(item for item in (version_warning, database_warning, warning) if item), False)
+
+
+def run_grype_purls(purls: tuple[str, ...], binary: Path | None, timeout: float) -> GrypeResult:
+    """Scan a bounded set of package URLs using the existing local Grype DB.
+
+    Grype supports a text file containing one PURL per line.  This helper is
+    deliberately separate from ``run_grype`` so candidate-version checks do
+    not repeat the version and database-status probes or mutate the database.
+    """
+    if not purls:
+        return GrypeResult((), "", {}, "", False)
+    if binary is None:
+        return GrypeResult((), "", {}, "Grype is not configured; final-version verification was not run.", True)
+    validation = _validate_binary(binary)
+    if validation:
+        return GrypeResult((), "", {}, validation, True)
+    with tempfile.TemporaryDirectory(prefix="koda-grype-purls-") as directory:
+        package_file = Path(directory) / "packages.txt"
+        package_file.write_text("\n".join(dict.fromkeys(purls)) + "\n", encoding="utf-8")
+        matches, warning, fatal = _scan_target(binary, f"purl:{package_file}", timeout)
+    return GrypeResult(tuple(matches), "", {}, warning, fatal)
+
+
+def _scan_target(binary: Path, target: str, timeout: float) -> tuple[tuple[GrypeMatch, ...], str, bool]:
+    scan = _run(binary, (target, "-o", "json"), timeout)
     if scan.returncode != 0:
-        return GrypeResult((), version, database, f"Grype failed: {scan.stderr.strip() or 'unknown error'}", True)
+        return (), f"Grype failed: {scan.stderr.strip() or 'unknown error'}", True
     try:
         payload = json.loads(scan.stdout)
         matches = tuple(_parse_match(value) for value in payload.get("matches", []) if isinstance(value, dict))
     except (json.JSONDecodeError, AttributeError, TypeError, KeyError) as exc:
-        return GrypeResult((), version, database, f"Grype returned invalid JSON: {exc}", True)
-    return GrypeResult(tuple(match for match in matches if match is not None), version, database, "; ".join(item for item in (version_warning, database_warning) if item), False)
+        return (), f"Grype returned invalid JSON: {exc}", True
+    return tuple(match for match in matches if match is not None), "", False
 
 
 def _database_status(binary: Path, timeout: float) -> tuple[dict[str, object], str]:
@@ -73,11 +103,15 @@ def _parse_match(value: dict[str, object]) -> GrypeMatch | None:
     if not vulnerability_id:
         return None
     related = value.get("relatedVulnerabilities")
+    vulnerability_ids = {vulnerability_id}
     cve_ids = set(_cve_ids(vulnerability_id))
     if isinstance(related, list):
         for entry in related:
             if isinstance(entry, dict):
-                cve_ids.update(_cve_ids(_string(entry.get("id"))))
+                related_id = _string(entry.get("id"))
+                if related_id:
+                    vulnerability_ids.add(related_id)
+                    cve_ids.update(_cve_ids(related_id))
     fix = vulnerability.get("fix")
     fixed_versions = tuple(_string(item) for item in fix.get("versions", []) if _string(item)) if isinstance(fix, dict) and isinstance(fix.get("versions"), list) else ()
     locations = value.get("artifact", {}).get("locations", []) if isinstance(value.get("artifact"), dict) else []
@@ -102,6 +136,7 @@ def _parse_match(value: dict[str, object]) -> GrypeMatch | None:
         severity=_string(vulnerability.get("severity")).lower() or "unknown",
         locations=location_values,
         match_details=detail_values,
+        vulnerability_ids=tuple(sorted(vulnerability_ids)),
     )
 
 

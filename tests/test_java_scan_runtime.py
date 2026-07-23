@@ -15,7 +15,7 @@ SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
 if str(SHARED_PYTHON) not in sys.path:
     sys.path.insert(0, str(SHARED_PYTHON))
 
-from security_scanner.grype_adapter import run_grype
+from security_scanner.grype_adapter import run_grype, run_grype_purls
 from security_scanner.java_archives import scan_archives
 from security_scanner.java_vulnerability_scan import JavaScanOptions, run_java_scan
 from security_scanner.syft_adapter import run_syft
@@ -108,6 +108,21 @@ class JavaScanRuntimeTests(unittest.TestCase):
                 run_syft(jar, binary, 1)
 
             self.assertEqual(syft_run.call_args_list[1].args[0][1], f"file:{jar}")
+
+    def test_grype_candidate_scan_uses_purl_file_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "grype"
+            binary.write_text("placeholder", encoding="utf-8")
+            binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+            with patch("security_scanner.grype_adapter.subprocess.run") as grype_run:
+                grype_run.return_value = subprocess.CompletedProcess([str(binary)], 0, json.dumps({"matches": []}), "")
+
+                result = run_grype_purls(("pkg:maven/org.example/demo@1.2.3",), binary, 1)
+
+            self.assertFalse(result.fatal)
+            self.assertTrue(grype_run.call_args_list)
+            self.assertTrue(grype_run.call_args_list[0].args[0][1].startswith("purl:"))
 
 
 if __name__ == "__main__":

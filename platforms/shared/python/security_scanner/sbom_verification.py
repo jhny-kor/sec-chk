@@ -92,7 +92,7 @@ class VerificationItem:
             "details": self.details,
             "recommendation": self.recommendation,
             "vulnerabilities": list(self.vulnerabilities),
-            "cves": sorted({str(v.get("vulnerability_id", "")) for v in self.vulnerabilities if v.get("vulnerability_id")}),
+            "cves": sorted({identifier for vulnerability in self.vulnerabilities for identifier in _vulnerability_ids(vulnerability)}),
             "kev": any(bool(v.get("known_exploited")) for v in self.vulnerabilities),
         }
 
@@ -309,7 +309,20 @@ def _hash(component: SbomComponentIdentity) -> str:
 def _vulnerability_matches(value: dict[str, object], expected: SbomComponentIdentity, actual: ActualArchiveIdentity) -> bool:
     purl = str(value.get("component_purl") or "")
     name = str(value.get("component_name") or "")
-    return bool((purl and purl in {expected.purl, actual.purl}) or (name and name in {expected.name, actual.name}))
+    identity_matches = bool((purl and purl in {expected.purl, actual.purl}) or (name and name in {expected.name, actual.name}))
+    installed_version = str(value.get("installed_version") or "")
+    return identity_matches and (not installed_version or installed_version in {expected.version, actual.version})
+
+
+def _vulnerability_ids(value: dict[str, object]) -> tuple[str, ...]:
+    identifiers: list[str] = []
+    for key in ("cve_ids", "vulnerability_ids"):
+        raw = value.get(key)
+        if isinstance(raw, list):
+            identifiers.extend(str(item) for item in raw if item)
+    if not identifiers and value.get("vulnerability_id"):
+        identifiers.append(str(value["vulnerability_id"]))
+    return tuple(dict.fromkeys(identifiers))
 
 
 def _recommendation(status: str) -> str:

@@ -79,9 +79,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         for warning in result.warnings:
             print(f"warning: {warning}", file=sys.stderr)
+        unique_vulnerabilities = sum(len(group.advisories) for group in result.vulnerabilities)
         print(
             f"Java scan: {result.archive_count} archive(s), {len(result.components)} component(s), "
-            f"{len(result.vulnerabilities)} vulnerability finding(s).",
+            f"{len(result.vulnerabilities)} affected library version(s), {unique_vulnerabilities} unique vulnerability type(s).",
             file=sys.stderr,
         )
         return result.exit_code
@@ -713,14 +714,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="base git ref for --changed-only, e.g. origin/main",
     )
 
-    jar_scan = subparsers.add_parser("jar-scan", help="offline JAR/WAR/EAR SBOM and vulnerability scan")
+    jar_scan = subparsers.add_parser(
+        "jar-scan",
+        help="offline JAR/WAR/EAR SBOM and vulnerability scan",
+        epilog="Final is a candidate with no vulnerability match in the report's Grype DB as of its database date; it is not a compatibility guarantee.",
+    )
     jar_scan.add_argument("--target", required=True, help="JAR/WAR/EAR file or directory containing deployed Java archives")
     jar_scan.add_argument("--output-dir", default="reports/java-scan", help="report directory")
     jar_scan.add_argument("--syft-bin", help="Syft executable; no automatic download")
     jar_scan.add_argument("--grype-bin", help="Grype executable; no automatic download")
     jar_scan.add_argument("--nvd-data", help="NVD JSON 2.0 file, .json.gz file, or directory")
     jar_scan.add_argument("--cisa-kev", help="CISA known_exploited_vulnerabilities.json")
-    jar_scan.add_argument("--language", choices=("ko", "en"), default="en", help="language for generated HTML and Markdown reports")
+    jar_scan.add_argument("--language", choices=("ko", "en"), default=None, help="report language; omit for a Korean HTML report with a Korean/English toggle")
     jar_scan.add_argument("--exclude", action="append", default=[], help="archive relative-path/name glob to skip")
     jar_scan.add_argument("--max-depth", type=_positive_int, help="optional nested archive depth limit; the default scans all depths")
     jar_scan.add_argument("--timeout", type=_positive_float, default=300.0, help="Syft/Grype timeout in seconds")

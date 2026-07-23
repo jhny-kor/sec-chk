@@ -25,10 +25,14 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "review": "Review",
         "search": "Search",
         "vulnerabilities": "Vulnerabilities",
-        "cve": "CVE",
+        "raw_matches": "Raw matches",
+        "unique_vulnerabilities": "Unique vulnerabilities",
+        "affected_library_versions": "Affected library versions",
+        "cve": "Vulnerability ID",
         "library": "Library",
         "installed_version": "Installed version",
         "fixed": "Fixed",
+        "final": "Final",
         "cvss": "CVSS",
         "server_path": "Server path",
         "identity": "Identity",
@@ -40,6 +44,8 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "none_detail": "This does not prove that the target has no vulnerabilities.",
         "update": "Upgrade to {versions}.",
         "vendor_review": "Review the advisory and remediate with the vendor-supported release.",
+        "update_final": "Upgrade to the verified final version {version}.",
+        "unknown": "Unknown",
         "kev_priority": "Prioritize this item because it is listed in CISA KEV.",
     },
     "ko": {
@@ -61,10 +67,14 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "review": "검토",
         "search": "검색",
         "vulnerabilities": "취약점",
-        "cve": "CVE",
+        "raw_matches": "원본 매치",
+        "unique_vulnerabilities": "고유 취약점",
+        "affected_library_versions": "영향받은 라이브러리 버전",
+        "cve": "취약점 ID",
         "library": "라이브러리",
         "installed_version": "설치 버전",
         "fixed": "수정 버전",
+        "final": "최종 버전",
         "cvss": "CVSS",
         "server_path": "서버 경로",
         "identity": "식별 상태",
@@ -76,6 +86,8 @@ _TEXT: Final[dict[ReportLanguage, dict[str, str]]] = {
         "none_detail": "대상에 취약점이 없다는 의미는 아닙니다.",
         "update": "{versions} 버전 이상으로 업데이트하세요.",
         "vendor_review": "권고문을 검토하고 공급업체가 지원하는 수정 릴리스로 조치하세요.",
+        "update_final": "검증된 최종 버전 {version}(으)로 업데이트하세요.",
+        "unknown": "확인 불가",
         "kev_priority": "CISA KEV에 등재되어 있으므로 우선 조치하세요.",
     },
 }
@@ -89,6 +101,7 @@ _HELP: Final[dict[ReportLanguage, tuple[str, str, tuple[tuple[str, str], ...]]]]
             ("KEV", "Yes means the CVE appears in CISA's Known Exploited Vulnerabilities catalog. It is a prioritization signal, not proof that this server was compromised."),
             ("Identity", "Resolved means Maven coordinates came from pom.properties or pom.xml. Partial means only Manifest metadata was available. Inferred means the filename supplied the version. Unresolved means the library identity could not be determined. Review non-resolved identities before acting."),
             ("Fixed", "A listed version is the first known fixed release from the advisory. Select a currently supported and application-compatible release that resolves every affected CVE; do not assume the listed version is the final upgrade target."),
+            ("Final", "Final is the lowest candidate verified against the same Grype database with no matching vulnerability. It is evidence for the database date, not a guarantee that the release is compatible or free of newly published issues."),
             ("Scope", "The server path identifies the scanned archive location. Backups, unused archives, and unreachable code still require operational confirmation. No matches do not prove the absence of vulnerabilities."),
         ),
     ),
@@ -100,14 +113,15 @@ _HELP: Final[dict[ReportLanguage, tuple[str, str, tuple[tuple[str, str], ...]]]]
             ("KEV", "예는 해당 CVE가 CISA의 Known Exploited Vulnerabilities 목록에 있다는 뜻입니다. 이 서버가 이미 침해됐다는 증거는 아니며, 조치 우선순위 신호입니다."),
             ("식별 상태", "resolved는 pom.properties 또는 pom.xml에서 Maven 좌표를 확인한 상태입니다. partial은 Manifest 정보만 확인한 상태, inferred는 파일명에서 버전을 추정한 상태, unresolved는 라이브러리 식별에 실패한 상태입니다. resolved 이외의 항목은 조치 전에 확인하세요."),
             ("수정 버전", "표시된 버전은 권고문에서 확인된 최초 수정 릴리스입니다. 모든 CVE를 해결하면서 애플리케이션과 호환되는 현재 지원 버전을 선택해야 하며, 표기 버전이 최종 업그레이드 대상이라는 뜻은 아닙니다."),
+            ("최종 버전", "최종 버전은 동일한 Grype DB로 재검사해 알려진 매치가 없음을 확인한 후보 중 선택한 버전입니다. DB 기준일에 대한 증거이며 애플리케이션 호환성이나 이후 공개될 취약점까지 보장하지 않습니다."),
             ("점검 범위", "서버 경로는 실제로 검사한 아카이브 위치입니다. 백업 파일, 미사용 아카이브, 도달 불가능한 코드는 운영자가 추가로 확인해야 합니다. 일치 항목이 없더라도 취약점이 없다고 단정할 수 없습니다."),
         ),
     ),
 }
 
 
-def normalize_language(value: str) -> ReportLanguage:
-    return "ko" if value == "ko" else "en"
+def normalize_language(value: str | None) -> ReportLanguage:
+    return "ko" if value in {None, "ko"} else "en"
 
 
 def text(language: ReportLanguage, key: str) -> str:
@@ -131,7 +145,7 @@ def identity_label(language: ReportLanguage, status: str) -> str:
     return values[0] if language == "ko" else values[1]
 
 
-def help_html(language: ReportLanguage) -> str:
+def help_html(language: ReportLanguage, element_id: str = "report-help") -> str:
     title, introduction, items = _HELP[language]
     details = "".join(f"<dt>{heading}</dt><dd>{description}</dd>" for heading, description in items)
-    return f"<details id=\"report-help\" open><summary>{title}</summary><p>{introduction}</p><dl>{details}</dl></details>"
+    return f"<details id=\"{element_id}\" open><summary>{title}</summary><p>{introduction}</p><dl>{details}</dl></details>"

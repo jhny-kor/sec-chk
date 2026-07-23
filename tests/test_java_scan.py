@@ -18,8 +18,9 @@ if str(SHARED_PYTHON) not in sys.path:
 
 from security_scanner.java_archives import scan_archives
 from security_scanner.java_inventory import inventory_components
-from security_scanner.java_vulnerability_scan import JavaScanOptions, run_java_scan
+from security_scanner.java_vulnerability_scan import JavaScanOptions, VulnerabilityRecord, aggregate_vulnerabilities, run_java_scan
 from security_scanner.grype_adapter import GrypeMatch, GrypeResult
+from security_scanner.java_vulnerability_reporting import write_reports
 from security_scanner.syft_adapter import run_syft
 
 
@@ -119,6 +120,86 @@ class JavaInventoryTests(unittest.TestCase):
 
 
 class JavaScanTests(unittest.TestCase):
+    @staticmethod
+    def _record(
+        vulnerability_id: str,
+        cve_ids: tuple[str, ...],
+        fixed_versions: tuple[str, ...],
+        severity: str,
+        location: str,
+        purl: str = "pkg:maven/org.example/demo@1.0.0",
+        installed_version: str = "1.0.0",
+    ) -> VulnerabilityRecord:
+        return VulnerabilityRecord(
+            vulnerability_id,
+            cve_ids,
+            purl,
+            "demo",
+            installed_version,
+            fixed_versions,
+            severity,
+            8.0 if severity == "high" else 5.0,
+            severity.upper(),
+            False,
+            {},
+            {},
+            (location,),
+            "resolved",
+            "upgrade",
+            ("java-matcher",),
+        )
+
+    def test_vulnerabilities_are_grouped_by_library_version_and_final_is_verified(self) -> None:
+        records = (
+            self._record("GHSA-demo", ("CVE-2026-0001",), ("1.1.0",), "high", "/apps/a/demo.jar"),
+            self._record("CVE-2026-0001", ("CVE-2026-0001",), ("1.1.0",), "high", "/apps/b/demo.jar"),
+            self._record("CVE-2026-0002", ("CVE-2026-0002",), ("1.2.0",), "medium", "/apps/a/demo.jar"),
+            self._record("CVE-2026-0003", ("CVE-2026-0003",), ("2.1.0",), "low", "/apps/c/demo.jar", purl="pkg:maven/org.example/demo@2.0.0", installed_version="2.0.0"),
+        )
+        candidate_match = GrypeMatch("CVE-2026-0004", ("CVE-2026-0004",), "demo", "1.1.0", "pkg:maven/org.example/demo@1.1.0", ("1.2.0",), "medium", (), ())
+        with patch("security_scanner.java_vulnerability_scan.run_grype_purls", side_effect=(GrypeResult((candidate_match,), "", {}, "", False), GrypeResult((), "", {}, "", False))):
+            groups, warnings = aggregate_vulnerabilities(records, Path("/tmp/grype"), 5.0)
+
+        self.assertFalse(warnings)
+        self.assertEqual(len(groups), 2)
+        group = groups[0]
+        self.assertEqual(group.component_name, "demo")
+        self.assertEqual(group.installed_version, "1.0.0")
+        self.assertEqual(len(group.advisories), 2)
+        self.assertEqual(set(group.locations), {"/apps/a/demo.jar", "/apps/b/demo.jar"})
+        self.assertEqual(group.final_version, "1.2.0")
+        self.assertEqual(group.final_status, "verified_clean")
+        self.assertEqual(group.final_checked_versions, ("1.1.0", "1.2.0"))
+        self.assertIn("CVE-2026-0001", group.fixed_by_vulnerability)
+
+    def test_final_is_unknown_when_every_fixed_candidate_remains_vulnerable(self) -> None:
+        record = self._record("CVE-2026-0010", ("CVE-2026-0010",), ("1.1.0",), "high", "/apps/demo.jar")
+        still_vulnerable = GrypeMatch("CVE-2026-0011", ("CVE-2026-0011",), "demo", "1.1.0", "pkg:maven/org.example/demo@1.1.0", (), "high", (), ())
+        with patch("security_scanner.java_vulnerability_scan.run_grype_purls", return_value=GrypeResult((still_vulnerable,), "", {}, "", False)):
+            groups, warnings = aggregate_vulnerabilities((record,), Path("/tmp/grype"), 5.0)
+
+        self.assertEqual(groups[0].final_version, "")
+        self.assertEqual(groups[0].final_status, "unresolved")
+        self.assertTrue(any("No verified clean candidate" in warning for warning in warnings))
+
+    def test_language_omitted_generates_toggle_and_explicit_language_is_fixed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_reports(output, (), (), 0, (), "2026-07-23", language=None)
+            html_report = (output / "server-library-report.html").read_text(encoding="utf-8")
+            markdown_report = (output / "server-library-report.md").read_text(encoding="utf-8")
+            self.assertIn('<html lang="ko">', html_report)
+            self.assertIn("language-switch", html_report)
+            self.assertIn("English", html_report)
+            self.assertIn("KODA Java 라이브러리 취약점 보고서", markdown_report)
+
+            write_reports(output, (), (), 0, (), "2026-07-23", language="en")
+            html_report = (output / "server-library-report.html").read_text(encoding="utf-8")
+            markdown_report = (output / "server-library-report.md").read_text(encoding="utf-8")
+            self.assertIn('<html lang="en">', html_report)
+            self.assertNotIn("language-switch", html_report)
+            self.assertIn("KODA Java Library Vulnerability Report", markdown_report)
+
     def test_offline_run_writes_all_reports_and_combines_local_feeds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -186,6 +267,7 @@ class JavaScanTests(unittest.TestCase):
                     type("Completed", (), {"returncode": 0, "stdout": "grype 0.80.0", "stderr": ""})(),
                     type("Completed", (), {"returncode": 0, "stdout": json.dumps({"database": {"built": "2026-07-15T00:00:00Z"}}), "stderr": ""})(),
                     type("Completed", (), {"returncode": 0, "stdout": json.dumps(grype_payload), "stderr": ""})(),
+                    type("Completed", (), {"returncode": 0, "stdout": json.dumps({"matches": []}), "stderr": ""})(),
                 ]
                 result = run_java_scan(
                     JavaScanOptions(
@@ -203,6 +285,8 @@ class JavaScanTests(unittest.TestCase):
             self.assertEqual(len(result.vulnerabilities), 1)
             vulnerability = result.vulnerabilities[0]
             self.assertTrue(vulnerability.known_exploited)
+            self.assertEqual(vulnerability.final_version, "2.17.1")
+            self.assertEqual(vulnerability.final_status, "verified_clean")
             self.assertEqual(vulnerability.cisa_kev["kev_date_added"], "2021-12-10")
             self.assertEqual(vulnerability.cisa_kev["kev_required_action"], "Patch")
             self.assertTrue((root / "reports/server-sbom.cdx.json").exists())
@@ -213,16 +297,24 @@ class JavaScanTests(unittest.TestCase):
             self.assertTrue((root / "reports/warnings.json").exists())
             metadata = json.loads((root / "reports/scan-metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(set(metadata["data_sources"]), {"nvd", "cisa_kev"})
+            self.assertEqual(metadata["report_language"], "ko")
+            self.assertFalse(metadata["report_language_toggle"])
             self.assertEqual(metadata["grype_database"]["database"]["built"], "2026-07-15T00:00:00Z")
             self.assertTrue(all(len(source["files"][0]["sha256"]) == 64 for source in metadata["data_sources"].values()))
             report = json.loads((root / "reports/server-vulnerabilities.json").read_text(encoding="utf-8"))
             self.assertEqual(report["archives"][0]["archive_type"], "jar")
             self.assertEqual(report["target"], str(target.resolve()))
+            self.assertEqual(report["summary"]["raw_match_count"], 1)
+            self.assertEqual(report["summary"]["unique_vulnerability_count"], 1)
+            self.assertEqual(report["summary"]["affected_library_version_count"], 1)
+            self.assertEqual(report["vulnerabilities"][0]["final_version"], "2.17.1")
+            self.assertIn("CVE-2021-44228", report["vulnerabilities"][0]["fixed_by_vulnerability"])
             self.assertNotIn("kn" + "vd", report)
             self.assertNotIn("manual_review_candidates", report)
             rendered = (root / "reports/server-library-report.html").read_text(encoding="utf-8")
             self.assertIn('<html lang="ko">', rendered)
             self.assertIn('id="report-help"', rendered)
+            self.assertNotIn("language-switch", rendered)
             self.assertNotIn("KN" + "VD", rendered)
 
     def test_missing_explicit_grype_is_exit_two_without_network(self) -> None:

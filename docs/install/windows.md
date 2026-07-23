@@ -76,6 +76,11 @@ for `tools\`. No path arguments are needed:
   --output-dir reports --fail-on high --fail-on-kev
 ```
 
+Add `--language ko` or `--language en` to fix the report language. When omitted,
+the HTML report opens in Korean and includes a Korean/English toggle; Markdown is
+generated in Korean. Findings are grouped by library and installed version, with
+`Fixed` advisory candidates and a DB-verified `Final` candidate when available.
+
 Without the data package `jar-scan` still runs on Grype alone, but reports carry
 no CVSS or exploited-vulnerability detail, and `--fail-on-kev` exits `2` rather
 than passing a gate it cannot evaluate.
