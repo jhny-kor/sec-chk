@@ -34,3 +34,4 @@ For privacy questions or support requests, use the project support page:
 
 https://github.com/jhny-kor/sec-chk
 
+For the Korean version, see [PRIVACY.ko.md](PRIVACY.ko.md).

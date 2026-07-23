@@ -59,7 +59,7 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
 
 This command does not download tools, update a vulnerability database, or
 contact NVD or CISA. The full data-transfer procedure and report
-contract are in [the offline Java SBOM runbook](../security/java-sbom-vulnerability-scan.md).
+contract are in [the offline Java SBOM runbook](../security/java-sbom-vulnerability-scan.en.md).
 
 ## Install Offline Bundle
 

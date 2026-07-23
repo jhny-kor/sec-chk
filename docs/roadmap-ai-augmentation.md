@@ -6,6 +6,12 @@
 > 구현 명세(어떻게·코드 스켈레톤·CLI/Config·프롬프트 체인): [spec-beyond-static-scanner.md](spec-beyond-static-scanner.md)
 > 최종 갱신: 2026-06-14
 
+> **문서 상태:** 이 문서는 구현 전 기획과 의사결정 이력입니다. 현재는 AI triage,
+> reachability, 자동 교정, changed-file CI action이 구현되어 있습니다. 현재 사용법은
+> [CLI 및 로컬 사용법](usage.ko.md)을, 구현 세부는
+> [구현 명세](spec-beyond-static-scanner.md)를 기준으로 확인하세요. 아래의 미구현
+> 표현과 체크박스는 당시 계획 상태를 보존한 것입니다.
+
 ---
 
 ## 0. 두 도구의 성격 차이 (벤치마킹 근거)

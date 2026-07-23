@@ -170,12 +170,13 @@ koda jar-scan \
   --fail-on high --fail-on-kev
 ~~~
 
-언어를 고정하려면 `--language ko` 또는 `--language en`을 추가합니다. 생략하면
-HTML은 한국어로 열리고 한국어/English 전환 버튼을 제공하며 Markdown은 한국어로
-생성됩니다. 동일 라이브러리·설치 버전의 취약점은 한 행으로 종합되고, `Final`은
-같은 Grype DB로 재검사한 최종 후보 버전입니다.
+Use `--language ko` or `--language en` to fix the report language. When omitted,
+HTML opens in Korean with a Korean/English switch and Markdown is generated in
+Korean. Vulnerabilities for the same library and installed version are merged
+into one row, and `Final` is the candidate version rechecked against the same
+Grype database.
 
 The scanner is read-only, includes nested libraries, and never infers a Maven
 version from a filename. Unknown identity, duplicate locations, input
-SHA-256, and data 기준일 remain visible in the generated reports. See
-docs/security/java-sbom-vulnerability-scan.md for the complete runbook.
+SHA-256, and data-as-of date remain visible in the generated reports. See
+docs/security/java-sbom-vulnerability-scan.en.md for the complete runbook.

@@ -103,7 +103,7 @@ bash install.sh                 # 기본 prefix /home/user0/koda
 
 Syft·Grype·Grype DB·NVD·CISA·Playwright/Chromium이 모두 번들에 포함되며
 설치 시 자동으로 경로가 잡힙니다. 상세:
-[platforms/linux/README-offline.md](../../platforms/linux/README-offline.md)
+[platforms/linux/README-offline.ko.md](../../platforms/linux/README-offline.ko.md)
 
 ## 3. Windows 설치본 + 데이터 zip
 
@@ -136,7 +136,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 스크립트는 연도별 NVD 피드를 `.meta` SHA-256으로 검증하고, NVD
 `recent`/`modified`와 CISA KEV를 새로 받아 동일한 `vuln-data\` 내부 구조로
-압축합니다. 상세 옵션은 [Windows 설치](windows.md)와
+압축합니다. 상세 옵션은 [Windows 설치](windows.ko.md)와
 [데이터 현행화 절차](vuln-data-refresh.md)를 참고하십시오.
 
 ```powershell
@@ -153,7 +153,7 @@ Expand-Archive koda-vuln-data-<date>.zip -DestinationPath $env:LOCALAPPDATA\KODA
 ```
 
 데이터 zip 갱신 절차: [vuln-data-refresh.md](vuln-data-refresh.md) · 설치본
-상세: [windows.md](windows.md)
+상세: [windows.ko.md](windows.ko.md)
 
 ## GitLab 적재 (선택)
 

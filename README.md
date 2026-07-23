@@ -10,7 +10,8 @@
 
 <p align="center">
   <a href="https://apps.apple.com/kr/app/koda/id6770264012?mt=12">Download KODA on the Mac App Store</a> ·
-  <a href="docs/README.md">🇰🇷 한국어 설치·운영 문서</a>
+  <a href="docs/README.en.md">🇬🇧 English documentation</a> ·
+  <a href="docs/README.md">🇰🇷 한국어 문서</a>
 </p>
 
 KODA keeps scans local by default. The native macOS app has its own Swift scanner; Linux, Windows, CI, and server deployments use the shared Python engine in [`platforms/shared/python/`](platforms/shared/python/).
@@ -22,10 +23,10 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Install the native macOS app | [Mac App Store](https://apps.apple.com/kr/app/koda/id6770264012?mt=12) or [macOS install guide](docs/install/macos.md) |
 | Run KODA on Linux | [Linux install and operation guide](docs/install/linux.md) |
 | Build or install the Windows desktop app | [Windows install guide](docs/install/windows.md) |
-| Scan JAR/WAR/EAR files on an offline server | [Offline Java SBOM and vulnerability runbook](docs/security/java-sbom-vulnerability-scan.md) |
-| Choose an air-gapped delivery method | [Offline delivery overview](docs/install/offline-delivery.md) |
+| Scan JAR/WAR/EAR files on an offline server | [Offline Java SBOM and vulnerability runbook](docs/security/java-sbom-vulnerability-scan.en.md) |
+| Choose an air-gapped delivery method | [Offline delivery overview](docs/install/offline-delivery.en.md) |
 | Run scans, configure reports, or set up CI | [CLI and local usage](docs/usage.md) |
-| Integrate with security tooling | [Security integration docs](docs/README.md#보안-점검연동-security) |
+| Integrate with security tooling | [Security integration docs](docs/README.en.md#security-integrations) |
 
 ## Platform support
 
@@ -79,14 +80,14 @@ Security scans run `secrets`, `dependencies`, `configuration`, `code`, and `prev
 
 ## Documentation
 
-The [documentation index](docs/README.md) is the complete map. Common references:
+The [English documentation index](docs/README.en.md) is the complete map. The [Korean documentation index](docs/README.md) is available separately. Common references:
 
 | Topic | Document |
 | --- | --- |
 | CLI commands, configuration, reports, CI, and auto-fix | [CLI and local usage](docs/usage.md) |
-| Closed-network Docker, Linux, and Windows delivery | [Offline delivery overview](docs/install/offline-delivery.md) |
-| macOS, Linux, and Windows installation | [Install guides](docs/README.md#설치와-배포-install) |
-| Java SBOM, pre-commit, Dependency-Track, ZAP, VEX, and supply-chain guidance | [Security integration docs](docs/README.md#보안-점검연동-security) |
+| Closed-network Docker, Linux, and Windows delivery | [Offline delivery overview](docs/install/offline-delivery.en.md) |
+| macOS, Linux, and Windows installation | [Install guides](docs/README.en.md#installation-and-delivery) |
+| Java SBOM, pre-commit, Dependency-Track, ZAP, VEX, and supply-chain guidance | [Security integration docs](docs/README.en.md#security-integrations) |
 | Report fields and output contracts | [Report contract](docs/report-contract.md) |
 | Dashboard design rationale and limits | [Dashboard research](docs/security-dashboard-research.md) |
 
