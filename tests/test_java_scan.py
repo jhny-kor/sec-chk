@@ -129,6 +129,7 @@ class JavaScanTests(unittest.TestCase):
         location: str,
         purl: str = "pkg:maven/org.example/demo@1.0.0",
         installed_version: str = "1.0.0",
+        identity_status: str = "resolved",
     ) -> VulnerabilityRecord:
         return VulnerabilityRecord(
             vulnerability_id,
@@ -144,7 +145,7 @@ class JavaScanTests(unittest.TestCase):
             {},
             {},
             (location,),
-            "resolved",
+            identity_status,
             "upgrade",
             ("java-matcher",),
         )
@@ -182,6 +183,51 @@ class JavaScanTests(unittest.TestCase):
         self.assertEqual(groups[0].final_status, "unresolved")
         self.assertTrue(any("No verified clean candidate" in warning for warning in warnings))
 
+    def test_final_follows_each_advisory_fix_until_purl_is_clean(self) -> None:
+        record = self._record(
+            "CVE-2026-0100",
+            ("CVE-2026-0100",),
+            ("1.1.0",),
+            "high",
+            "/apps/demo.jar",
+            identity_status="partial",
+        )
+        first_fix_still_vulnerable = GrypeMatch(
+            "CVE-2026-0101",
+            ("CVE-2026-0101",),
+            "demo",
+            "1.1.0",
+            "pkg:maven/org.example/demo@1.1.0",
+            ("1.2.0",),
+            "high",
+            (),
+            (),
+        )
+        second_fix_still_vulnerable = GrypeMatch(
+            "CVE-2026-0102",
+            ("CVE-2026-0102",),
+            "demo",
+            "1.2.0",
+            "pkg:maven/org.example/demo@1.2.0",
+            ("1.3.0",),
+            "medium",
+            (),
+            (),
+        )
+        results = (
+            GrypeResult((first_fix_still_vulnerable,), "", {}, "", False),
+            GrypeResult((second_fix_still_vulnerable,), "", {}, "", False),
+            GrypeResult((), "", {}, "", False),
+        )
+        with patch("security_scanner.java_vulnerability_scan.run_grype_purls", side_effect=results):
+            groups, warnings = aggregate_vulnerabilities((record,), Path("/tmp/grype"), 5.0)
+
+        self.assertFalse(warnings)
+        self.assertEqual(groups[0].identity_status, "partial")
+        self.assertEqual(groups[0].final_version, "1.3.0")
+        self.assertEqual(groups[0].final_status, "verified_clean")
+        self.assertEqual(groups[0].final_checked_versions, ("1.1.0", "1.2.0", "1.3.0"))
+
     def test_language_omitted_generates_toggle_and_explicit_language_is_fixed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -191,6 +237,10 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn('<html lang="ko">', html_report)
             self.assertIn("language-switch", html_report)
             self.assertIn("English", html_report)
+            self.assertIn('class="column-resizer"', html_report)
+            self.assertIn('data-column-index="10"', html_report)
+            self.assertIn("table-layout:fixed", html_report)
+            self.assertIn("ArrowRight", html_report)
             self.assertIn("KODA Java 라이브러리 취약점 보고서", markdown_report)
 
             write_reports(output, (), (), 0, (), "2026-07-23", language="en")
@@ -199,6 +249,24 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn('<html lang="en">', html_report)
             self.assertNotIn("language-switch", html_report)
             self.assertIn("KODA Java Library Vulnerability Report", markdown_report)
+
+    def test_fixed_versions_render_one_line_per_vulnerability_id(self) -> None:
+        records = (
+            self._record("CVE-2026-0201", ("CVE-2026-0201",), ("1.1.0",), "high", "/apps/demo.jar"),
+            self._record("CVE-2026-0202", ("CVE-2026-0202",), ("1.2.0",), "medium", "/apps/demo.jar"),
+        )
+        with patch("security_scanner.java_vulnerability_scan.run_grype_purls", return_value=GrypeResult((), "", {}, "", False)):
+            groups, _ = aggregate_vulnerabilities(records, Path("/tmp/grype"), 5.0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_reports(output, (), groups, 1, (), "2026-07-23", language="ko")
+            html_report = (output / "server-library-report.html").read_text(encoding="utf-8")
+            markdown_report = (output / "server-library-report.md").read_text(encoding="utf-8")
+
+        expected = "CVE-2026-0201: 1.1.0<br>CVE-2026-0202: 1.2.0"
+        self.assertIn(expected, html_report)
+        self.assertIn(expected, markdown_report)
 
     def test_offline_run_writes_all_reports_and_combines_local_feeds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
