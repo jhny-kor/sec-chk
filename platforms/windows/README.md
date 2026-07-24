@@ -41,9 +41,13 @@ new Command Prompt after installation and run `koda --help` or, for example:
 koda scan --target C:\src\project --standard owasp-asvs-5 --format html --output reports\source.html
 ```
 
-The requested HTML path is the summary page; the linked `-detail.html` sibling
-contains the full source findings table. `--standard-category` can narrow the
-selected OWASP or Korean software-development-security profile.
+The requested HTML path is the source main report. KODA also writes the
+standalone `-detail.html` source evidence report beside it. For Java archives,
+run `koda jar-scan`; it writes `server-library-report.html` and
+`server-library-report-detail.html` in the same output directory. The desktop
+program's **Report → HTML (main + detail)** action downloads the source pair as
+one ZIP so the relative detail file stays together. `--standard-category` can
+narrow the selected OWASP or Korean software-development-security profile.
 
 ## Build
 

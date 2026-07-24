@@ -19,6 +19,7 @@ from .reporting import (
     filter_by_min_severity,
     filter_disabled_rules,
     render_html,
+    render_html_pair_zip_from_payload,
     render_hwpx,
     render_markdown_from_payload,
     render_pdf,
@@ -709,7 +710,7 @@ def _handler(language: str):
         def _handle_export(self) -> None:
             try:
                 request = self._read_json(max_bytes=4_194_304)
-                report_format = _choice_value(request, "format", {"md", "markdown", "xlsx", "hwpx", "pdf"}, "md")
+                report_format = _choice_value(request, "format", {"md", "markdown", "xlsx", "hwpx", "pdf", "html"}, "md")
                 lang = _choice_value(request, "language", {"en", "ko"}, language)
                 payload = request.get("payload")
                 if not isinstance(payload, dict):
@@ -718,7 +719,10 @@ def _handler(language: str):
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
 
-            if report_format in {"md", "markdown"}:
+            if report_format == "html":
+                body = render_html_pair_zip_from_payload(payload, lang)
+                content_type, extension = "application/zip", "zip"
+            elif report_format in {"md", "markdown"}:
                 body = render_markdown_from_payload(payload, lang).encode("utf-8")
                 content_type, extension = "text/markdown; charset=utf-8", "md"
             elif report_format == "xlsx":

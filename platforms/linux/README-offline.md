@@ -85,6 +85,13 @@ bash install.sh
 koda scan --target /deploy/app --format json --output reports/koda.json --fail-on high
 ```
 
+For the two-page source HTML report, use `--format html`; KODA writes the
+requested main file and its `-detail.html` sibling. For Java archives, use
+`koda jar-scan --target /deploy/app --format html`; the output contains
+`server-library-report.html` and `server-library-report-detail.html`. The
+Windows desktop program exposes the same source pair as **HTML (main + detail)**
+in its report download menu.
+
 The archive contains the KODA source, Syft, Grype, Grype DB, selected NVD/CISA
 data, Playwright wheels for Python 3.10 through 3.14, and Chromium. The
 installer uses only those local files and refuses network installation if an

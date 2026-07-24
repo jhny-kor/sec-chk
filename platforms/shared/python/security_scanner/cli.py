@@ -633,7 +633,7 @@ def main(argv: list[str] | None = None) -> int:
                         warnings=tuple(scanner.warnings),
                         scan_path=", ".join(target_paths.values()),
                         kind="source",
-                        summary_href=output.name,
+                        summary_href=None,
                         standard=standard_selection.standard,
                         standard_category=standard_selection.category,
                         scanned_categories=standard_selection.scanner_categories,
@@ -777,7 +777,11 @@ def build_parser() -> argparse.ArgumentParser:
     jar_scan = subparsers.add_parser(
         "jar-scan",
         help="offline JAR/WAR/EAR SBOM and vulnerability scan",
-        epilog="Final is a candidate with no vulnerability match in the report's Grype DB as of its database date; it is not a compatibility guarantee.",
+        epilog=(
+            "HTML writes server-library-report.html and server-library-report-detail.html. "
+            "Final is a candidate with no vulnerability match in the report's Grype DB as of its database date; "
+            "it is not a compatibility guarantee."
+        ),
     )
     jar_scan.add_argument("--target", required=True, help="JAR/WAR/EAR file or directory containing deployed Java archives")
     jar_scan.add_argument("--output-dir", default="reports/java-scan", help="report directory")
@@ -799,7 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
     jar_scan.add_argument("--fail-on-version-conflict", action="store_true", help="with --verify-sbom, exit 1 for version conflicts")
     jar_scan.add_argument("--fail-on-untracked", action="store_true", help="with --verify-sbom, exit 1 for archives missing from the SBOM")
     jar_scan.add_argument("--strict-hash", action="store_true", help="with --verify-sbom, require a SHA-256 in the SBOM")
-    jar_scan.add_argument("--format", choices=("json", "html", "markdown"), default="html", help="primary report format; all six artifacts are written")
+    jar_scan.add_argument("--format", choices=("json", "html", "markdown"), default="html", help="primary report format; HTML writes the main and detail report pair")
 
     sbom_verify = subparsers.add_parser("sbom-verify", help="compare a CycloneDX SBOM with deployed JAR/WAR/EAR archives")
     sbom_verify.add_argument("--target", required=True, help="directory containing deployed JAR, WAR, and EAR files")

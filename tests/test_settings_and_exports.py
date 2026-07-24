@@ -20,6 +20,7 @@ from security_scanner.reporting import (
     build_rule_catalog,
     filter_disabled_rules,
     PdfExportError,
+    render_html_pair_zip_from_payload,
     render_hwpx,
     render_markdown_from_payload,
     render_pdf,
@@ -114,6 +115,23 @@ class ExportTests(unittest.TestCase):
             sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
             self.assertIn("secret.aws-access-key", sheet)
 
+    def test_html_export_contains_linked_main_and_detail_reports(self) -> None:
+        payload = {
+            **SAMPLE_PAYLOAD,
+            "scan": {"kind": "source", "path": "src", "standard": "owasp-asvs-5"},
+        }
+        data = render_html_pair_zip_from_payload(payload, "ko")
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            self.assertEqual(set(archive.namelist()), {"report.html", "report-detail.html"})
+            main = archive.read("report.html").decode("utf-8")
+            detail = archive.read("report-detail.html").decode("utf-8")
+            self.assertIn("source-main-guide-open", main)
+            self.assertNotIn("report-detail.html", main)
+            self.assertIn("source-detail-guide-open", detail)
+            self.assertNotIn('href="report.html"', detail)
+            self.assertIn("owasp-asvs-5", detail)
+
     def test_hwpx_is_valid_zip_with_hwp_mimetype(self) -> None:
         data = render_hwpx(SAMPLE_PAYLOAD, "ko")
         self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
@@ -159,6 +177,29 @@ class ExportTests(unittest.TestCase):
             else:
                 self.assertEqual(response.status, 503)
                 self.assertIn("bundled Chromium renderer", response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_export_endpoint_returns_html_pair_zip(self) -> None:
+        server = create_dashboard_server(port=0)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request(
+                "POST",
+                "/api/export",
+                body=json.dumps({"format": "html", "language": "ko", "payload": SAMPLE_PAYLOAD}),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("Content-Type"), "application/zip")
+            self.assertEqual(response.getheader("Content-Disposition"), 'attachment; filename="koda-report.zip"')
+            with zipfile.ZipFile(io.BytesIO(response.read())) as archive:
+                self.assertEqual(set(archive.namelist()), {"report.html", "report-detail.html"})
         finally:
             server.shutdown()
             server.server_close()

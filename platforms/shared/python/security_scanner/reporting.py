@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import io
-import json
 import html
+import json
 import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -104,6 +104,7 @@ TRANSLATIONS = {
         "download_xlsx": "Excel (xlsx)",
         "download_hwpx": "Hangul (hwpx)",
         "download_pdf": "PDF",
+        "download_html": "HTML (main + detail)",
         "download_report_empty": "Run a scan first to download a report.",
         "download_future_title": "Format support notice",
         "download_future_support": "Markdown, Hangul, and Excel export will be provided in a future update. Use PDF export for a file download now.",
@@ -341,6 +342,7 @@ TRANSLATIONS = {
         "download_xlsx": "엑셀 (xlsx)",
         "download_hwpx": "한글 (hwpx)",
         "download_pdf": "PDF",
+        "download_html": "HTML (메인 + 상세)",
         "download_report_empty": "먼저 점검을 실행한 뒤 결과를 다운로드하세요.",
         "download_future_title": "형식 지원 안내",
         "download_future_support": "마크다운·한글·엑셀 다운로드는 추후 업데이트에서 지원할 예정입니다. 현재는 PDF 다운로드를 이용해 주세요.",
@@ -1502,6 +1504,31 @@ def render_markdown_from_payload(payload: dict[str, object], language: str = "ko
     return report
 
 
+def render_html_pair_zip_from_payload(payload: dict[str, object], language: str = "ko") -> bytes:
+    """Export the dashboard findings as a linked main/detail HTML pair."""
+    findings = [_finding_from_payload(item) for item in _payload_findings(payload)]
+    target_names = tuple(sorted({finding.target for finding in findings if finding.target}))
+    scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
+    standard = str(scan.get("standard") or DEFAULT_STANDARD)
+    standard_category = str(scan.get("standard_category") or DEFAULT_STANDARD_CATEGORY)
+    main_html, detail_html = render_html_pair(
+        findings,
+        target_names=target_names,
+        language=language,
+        detail_href="report-detail.html",
+        summary_href=None,
+        scan_path=str(scan.get("path") or ""),
+        kind=str(scan.get("kind") or "source"),
+        standard=standard,
+        standard_category=standard_category,
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("report.html", main_html)
+        archive.writestr("report-detail.html", detail_html)
+    return buffer.getvalue()
+
+
 def _payload_sw49(payload: dict[str, object]) -> dict[str, object] | None:
     sw49 = payload.get("sw49")
     if isinstance(sw49, dict) and isinstance(sw49.get("controls"), list) and sw49["controls"]:
@@ -1887,27 +1914,116 @@ def render_html_pair(
         enable_osv=enable_osv,
         scanned_categories=scanned_categories,
     )
-    return _render_html_main(payload, language, detail_href), _render_html_payload(payload, language, summary_href=summary_href)
+    # The four-file contract exposes the summary and detail files separately;
+    # navigation is intentionally omitted from both pages so each can be
+    # opened independently from a file manager or an artifact browser.
+    # ``detail_href`` remains accepted for callers that used the old linked
+    # summary contract; both artifacts are intentionally standalone now.
+    main_html = _render_html_main(payload, language)
+    return main_html, _render_html_payload(payload, language, summary_href=summary_href)
 
 
 def _render_html_payload(payload: dict[str, object], language: str, *, summary_href: str | None = None) -> str:
     labels = _labels(language)
     json_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     replacements = _html_replacements(labels, json_payload)
-    if summary_href:
-        replacements["__INITIAL_SUMMARY_LINK_HTML__"] = (
-            f'<a class="topbar-action summary-link" href="{html.escape(summary_href, quote=True)}">'
-            f'{html.escape(str(labels["summary_link"]))}</a>'
-        )
-    else:
-        replacements["__INITIAL_SUMMARY_LINK_HTML__"] = ""
+    scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
+    guide_button, guide_dialog, guide_script = _standards_guide_markup(
+        language,
+        "source-detail-guide",
+        str(scan.get("standard") or DEFAULT_STANDARD),
+    )
+    replacements["__INITIAL_STANDARDS_GUIDE_BUTTON__"] = guide_button
+    replacements["__INITIAL_STANDARDS_GUIDE_DIALOG__"] = guide_dialog
+    replacements["__INITIAL_STANDARDS_GUIDE_SCRIPT__"] = guide_script
+    # Main and detail reports are independent artifacts.  Do not inject a
+    # cross-page back link; the caller can open either file directly.
+    replacements["__INITIAL_SUMMARY_LINK_HTML__"] = ""
     content = HTML_TEMPLATE
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
     return content
 
 
-def _render_html_main(payload: dict[str, object], language: str, detail_href: str) -> str:
+_STANDARDS_GUIDE_COPY = {
+    "local": (
+        "KODA Local Rule Categories",
+        "KODA의 로컬 보안 규칙 모음으로, 선택된 파일·폴더 점검 범위의 발견 패턴을 설명합니다.",
+        "KODA's local rule set describing detected patterns within the selected file and folder scope.",
+    ),
+    "owasp-top-10-2025": (
+        "OWASP Top 10:2025",
+        "OWASP가 정리한 2025년 웹 애플리케이션 주요 위험 범주입니다.",
+        "OWASP's 2025 risk categories for the most important web application threats.",
+    ),
+    "owasp-proactive-controls": (
+        "OWASP Proactive Controls",
+        "OWASP가 개발자에게 제시하는 예방 중심의 안전한 설계·코딩 실천 항목입니다.",
+        "OWASP's prevention-focused secure design and coding practices for developers.",
+    ),
+    "owasp-asvs-5": (
+        "OWASP ASVS 5.0",
+        "OWASP의 웹 애플리케이션 보안 검증 요구사항으로, 구현된 보안 통제를 점검합니다.",
+        "OWASP application security verification requirements for checking implemented controls.",
+    ),
+    "cwe-top-25-2025": (
+        "CWE Top 25:2025",
+        "MITRE가 발표한 위험도가 높은 소프트웨어 약점 우선순위 목록입니다.",
+        "MITRE's prioritized list of dangerous software weaknesses.",
+    ),
+    "sw-dev-security-49": (
+        "행정안전부 소프트웨어 개발보안 49",
+        "행정안전부의 소프트웨어 개발보안 49개 보안약점 기준과 점검 항목입니다.",
+        "The Korean Ministry of the Interior and Safety's 49 software development security weaknesses.",
+    ),
+    "sw-dev-security-7-types": (
+        "행정안전부 소프트웨어 보안 7가지 유형",
+        "행정안전부의 소프트웨어 보안약점을 7개 유형으로 분류한 기준입니다.",
+        "The Korean Ministry of the Interior and Safety's seven software security weakness types.",
+    ),
+    "kisa-secure-coding-guide": (
+        "KISA 소프트웨어 보안약점 진단가이드 2021",
+        "한국인터넷진흥원(KISA)의 안전한 소프트웨어 개발과 보안약점 진단 기준입니다.",
+        "KISA's 2021 guide for secure software development and weakness diagnosis.",
+    ),
+}
+
+
+def _standards_guide_markup(language: str, prefix: str, standard_id: str = DEFAULT_STANDARD) -> tuple[str, str, str]:
+    """Return a source-report standards guide that works without a JS dialog API."""
+    is_ko = language == "ko"
+    button_text = "안내" if is_ko else "Guide"
+    title = "분석 기준 안내" if is_ko else "Analysis standards guide"
+    close = "닫기" if is_ko else "Close"
+    selected = _STANDARDS_GUIDE_COPY.get(standard_id)
+    if selected:
+        label, ko_description, en_description = selected
+        rows = ((label, ko_description if is_ko else en_description),)
+    else:
+        rows = (
+            (
+                "MITRE CWE",
+                "CWE-89, CWE-798 등은 탐지된 문제의 원인 유형과 영향 범주를 나타내는 약점 분류입니다."
+                if is_ko
+                else "CWE-89, CWE-798, and others classify the cause and impact category of each weakness.",
+            ),
+        )
+    rows_html = "".join(
+        f'<li><strong>{html.escape(label)}</strong><span>{html.escape(description)}</span></li>'
+        for label, description in rows
+    )
+    button = f'<button id="{prefix}-open" class="standards-guide-button" type="button" style="min-height:36px;padding:0 12px;border:1px solid #b8cdf1;border-radius:999px;color:#0b3b89;background:#edf4ff;cursor:pointer;font-weight:800">{html.escape(button_text)}</button>'
+    dialog = (
+        f'<dialog id="{prefix}" class="standards-guide-dialog" style="width:min(680px,calc(100% - 28px));padding:0;border:0;border-radius:18px;box-shadow:0 24px 80px rgba(15,35,64,.28);color:#10233f">'
+        f'<div class="standards-guide-head" style="display:flex;justify-content:space-between;gap:16px;align-items:center;padding:18px 21px;border-bottom:1px solid #dbe4ef"><h2 style="margin:0;font-size:20px">{html.escape(title)}</h2>'
+        f'<button id="{prefix}-close" type="button" style="min-height:34px;padding:0 10px;border:1px solid #dbe4ef;border-radius:8px;background:#fff;cursor:pointer">{html.escape(close)}</button></div>'
+        f'<ul style="display:grid;gap:10px;margin:0;padding:18px 21px 22px;list-style:none">{rows_html}</ul></dialog>'
+    )
+    script = f'''<script>(function(){{const dialog=document.getElementById("{prefix}"),open=document.getElementById("{prefix}-open"),close=document.getElementById("{prefix}-close");function show(){{if(typeof dialog.showModal==="function")dialog.showModal();else dialog.setAttribute("open","");}}function hide(){{if(typeof dialog.close==="function")dialog.close();else dialog.removeAttribute("open");}}open.addEventListener("click",show);close.addEventListener("click",hide);}})();</script>'''
+    return button, dialog, script
+
+
+def _render_html_main(payload: dict[str, object], language: str) -> str:
     labels = _labels(language)
     summary = payload.get("summary", {})
     if not isinstance(summary, dict):
@@ -1917,6 +2033,7 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         scan = {}
     standards = payload.get("standards", [])
     standard_label = str(scan.get("standard", DEFAULT_STANDARD))
+    standard_id = standard_label
     category_label = str(scan.get("standard_category", DEFAULT_STANDARD_CATEGORY))
     for item in standards:
         if isinstance(item, dict) and item.get("id") == standard_label:
@@ -1935,7 +2052,6 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
     title = "소스 보안 분석 요약" if is_ko else "Source Security Scan Summary"
     eyebrow = "KODA · 정적 분석" if is_ko else "KODA · STATIC ANALYSIS"
     intro = "요약을 확인한 뒤 전체 취약점과 근거는 상세 보고서에서 확인하세요." if is_ko else "Review the summary first, then open the detailed findings and evidence."
-    detail_text = "상세 보고서 열기" if is_ko else "Open detailed report"
     target_text = "대상" if is_ko else "Target"
     standard_text = "기준" if is_ko else "Standard"
     category_text = "범주" if is_ko else "Category"
@@ -1967,9 +2083,10 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         priority = f"우선 조치: 치명 {_format_main_count(critical_count)}건 · 높음 {_format_main_count(high_count)}건. 상세 보고서에서 파일 위치, 문제행 문맥과 수정 방법을 확인하세요."
     else:
         priority = f"Priority action: {_format_main_count(critical_count)} Critical · {_format_main_count(high_count)} High. Use the detailed report for file locations, source context, and remediation guidance."
+    guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-main-guide", standard_id)
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 :root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-action{{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:13px 17px;border-radius:11px;color:#fff;background:#1368e8;text-decoration:none;font-weight:800}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span></div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div><a class="koda-main-action" href="{html.escape(detail_href, quote=True)}">{html.escape(detail_text)} →</a></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><footer>KODA · {html.escape(generated_at)}</footer></main></body></html>'''
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
 
 
 def _format_main_count(value: object) -> str:
@@ -3327,6 +3444,7 @@ HTML_TEMPLATE = """<!doctype html>
         </div>
         <div class="topbar-actions">
           __INITIAL_SUMMARY_LINK_HTML__
+          __INITIAL_STANDARDS_GUIDE_BUTTON__
           <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
           <button id="settings-toggle" class="topbar-action" type="button">⚙ 설정</button>
         </div>
@@ -3469,6 +3587,7 @@ HTML_TEMPLATE = """<!doctype html>
           <button class="report-download-btn" type="button" data-format="xlsx"></button>
           <button class="report-download-btn" type="button" data-format="hwpx"></button>
           <button class="report-download-btn" type="button" data-format="pdf"></button>
+          <button class="report-download-btn" type="button" data-format="html"></button>
         </div>
         <button id="download-dialog-cancel" type="button" class="download-dialog-cancel"></button>
       </dialog>
@@ -3477,6 +3596,7 @@ HTML_TEMPLATE = """<!doctype html>
         <p id="download-notice-body" class="download-notice-body"></p>
         <button id="download-notice-close" type="button" class="download-dialog-cancel"></button>
       </dialog>
+      __INITIAL_STANDARDS_GUIDE_DIALOG__
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
 
@@ -3788,6 +3908,7 @@ HTML_TEMPLATE = """<!doctype html>
         xlsx: activeLabels.download_xlsx,
         hwpx: activeLabels.download_hwpx,
         pdf: activeLabels.download_pdf,
+        html: activeLabels.download_html,
       };
       document.querySelectorAll("#download-dialog .report-download-btn").forEach((btn) => {
         btn.textContent = formatLabels[btn.getAttribute("data-format")] || "";
@@ -4240,10 +4361,18 @@ HTML_TEMPLATE = """<!doctype html>
       if (!items.length) return;
       const suffix = standardId && standardId !== "all" ? `-${standardId}` : "";
       try {
+        const exportPayload = { ...payload, findings: items };
+        if (standardId && standardId !== "all") {
+          exportPayload.scan = { ...(payload.scan || {}), standard: standardId, standard_category: "all" };
+        }
         const response = await fetch(apiEndpoint("/api/export"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ format, language: state.language, payload: { findings: items } }),
+          body: JSON.stringify({
+            format,
+            language: state.language,
+            payload: exportPayload,
+          }),
         });
         if (!response.ok) {
           const error = await parseJsonResponse(response);
@@ -4257,7 +4386,9 @@ HTML_TEMPLATE = """<!doctype html>
         const link = document.createElement("a");
         const downloadUrl = URL.createObjectURL(blob);
         link.href = downloadUrl;
-        link.download = `koda-report${suffix}.${format}`;
+        link.download = format === "html"
+          ? `koda-source-report${suffix}.zip`
+          : `koda-report${suffix}.${format}`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -4950,6 +5081,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     render();
   </script>
+  __INITIAL_STANDARDS_GUIDE_SCRIPT__
 </body>
 </html>
 """

@@ -20,5 +20,12 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 Microsoft Store 배포에는 Inno 설치본이 아니라 MSIX 또는 `.msixupload`를
 사용해야 합니다.
 
+설치 후 `koda scan --target C:\src\project --format html --output reports\source.html`을
+실행하면 소스 메인 리포트와 `source-detail.html` 상세 리포트가 함께 생성됩니다.
+Java 아카이브는 `koda jar-scan --target C:\deploy\apps --format html`을 사용하며,
+`server-library-report.html`과 `server-library-report-detail.html`을 생성합니다.
+Windows 프로그램에서는 **보고서 → HTML (메인 + 상세)**를 선택하면 소스 두 파일이
+상대 링크를 유지한 ZIP으로 저장됩니다.
+
 - [한국어 문서 인덱스](../../docs/README.md)
 - [English Windows installer guide](README.md)
