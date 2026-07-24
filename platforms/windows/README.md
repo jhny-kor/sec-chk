@@ -33,6 +33,18 @@ from the Start Menu shortcut named `KODA (Browser Mode)`.
 Target users do **not** need to clone the repository. They only need
 `KODASetup.exe`.
 
+The installer places both `koda.cmd` and the legacy `KODA-CLI.cmd` in the
+per-user install directory and adds that directory to the user `PATH`. Open a
+new Command Prompt after installation and run `koda --help` or, for example:
+
+```bat
+koda scan --target C:\src\project --standard owasp-asvs-5 --format html --output reports\source.html
+```
+
+The requested HTML path is the summary page; the linked `-detail.html` sibling
+contains the full source findings table. `--standard-category` can narrow the
+selected OWASP or Korean software-development-security profile.
+
 ## Build
 
 Run from the repository root:

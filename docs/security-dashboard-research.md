@@ -24,8 +24,12 @@ The current implementation borrows information architecture from established vul
   - https://owasp.org/API-Security/editions/2023/en/0x11-t10/
 - OWASP Mobile Top 10:2024: mobile risk categories; added as a mapped profile for credential, supply-chain, communication, storage, cryptography, and configuration overlaps.
   - https://owasp.org/www-project-mobile-top-10/
-- OWASP ASVS 5.0.0: verification requirements for web application technical controls; tracked as a future checklist/profile candidate.
+- OWASP ASVS 5.0.0: verification requirements for web application technical controls; exposed as a locally mapped source-analysis profile.
   - https://owasp.org/www-project-application-security-verification-standard/
+- OWASP Top 10 Proactive Controls 2024: developer-oriented secure-coding controls C1–C10; added as a mapped source-analysis profile.
+  - https://top10proactive.owasp.org/the-top-10/
+- OWASP Developer Guide secure-coding checklist: modern checklist guidance aligned with proactive controls; used to distinguish a coding checklist from a complete SAST engine.
+  - https://devguide.owasp.org/en/04-design/02-web-app-checklist/
 - CWE Top 25 2025: current MITRE/CISA weakness prioritization list; added as a partial profile for local sensitive-data checks and heuristic code-pattern checks.
   - https://cwe.mitre.org/top25/
 - NIST SSDF SP 800-218: secure software development practice framework; tracked as a future process/checklist candidate rather than a direct static-scan profile.
@@ -48,6 +52,19 @@ The current implementation borrows information architecture from established vul
 - Interchange output: SARIF is available for downstream static-analysis consumers.
 - Code-pattern heuristics: common risky sinks such as dynamic SQL, unsafe HTML rendering, shell execution, path use, SSRF fetches, disabled CSRF/auth checks, unsafe deserialization, file upload saves, request body parsing, and C/C++ buffer APIs can provide lightweight local evidence for standards categories.
 
+## Source-analysis standards
+
+The CLI accepts only IDs registered in `standards.py`. For secure coding and
+static evidence, `owasp-asvs-5` is the verification-oriented profile and
+`owasp-proactive-controls` is the developer-control profile. OWASP Top 10 and
+WSTG remain risk/testing views, not substitutes for a complete language-aware
+SAST engine. The Korean profiles are `sw-dev-security-49` (the implementation
+weakness controls I-01..I-17, S-01..S-16, T-01..T-02, E-01..E-03, C-01..C-05,
+P-01..P-04, A-01..A-02) and `sw-dev-security-7-types` (the seven categories:
+input validation and representation, security features, time/state, error
+handling, code error, encapsulation, and API misuse). Unsupported or external
+categories are rejected instead of being reported as automatically passed.
+
 ## Deliberate Limits
 
 - The local risk score is a simple weighted backlog score, not a CVSS calculation.
@@ -56,4 +73,6 @@ The current implementation borrows information architecture from established vul
 - Standard selections are mapping profiles over the implemented local rules, not a claim of full standard coverage.
 - CWE Top 25 coverage is still heuristic; use-after-free and null-pointer dereference remain unsupported because they need deeper language-aware analysis.
 - ISMS-P 2.8 is a supporting-evidence profile, not an ISMS-P audit result; full coverage needs checklist/evidence workflows outside static file scanning.
-- ASVS and NIST SSDF are better served by additional rule engines or checklist/evidence workflows before they are exposed as first-class scan profiles.
+- ASVS, Proactive Controls, and the Korean profiles are mapping profiles over
+  the implemented local rules; formal compliance still requires the standard's
+  design, test, runtime, and organizational evidence.

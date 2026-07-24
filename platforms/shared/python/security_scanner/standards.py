@@ -689,6 +689,44 @@ OWASP_TOP_10_2021 = SecurityStandard(
 )
 
 
+# OWASP Top 10 Proactive Controls (2024).  These are developer-facing secure
+# coding controls rather than a vulnerability taxonomy; each category below is
+# deliberately limited to local rules that can produce static evidence.
+_OWASP_PROACTIVE_CONTROLS_CATEGORIES = (
+    StandardCategory("c1-access-control", {"en": "C1 Implement Access Control", "ko": "C1 접근통제 구현"}, scanner_categories=("code",), rule_ids=ACCESS_CONTROL_RULE_IDS),
+    StandardCategory("c2-cryptography", {"en": "C2 Use Cryptography Properly", "ko": "C2 암호기술 올바르게 사용"}, scanner_categories=("secrets", "configuration", "dependencies", "code"), rule_ids=CRYPTOGRAPHY_RULE_IDS),
+    StandardCategory("c3-input-exceptions", {"en": "C3 Validate Input and Handle Exceptions", "ko": "C3 입력 검증 및 예외 처리"}, scanner_categories=("code", "configuration"), rule_ids=INPUT_VALIDATION_RULE_IDS + ERROR_HANDLING_RULE_IDS),
+    StandardCategory("c4-security-start", {"en": "C4 Address Security from the Start", "ko": "C4 초기 단계부터 보안 반영"}, scanner_categories=("code", "prevention"), rule_ids=INSECURE_DESIGN_RULE_IDS + PREVENTION_RULE_IDS),
+    StandardCategory("c5-secure-defaults", {"en": "C5 Secure by Default Configurations", "ko": "C5 안전한 기본 설정"}, scanner_categories=("configuration", "code"), rule_ids=MISCONFIGURATION_RULE_IDS),
+    StandardCategory("c6-components", {"en": "C6 Keep Components Secure", "ko": "C6 구성요소 안전성 유지"}, scanner_categories=("dependencies", "prevention"), rule_ids=DEPENDENCY_RULE_IDS + INTEGRITY_RULE_IDS),
+    StandardCategory("c7-digital-identity", {"en": "C7 Implement Digital Identity", "ko": "C7 디지털 신원 구현"}, scanner_categories=("code",), rule_ids=AUTHENTICATION_RULE_IDS),
+    StandardCategory("c8-browser-security", {"en": "C8 Leverage Browser Security Features", "ko": "C8 브라우저 보안 기능 활용"}, scanner_categories=("code", "configuration"), rule_ids=INSECURE_TRANSPORT_RULE_IDS + ("code.wildcard-cors", "code.insecure-cookie-settings")),
+    StandardCategory("c9-logging-monitoring", {"en": "C9 Implement Security Logging and Monitoring", "ko": "C9 보안 로깅 및 모니터링"}, scanner_categories=("code",), rule_ids=LOGGING_MONITORING_RULE_IDS),
+    StandardCategory("c10-ssrf", {"en": "C10 Stop Server-Side Request Forgery", "ko": "C10 서버사이드 요청 위조 차단"}, scanner_categories=("code",), rule_ids=("code.ssrf-user-url",)),
+)
+
+OWASP_PROACTIVE_CONTROLS = SecurityStandard(
+    "owasp-proactive-controls",
+    {"en": "OWASP Top 10 Proactive Controls:2024", "ko": "OWASP Top 10 Proactive Controls:2024"},
+    (
+        _all_category(_OWASP_PROACTIVE_CONTROLS_CATEGORIES, {"en": "All mapped OWASP proactive controls", "ko": "매핑된 OWASP 선제적 통제 전체"}),
+        *_OWASP_PROACTIVE_CONTROLS_CATEGORIES,
+    ),
+    description=_text(
+        "OWASP's 2024 developer-focused secure coding controls mapped to local static evidence.",
+        "OWASP 2024 개발자 중심 시큐어코딩 통제를 로컬 정적 증거에 매핑한 프로파일입니다.",
+    ),
+    coverage=_text(
+        "Automatic local checks cover only the mapped patterns; design, runtime, and business-logic review remain required.",
+        "자동 점검은 매핑된 패턴만 다루며 설계, 런타임, 비즈니스 로직 검토가 추가로 필요합니다.",
+    ),
+    references=(
+        _reference("OWASP Top 10 Proactive Controls", "OWASP Top 10 Proactive Controls", "https://top10proactive.owasp.org/the-top-10/"),
+        _reference("OWASP Developer Guide", "OWASP Developer Guide", "https://devguide.owasp.org/en/05-implementation/01-documentation/01-proactive-controls/"),
+    ),
+)
+
+
 # --- Korea SW Development Security 49 official implementation-stage controls -----
 #
 # Each of the 49 MOIS/KISA implementation-stage weaknesses is registered as an
@@ -1202,6 +1240,11 @@ SW_DEV_SECURITY_49 = SecurityStandard(
         "49개 전체 기준 목록을 제공하지만 모든 항목이 자동 진단되는 것은 아닙니다. 자동·부분 지원 항목은 소스, 설정, 비밀값, 의존성 및 선택적 웹 점검으로 확인하고, 설계·권한·세션·복잡한 데이터 흐름 관련 항목은 수동 검토나 외부 SAST가 필요합니다.",
     ),
     references=(
+        _reference(
+            "MOIS Software Development Security Guide (2021)",
+            "행정안전부 소프트웨어 개발보안 가이드(2021)",
+            "https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956",
+        ),
         _reference("KISA Software Development Security", "KISA 소프트웨어 개발보안", "https://www.kisa.or.kr/1051202"),
     ),
 )
@@ -2619,6 +2662,7 @@ SECURITY_STANDARDS = (
     LOCAL_STANDARD,
     OWASP_TOP_10_2025,
     OWASP_TOP_10_2021,
+    OWASP_PROACTIVE_CONTROLS,
     CWE_TOP_25_2025,
     CWE_SANS_TOP_25_2025,
     CWE_GENERAL,
@@ -2650,10 +2694,29 @@ SECURITY_STANDARDS = (
 )
 SECURITY_STANDARD_IDS = tuple(standard.id for standard in SECURITY_STANDARDS)
 
+# Profiles intended for source-code/static analysis.  Host, web-runtime,
+# certification, and supply-chain-only profiles remain available to the
+# dashboard/server APIs but are not valid ``koda scan --standard`` choices.
+SOURCE_STANDARD_IDS = (
+    DEFAULT_STANDARD,
+    "owasp-top-10-2025",
+    "owasp-top-10-2021",
+    "owasp-proactive-controls",
+    "owasp-asvs-5",
+    "owasp-wstg",
+    "cwe-top-25-2025",
+    "cwe-sans-top-25-2025",
+    "cwe",
+    "sw-dev-security-49",
+    "sw-dev-security-7-types",
+    "kisa-secure-coding-guide",
+)
+
 AUTOMATIC_COVERAGE_STANDARD_IDS = {
     DEFAULT_STANDARD,
     "owasp-top-10-2025",
     "owasp-top-10-2021",
+    "owasp-proactive-controls",
     "cwe-top-25-2025",
     "cwe-sans-top-25-2025",
     "cwe",

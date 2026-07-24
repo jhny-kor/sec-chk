@@ -118,7 +118,7 @@ type %LOCALAPPDATA%\KODA\vuln-data\versions.txt
 이어서 실제 스캔으로 게이트가 동작하는지 확인합니다.
 
 ```bat
-"%LOCALAPPDATA%\KODA\KODA-CLI.cmd" jar-scan --target D:\some\apps ^
+koda jar-scan --target D:\some\apps ^
   --output-dir %TEMP%\koda-check --fail-on-kev
 echo exit=%ERRORLEVEL%
 ```

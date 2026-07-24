@@ -103,3 +103,8 @@ class ScannerConfig:
     # Opt-in CI diff-scope: scan only files changed versus diff_base (see git_changes.py).
     changed_only: bool = False
     diff_base: str | None = None
+    # Optional standards profile selected for source-code scans.  The local
+    # profile keeps the historic category behaviour; named profiles narrow the
+    # scanner to the rules that belong to that standard/category.
+    standard: str = "local"
+    standard_category: str = "all"

@@ -240,7 +240,9 @@ class JavaScanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             write_reports(output, (), (), 0, (), "2026-07-23", language=None)
-            html_report = (output / "server-library-report.html").read_text(encoding="utf-8")
+            html_report = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
+            main_report = (output / "server-library-report.html").read_text(encoding="utf-8")
+            self.assertIn("server-library-report-detail.html", main_report)
             markdown_report = (output / "server-library-report.md").read_text(encoding="utf-8")
             self.assertIn('<html lang="ko">', html_report)
             self.assertIn("language-switch", html_report)
@@ -254,7 +256,7 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn("KODA Java 라이브러리 취약점 보고서", markdown_report)
 
             write_reports(output, (), (), 0, (), "2026-07-23", language="en")
-            html_report = (output / "server-library-report.html").read_text(encoding="utf-8")
+            html_report = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
             markdown_report = (output / "server-library-report.md").read_text(encoding="utf-8")
             self.assertIn('<html lang="en">', html_report)
             self.assertNotIn("language-switch", html_report)
@@ -271,7 +273,7 @@ class JavaScanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             write_reports(output, (), groups, 1, (), "2026-07-23", language="ko")
-            html_report = (output / "server-library-report.html").read_text(encoding="utf-8")
+            html_report = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
             markdown_report = (output / "server-library-report.md").read_text(encoding="utf-8")
 
         expected = "CVE-2026-0202: 1.2.0<br>CVE-2026-0201: 1.1.0"
@@ -299,7 +301,7 @@ class JavaScanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             write_reports(output, (), groups, 1319, (), "2026-07-23", language="ko")
-            rendered = (output / "server-library-report.html").read_text(encoding="utf-8")
+            rendered = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
 
         self.assertIn("더보기", rendered)
         self.assertIn("접기", rendered)
@@ -400,6 +402,7 @@ class JavaScanTests(unittest.TestCase):
             self.assertTrue((root / "reports/server-sbom.cdx.json").exists())
             self.assertTrue((root / "reports/server-vulnerabilities.json").exists())
             self.assertTrue((root / "reports/server-library-report.html").exists())
+            self.assertTrue((root / "reports/server-library-report-detail.html").exists())
             self.assertTrue((root / "reports/server-library-report.md").exists())
             self.assertTrue((root / "reports/scan-metadata.json").exists())
             self.assertTrue((root / "reports/warnings.json").exists())
@@ -419,7 +422,7 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn("CVE-2021-44228", report["vulnerabilities"][0]["fixed_by_vulnerability"])
             self.assertNotIn("kn" + "vd", report)
             self.assertNotIn("manual_review_candidates", report)
-            rendered = (root / "reports/server-library-report.html").read_text(encoding="utf-8")
+            rendered = (root / "reports/server-library-report-detail.html").read_text(encoding="utf-8")
             self.assertIn('<html lang="ko">', rendered)
             self.assertIn('id="report-help"', rendered)
             self.assertNotIn("language-switch", rendered)

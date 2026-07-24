@@ -20,6 +20,7 @@ DefaultDirName={localappdata}\KODA
 DefaultGroupName=KODA
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+ChangesEnvironment=yes
 OutputDir=..\..\..\dist\Windows
 OutputBaseFilename=KODASetup
 Compression=lzma2
@@ -39,11 +40,17 @@ Type: files; Name: "{app}\SecChk-CLI.bat"
 Type: files; Name: "{app}\Uninstall-SecChk.ps1"
 Type: filesandordirs; Name: "{app}\KODA-CLI"
 Type: files; Name: "{app}\KODA-CLI.cmd"
+Type: files; Name: "{app}\koda.cmd"
 Type: files; Name: "{app}\KODA-CLI-Shell.cmd"
 Type: filesandordirs; Name: "{app}\tools"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Registry]
+; Add the per-user install directory to PATH so a new Command Prompt can run
+; `koda` directly. Existing PATH entries are preserved by {olddata}.
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Flags: preservestringtype
 
 [Icons]
 Name: "{group}\KODA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{userdocs}"; Comment: "KODA local security dashboard"

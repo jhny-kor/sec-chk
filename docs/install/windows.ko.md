@@ -17,5 +17,22 @@ python -m security_scanner jar-scan `
 `--language ko|en`은 HTML과 Markdown을 고정합니다. 생략하면 HTML은 한국어로
 열리고 `한국어`/`English` 전환 버튼을 표시하며 Markdown은 한국어입니다.
 
+설치기는 `%LOCALAPPDATA%\KODA`를 사용자 `PATH`에 추가하고 `koda.cmd`를
+설치합니다. 설치 후 새 명령 프롬프트를 열어 `koda --help`로 실행하세요.
+기존 `KODA-CLI.cmd`도 호환성을 위해 유지됩니다.
+
+소스코드 분석은 기준을 명시해서 실행할 수 있습니다. HTML은 메인 요약과
+`-detail.html` 상세 파일로 나뉩니다.
+
+```bat
+koda scan --target C:\src\project --standard sw-dev-security-49 ^
+  --format html --output reports\source.html
+```
+
+`owasp-asvs-5`, `owasp-proactive-controls`, `sw-dev-security-49`,
+`sw-dev-security-7-types` 등을 선택할 수 있고 `--standard-category`로 범주를
+좁힐 수 있습니다. 프로파일은 KODA 정적 룰의 매핑 범위이며 전체 SAST나 공식
+준수 판정을 의미하지 않습니다.
+
 - [한국어 문서 인덱스](../README.md)
 - [English Windows install](windows.md)

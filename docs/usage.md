@@ -6,7 +6,7 @@ This guide covers the shared Python engine used by Linux, Windows, CI, and serve
 
 | Goal | Start with | What it gives you |
 | --- | --- | --- |
-| Scan a repository before review or release | `scan --target . --format html` | Local findings for source, configuration, dependencies, secrets, and prevention gaps. |
+| Scan a repository before review or release | `scan --target . --standard owasp-asvs-5 --format html --output reports/source.html` | A summary HTML page plus a linked detail page for source, configuration, dependencies, secrets, and prevention gaps. |
 | Run a repeatable CI gate | `scan --changed-only --base origin/main --format sarif --fail-on high` | Changed-file scan, SARIF output, and a nonzero exit code at the chosen severity. |
 | Create an offline Java inventory | `jar-scan --target /deploy/apps` | CycloneDX, vulnerability, HTML, Markdown, and scan-metadata artifacts. |
 | Compare a deployment to an approved baseline | `sbom-verify --target /deploy/apps --sbom approved.cdx.json` | Archive, version, PURL, and optional SHA-256 mismatch evidence. |
@@ -73,6 +73,8 @@ ignore:
 # Discover project roots and run local scans
 python3 -m security_scanner discover --target /path/to/projects
 python3 -m security_scanner scan --target /path/to/project --category secrets --format json
+python3 -m security_scanner scan --target . --standard owasp-proactive-controls --format html --output reports/source.html
+python3 -m security_scanner scan --target . --standard sw-dev-security-49 --standard-category input-validation-expression --format html --output reports/sw49-input.html
 python3 -m security_scanner scan --config scanner_config.example.json --fail-on high
 python3 -m security_scanner scan --target . --format sarif --output reports/results.sarif
 python3 -m security_scanner scan --target . --format cyclonedx --output reports/sbom.cdx.json
@@ -90,9 +92,16 @@ python3 -m security_scanner jar-scan --target /deploy/apps --output-dir reports/
 python3 -m security_scanner sbom-verify --target /deploy/apps --sbom reports/approved-sbom.cdx.json --output-dir reports/sbom-verification --strict-hash --fail-on-mismatch
 ```
 
+Source HTML writes the requested summary path and a `-detail.html` sibling. The
+summary is the landing page; the detail page contains the complete static finding
+table and filters. `--standard` accepts only profiles registered by KODA and
+`--standard-category` selects one supported category. The profiles are mappings to
+the local static rules, not a claim of full SAST or formal compliance.
+
 For Java reports, add `--language ko` or `--language en` to generate a fixed-language
 HTML/Markdown pair. If omitted, HTML opens in Korean with a Korean/English toggle and
-Markdown is Korean. Java findings are grouped by library and installed version;
+Markdown is Korean. `server-library-report.html` is the landing page and
+`server-library-report-detail.html` contains the complete table. Java findings are grouped by library and installed version;
 `Fixed` lists advisory candidates and `Final` is the lowest candidate verified against
 the same Grype database with no matching vulnerability.
 

@@ -28,6 +28,7 @@ from security_scanner.standards import (  # noqa: E402
     DEPENDENCY_RULE_IDS,
     OWASP_TOP_10_2021,
     OWASP_TOP_10_2025,
+    OWASP_PROACTIVE_CONTROLS,
     PREVENTION_RULE_IDS,
     SECRET_RULE_IDS,
     SENSITIVE_COMMENT_RULE_IDS,
@@ -127,6 +128,19 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
             self.assertTrue(control.title.get("ko"))
             self.assertTrue(control.title.get("en"))
             self.assertTrue(control.cwe_ids, f"{control.official_id} has no CWE mapping")
+
+    def test_korean_seven_types_and_owasp_proactive_controls_are_exact_profiles(self) -> None:
+        self.assertEqual(
+            [category.id for category in SW_DEV_SECURITY_49.categories if category.id != "all"],
+            list(SW49_CATEGORY_EXPECTED_COUNTS),
+        )
+        self.assertEqual(
+            [category.id for category in OWASP_PROACTIVE_CONTROLS.categories if category.id != "all"],
+            [f"c{index}-" + suffix for index, suffix in enumerate((
+                "access-control", "cryptography", "input-exceptions", "security-start", "secure-defaults",
+                "components", "digital-identity", "browser-security", "logging-monitoring", "ssrf",
+            ), start=1)],
+        )
 
 
 class Sw49MappingCorrectionTests(unittest.TestCase):

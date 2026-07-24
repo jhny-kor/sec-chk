@@ -72,9 +72,27 @@ Expand-Archive -Path koda-vuln-data-<date>.zip -DestinationPath $env:LOCALAPPDAT
 for `tools\`. No path arguments are needed:
 
 ```bat
-"%LOCALAPPDATA%\KODA\KODA-CLI.cmd" jar-scan --target D:\apps ^
+koda jar-scan --target D:\apps ^
   --output-dir reports --fail-on high --fail-on-kev
 ```
+
+The installer keeps `KODA-CLI.cmd` as a compatibility alias and adds
+`%LOCALAPPDATA%\KODA` to the per-user `PATH`. Open a new Command Prompt after
+installation and type `koda --help` (existing shells must be restarted).
+
+For source-code static analysis, choose one configured standard explicitly. The
+HTML output path is the summary page and a `-detail.html` sibling is written for
+the complete findings table:
+
+```bat
+koda scan --target D:\src\project --standard sw-dev-security-49 ^
+  --format html --output reports\source.html
+```
+
+The supported profiles include `owasp-asvs-5`, `owasp-proactive-controls`,
+`owasp-top-10-2021`, `owasp-top-10-2025`, `sw-dev-security-49`, and
+`sw-dev-security-7-types`. Use `koda scan --help` to see the complete list and
+`--standard-category` to narrow a profile to one category.
 
 Add `--language ko` or `--language en` to fix the report language. When omitted,
 the HTML report opens in Korean and includes a Korean/English toggle; Markdown is

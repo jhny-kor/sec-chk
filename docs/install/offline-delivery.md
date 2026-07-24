@@ -148,7 +148,7 @@ Expand-Archive koda-vuln-data-<date>.zip -DestinationPath $env:LOCALAPPDATA\KODA
 `KODA_CISA_KEV`를 자동 설정합니다. 명령어는 다른 플랫폼과 동일합니다.
 
 ```bat
-"%LOCALAPPDATA%\KODA\KODA-CLI.cmd" jar-scan --target D:\apps ^
+koda jar-scan --target D:\apps ^
   --output-dir reports --fail-on high --fail-on-kev
 ```
 

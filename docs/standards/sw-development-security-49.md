@@ -2,6 +2,8 @@
 
 행정안전부·KISA 「소프트웨어 보안약점 진단가이드」의 **구현단계 보안약점 49개**를 KODA에서 기준별로 추적하는 프로파일입니다. 기준연도는 진단가이드 2021 개정판(7개 유형 · 49개 보안약점 체계)입니다.
 
+공식 기준 원문: [행정안전부 소프트웨어 개발보안 가이드(2021.11.30 개정)](https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956)
+
 ## 동작 원칙
 
 - 공식 기준 49개가 각각 독립된 `SecurityControl`로 등록됩니다 (`security_scanner/standards.py`의 `SW49_CONTROLS`).

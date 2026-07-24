@@ -18,6 +18,8 @@ python3 -m security_scanner app
 
 ```bash
 python3 -m security_scanner scan --target /path/to/project --format html
+python3 -m security_scanner scan --target /path/to/project --standard owasp-asvs-5 --format html --output reports/source.html
+python3 -m security_scanner scan --target /path/to/project --standard sw-dev-security-49 --standard-category input-validation-expression --format html --output reports/sw49-input.html
 python3 -m security_scanner scan --target /path/to/project --format sarif --fail-on high
 python3 -m security_scanner jar-scan --target /deploy/apps --fail-on high --fail-on-kev
 python3 -m security_scanner sbom-verify --target /deploy/apps --sbom approved.cdx.json
@@ -27,6 +29,13 @@ JAR 보고서는 `--language ko` 또는 `--language en`으로 고정할 수 있�
 옵션을 생략하면 HTML은 한국어로 열리고 `한국어`/`English` 전환 버튼을
 표시하며 Markdown은 한국어로 생성됩니다. 취약점은 라이브러리·설치 버전별로
 통합되고 `Fixed`와 Grype DB 재검증 결과인 `Final`이 함께 표시됩니다.
+
+소스코드 분석은 `--standard`로 등록된 기준을 하나 선택해야 합니다. 예를 들어
+`owasp-asvs-5`, `owasp-proactive-controls`, `sw-dev-security-49`,
+`sw-dev-security-7-types`를 사용할 수 있으며, `--standard-category`로 해당
+기준의 지원 범주를 더 좁힐 수 있습니다. HTML은 지정한 경로를 요약(메인)으로
+생성하고 같은 폴더에 `-detail.html` 상세 보고서를 함께 생성합니다. 기준 프로파일은
+KODA가 구현한 정적 룰 매핑 범위이며 전체 SAST 또는 공식 준수 판정을 의미하지 않습니다.
 
 ## 안전 경계
 

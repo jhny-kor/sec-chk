@@ -42,6 +42,8 @@ def config_from_dict(raw: dict[str, Any], base_dir: Path | None = None) -> Scann
     changed_only = bool(raw.get("changed_only", False))
     diff_base_raw = raw.get("diff_base")
     diff_base = str(diff_base_raw) if isinstance(diff_base_raw, str) and diff_base_raw.strip() else None
+    standard = str(raw.get("standard", "local")).strip().lower()
+    standard_category = str(raw.get("standard_category", "all")).strip().lower()
     return ScannerConfig(
         targets=targets,
         report=report,
@@ -52,6 +54,8 @@ def config_from_dict(raw: dict[str, Any], base_dir: Path | None = None) -> Scann
         llm_model=llm_model,
         changed_only=changed_only,
         diff_base=diff_base,
+        standard=standard,
+        standard_category=standard_category,
     )
 
 

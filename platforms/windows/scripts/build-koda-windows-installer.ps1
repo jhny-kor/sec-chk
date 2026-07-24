@@ -793,6 +793,14 @@ Set-Content `
     -Value $cliLauncherSource `
     -Encoding ASCII
 
+# Keep the legacy launcher for compatibility and expose the short command
+# users can type after the installer adds this directory to PATH.
+$kodaLauncherPath = Join-Path $AppDistDir "koda.cmd"
+Set-Content `
+    -LiteralPath $kodaLauncherPath `
+    -Value $cliLauncherSource `
+    -Encoding ASCII
+
 # Start Menu shell that remains open.
 $cliShellPath = Join-Path $AppDistDir "KODA-CLI-Shell.cmd"
 
@@ -803,7 +811,8 @@ cd /d "%USERPROFILE%"
 set "PATH=%~dp0;%PATH%"
 echo.
 echo KODA CLI
-echo Run: KODA-CLI.cmd --help
+echo Run: koda --help
+echo This shell temporarily adds the installed KODA directory to PATH.
 echo.
 %COMSPEC% /K
 '@
@@ -873,6 +882,6 @@ Write-Host "Bundled tools: $InstalledToolsDir"
 Write-Host "Installer: $setupPath"
 Write-Host ""
 Write-Host "Installed CLI example:"
-Write-Host '  "%LOCALAPPDATA%\KODA\KODA-CLI.cmd" jar-scan --target . --output-dir output --fail-on high'
+Write-Host '  koda jar-scan --target . --output-dir output --fail-on high'
 Write-Host ""
 Write-Host "Syft, Grype and the Grype DB will be detected automatically."

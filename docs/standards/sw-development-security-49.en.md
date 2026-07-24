@@ -3,6 +3,8 @@
 This profile maps the 49 implementation-stage software weaknesses from the
 Korean Ministry of the Interior and Safety/KISA guide to KODA controls.
 
+Official source: [MOIS Software Development Security Guide (revised 2021-11-30)](https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956)
+
 ## Status meanings
 
 | Status | Meaning |

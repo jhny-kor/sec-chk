@@ -1834,6 +1834,49 @@ def render_html(
     components: tuple[DependencyComponent, ...] = (),
 ) -> str:
     payload = build_dashboard_payload(findings, target_names, language, target_paths=target_paths, components=components)
+    return _render_html_payload(payload, language)
+
+
+def render_html_pair(
+    findings: list[Finding],
+    target_names: tuple[str, ...] = (),
+    language: str = "en",
+    *,
+    detail_href: str = "security-dashboard-detail.html",
+    target_paths: dict[str, str] | None = None,
+    warnings: tuple[str, ...] = (),
+    scan_path: str | None = None,
+    kind: str = "source",
+    standard: str = DEFAULT_STANDARD,
+    standard_category: str = DEFAULT_STANDARD_CATEGORY,
+    components: tuple[DependencyComponent, ...] = (),
+    enable_osv: bool = False,
+    scanned_categories: tuple[str, ...] = (),
+) -> tuple[str, str]:
+    """Render a compact landing page and the full source findings page.
+
+    The existing ``render_html`` remains a single document for the embedded
+    dashboard/server API.  File-based CLI reports use this pair so a reviewer
+    can open a summary first and follow a relative link to the complete table.
+    """
+    payload = build_dashboard_payload(
+        findings,
+        target_names,
+        language,
+        target_paths=target_paths,
+        warnings=warnings,
+        scan_path=scan_path,
+        kind=kind,
+        standard=standard,
+        standard_category=standard_category,
+        components=components,
+        enable_osv=enable_osv,
+        scanned_categories=scanned_categories,
+    )
+    return _render_html_main(payload, language, detail_href), _render_html_payload(payload, language)
+
+
+def _render_html_payload(payload: dict[str, object], language: str) -> str:
     labels = _labels(language)
     json_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     replacements = _html_replacements(labels, json_payload)
@@ -1841,6 +1884,65 @@ def render_html(
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
     return content
+
+
+def _render_html_main(payload: dict[str, object], language: str, detail_href: str) -> str:
+    labels = _labels(language)
+    summary = payload.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+    scan = payload.get("scan", {})
+    if not isinstance(scan, dict):
+        scan = {}
+    standards = payload.get("standards", [])
+    standard_label = str(scan.get("standard", DEFAULT_STANDARD))
+    category_label = str(scan.get("standard_category", DEFAULT_STANDARD_CATEGORY))
+    for item in standards:
+        if isinstance(item, dict) and item.get("id") == standard_label:
+            localized = item.get("labels", {})
+            if isinstance(localized, dict):
+                standard_label = str(localized.get(language, localized.get("en", standard_label)))
+            for category in item.get("categories", ()):
+                if isinstance(category, dict) and category.get("id") == category_label:
+                    category_labels = category.get("labels", {})
+                    if isinstance(category_labels, dict):
+                        category_label = str(category_labels.get(language, category_labels.get("en", category_label)))
+                    break
+            break
+
+    is_ko = language == "ko"
+    title = "소스 보안 분석 요약" if is_ko else "Source Security Scan Summary"
+    eyebrow = "KODA · 정적 분석" if is_ko else "KODA · STATIC ANALYSIS"
+    intro = "요약을 확인한 뒤 전체 취약점과 근거는 상세 보고서에서 확인하세요." if is_ko else "Review the summary first, then open the detailed findings and evidence."
+    detail_text = "상세 보고서 열기" if is_ko else "Open detailed report"
+    target_text = "대상" if is_ko else "Target"
+    standard_text = "기준" if is_ko else "Standard"
+    category_text = "범주" if is_ko else "Category"
+    generated_text = "생성" if is_ko else "Generated"
+    findings_text = "취약점" if is_ko else "Findings"
+    risk_text = "위험 점수" if is_ko else "Risk score"
+    target_names = payload.get("scan", {}).get("path", "") if isinstance(payload.get("scan"), dict) else ""
+    cards = (
+        (findings_text, summary.get("displayed_finding_count", len(payload.get("findings_by_language", {}).get("en", ())))),
+        (risk_text, summary.get("risk_score", 0)),
+        (target_text, summary.get("target_count", 0)),
+    )
+    cards_html = "".join(
+        f'<article class="koda-main-card"><span>{html.escape(str(label))}</span><strong>{html.escape(_format_main_count(value))}</strong></article>'
+        for label, value in cards
+    )
+    generated_at = str(payload.get("generated_display", payload.get("generated_at", "")))
+    return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html.escape(title)}</title><style>
+:root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card strong{{display:block;margin-top:8px;font-size:30px;letter-spacing:-.04em}}.koda-main-action{{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:13px 17px;border-radius:11px;color:#fff;background:#1368e8;text-decoration:none;font-weight:800}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:680px){{.koda-main-cards{{grid-template-columns:1fr}}.koda-main-hero{{padding:26px 22px}}}}
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span></div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div><a class="koda-main-action" href="{html.escape(detail_href, quote=True)}">{html.escape(detail_text)} →</a></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape("상세 보고서의 검색·심각도 필터와 파일별 근거를 사용하세요." if is_ko else "Use the detailed report for search, severity filters, and file-level evidence.")}</div><footer>KODA · {html.escape(generated_at)}</footer></main></body></html>'''
+
+
+def _format_main_count(value: object) -> str:
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return f"{value:,}"
+    return str(value)
 
 
 def build_dashboard_payload(

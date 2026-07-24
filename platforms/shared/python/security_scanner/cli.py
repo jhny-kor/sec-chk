@@ -16,8 +16,15 @@ from shutil import copyfileobj
 
 from .config import ConfigError, expand_path, load_config
 from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, ReportConfig, ScannerConfig, TargetConfig
-from .reporting import filter_by_min_severity, render_report, write_report
+from .reporting import filter_by_min_severity, render_html_pair, render_report, write_report
 from .scanner import SecurityScanner
+from .standards import (
+    DEFAULT_STANDARD,
+    DEFAULT_STANDARD_CATEGORY,
+    SOURCE_STANDARD_IDS,
+    filter_findings_by_standard,
+    resolve_standard_selection,
+)
 
 ARCHIVE_SUFFIXES = (
     ".zip",
@@ -597,20 +604,52 @@ def main(argv: list[str] | None = None) -> int:
             with _build_scan_config_context(args) as config:
                 scanner = SecurityScanner(config)
                 findings = scanner.scan()
+                standard_selection = resolve_standard_selection(
+                    config.standard,
+                    config.standard_category,
+                    tuple(args.category)
+                    if getattr(args, "category", None)
+                    and config.standard == DEFAULT_STANDARD
+                    and config.standard_category == DEFAULT_STANDARD_CATEGORY
+                    and not getattr(args, "standard_category", None)
+                    else None,
+                )
+                findings = filter_findings_by_standard(findings, standard_selection)
                 filtered_findings = filter_by_min_severity(findings, config.report.min_severity)
                 effective_targets = scanner.effective_targets or config.targets
                 target_names = tuple(target.name for target in effective_targets)
                 target_paths = {target.name: str(target.path) for target in effective_targets}
-                content = render_report(
-                    filtered_findings,
-                    config.report.format,
-                    target_names=target_names,
-                    target_paths=target_paths,
-                    language=config.report.language,
-                    components=scanner.components,
-                    warnings=tuple(scanner.warnings),
-                )
-                write_report(content, config.report.output)
+                if config.report.format == "html":
+                    output = config.report.output or (Path.cwd() / "reports" / "security-dashboard.html")
+                    detail_path = output.with_name(f"{output.stem}-detail{output.suffix}")
+                    main_html, detail_html = render_html_pair(
+                        filtered_findings,
+                        target_names=target_names,
+                        target_paths=target_paths,
+                        language=config.report.language,
+                        detail_href=detail_path.name,
+                        components=scanner.components,
+                        warnings=tuple(scanner.warnings),
+                        scan_path=", ".join(target_paths.values()),
+                        kind="source",
+                        standard=standard_selection.standard,
+                        standard_category=standard_selection.category,
+                        scanned_categories=standard_selection.scanner_categories,
+                    )
+                    write_report(main_html, output)
+                    write_report(detail_html, detail_path)
+                    print(f"HTML reports: {output} (main), {detail_path} (detail)", file=sys.stderr)
+                else:
+                    content = render_report(
+                        filtered_findings,
+                        config.report.format,
+                        target_names=target_names,
+                        target_paths=target_paths,
+                        language=config.report.language,
+                        components=scanner.components,
+                        warnings=tuple(scanner.warnings),
+                    )
+                    write_report(content, config.report.output)
 
                 for warning in scanner.warnings:
                     print(f"warning: {warning}", file=sys.stderr)
@@ -627,7 +666,7 @@ def main(argv: list[str] | None = None) -> int:
                     ]
                 if args.fail_on and _has_failure(gate_findings, args.fail_on):
                     return 1
-        except ConfigError as exc:
+        except (ConfigError, ValueError) as exc:
             print(f"Config error: {exc}", file=sys.stderr)
             return 2
         return 0
@@ -657,7 +696,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    scan = subparsers.add_parser("scan", help="scan configured local project folders")
+    scan = subparsers.add_parser(
+        "scan",
+        help="scan configured local project folders",
+        epilog="HTML output writes a summary page and a linked -detail.html page. --standard accepts only registered source-analysis OWASP/Korean/local profiles; mappings are not a full SAST or compliance claim.",
+    )
     scan.add_argument("--config", type=Path, help="JSON config file")
     scan.add_argument(
         "--target",
@@ -669,6 +712,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=CATEGORIES,
         help="category to run; can be passed multiple times",
+    )
+    scan.add_argument(
+        "--standard",
+        choices=SOURCE_STANDARD_IDS,
+        help="source-analysis standard profile; only configured standards can be selected",
+    )
+    scan.add_argument(
+        "--standard-category",
+        help="optional category within --standard (for example sw-dev-security-49/input-validation-expression)",
     )
     scan.add_argument("--format", choices=("markdown", "json", "html", "sarif", "cyclonedx", "cyclonedx-vex"), help="report format")
     scan.add_argument("--output", type=Path, help="report output path")
@@ -1023,7 +1075,17 @@ def _build_scan_config(args: argparse.Namespace, *, archive_extract_root: Path |
 
 def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | None = None) -> ScannerConfig:
     target_values = args.target or ["."]
-    categories = tuple(args.category or DEFAULT_CATEGORIES)
+    explicit_categories = tuple(args.category) if args.category else None
+    standard = getattr(args, "standard", None) or DEFAULT_STANDARD
+    standard_category = getattr(args, "standard_category", None) or DEFAULT_STANDARD_CATEGORY
+    selection = resolve_standard_selection(
+        standard,
+        standard_category,
+        explicit_categories=explicit_categories
+        if standard == DEFAULT_STANDARD and standard_category == DEFAULT_STANDARD_CATEGORY and not getattr(args, "standard_category", None)
+        else None,
+    )
+    categories = selection.scanner_categories
     base_dir = Path.cwd()
     targets = tuple(
         TargetConfig(
@@ -1053,6 +1115,8 @@ def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | N
         llm_model=getattr(args, "llm", None),
         changed_only=bool(getattr(args, "changed_only", False)),
         diff_base=getattr(args, "base", None),
+        standard=selection.standard,
+        standard_category=selection.category,
     )
 
 
@@ -1063,6 +1127,32 @@ def _apply_overrides(
     archive_extract_root: Path | None = None,
 ) -> ScannerConfig:
     targets = config.targets
+    selected_standard = config.standard
+    selected_category = config.standard_category
+    if getattr(args, "standard", None) or getattr(args, "standard_category", None) or getattr(args, "category", None):
+        selected_standard = getattr(args, "standard", None) or selected_standard or DEFAULT_STANDARD
+        selected_category = getattr(args, "standard_category", None) or DEFAULT_STANDARD_CATEGORY
+        selection = resolve_standard_selection(
+            selected_standard,
+            selected_category,
+            explicit_categories=tuple(args.category)
+            if args.category and selected_standard == DEFAULT_STANDARD and selected_category == DEFAULT_STANDARD_CATEGORY and not getattr(args, "standard_category", None)
+            else None,
+        )
+        selected_standard, selected_category = selection.standard, selection.category
+        if not args.target:
+            targets = tuple(
+                TargetConfig(
+                    name=target.name,
+                    path=target.path,
+                    categories=selection.scanner_categories,
+                    exclude_globs=target.exclude_globs,
+                    max_file_size_bytes=target.max_file_size_bytes,
+                    discover_projects=target.discover_projects,
+                    discovery_depth=target.discovery_depth,
+                )
+                for target in config.targets
+            )
     if args.target:
         cli_config = _config_from_cli(args, archive_extract_root=archive_extract_root)
         targets = cli_config.targets
@@ -1097,6 +1187,8 @@ def _apply_overrides(
         llm_model=getattr(args, "llm", None) or config.llm_model,
         changed_only=bool(getattr(args, "changed_only", False)) or config.changed_only,
         diff_base=getattr(args, "base", None) or config.diff_base,
+        standard=selected_standard,
+        standard_category=selected_category,
     )
 
 
