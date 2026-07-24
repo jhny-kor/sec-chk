@@ -94,8 +94,12 @@ def identify_archive(artifact: ArchiveArtifact) -> JavaComponent:
                     values = _properties(archive.read(manifest).decode("utf-8", errors="replace"))
                     name = values.get("Implementation-Title") or values.get("Bundle-SymbolicName") or name
                     version = values.get("Implementation-Version") or values.get("Bundle-Version") or ""
-                    if name != artifact.filename or version:
-                        source, status = "manifest", "partial"
+                    # A version explicitly declared by MANIFEST.MF is a confirmed
+                    # version, even when the archive does not carry full Maven
+                    # coordinates. Do not downgrade this to a filename guess or
+                    # leave it in the review queue.
+                    if version:
+                        source, status = "manifest", "resolved"
     except (OSError, zipfile.BadZipFile, UnicodeError, ET.ParseError):
         source = "filename-unresolved"
 

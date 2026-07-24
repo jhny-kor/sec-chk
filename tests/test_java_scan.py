@@ -31,14 +31,15 @@ def _write_jar(path: Path, files: dict[str, str | bytes]) -> None:
 
 
 class JavaInventoryTests(unittest.TestCase):
-    def test_manifest_only_archive_is_partial_and_requires_review(self) -> None:
+    def test_manifest_version_is_resolved_without_maven_coordinates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _write_jar(root / "manifest.jar", {"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\nImplementation-Title: internal-lib\nImplementation-Version: 4.2\n"})
             component = inventory_components(scan_archives(root))[0]
             self.assertEqual(component.identification_source, "manifest")
-            self.assertEqual(component.identity_status, "partial")
-            self.assertTrue(component.manual_review_required)
+            self.assertEqual(component.version, "4.2")
+            self.assertEqual(component.identity_status, "resolved")
+            self.assertFalse(component.manual_review_required)
 
     def test_maven_coordinates_and_nested_war_library_are_identified(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -172,6 +173,13 @@ class JavaScanTests(unittest.TestCase):
         self.assertEqual(group.final_status, "verified_clean")
         self.assertEqual(group.final_checked_versions, ("1.1.0", "1.2.0"))
         self.assertIn("CVE-2026-0001", group.fixed_by_vulnerability)
+        self.assertNotIn("GHSA", group.vulnerability_id)
+
+    def test_ghsa_only_records_are_excluded_from_cve_report(self) -> None:
+        record = self._record("GHSA-only", (), ("1.1.0",), "high", "/apps/demo.jar")
+        groups, warnings = aggregate_vulnerabilities((record,), None, 5.0)
+        self.assertEqual(groups, ())
+        self.assertEqual(warnings, ())
 
     def test_final_is_unknown_when_every_fixed_candidate_remains_vulnerable(self) -> None:
         record = self._record("CVE-2026-0010", ("CVE-2026-0010",), ("1.1.0",), "high", "/apps/demo.jar")
@@ -241,6 +249,8 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn('data-column-index="10"', html_report)
             self.assertIn("table-layout:fixed", html_report)
             self.assertIn("ArrowRight", html_report)
+            self.assertIn("table-scroll-hint", html_report)
+            self.assertIn("severity.value", html_report)
             self.assertIn("KODA Java 라이브러리 취약점 보고서", markdown_report)
 
             write_reports(output, (), (), 0, (), "2026-07-23", language="en")
@@ -264,12 +274,39 @@ class JavaScanTests(unittest.TestCase):
             html_report = (output / "server-library-report.html").read_text(encoding="utf-8")
             markdown_report = (output / "server-library-report.md").read_text(encoding="utf-8")
 
-        expected = "CVE-2026-0201: 1.1.0<br>CVE-2026-0202: 1.2.0"
-        self.assertIn(expected, html_report)
+        expected = "CVE-2026-0202: 1.2.0<br>CVE-2026-0201: 1.1.0"
+        self.assertIn('<code>CVE-2026-0202</code><code>1.2.0</code>', html_report)
+        self.assertLess(html_report.index('CVE-2026-0202'), html_report.index('CVE-2026-0201'))
         self.assertIn(expected, markdown_report)
         self.assertIn('data-severity="high"', html_report)
         self.assertIn(">높음</span>", html_report)
         self.assertNotIn('data-severity="높음"', html_report)
+
+    def test_identifiers_and_fixed_versions_collapse_after_three_and_counts_use_grouping(self) -> None:
+        records = tuple(
+            self._record(
+                f"CVE-2026-{index:04d}",
+                (f"CVE-2026-{index:04d}",),
+                (f"1.{index}.0",),
+                "high",
+                f"/apps/demo-{index}.jar",
+            )
+            for index in range(1, 5)
+        )
+        with patch("security_scanner.java_vulnerability_scan.run_grype_purls", return_value=GrypeResult((), "", {}, "", False)):
+            groups, _ = aggregate_vulnerabilities(records, Path("/tmp/grype"), 5.0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_reports(output, (), groups, 1319, (), "2026-07-23", language="ko")
+            rendered = (output / "server-library-report.html").read_text(encoding="utf-8")
+
+        self.assertIn("더보기", rendered)
+        self.assertIn("접기", rendered)
+        self.assertIn('class="collapse-item" hidden', rendered)
+        self.assertIn("1,319", rendered)
+        self.assertLess(rendered.index("해석 시 유의사항"), rendered.index("라이브러리별 조치 현황"))
+        self.assertIn("border-right:1px solid", rendered)
 
     def test_offline_run_writes_all_reports_and_combines_local_feeds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
