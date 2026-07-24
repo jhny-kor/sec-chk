@@ -26,7 +26,6 @@ from security_scanner.standards import (  # noqa: E402
     CODE_PATTERN_RULE_IDS,
     CONFIGURATION_RULE_IDS,
     DEPENDENCY_RULE_IDS,
-    OWASP_TOP_10_2021,
     OWASP_TOP_10_2025,
     OWASP_PROACTIVE_CONTROLS,
     PREVENTION_RULE_IDS,
@@ -198,9 +197,8 @@ class Sw49MappingCorrectionTests(unittest.TestCase):
             "code.password-hash-without-salt",
             "secret.sensitive-comment",
         }
-        for standard in (OWASP_TOP_10_2021, OWASP_TOP_10_2025):
-            for category in standard.categories:
-                self.assertFalse(new_rules & set(category.rule_ids), f"{standard.id}/{category.id}")
+        for category in OWASP_TOP_10_2025.categories:
+            self.assertFalse(new_rules & set(category.rule_ids), f"{OWASP_TOP_10_2025.id}/{category.id}")
 
 
 class Sw49EvaluationTests(unittest.TestCase):

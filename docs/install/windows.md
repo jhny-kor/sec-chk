@@ -90,9 +90,10 @@ koda scan --target D:\src\project --standard sw-dev-security-49 ^
 ```
 
 The supported profiles include `owasp-asvs-5`, `owasp-proactive-controls`,
-`owasp-top-10-2021`, `owasp-top-10-2025`, `sw-dev-security-49`, and
+`owasp-top-10-2025`, `sw-dev-security-49`, and
 `sw-dev-security-7-types`. Use `koda scan --help` to see the complete list and
-`--standard-category` to narrow a profile to one category.
+its issuer/release date, and use `--standard-category` to narrow a profile to
+one category.
 
 Add `--language ko` or `--language en` to fix the report language. When omitted,
 the HTML report opens in Korean and includes a Korean/English toggle; Markdown is

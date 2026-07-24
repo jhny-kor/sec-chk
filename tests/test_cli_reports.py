@@ -23,6 +23,19 @@ class CliReportTests(unittest.TestCase):
             build_parser().parse_args(["scan", "--target", ".", "--standard", "cis-windows-benchmark"])
         with self.assertRaises(SystemExit):
             build_parser().parse_args(["scan", "--target", ".", "--standard", "not-a-standard"])
+        for removed_standard in ("owasp-top-10-2021", "cwe-sans-top-25-2025", "cwe", "ncsc-web-8"):
+            with self.assertRaises(SystemExit):
+                build_parser().parse_args(["scan", "--target", ".", "--standard", removed_standard])
+
+    def test_standard_help_lists_current_publication_information(self) -> None:
+        help_text = build_parser()._subparsers._group_actions[0].choices["scan"].format_help()
+        self.assertIn("owasp-asvs-5: OWASP ASVS 5.0", help_text)
+        self.assertIn("v5.0.0", help_text)
+        self.assertIn("published 2025-05-30", help_text)
+        self.assertIn("kisa-secure-coding-guide", help_text)
+        self.assertIn("published 2021-11-30", help_text)
+        self.assertNotIn("owasp-top-10-2021", help_text)
+        self.assertNotIn("cwe-sans-top-25-2025", help_text)
 
     def test_source_html_writes_main_and_detail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -38,7 +51,7 @@ class CliReportTests(unittest.TestCase):
                     "--standard",
                     "owasp-asvs-5",
                     "--standard-category",
-                    "validation",
+                    "v2-validation-business-logic",
                     "--format",
                     "html",
                     "--output",
@@ -49,8 +62,41 @@ class CliReportTests(unittest.TestCase):
             detail = output.with_name("source-detail.html")
             self.assertTrue(output.is_file())
             self.assertTrue(detail.is_file())
-            self.assertIn("source-detail.html", output.read_text(encoding="utf-8"))
-            self.assertIn("code.sql-dynamic-query", detail.read_text(encoding="utf-8"))
+            main_html = output.read_text(encoding="utf-8")
+            self.assertIn("source-detail.html", main_html)
+            self.assertIn("Total findings", main_html)
+            self.assertIn("Critical", main_html)
+            self.assertIn("Priority action", main_html)
+            detail_html = detail.read_text(encoding="utf-8")
+            self.assertIn("code.sql-dynamic-query", detail_html)
+            self.assertIn('href="source.html"', detail_html)
+            self.assertIn('source_context', detail_html)
+            self.assertIn("source-code-line", detail_html)
+            self.assertIn('id="location"', detail_html)
+            self.assertIn("All locations", detail_html)
+
+    def test_source_html_redacts_secret_context_and_embedded_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "secret.py"
+            secret = "sk-123456789012345678901234"
+            source.write_text(f'api_key = "{secret}"\n', encoding="utf-8")
+            output = root / "reports" / "source.html"
+            exit_code = main(
+                [
+                    "scan",
+                    "--target",
+                    str(source),
+                    "--format",
+                    "html",
+                    "--output",
+                    str(output),
+                ]
+            )
+            self.assertEqual(exit_code, 0)
+            detail_html = output.with_name("source-detail.html").read_text(encoding="utf-8")
+            self.assertIn("<redacted sensitive source line>", detail_html)
+            self.assertNotIn(secret, detail_html)
 
 
 class WindowsAliasPackagingTests(unittest.TestCase):

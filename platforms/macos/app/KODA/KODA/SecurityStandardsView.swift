@@ -60,6 +60,13 @@ enum AppLanguage: String, Hashable {
         }
     }
 
+    var publicationTitle: String {
+        switch self {
+        case .ko: return "발행기관 / 판본"
+        case .en: return "Issuer / Release"
+        }
+    }
+
     var criteriaTitle: String {
         switch self {
         case .ko: return "점검 기준"
@@ -1188,6 +1195,13 @@ struct AppSecurityStandard: Identifiable, Hashable {
         guard language == .en else { return badge }
         return SecurityStandardLocalization.badgeText[badge] ?? badge
     }
+
+    func publication(language: AppLanguage) -> String? {
+        guard let publication = SecurityStandardLocalization.publicationText[id] else {
+            return nil
+        }
+        return language == .ko ? publication.ko : publication.en
+    }
 }
 
 struct AppStandardCategory: Identifiable, Hashable {
@@ -1387,6 +1401,11 @@ private enum SecurityStandardLocalization {
         let coverage: String
     }
 
+    struct PublicationText {
+        let ko: String
+        let en: String
+    }
+
     static let badgeText: [String: String] = [
         "기본": "Default",
         "국제 기준": "International",
@@ -1398,6 +1417,23 @@ private enum SecurityStandardLocalization {
         "국제 성숙도모델": "International Maturity Model",
         "국제 원칙": "International Principles",
         "공급망": "Supply Chain",
+    ]
+
+    static let publicationText: [String: PublicationText] = [
+        "owasp-top-10-2025": PublicationText(ko: "OWASP 재단 · 2025년판", en: "OWASP Foundation · 2025 edition"),
+        "owasp-proactive-controls": PublicationText(ko: "OWASP 재단 · 2024년판", en: "OWASP Foundation · 2024 edition"),
+        "owasp-api-security-2023": PublicationText(ko: "OWASP 재단 · 2023년판", en: "OWASP Foundation · 2023 edition"),
+        "owasp-mobile-top-10-2024": PublicationText(ko: "OWASP 재단 · 2024년판", en: "OWASP Foundation · 2024 edition"),
+        "owasp-masvs": PublicationText(ko: "OWASP 재단 · v2.1.0 · 2024-01-18", en: "OWASP Foundation · v2.1.0 · 2024-01-18"),
+        "owasp-llm-top-10-2025": PublicationText(ko: "OWASP 재단 · 2025년판", en: "OWASP Foundation · 2025 edition"),
+        "owasp-asvs-5": PublicationText(ko: "OWASP 재단 · v5.0.0 · 2025-05-30", en: "OWASP Foundation · v5.0.0 · 2025-05-30"),
+        "owasp-wstg": PublicationText(ko: "OWASP 재단 · v4.2 · 2020-12-03", en: "OWASP Foundation · v4.2 · 2020-12-03"),
+        "owasp-samm-2": PublicationText(ko: "OWASP 재단 · v2.0 · 2020년", en: "OWASP Foundation · v2.0 · 2020"),
+        "owasp-scvs": PublicationText(ko: "OWASP 재단 · v1.0 · 2020-06-25", en: "OWASP Foundation · v1.0 · 2020-06-25"),
+        "cwe-top-25-2025": PublicationText(ko: "MITRE CWE · 2025년판", en: "MITRE CWE · 2025 edition"),
+        "sw-dev-security-49": PublicationText(ko: "행정안전부 / KISA · 2021-11-30", en: "MOIS / KISA · 2021-11-30"),
+        "sw-dev-security-7-types": PublicationText(ko: "행정안전부 / KISA · 2021-11-30", en: "MOIS / KISA · 2021-11-30"),
+        "kisa-secure-coding-guide": PublicationText(ko: "한국인터넷진흥원 · 2021-11-30", en: "KISA · 2021-11-30"),
     ]
 
     static let standardText: [String: StandardText] = [
@@ -1419,28 +1455,10 @@ private enum SecurityStandardLocalization {
             scope: "Web application code and configuration",
             coverage: "Automatic file-based checks"
         ),
-        "owasp-top-10-2021": StandardText(
-            title: "OWASP Top 10:2021",
-            subtitle: "Checks widely used OWASP Top 10 categories with local evidence.",
-            scope: "Web application code and configuration",
-            coverage: "Automatic file-based checks"
-        ),
-        "cwe-sans-top-25-2025": StandardText(
-            title: "CWE/SANS Top 25:2025",
-            subtitle: "Risk profile that groups MITRE CWE Top 25 data from the SANS software-error perspective.",
-            scope: "Code weaknesses and security hygiene",
-            coverage: "Automatic file-based checks"
-        ),
         "cwe-top-25-2025": StandardText(
             title: "CWE Top 25:2025",
             subtitle: "Checks the most dangerous CWE weaknesses with file-based static analysis.",
             scope: "Code weaknesses and dependency hygiene",
-            coverage: "Automatic file-based checks"
-        ),
-        "cwe-general": StandardText(
-            title: "General CWE Weaknesses",
-            subtitle: "Classifies common code and configuration weaknesses beyond the Top 25 from the CWE perspective.",
-            scope: "Code, configuration, and dependencies",
             coverage: "Automatic file-based checks"
         ),
         "owasp-api-security-2023": StandardText(
@@ -1457,7 +1475,7 @@ private enum SecurityStandardLocalization {
         ),
         "owasp-masvs": StandardText(
             title: "OWASP MASVS",
-            subtitle: "Checks mobile application security verification areas including storage, cryptography, authentication, network, platform interaction, code quality, resilience, and privacy.",
+            subtitle: "Maps the eight official MASVS control groups to related local mobile evidence.",
             scope: "Mobile source, manifests, plists, and release evidence",
             coverage: "External integration required"
         ),
@@ -1479,17 +1497,11 @@ private enum SecurityStandardLocalization {
             scope: "Korean secure-coding types",
             coverage: "Automatic file-based checks"
         ),
-        "kisa-secure-coding": StandardText(
-            title: "KISA Secure Coding Guide",
-            subtitle: "Checks Korean secure-coding recommendations using local code evidence.",
-            scope: "Source code and configuration",
-            coverage: "Automatic file-based checks"
-        ),
-        "ncsc-web-8": StandardText(
-            title: "NCSC Web 8 Security Vulnerabilities",
-            subtitle: "Checks eight common public web-service vulnerability families used in Korean security reviews.",
-            scope: "Web code and server configuration",
-            coverage: "External integration required"
+        "kisa-secure-coding-guide": StandardText(
+            title: "KISA Software Security Weakness Diagnostic Guide 2021",
+            subtitle: "Checks the seven types and 49 implementation-stage security weaknesses in KISA's official 2021 diagnostic guide.",
+            scope: "Korean secure-coding criteria",
+            coverage: "Automated and partial local checks; design, permission, and data-flow criteria need manual review or external SAST"
         ),
         "electronic-financial-8": StandardText(
             title: "Electronic Financial Supervision 8 Vulnerabilities",
@@ -1505,15 +1517,15 @@ private enum SecurityStandardLocalization {
         ),
         "owasp-asvs-5": StandardText(
             title: "OWASP ASVS 5.0",
-            subtitle: "Groups static-checkable areas from application security verification requirements.",
+            subtitle: "Shows all 17 official ASVS 5.0.0 chapters and attaches only directly related KODA heuristics.",
             scope: "Application security verification",
-            coverage: "Evidence review required"
+            coverage: "Partial evidence only · no requirement-level compliance claim"
         ),
         "owasp-wstg": StandardText(
-            title: "OWASP WSTG",
-            subtitle: "Shows web security testing guide areas where file-based evidence is available.",
+            title: "OWASP WSTG v4.2",
+            subtitle: "Shows all 12 official web-application testing areas and attaches static hints only where related file evidence exists.",
             scope: "Web security testing methodology",
-            coverage: "External integration required"
+            coverage: "Live-target testing required"
         ),
         "nist-ssdf": StandardText(
             title: "NIST SSDF SP 800-218",
@@ -1523,7 +1535,7 @@ private enum SecurityStandardLocalization {
         ),
         "owasp-samm-2": StandardText(
             title: "OWASP SAMM 2",
-            subtitle: "Checks design, implementation, verification, and operations practices in the software assurance maturity model.",
+            subtitle: "Maps the five official business functions to related repository evidence; KODA does not score the 15 practices or maturity levels.",
             scope: "Software assurance maturity",
             coverage: "Evidence review required"
         ),
@@ -2021,6 +2033,12 @@ private struct SecurityStandardCard: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let publication = standard.publication(language: language) {
+                Label(publication, systemImage: "calendar")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(spacing: 8) {
                 Label("\(standard.supportedCategoryCount)/\(standard.categories.count)", systemImage: "checklist")
                 Text(standard.coverage(language: language))
@@ -2117,6 +2135,9 @@ struct SecurityStandardDetailScreen: View {
             LazyVGrid(columns: detailColumns(width), spacing: 14) {
                 DetailSummaryTile(title: language.scopeTitle, value: standard.scope(language: language))
                 DetailSummaryTile(title: language.automationTitle, value: standard.coverage(language: language))
+                if let publication = standard.publication(language: language) {
+                    DetailSummaryTile(title: language.publicationTitle, value: publication)
+                }
             }
 
             section(title: language.criteriaTitle) {
@@ -2228,6 +2249,9 @@ struct HelpGuideScreen: View {
                         LazyVGrid(columns: detailColumns(proxy.size.width), spacing: 14) {
                             DetailSummaryTile(title: language.scopeTitle, value: route.standard?.scope(language: language) ?? overallScope)
                             DetailSummaryTile(title: language.automationTitle, value: route.standard?.coverage(language: language) ?? overallCoverage)
+                            if let publication = route.standard?.publication(language: language) {
+                                DetailSummaryTile(title: language.publicationTitle, value: publication)
+                            }
                             DetailSummaryTile(title: language.riskFormulaTitle, value: language.riskFormulaDescription)
                         }
 
@@ -2582,41 +2606,6 @@ enum SecurityStandardCatalog {
             ]
         ),
         AppSecurityStandard(
-            id: "owasp-top-10-2021",
-            title: "OWASP Top 10:2021",
-            subtitle: "현재 널리 쓰이는 OWASP Top 10 범주를 로컬 증거 중심으로 점검합니다.",
-            scope: "웹 애플리케이션 코드 및 설정",
-            coverage: "자동 점검",
-            badge: "국제 기준",
-            icon: "shield",
-            accent: .cyan,
-            categories: [
-                category("a01", "A01 Broken Access Control", "인가 우회와 파일 경로 취급 위험을 확인합니다."),
-                category("a02", "A02 Cryptographic Failures", "비밀값, 약한 암호, 평문 전송 흔적을 확인합니다."),
-                category("a03", "A03 Injection", "SQL, command, DOM XSS, path traversal 패턴을 확인합니다."),
-                category("a05", "A05 Security Misconfiguration", "debug, CORS, directory listing, WebDAV 흔적을 확인합니다."),
-                category("a06", "A06 Vulnerable Components", "고정되지 않은 의존성과 락파일 누락을 확인합니다.")
-            ],
-            references: [
-                reference("OWASP Top Ten Project", "https://owasp.org/www-project-top-ten/")
-            ]
-        ),
-        AppSecurityStandard(
-            id: "cwe-sans-top-25-2025",
-            title: "CWE/SANS Top 25:2025",
-            subtitle: "MITRE CWE Top 25 데이터를 SANS 관점으로 묶은 위험 소프트웨어 오류 프로파일입니다.",
-            scope: "코드 약점 및 보안 위생",
-            coverage: "자동 점검",
-            badge: "국제 기준",
-            icon: "exclamationmark.shield",
-            accent: .orange,
-            categories: cweCategories(),
-            references: [
-                reference("MITRE CWE Top 25:2025", "https://cwe.mitre.org/top25/archive/2025/2025_cwe_top25.html"),
-                reference("SANS Top 25 Software Errors", "https://www.sans.org/top25-software-errors/")
-            ]
-        ),
-        AppSecurityStandard(
             id: "cwe-top-25-2025",
             title: "CWE Top 25:2025",
             subtitle: "가장 위험한 CWE 약점을 파일 기반 정적 점검으로 확인합니다.",
@@ -2628,25 +2617,6 @@ enum SecurityStandardCatalog {
             categories: cweCategories(),
             references: [
                 reference("MITRE CWE Top 25:2025", "https://cwe.mitre.org/top25/archive/2025/2025_cwe_top25.html")
-            ]
-        ),
-        AppSecurityStandard(
-            id: "cwe-general",
-            title: "CWE 일반 약점",
-            subtitle: "Top 25 외의 일반적인 코드·설정 약점을 CWE 관점으로 분류합니다.",
-            scope: "코드, 설정, 의존성",
-            coverage: "자동 점검",
-            badge: "국제 기준",
-            icon: "square.grid.2x2",
-            accent: .indigo,
-            categories: [
-                category("input-validation", "입력값 검증", "XSS, injection, traversal, SSRF 계열 패턴을 확인합니다."),
-                category("auth-access", "인증 및 접근통제", "약한 세션, 파일 접근, 인증 우회 흔적을 확인합니다."),
-                category("crypto", "암호 및 비밀정보", "약한 해시와 비밀값 노출을 확인합니다."),
-                category("configuration", "보안 설정", "CORS, debug, directory listing, WebDAV 설정을 확인합니다.")
-            ],
-            references: [
-                reference("MITRE CWE", "https://cwe.mitre.org/")
             ]
         ),
         AppSecurityStandard(
@@ -2690,7 +2660,7 @@ enum SecurityStandardCatalog {
         AppSecurityStandard(
             id: "owasp-masvs",
             title: "OWASP MASVS",
-            subtitle: "모바일 앱 보안 검증 표준의 저장소, 암호, 인증, 네트워크, 플랫폼, 코드 품질, 회복탄력성, 개인정보 항목을 확인합니다.",
+            subtitle: "모바일 앱 보안 검증 표준의 공식 8개 통제 그룹에 관련 로컬 모바일 증거를 매핑합니다.",
             scope: "모바일 앱 소스, Manifest, plist, 릴리스 증적",
             coverage: "외부 연동 필요",
             badge: "국제 검증표준",
@@ -2698,10 +2668,13 @@ enum SecurityStandardCatalog {
             accent: .green,
             categories: [
                 category("storage", "MASVS-STORAGE", "민감정보 저장, 백업, iOS 파일 공유, Android 백업 설정을 확인합니다."),
+                category("crypto", "MASVS-CRYPTO", "약한 해시, 키 길이, 난수, 솔트 사용과 같은 암호 기능 단서를 확인합니다."),
+                category("auth", "MASVS-AUTH", "인증, 인가, 세션 관련 코드 단서를 확인합니다."),
                 category("network", "MASVS-NETWORK", "ATS 예외, Android cleartext traffic, 평문 의존성 소스를 확인합니다."),
                 category("platform", "MASVS-PLATFORM", "Android exported component, iOS document sharing, 파일 처리 위험을 확인합니다."),
-                category("code", "MASVS-CODE", "debuggable, 로깅, 인젝션, 파일 처리, 의존성 위생을 확인합니다."),
-                category("resilience", "MASVS-RESILIENCE", "릴리스 서명, provenance, debug build 잔존 여부를 확인합니다.")
+                category("code", "MASVS-CODE", "알려진 취약 구성요소와 위험 코드 사용 단서를 확인합니다."),
+                category("resilience", "MASVS-RESILIENCE", "Android debug build 잔존 여부를 확인합니다."),
+                category("privacy", "MASVS-PRIVACY", "민감정보 저장·로깅·공유와 개인정보 보호 계획 증거를 확인합니다.")
             ],
             references: [
                 reference("OWASP MASVS", "https://mas.owasp.org/MASVS/"),
@@ -2741,11 +2714,14 @@ enum SecurityStandardCatalog {
                 category("input-data", "입력 데이터 검증 및 표현", "SQL, XSS, command, path traversal 패턴을 확인합니다."),
                 category("security-function", "보안 기능", "인증, 세션, 암호, 권한 흐름을 확인합니다."),
                 category("time-state", "시간 및 상태", "임시 파일, 경쟁 상태 가능 패턴을 확인합니다."),
-                category("error-code", "에러 처리 및 코드 품질", "오류 노출, 위험 API 사용 흔적을 확인합니다."),
-                category("encapsulation", "캡슐화 및 API 오용", "파일·명령·직렬화 API 오용을 확인합니다.")
+                category("error", "에러 처리", "오류 메시지 노출과 예외 처리 부재 단서를 확인합니다."),
+                category("code-error", "코드 오류", "위험한 역직렬화 등 직접 확인 가능한 코드 오류를 확인합니다."),
+                category("encapsulation", "캡슐화", "디버그 코드 등 로컬에서 확인 가능한 캡슐화 단서를 확인합니다."),
+                category("api-misuse", "API 오용", "위험한 C/C++ API 사용 단서를 확인합니다.")
             ],
             references: [
-                reference("KISA 보호나라", "https://www.boho.or.kr/")
+                reference("행정안전부 소프트웨어 개발보안 가이드(2021)", "https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956"),
+                reference("KISA 소프트웨어 보안약점 진단가이드(2021)", "https://www.kisa.or.kr/2060204/form?page=1&postSeq=9")
             ]
         ),
         AppSecurityStandard(
@@ -2762,50 +2738,36 @@ enum SecurityStandardCatalog {
                 category("security", "보안 기능", "인증, 세션, 암호 사용 위험을 확인합니다."),
                 category("time-state", "시간 및 상태", "임시 파일 및 상태 처리 위험을 확인합니다."),
                 category("error", "에러 처리", "디버그와 오류 노출 설정을 확인합니다."),
-                category("code-quality", "코드 오류", "위험 API와 오용 패턴을 확인합니다.")
+                category("code-error", "코드 오류", "역직렬화와 코드 오류 단서를 확인합니다."),
+                category("encapsulation", "캡슐화", "디버그 코드 등 캡슐화 관련 단서를 확인합니다."),
+                category("api-misuse", "API 오용", "위험 API 사용 단서를 확인합니다.")
             ],
             references: [
-                reference("KISA 보호나라", "https://www.boho.or.kr/")
+                reference("행정안전부 소프트웨어 개발보안 가이드(2021)", "https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956"),
+                reference("KISA 소프트웨어 보안약점 진단가이드(2021)", "https://www.kisa.or.kr/2060204/form?page=1&postSeq=9")
             ]
         ),
         AppSecurityStandard(
-            id: "kisa-secure-coding",
-            title: "KISA 시큐어코딩 가이드",
-            subtitle: "국내 시큐어코딩 권고를 로컬 코드 증거 중심으로 확인합니다.",
-            scope: "소스코드 및 설정",
-            coverage: "자동 점검",
+            id: "kisa-secure-coding-guide",
+            title: "KISA 소프트웨어 보안약점 진단가이드 2021",
+            subtitle: "KISA가 2021년에 발행한 공식 진단가이드의 7개 유형·구현단계 보안약점 49개를 점검합니다.",
+            scope: "국내 시큐어코딩 기준",
+            coverage: "자동·부분 로컬 점검 (설계·권한·데이터 흐름 항목은 수동 검토 또는 외부 SAST 필요)",
             badge: "국내 기준",
             icon: "checkmark.shield",
             accent: .green,
             categories: [
-                category("injection", "인젝션", "SQL, command, template injection 패턴을 확인합니다."),
-                category("xss", "크로스사이트 스크립팅", "DOM sink와 HTML 렌더링 위험을 확인합니다."),
-                category("file", "파일 처리", "다운로드, 경로 조작, directory listing 위험을 확인합니다."),
-                category("secret", "중요정보 보호", "비밀값과 약한 암호 사용을 확인합니다.")
+                category("input", "입력 데이터 검증 및 표현", "입력값 기반 공격 패턴을 확인합니다."),
+                category("security", "보안 기능", "인증, 세션, 암호 사용 위험을 확인합니다."),
+                category("time-state", "시간 및 상태", "임시 파일 및 상태 처리 위험을 확인합니다."),
+                category("error", "에러 처리", "오류 노출과 예외 처리 단서를 확인합니다."),
+                category("code-error", "코드 오류", "역직렬화와 코드 오류 단서를 확인합니다."),
+                category("encapsulation", "캡슐화", "디버그 코드 등 캡슐화 관련 단서를 확인합니다."),
+                category("api-misuse", "API 오용", "위험 API 사용 단서를 확인합니다.")
             ],
             references: [
-                reference("KISA 보호나라", "https://www.boho.or.kr/")
-            ]
-        ),
-        AppSecurityStandard(
-            id: "ncsc-web-8",
-            title: "국정원 웹 8대 보안취약점",
-            subtitle: "공개 웹서비스에서 자주 확인하는 8대 취약점 계열을 점검합니다.",
-            scope: "웹 코드 및 서버 설정",
-            coverage: "외부 연동 필요",
-            badge: "국내 기준",
-            icon: "building.columns",
-            accent: .red,
-            categories: [
-                category("sql-injection", "SQL Injection", "동적 SQL 조합과 쿼리 입력 흐름을 확인합니다."),
-                category("xss", "Cross-Site Scripting", "DOM XSS와 HTML 출력 위험을 확인합니다."),
-                category("file-download", "파일 다운로드", "경로 조작과 다운로드 핸들러 위험을 확인합니다."),
-                category("directory-listing", "디렉터리 리스팅", "index 옵션과 listing 설정을 확인합니다."),
-                category("webdav", "WebDAV", "WebDAV 활성화 설정을 확인합니다."),
-                category("legacy-board", "레거시 게시판", "오래된 게시판·업로드 흔적을 확인합니다.")
-            ],
-            references: [
-                reference("국가사이버안보센터", "https://www.ncsc.go.kr/")
+                reference("KISA 소프트웨어 보안약점 진단가이드(2021)", "https://www.kisa.or.kr/2060204/form?page=1&postSeq=9"),
+                reference("행정안전부 소프트웨어 개발보안 가이드(2021)", "https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956")
             ]
         ),
         AppSecurityStandard(
@@ -2851,41 +2813,62 @@ enum SecurityStandardCatalog {
         AppSecurityStandard(
             id: "owasp-asvs-5",
             title: "OWASP ASVS 5.0",
-            subtitle: "애플리케이션 보안 검증 요구사항 중 정적 점검 가능한 영역을 묶습니다.",
+            subtitle: "ASVS 5.0.0의 공식 17개 장을 표시하고 직접 관련된 KODA 휴리스틱만 연결합니다.",
             scope: "애플리케이션 보안 검증",
-            coverage: "증적 확인 필요",
+            coverage: "부분 증거만 제공 · 요구사항 단위 준수 판정 아님",
             badge: "국제 검증표준",
             icon: "doc.badge.gearshape",
             accent: .indigo,
             categories: [
-                category("validation", "입력 검증", "입력값 검증과 인코딩 위험을 확인합니다."),
-                category("auth-session", "인증 및 세션", "쿠키, 세션, 인증 처리 위험을 확인합니다."),
-                category("access-control", "접근통제", "파일·라우트 접근통제 위험을 확인합니다."),
-                category("data-protection", "데이터 보호 및 암호", "비밀값과 약한 암호 사용을 확인합니다."),
-                category("supply-chain", "공급망", "의존성 및 무결성 설정을 확인합니다.")
+                category("v1", "V1 인코딩 및 정제", "인젝션, 역직렬화, 메모리 API 관련 정적 단서를 확인합니다."),
+                category("v2", "V2 검증 및 비즈니스 로직", "입력 검증과 리소스 제한 관련 단서를 확인합니다."),
+                category("v3", "V3 웹 프런트엔드 보안", "XSS, CORS, 쿠키, CSRF, 리디렉션 단서를 확인합니다."),
+                category("v4", "V4 API 및 웹 서비스", "API 라우트, 인가, SSRF, 리소스 제한 단서를 확인합니다."),
+                category("v5", "V5 파일 처리", "파일 업로드와 경로 처리 단서를 확인합니다."),
+                category("v6", "V6 인증", "인증 우회와 토큰 검증 단서를 확인합니다."),
+                category("v7", "V7 세션 관리", "쿠키, CSRF, JWT, 세션 만료 단서를 확인합니다."),
+                category("v8", "V8 인가", "인가 누락과 mass assignment 단서를 확인합니다."),
+                category("v9", "V9 자체 포함 토큰", "JWT 검증, none 알고리즘, 만료 단서를 확인합니다."),
+                category("v10", "V10 OAuth 및 OIDC", "직접 자동 점검은 지원하지 않습니다.", isMapped: false),
+                category("v11", "V11 암호기술", "약한 해시, 키 길이, 난수, 솔트 사용 단서를 확인합니다."),
+                category("v12", "V12 안전한 통신", "평문 전송과 인증서 검증 비활성화 단서를 확인합니다."),
+                category("v13", "V13 설정", "보안 설정 오류 단서를 확인합니다."),
+                category("v14", "V14 데이터 보호", "비밀값과 민감정보 노출 단서를 확인합니다."),
+                category("v15", "V15 안전한 코딩 및 아키텍처", "위험 API, 역직렬화, 위협 모델 증거를 확인합니다."),
+                category("v16", "V16 보안 로깅 및 오류 처리", "오류 노출과 민감정보 로깅 단서를 확인합니다."),
+                category("v17", "V17 WebRTC", "직접 자동 점검은 지원하지 않습니다.", isMapped: false)
             ],
             references: [
-                reference("OWASP ASVS", "https://owasp.org/www-project-application-security-verification-standard/")
+                reference("OWASP ASVS", "https://owasp.org/www-project-application-security-verification-standard/"),
+                reference("OWASP ASVS 5.0.0 CSV", "https://github.com/OWASP/ASVS/raw/v5.0.0/5.0/docs_en/OWASP_Application_Security_Verification_Standard_5.0.0_en.csv")
             ]
         ),
         AppSecurityStandard(
             id: "owasp-wstg",
-            title: "OWASP WSTG",
-            subtitle: "웹 보안 테스트 가이드 중 파일 기반 증거가 가능한 항목을 표시합니다.",
+            title: "OWASP WSTG v4.2",
+            subtitle: "공식 웹 애플리케이션 테스트 12개 영역을 표시하고 관련 파일 증거가 있는 곳에만 정적 단서를 연결합니다.",
             scope: "웹 보안 테스트 방법론",
-            coverage: "외부 연동 필요",
+            coverage: "실제 대상 웹 테스트 필요",
             badge: "국제 테스트가이드",
             icon: "network",
             accent: .indigo,
             categories: [
-                category("config", "설정 및 배포", "CORS, debug, directory listing, WebDAV를 확인합니다."),
-                category("authentication", "인증", "인증·세션 관련 코드 패턴을 확인합니다."),
-                category("authorization", "인가", "파일 접근과 라우트 접근 위험을 확인합니다."),
-                category("input-validation", "입력값 검증", "XSS, SQL, command, traversal 패턴을 확인합니다."),
-                category("weak-cryptography", "약한 암호", "약한 해시와 비밀값 노출을 확인합니다.")
+                category("information", "정보 수집", "정적 스캔만으로 WSTG 시나리오를 완료할 수 없습니다.", isMapped: false),
+                category("configuration", "설정 및 배포 관리 테스트", "CORS, debug, directory listing, WebDAV 단서를 확인합니다."),
+                category("identity", "식별 관리 테스트", "정적 스캔만으로 완료할 수 없습니다.", isMapped: false),
+                category("authentication", "인증 테스트", "인증 관련 코드 단서를 확인합니다."),
+                category("authorization", "인가 테스트", "접근통제 관련 코드 단서를 확인합니다."),
+                category("session", "세션 관리 테스트", "쿠키와 세션 관련 코드 단서를 확인합니다."),
+                category("input", "입력 검증 테스트", "XSS, SQL, command, traversal 단서를 확인합니다."),
+                category("error", "오류 처리 테스트", "디버그와 오류 노출 단서를 확인합니다."),
+                category("crypto", "약한 암호 테스트", "약한 암호와 민감정보 처리 단서를 확인합니다."),
+                category("business", "비즈니스 로직 테스트", "정적 스캔만으로 완료할 수 없습니다.", isMapped: false),
+                category("client", "클라이언트 측 테스트", "XSS, 리디렉션, CORS 단서를 확인합니다."),
+                category("api", "API 테스트", "API 인벤토리, SSRF, 요청 제한 단서를 확인합니다.")
             ],
             references: [
-                reference("OWASP WSTG", "https://owasp.org/www-project-web-security-testing-guide/")
+                reference("OWASP WSTG", "https://owasp.org/www-project-web-security-testing-guide/"),
+                reference("OWASP WSTG v4.2", "https://owasp.org/www-project-web-security-testing-guide/v42/")
             ]
         ),
         AppSecurityStandard(
@@ -2910,13 +2893,14 @@ enum SecurityStandardCatalog {
         AppSecurityStandard(
             id: "owasp-samm-2",
             title: "OWASP SAMM 2",
-            subtitle: "보안 성숙도 모델의 설계·구현·검증·운영 실천 항목을 확인합니다.",
+            subtitle: "공식 5개 비즈니스 기능에 저장소 증거를 매핑하며 15개 실천항목이나 성숙도 수준은 채점하지 않습니다.",
             scope: "소프트웨어 보증 성숙도",
             coverage: "증적 확인 필요",
             badge: "국제 성숙도모델",
             icon: "chart.line.uptrend.xyaxis",
             accent: .teal,
             categories: [
+                category("governance", "Governance", "정책, 책임자, 로드맵, 증적 등록부 단서를 확인합니다."),
                 category("design", "Design", "보안 요구와 예방 정책 문서화 근거를 확인합니다."),
                 category("implementation", "Implementation", "시큐어코딩, 의존성 위생, CI 보안 점검 준비성을 확인합니다."),
                 category("verification", "Verification", "정적 점검 근거와 자동화 가드레일을 수집합니다."),
@@ -3111,12 +3095,31 @@ enum SecurityStandardCatalog {
 
     private static func cweCategories() -> [AppStandardCategory] {
         [
-            category("cwe-79", "CWE-79 XSS", "DOM XSS와 출력 인코딩 위험을 확인합니다."),
-            category("cwe-89", "CWE-89 SQL Injection", "동적 SQL 조합과 입력 흐름을 확인합니다."),
-            category("cwe-78", "CWE-78 OS Command Injection", "shell 명령 조합과 실행 패턴을 확인합니다."),
-            category("cwe-22", "CWE-22 Path Traversal", "경로 조작 및 파일 다운로드 위험을 확인합니다."),
-            category("cwe-352", "CWE-352 CSRF", "증적 확인이 필요합니다. 정적 코드 근거가 있는 경우만 확인합니다.", isMapped: false),
-            category("cwe-798", "CWE-798 Hard-coded Credentials", "하드코딩된 비밀값과 토큰을 확인합니다.")
+            category("cwe-79", "CWE-79 Improper Neutralization of Input During Web Page Generation", "XSS 관련 정적 단서를 확인합니다."),
+            category("cwe-89", "CWE-89 Improper Neutralization of Special Elements used in an SQL Command", "SQL 삽입 관련 정적 단서를 확인합니다."),
+            category("cwe-352", "CWE-352 Cross-Site Request Forgery", "CSRF 보호 비활성화 단서를 확인합니다."),
+            category("cwe-862", "CWE-862 Missing Authorization", "인가 누락 단서를 확인합니다."),
+            category("cwe-787", "CWE-787 Out-of-bounds Write", "정밀 메모리 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-22", "CWE-22 Improper Limitation of a Pathname to a Restricted Directory", "경로 조작 단서를 확인합니다."),
+            category("cwe-416", "CWE-416 Use After Free", "메모리 수명 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-125", "CWE-125 Out-of-bounds Read", "정밀 메모리 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-78", "CWE-78 Improper Neutralization of Special Elements used in an OS Command", "OS 명령 삽입 단서를 확인합니다."),
+            category("cwe-94", "CWE-94 Improper Control of Generation of Code", "코드 삽입 단서를 확인합니다."),
+            category("cwe-120", "CWE-120 Buffer Copy without Checking Size of Input", "위험 C/C++ 버퍼 API 사용 단서만 확인합니다."),
+            category("cwe-434", "CWE-434 Unrestricted Upload of File with Dangerous Type", "위험 파일 업로드 단서를 확인합니다."),
+            category("cwe-476", "CWE-476 NULL Pointer Dereference", "정밀 포인터 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-121", "CWE-121 Stack-based Buffer Overflow", "정밀 메모리 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-502", "CWE-502 Deserialization of Untrusted Data", "위험한 역직렬화 단서를 확인합니다."),
+            category("cwe-122", "CWE-122 Heap-based Buffer Overflow", "정밀 메모리 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-863", "CWE-863 Incorrect Authorization", "정확한 인가 결정 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-20", "CWE-20 Improper Input Validation", "입력 검증 관련 정적 단서를 확인합니다."),
+            category("cwe-284", "CWE-284 Improper Access Control", "접근통제 관련 정적 단서를 확인합니다."),
+            category("cwe-200", "CWE-200 Exposure of Sensitive Information to an Unauthorized Actor", "민감정보 노출 단서를 확인합니다."),
+            category("cwe-306", "CWE-306 Missing Authentication for Critical Function", "중요 기능 인증 누락 단서를 확인합니다."),
+            category("cwe-918", "CWE-918 Server-Side Request Forgery", "SSRF 단서를 확인합니다."),
+            category("cwe-77", "CWE-77 Improper Neutralization of Special Elements used in a Command", "명령 삽입 단서를 확인합니다."),
+            category("cwe-639", "CWE-639 Authorization Bypass Through User-Controlled Key", "객체 단위 인가 흐름 분석을 지원하지 않습니다.", isMapped: false),
+            category("cwe-770", "CWE-770 Allocation of Resources Without Limits or Throttling", "요청 크기와 rate limit 부재 단서를 확인합니다.")
         ]
     }
 

@@ -61,6 +61,7 @@ Linux 오프라인 배포 계층 설명은
 | 문서 | 내용 |
 | --- | --- |
 | [sw-development-security-49.md](standards/sw-development-security-49.md) | 소프트웨어 개발보안 49개 항목 매핑 |
+| [authoritative-mapping-audit.md](standards/authoritative-mapping-audit.md) | 행정안전부·KISA·OWASP·CWE의 현행 공식 분류와 KODA 점검 범위 검증 |
 
 ## 리포트·설계·로드맵
 

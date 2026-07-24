@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -261,6 +262,43 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn('<html lang="en">', html_report)
             self.assertNotIn("language-switch", html_report)
             self.assertIn("KODA Java Library Vulnerability Report", markdown_report)
+
+    def test_library_detail_expands_nvd_evidence_and_links_to_summary(self) -> None:
+        record = self._record("CVE-2026-0301", ("CVE-2026-0301",), ("1.1.0",), "critical", "/apps/demo.jar")
+        with patch("security_scanner.java_vulnerability_scan.run_grype_purls", return_value=GrypeResult((), "", {}, "", False)):
+            groups, _ = aggregate_vulnerabilities((record,), Path("/tmp/grype"), 5.0)
+        advisory = dict(groups[0].advisories[0])
+        advisory["nvd"] = {
+            "id": "CVE-2026-0301",
+            "published": "2026-01-01T00:00:00Z",
+            "last_modified": "2026-01-02T00:00:00Z",
+            "descriptions": ["A test vulnerability description."],
+            "references": ["https://nvd.nist.gov/vuln/detail/CVE-2026-0301"],
+            "cwe": ["CWE-89"],
+            "cvss_score": 9.8,
+            "cvss_version": "3.1",
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+        group = replace(groups[0], advisories=(advisory,))
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_reports(output, (), (group,), 1, (), "2026-07-23", language="ko")
+            main_html = (output / "server-library-report.html").read_text(encoding="utf-8")
+            detail_html = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
+
+        self.assertIn("전체 취약점", main_html)
+        self.assertIn("치명", main_html)
+        self.assertIn("우선 조치", main_html)
+        self.assertIn('href="server-library-report.html"', detail_html)
+        self.assertIn("library-details", detail_html)
+        self.assertIn("A test vulnerability description.", detail_html)
+        self.assertIn("CWE-89", detail_html)
+        self.assertIn("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", detail_html)
+        self.assertIn("최종 버전 검증", detail_html)
+        self.assertIn("CVE-2026-0301", detail_html)
+        self.assertIn(".metric--critical .metric-label", detail_html)
+        self.assertNotIn(".metric--critical{background:", detail_html)
 
     def test_fixed_versions_render_one_line_per_vulnerability_id(self) -> None:
         records = (

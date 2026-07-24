@@ -2635,96 +2635,48 @@ final class ScannerBridge: ObservableObject {
         return items
     }
 
+    private nonisolated static let sharedStandardRuleIDs: [String: Set<String>] = {
+        Dictionary(
+            uniqueKeysWithValues: RuleCatalog.groups(language: .en).map { group in
+                (group.key, Set(group.rules.map(\.id)))
+            }
+        )
+    }()
+
+    private nonisolated static func sharedStandardID(for appStandardID: String) -> String {
+        switch appStandardID {
+        case "electronic-financial-8":
+            return "electronic-financial-supervision-8"
+        case "isms-p-28":
+            return "isms-p-development-security"
+        case "nist-ssdf":
+            return "nist-ssdf-sp800-218"
+        case "owasp-dependency-check":
+            return "owasp-dependency-check-baseline"
+        case "owasp-dependency-track":
+            return "owasp-dependency-track-baseline"
+        default:
+            return appStandardID
+        }
+    }
+
     private nonisolated static func findingMatches(_ finding: NativeFinding, standard: AppSecurityStandard) -> Bool {
-        switch standard.id {
-        case "local", "isms-p-28", "nist-ssdf", "owasp-samm-2":
+        if standard.id == "local" {
             return true
-        case "cis-macos-benchmark":
+        }
+        if standard.id == "cis-macos-benchmark" {
             // Map host posture problems (not the info-level "pass" findings) so the
             // compliance card reflects actual endpoint issues.
             return finding.category == "host" && finding.severity != "info"
-        case "owasp-dependency-check", "owasp-dependency-track":
-            return finding.category == "dependencies"
-                || finding.ruleID.contains("dependency")
-                || finding.ruleID == "prevention.sbom-missing"
-                || finding.ruleID == "prevention.dependency-update-automation-missing"
-                || finding.ruleID == "prevention.ci-security-scan-missing"
-                || finding.ruleID == "prevention.vex-missing"
-                || finding.ruleID == "prevention.dependency-track-integration-missing"
-        case "owasp-scvs":
-            return finding.category == "dependencies"
-                || finding.ruleID.contains("dependency")
-                || finding.ruleID == "prevention.scvs-plan-missing"
-                || finding.ruleID == "prevention.sbom-missing"
-                || finding.ruleID == "prevention.vex-missing"
-                || finding.ruleID == "prevention.dependency-update-automation-missing"
-                || finding.ruleID == "prevention.dependency-track-integration-missing"
-                || finding.ruleID == "prevention.slsa-sigstore-missing"
-                || finding.ruleID == "prevention.release-provenance-automation-missing"
-                || finding.ruleID == "prevention.github-actions-unpinned"
-                || finding.ruleID == "prevention.github-token-permissions-not-readonly"
-                || finding.ruleID == "prevention.binary-artifact-committed"
-        case "openssf-scorecard-baseline":
-            return finding.category == "prevention"
-                || finding.ruleID.contains("dependency")
-                || finding.ruleID == "dependency.osv-known-vulnerability"
-        case "cisa-kev-epss-priority":
-            return finding.ruleID == "dependency.osv-known-vulnerability"
-                || finding.ruleID == "prevention.vex-missing"
-                || finding.ruleID == "prevention.sbom-missing"
-                || finding.ruleID == "prevention.dependency-track-integration-missing"
-        case "slsa-sigstore-baseline":
-            return finding.ruleID == "prevention.slsa-sigstore-missing"
-                || finding.ruleID == "prevention.github-actions-unpinned"
-                || finding.ruleID == "prevention.github-token-permissions-not-readonly"
-                || finding.ruleID == "prevention.binary-artifact-committed"
-        case "owasp-api-security-2023":
-            return finding.ruleID.contains("api")
-                || finding.ruleID.contains("ssrf")
-                || finding.ruleID.contains("cors")
-                || finding.ruleID.contains("auth")
-                || finding.category == "configuration"
-        case "owasp-mobile-top-10-2024":
-            return finding.category == "secrets"
-                || finding.category == "configuration"
-                || finding.category == "dependencies"
-        case "owasp-masvs":
-            return finding.ruleID.contains("android")
-                || finding.ruleID.contains("ios")
-                || finding.category == "secrets"
-                || finding.category == "dependencies"
-                || finding.ruleID == "prevention.mobile-security-plan-missing"
-                || finding.ruleID == "prevention.slsa-sigstore-missing"
-                || finding.ruleID == "prevention.release-provenance-automation-missing"
-        case "owasp-llm-top-10-2025":
-            return finding.ruleID.contains("llm")
-                || finding.ruleID == "code.logging-sensitive-data"
-                || finding.ruleID == "code.unbounded-request-body"
-                || finding.ruleID == "code.eval-user-input"
-                || finding.ruleID == "code.command-injection"
-                || finding.ruleID == "code.unsafe-deserialization"
-                || finding.category == "secrets"
-                || finding.ruleID == "prevention.ai-llm-security-plan-missing"
-                || finding.ruleID == "prevention.threat-model-missing"
-                || finding.ruleID == "prevention.sbom-missing"
-                || finding.ruleID == "prevention.vex-missing"
-        case "nist-csf-2", "cisa-secure-software-attestation":
-            return finding.category == "prevention"
-                || finding.category == "dependencies"
-                || finding.category == "secrets"
-                || finding.category == "configuration"
-                || finding.ruleID == "code.logging-sensitive-data"
-                || finding.ruleID == "code.insecure-cookie-settings"
-                || finding.ruleID == "code.csrf-disabled"
-        case "ncsc-web-8", "electronic-financial-8":
-            return finding.category == "code" || finding.category == "configuration"
-        case "sw-dev-security-49", "sw-dev-security-7-types", "kisa-secure-coding":
-            return finding.category == "code"
-                || finding.category == "secrets"
-                || finding.category == "configuration"
-        default:
-            return true
         }
+
+        // Fail closed if the bundled shared-engine catalog is missing a profile.
+        // This prevents a standards report from silently including every finding.
+        let catalogID = sharedStandardID(for: standard.id)
+        guard let ruleIDs = sharedStandardRuleIDs[catalogID] else {
+            return false
+        }
+        return ruleIDs.contains(finding.ruleID)
     }
 }
 

@@ -17,7 +17,7 @@
 - 취약점 인텔리전스: OSV.dev 조회(`osv_vulnerabilities.query_osv_findings`) + CISA KEV + FIRST EPSS 우선순위(`vuln_intel`).
 - 의존성 인벤토리: requirements/poetry/Pipfile/package-lock/yarn/pnpm 등 파싱(`dependency_inventory`).
 - 리포트: Markdown / JSON / SARIF / CycloneDX(SBOM·VEX) (`reporting`, `sbom`, `vex`).
-- 표준 매핑: OWASP Top 10, CWE Top 25, ISMS-P 2.8, KISA, NCSC, NIST SSDF/CSF 2.0, OWASP ASVS/WSTG/MASVS/LLM/SCVS, CISA KEV/EPSS·Secure by Design, SLSA/Sigstore 등(`standards.py`).
+- 표준 매핑: OWASP Top 10, CWE Top 25, ISMS-P 2.8, 행안부/KISA, NIST SSDF/CSF 2.0, OWASP ASVS/WSTG/MASVS/LLM/SCVS, CISA KEV/EPSS·Secure by Design, SLSA/Sigstore 등(`standards.py`).
 - 운영: 대시보드/서버(`server`, `app`), 점수 이력·리포트 diff(`diffing`), 예외 거버넌스(`ignore`, `koda-ignore.yml`), 증거 레지스터(`evidence`), 릴리스 패키지(`release`).
 - 가벼운 DAST: OWASP ZAP baseline 실행(`dast`).
 - 배포: macOS 네이티브(Swift, MAS) + Windows(WebView2 단일창 + 브라우저 폴백), 양쪽 모두 Python 런타임 동봉.

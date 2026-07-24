@@ -24,6 +24,7 @@ from .standards import (
     SOURCE_STANDARD_IDS,
     filter_findings_by_standard,
     resolve_standard_selection,
+    source_standard_help,
 )
 
 ARCHIVE_SUFFIXES = (
@@ -632,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
                         warnings=tuple(scanner.warnings),
                         scan_path=", ".join(target_paths.values()),
                         kind="source",
+                        summary_href=output.name,
                         standard=standard_selection.standard,
                         standard_category=standard_selection.category,
                         scanned_categories=standard_selection.scanner_categories,
@@ -699,7 +701,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan = subparsers.add_parser(
         "scan",
         help="scan configured local project folders",
-        epilog="HTML output writes a summary page and a linked -detail.html page. --standard accepts only registered source-analysis OWASP/Korean/local profiles; mappings are not a full SAST or compliance claim.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "HTML output writes a summary page and a linked -detail.html page.\n"
+            "--standard accepts only the current registered source-analysis profiles;\n"
+            "mappings are not a full SAST or compliance claim.\n\n"
+            f"{source_standard_help()}"
+        ),
     )
     scan.add_argument("--config", type=Path, help="JSON config file")
     scan.add_argument(

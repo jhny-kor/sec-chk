@@ -18,8 +18,6 @@ The current implementation borrows information architecture from established vul
   - https://www.first.org/cvss/v3-1/specification-document
 - OWASP Top 10:2025: updated web application risk categories; added as a mapped profile where current local checks overlap.
   - https://owasp.org/Top10/2025/
-- OWASP Top 10:2021: web application risk categories used for the dashboard standard/category selector.
-  - https://owasp.org/Top10/2021/
 - OWASP API Security Top 10:2023: API-specific risk categories; added as a mapped profile for configuration and unsafe API-consumption overlaps.
   - https://owasp.org/API-Security/editions/2023/en/0x11-t10/
 - OWASP Mobile Top 10:2024: mobile risk categories; added as a mapped profile for credential, supply-chain, communication, storage, cryptography, and configuration overlaps.

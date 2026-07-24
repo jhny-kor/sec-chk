@@ -46,5 +46,6 @@ switching languages.
 - [Report contract](report-contract.md)
 - [Security dashboard research](security-dashboard-research.md)
 - [SW development security 49 profile](standards/sw-development-security-49.en.md)
+- [Authoritative standard mapping audit](standards/authoritative-mapping-audit.en.md)
 
 Planning material is maintained in Korean in the [Korean documentation index](README.md).

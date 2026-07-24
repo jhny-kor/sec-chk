@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import BoundedSemaphore
 
 from . import __version__
+from .checks.secrets import SECRET_RULES, _redact_line
 from .dependency_inventory import component_payload
 from .models import DependencyComponent, Finding, SEVERITIES, SEVERITY_RANK
 from .sbom import cyclonedx_payload, render_cyclonedx
@@ -70,6 +71,7 @@ TRANSLATIONS = {
         "help_intro": "Review each selectable standard, what SecChk checks locally, and links to the official source.",
         "coverage_matrix": "Coverage Matrix",
         "coverage": "Coverage",
+        "publication_info": "Issuer / release",
         "official_links": "Official links",
         "check_categories": "Check criteria",
         "mapped_checks": "mapped checks",
@@ -194,6 +196,9 @@ TRANSLATIONS = {
         "location": "Location",
         "evidence": "Evidence",
         "action": "Action",
+        "source_context": "Source context",
+        "source_context_unavailable": "Source context is unavailable for this finding.",
+        "problem_location": "Problem location",
         "no_findings_display": "No findings to display.",
         "no_findings_filter": "No findings match the current filters.",
         "sw49_heading": "SW Development Security 49 Control Status",
@@ -239,6 +244,7 @@ TRANSLATIONS = {
         "all_severities": "All severities",
         "all_categories": "All categories",
         "all_targets": "All targets",
+        "all_locations": "All locations",
         "risk_score_metric": "Risk Score",
         "risk_score_sub": "weighted local score",
         "risk_score_formula": "Calculation: critical 100, high 40, medium 10, low 3, info 1 per finding.",
@@ -251,6 +257,7 @@ TRANSLATIONS = {
         "blocking_sub": "critical or high",
         "remediate": "Remediate",
         "review_this_finding": "Review this finding.",
+        "summary_link": "Summary",
         "finding_singular": "finding",
         "finding_plural": "findings",
         "unknown": "unknown",
@@ -301,6 +308,7 @@ TRANSLATIONS = {
         "help_intro": "선택 가능한 보안 기준, 로컬 점검 범위, 공식 출처 링크를 확인합니다.",
         "coverage_matrix": "커버리지 매트릭스",
         "coverage": "점검 범위",
+        "publication_info": "발행기관 / 판본",
         "official_links": "공식 링크",
         "check_categories": "점검 기준",
         "mapped_checks": "매핑된 점검",
@@ -425,6 +433,9 @@ TRANSLATIONS = {
         "location": "위치",
         "evidence": "근거",
         "action": "조치",
+        "source_context": "소스 원문 문맥",
+        "source_context_unavailable": "이 항목의 소스 원문 문맥을 읽을 수 없습니다.",
+        "problem_location": "문제 위치",
         "no_findings_display": "표시할 발견 항목이 없습니다.",
         "no_findings_filter": "현재 필터와 일치하는 발견 항목이 없습니다.",
         "sw49_heading": "소프트웨어 개발보안 49 기준 현황",
@@ -470,6 +481,7 @@ TRANSLATIONS = {
         "all_severities": "모든 심각도",
         "all_categories": "모든 종류",
         "all_targets": "모든 대상",
+        "all_locations": "모든 위치",
         "risk_score_metric": "위험 점수",
         "risk_score_sub": "가중 로컬 점수",
         "risk_score_formula": "계산: 발견 항목마다 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점씩 합산합니다.",
@@ -482,6 +494,7 @@ TRANSLATIONS = {
         "blocking_sub": "치명 또는 높음",
         "remediate": "조치 보기",
         "review_this_finding": "이 발견 항목을 검토하세요.",
+        "summary_link": "요약으로 돌아가기",
         "finding_singular": "건",
         "finding_plural": "건",
         "unknown": "알 수 없음",
@@ -1843,6 +1856,7 @@ def render_html_pair(
     language: str = "en",
     *,
     detail_href: str = "security-dashboard-detail.html",
+    summary_href: str | None = None,
     target_paths: dict[str, str] | None = None,
     warnings: tuple[str, ...] = (),
     scan_path: str | None = None,
@@ -1873,13 +1887,20 @@ def render_html_pair(
         enable_osv=enable_osv,
         scanned_categories=scanned_categories,
     )
-    return _render_html_main(payload, language, detail_href), _render_html_payload(payload, language)
+    return _render_html_main(payload, language, detail_href), _render_html_payload(payload, language, summary_href=summary_href)
 
 
-def _render_html_payload(payload: dict[str, object], language: str) -> str:
+def _render_html_payload(payload: dict[str, object], language: str, *, summary_href: str | None = None) -> str:
     labels = _labels(language)
     json_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     replacements = _html_replacements(labels, json_payload)
+    if summary_href:
+        replacements["__INITIAL_SUMMARY_LINK_HTML__"] = (
+            f'<a class="topbar-action summary-link" href="{html.escape(summary_href, quote=True)}">'
+            f'{html.escape(str(labels["summary_link"]))}</a>'
+        )
+    else:
+        replacements["__INITIAL_SUMMARY_LINK_HTML__"] = ""
     content = HTML_TEMPLATE
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
@@ -1919,22 +1940,36 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
     standard_text = "기준" if is_ko else "Standard"
     category_text = "범주" if is_ko else "Category"
     generated_text = "생성" if is_ko else "Generated"
-    findings_text = "취약점" if is_ko else "Findings"
-    risk_text = "위험 점수" if is_ko else "Risk score"
+    findings_text = "전체 취약점" if is_ko else "Total findings"
+    severity_text = {
+        "critical": "치명" if is_ko else "Critical",
+        "high": "높음" if is_ko else "High",
+        "medium": "중간" if is_ko else "Medium",
+        "low": "낮음" if is_ko else "Low",
+    }
     target_names = payload.get("scan", {}).get("path", "") if isinstance(payload.get("scan"), dict) else ""
+    by_severity = summary.get("by_severity", {}) if isinstance(summary.get("by_severity"), dict) else {}
     cards = (
-        (findings_text, summary.get("displayed_finding_count", len(payload.get("findings_by_language", {}).get("en", ())))),
-        (risk_text, summary.get("risk_score", 0)),
-        (target_text, summary.get("target_count", 0)),
+        ("total", findings_text, summary.get("displayed_finding_count", len(payload.get("findings_by_language", {}).get("en", ())))),
+        ("critical", severity_text["critical"], by_severity.get("critical", 0)),
+        ("high", severity_text["high"], by_severity.get("high", 0)),
+        ("medium", severity_text["medium"], by_severity.get("medium", 0)),
+        ("low", severity_text["low"], by_severity.get("low", 0)),
     )
     cards_html = "".join(
-        f'<article class="koda-main-card"><span>{html.escape(str(label))}</span><strong>{html.escape(_format_main_count(value))}</strong></article>'
-        for label, value in cards
+        f'<article class="koda-main-card koda-main-card--{key}"><span>{html.escape(str(label))}</span><strong>{html.escape(_format_main_count(value))}</strong></article>'
+        for key, label, value in cards
     )
     generated_at = str(payload.get("generated_display", payload.get("generated_at", "")))
-    return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html.escape(title)}</title><style>
-:root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card strong{{display:block;margin-top:8px;font-size:30px;letter-spacing:-.04em}}.koda-main-action{{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:13px 17px;border-radius:11px;color:#fff;background:#1368e8;text-decoration:none;font-weight:800}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:680px){{.koda-main-cards{{grid-template-columns:1fr}}.koda-main-hero{{padding:26px 22px}}}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span></div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div><a class="koda-main-action" href="{html.escape(detail_href, quote=True)}">{html.escape(detail_text)} →</a></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape("상세 보고서의 검색·심각도 필터와 파일별 근거를 사용하세요." if is_ko else "Use the detailed report for search, severity filters, and file-level evidence.")}</div><footer>KODA · {html.escape(generated_at)}</footer></main></body></html>'''
+    critical_count = by_severity.get("critical", 0)
+    high_count = by_severity.get("high", 0)
+    if is_ko:
+        priority = f"우선 조치: 치명 {_format_main_count(critical_count)}건 · 높음 {_format_main_count(high_count)}건. 상세 보고서에서 파일 위치, 문제행 문맥과 수정 방법을 확인하세요."
+    else:
+        priority = f"Priority action: {_format_main_count(critical_count)} Critical · {_format_main_count(high_count)} High. Use the detailed report for file locations, source context, and remediation guidance."
+    return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
+:root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-action{{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:13px 17px;border-radius:11px;color:#fff;background:#1368e8;text-decoration:none;font-weight:800}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span></div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div><a class="koda-main-action" href="{html.escape(detail_href, quote=True)}">{html.escape(detail_text)} →</a></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><footer>KODA · {html.escape(generated_at)}</footer></main></body></html>'''
 
 
 def _format_main_count(value: object) -> str:
@@ -2060,8 +2095,77 @@ def write_report(content: str, output: Path | None) -> None:
     output.write_text(content, encoding="utf-8")
 
 
-def _finding_payload(finding: Finding) -> dict[str, object]:
+_SOURCE_CONTEXT_BEFORE = 3
+_SOURCE_CONTEXT_AFTER = 3
+_SOURCE_CONTEXT_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _redact_source_line(line: str) -> str:
+    redacted = line
+    for rule in SECRET_RULES:
+        for match in rule.pattern.finditer(redacted):
+            try:
+                secret_value = match.group(rule.secret_group)
+            except (IndexError, AttributeError):
+                secret_value = ""
+            if secret_value:
+                redacted = _redact_line(redacted, secret_value)
+    return redacted
+
+
+def _source_context_payload(finding: Finding) -> dict[str, object]:
+    """Return a bounded, report-safe source window for a file finding.
+
+    Secret findings intentionally keep line numbers but replace every source
+    line with a redaction marker. This prevents private-key bodies or unusual
+    token formats from being copied into the HTML/embedded JSON.
+    """
+    if finding.line is None or finding.resource:
+        return {"available": False, "reason": "no_file_line", "lines": []}
+    try:
+        path = finding.path
+        if not path.is_file():
+            return {"available": False, "reason": "file_unavailable", "lines": []}
+        if path.stat().st_size > _SOURCE_CONTEXT_MAX_BYTES:
+            return {"available": False, "reason": "file_too_large", "lines": []}
+        source_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, UnicodeError):
+        return {"available": False, "reason": "file_unavailable", "lines": []}
+
+    focus_line = int(finding.line)
+    if focus_line < 1 or focus_line > len(source_lines):
+        return {"available": False, "reason": "line_unavailable", "lines": []}
+    start_line = max(1, focus_line - _SOURCE_CONTEXT_BEFORE)
+    end_line = min(len(source_lines), focus_line + _SOURCE_CONTEXT_AFTER)
+    secret_finding = finding.category == "secrets"
+    context_lines = []
+    for number in range(start_line, end_line + 1):
+        source_line = source_lines[number - 1]
+        if secret_finding:
+            display_line = "<redacted sensitive source line>"
+            redacted = True
+        else:
+            display_line = _redact_source_line(source_line)
+            redacted = display_line != source_line
+        context_lines.append(
+            {
+                "number": number,
+                "text": display_line,
+                "is_focus": number == focus_line,
+                "redacted": redacted,
+            }
+        )
     return {
+        "available": True,
+        "start_line": start_line,
+        "end_line": end_line,
+        "focus_line": focus_line,
+        "lines": context_lines,
+    }
+
+
+def _finding_payload(finding: Finding) -> dict[str, object]:
+    payload = {
         "rule_id": finding.rule_id,
         "category": finding.category,
         "severity": finding.severity,
@@ -2078,6 +2182,9 @@ def _finding_payload(finding: Finding) -> dict[str, object]:
         "triage_confidence": finding.triage_confidence,
         "triage_note": finding.triage_note,
     }
+    if finding.line is not None and not finding.resource:
+        payload["source_context"] = _source_context_payload(finding)
+    return payload
 
 
 def _localized_finding_payload(finding: Finding, language: str) -> dict[str, object]:
@@ -2757,6 +2864,70 @@ HTML_TEMPLATE = """<!doctype html>
       color: var(--muted);
     }
 
+    .source-context {
+      margin-top: 14px;
+      max-width: 780px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .source-context > summary {
+      padding: 10px 12px;
+      color: var(--ink);
+    }
+
+    .source-code {
+      overflow-x: auto;
+      padding: 8px 0;
+      border-top: 1px solid var(--line);
+      background: #0f172a;
+      color: #e2e8f0;
+      font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .source-code-line {
+      display: grid;
+      grid-template-columns: 56px minmax(0, 1fr);
+      min-width: max-content;
+      padding: 2px 14px 2px 0;
+      white-space: pre;
+    }
+
+    .source-code-line.is-focus {
+      border-left: 3px solid #f59e0b;
+      padding-left: 0;
+      background: rgba(245, 158, 11, 0.18);
+      color: #fff7ed;
+      font-weight: 700;
+    }
+
+    .source-code-number {
+      padding-right: 12px;
+      color: #94a3b8;
+      text-align: right;
+      user-select: none;
+    }
+
+    .source-code-line.is-focus .source-code-number {
+      color: #fbbf24;
+    }
+
+    .source-problem-label {
+      margin-left: 12px;
+      color: #fbbf24;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .source-context-unavailable {
+      margin: 14px 0 0;
+      padding: 10px 12px;
+      border-left: 3px solid #94a3b8;
+      color: var(--muted);
+      background: #f8fafc;
+    }
+
     .empty {
       padding: 36px;
       text-align: center;
@@ -3155,6 +3326,7 @@ HTML_TEMPLATE = """<!doctype html>
           <button id="lang-en" type="button">EN</button>
         </div>
         <div class="topbar-actions">
+          __INITIAL_SUMMARY_LINK_HTML__
           <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
           <button id="settings-toggle" class="topbar-action" type="button">⚙ 설정</button>
         </div>
@@ -3316,6 +3488,7 @@ HTML_TEMPLATE = """<!doctype html>
       <select id="severity"></select>
       <select id="category"></select>
       <select id="target"></select>
+      <select id="location"></select>
       <select id="result-standard"></select>
       <button id="reset" type="button">__INITIAL_RESET__</button>
     </section>
@@ -3409,6 +3582,7 @@ HTML_TEMPLATE = """<!doctype html>
       severity: "all",
       category: "all",
       target: "all",
+      location: "all",
       resultStandard: "all",
       language: payload.language || "en",
       scanStatus: "",
@@ -3805,9 +3979,11 @@ HTML_TEMPLATE = """<!doctype html>
       const items = findings();
       const categories = Array.from(new Set(items.map((item) => item.category))).sort();
       const targets = Object.keys(summary.by_target || {}).sort();
+      const locations = Array.from(new Set(items.map((item) => item.path).filter(Boolean))).sort();
       fillSelect(byId("severity"), [["all", activeLabels.all_severities], ...severityOrder.map((sev) => [sev, activeSeverityLabels[sev]])], state.severity);
       fillSelect(byId("category"), [["all", activeLabels.all_categories], ...categories.map((cat) => [cat, categoryLabel(cat)])], state.category);
       fillSelect(byId("target"), [["all", activeLabels.all_targets], ...targets.map((target) => [target, targetDisplay(target)])], state.target);
+      fillSelect(byId("location"), [["all", activeLabels.all_locations], ...locations.map((location) => [location, location])], state.location);
       const scanKind = (payload.scan && payload.scan.kind) || "directory";
       const scannedStandard = (payload.scan && payload.scan.standard) || "all";
       const standardOptions = standardDefinitions()
@@ -3835,6 +4011,7 @@ HTML_TEMPLATE = """<!doctype html>
         if (state.severity !== "all" && finding.severity !== state.severity) return false;
         if (state.category !== "all" && finding.category !== state.category) return false;
         if (state.target !== "all" && finding.target !== state.target) return false;
+        if (state.location !== "all" && finding.path !== state.location) return false;
         if (state.resultStandard !== "all" && !(ruleMappings()[finding.rule_id] || []).some((mapping) => mapping.standard_id === state.resultStandard)) return false;
         if (!query) return true;
         return [finding.title, finding.rule_id, categoryLabel(finding.category), finding.path, targetDisplay(finding.target), finding.evidence, finding.recommendation]
@@ -3890,6 +4067,23 @@ HTML_TEMPLATE = """<!doctype html>
       `).join("")}</div>`;
     }
 
+    function sourceContextHtml(finding) {
+      const activeLabels = labels();
+      const context = finding.source_context;
+      if (!context) return "";
+      if (!context.available || !Array.isArray(context.lines) || context.lines.length === 0) {
+        return `<p class="source-context-unavailable">${escapeText(activeLabels.source_context_unavailable)}</p>`;
+      }
+      const lines = context.lines.map((line) => {
+        const focus = line.is_focus ? " is-focus" : "";
+        const marker = line.is_focus
+          ? `<span class="source-problem-label">${escapeText(activeLabels.problem_location)}</span>`
+          : "";
+        return `<div class="source-code-line${focus}"><span class="source-code-number">${escapeText(String(line.number))}</span><span>${escapeText(line.text || "")}${marker}</span></div>`;
+      }).join("");
+      return `<details class="source-context" open><summary>${escapeText(activeLabels.source_context)}</summary><div class="source-code" aria-label="${escapeText(activeLabels.source_context)}">${lines}</div></details>`;
+    }
+
     function renderTable(items) {
       const activeLabels = labels();
       const activeSeverityLabels = severityLabels();
@@ -3919,6 +4113,7 @@ HTML_TEMPLATE = """<!doctype html>
                   <br><br>
                   <strong>${escapeText(activeLabels.related_standards)}</strong>
                   ${relatedStandardsHtml(finding.rule_id)}
+                  ${sourceContextHtml(finding)}
                 </div>
               </details>
             </td>
@@ -4129,6 +4324,11 @@ HTML_TEMPLATE = """<!doctype html>
             ${escapeText(labelFor(category))}
           </span>
         `).join("");
+        const issuer = localizedText(standard.issuer, "");
+        const version = standard.version && standard.version !== standard.published_on
+          ? `${/^\\d{4}$/.test(standard.version) ? "" : "v"}${standard.version}`
+          : "";
+        const publication = [issuer, version, standard.published_on || ""].filter(Boolean).join(" · ");
         return `
           <article class="standard-card">
             <div class="standard-head">
@@ -4143,6 +4343,12 @@ HTML_TEMPLATE = """<!doctype html>
               <strong>${escapeText(activeLabels.coverage)}</strong>
               <span>${escapeText(localizedText(standard.coverage, ""))}</span>
             </div>
+            ${publication ? `
+              <div class="help-meta">
+                <strong>${escapeText(activeLabels.publication_info)}</strong>
+                <span>${escapeText(publication)}</span>
+              </div>
+            ` : ""}
             <div class="help-meta">
               <strong>${escapeText(activeLabels.check_categories)}</strong>
               <div class="category-chips">${categoryChips}</div>
@@ -4241,6 +4447,7 @@ HTML_TEMPLATE = """<!doctype html>
       state.severity = "all";
       state.category = "all";
       state.target = "all";
+      state.location = "all";
       state.resultStandard = payload.scan && payload.scan.kind === "web" ? "all" : (payload.scan && payload.scan.standard) || "all";
       state.scannedPages = payload.scanned_pages || [];
       state.pageResults = payload.page_results || [];
@@ -4584,6 +4791,10 @@ HTML_TEMPLATE = """<!doctype html>
       state.target = event.target.value;
       render();
     });
+    byId("location").addEventListener("change", (event) => {
+      state.location = event.target.value;
+      render();
+    });
     byId("result-standard").addEventListener("change", (event) => {
       state.resultStandard = event.target.value;
       render();
@@ -4604,11 +4815,13 @@ HTML_TEMPLATE = """<!doctype html>
       state.severity = "all";
       state.category = "all";
       state.target = "all";
+      state.location = "all";
       state.resultStandard = "all";
       byId("search").value = "";
       byId("severity").value = "all";
       byId("category").value = "all";
       byId("target").value = "all";
+      byId("location").value = "all";
       byId("result-standard").value = "all";
       render();
     });
