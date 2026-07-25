@@ -14,6 +14,14 @@ from security_scanner.cli import build_parser, main  # noqa: E402
 
 
 class CliReportTests(unittest.TestCase):
+    def test_report_samples_mark_external_distribution(self) -> None:
+        samples = sorted((ROOT / "samples" / "report-designs").glob("*.html"))
+        self.assertTrue(samples)
+        for sample in samples:
+            document = sample.read_text(encoding="utf-8")
+            self.assertIn("대외 비인가", document, sample.name)
+            self.assertRegex(document, r"border: ?2px solid #(ef4444|ff4d5e|b42318)", sample.name)
+
     def test_standard_is_selected_from_registered_profiles(self) -> None:
         args = build_parser().parse_args(
             ["scan", "--target", ".", "--standard", "sw-dev-security-49", "--standard-category", "code-error"]
@@ -36,6 +44,14 @@ class CliReportTests(unittest.TestCase):
         self.assertIn("published 2021-11-30", help_text)
         self.assertNotIn("owasp-top-10-2021", help_text)
         self.assertNotIn("cwe-sans-top-25-2025", help_text)
+
+    def test_jar_scan_accepts_repeated_targets(self) -> None:
+        args = build_parser().parse_args(
+            ["jar-scan", "--target", "/srv/api", "--target", "/opt/apps"]
+        )
+        self.assertEqual(args.target, ["/srv/api", "/opt/apps"])
+        help_text = build_parser()._subparsers._group_actions[0].choices["jar-scan"].format_help()
+        self.assertIn("repeat for multiple roots", help_text)
 
     def test_source_html_writes_main_and_detail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -69,11 +85,15 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("Priority action", main_html)
             self.assertIn("source-main-guide-open", main_html)
             self.assertIn("OWASP ASVS 5.0", main_html)
+            self.assertIn("대외 비인가", main_html)
+            self.assertIn("border:2px solid #ef4444", main_html)
             detail_html = detail.read_text(encoding="utf-8")
             self.assertIn("code.sql-dynamic-query", detail_html)
             self.assertNotIn('href="source.html"', detail_html)
             self.assertIn("source-detail-guide-open", detail_html)
             self.assertIn("Analysis standards guide", detail_html)
+            self.assertIn("대외 비인가", detail_html)
+            self.assertIn("external-classification-badge", detail_html)
             self.assertIn('source_context', detail_html)
             self.assertIn("source-code-line", detail_html)
             self.assertIn('id="location"', detail_html)

@@ -23,6 +23,7 @@ bash install.sh
 ```bash
 /home/user0/koda/koda jar-scan \
   --target /deploy/apps \
+  --target /deploy/worker-apps \
   --output-dir reports/java-scan \
   --fail-on high --fail-on-kev
 ```
@@ -35,6 +36,8 @@ HTML은 `--language`를 생략하면 한국어로 열리고 `한국어`/`English
 소스 취약점은 `koda scan --target /deploy/source --format html --output reports/source.html`로
 메인과 `source-detail.html`을 생성합니다. Java 아카이브는 위 `jar-scan` 명령으로
 라이브러리 메인·상세 HTML 두 파일을 생성합니다.
+`--target`을 반복하면 여러 배포 폴더의 아카이브·컴포넌트·취약점·SBOM을 중복 제거하여
+하나의 라이브러리 메인/상세 리포트로 통합합니다.
 
 자세한 전달물 비교와 Windows 데이터 패키지는
 [폐쇄망 배포 개요](../../docs/install/offline-delivery.md)를 참고하세요.

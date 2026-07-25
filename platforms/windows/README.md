@@ -49,6 +49,17 @@ program's **Report → HTML (main + detail)** action downloads the source pair a
 one ZIP so the relative detail file stays together. `--standard-category` can
 narrow the selected OWASP or Korean software-development-security profile.
 
+To combine two or more deployment roots into one library report, repeat
+`--target`. Archives, components, vulnerabilities, and SBOM entries from all
+roots are deduplicated and written to the same report pair:
+
+```bat
+koda jar-scan ^
+  --target C:\deploy\api ^
+  --target C:\deploy\worker ^
+  --output-dir reports\java-scan
+```
+
 ## Build
 
 Run from the repository root:

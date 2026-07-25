@@ -27,5 +27,16 @@ Java 아카이브는 `koda jar-scan --target C:\deploy\apps --format html`을 �
 Windows 프로그램에서는 **보고서 → HTML (메인 + 상세)**를 선택하면 소스 두 파일이
 상대 링크를 유지한 ZIP으로 저장됩니다.
 
+여러 배포 폴더를 하나의 라이브러리 리포트로 합치려면 `--target`을 반복 지정합니다.
+모든 폴더의 아카이브·컴포넌트·취약점·SBOM이 중복 제거되어 하나의 메인/상세 리포트로
+생성됩니다.
+
+```bat
+koda jar-scan ^
+  --target C:\deploy\api ^
+  --target C:\deploy\worker ^
+  --output-dir reports\java-scan
+```
+
 - [한국어 문서 인덱스](../../docs/README.md)
 - [English Windows installer guide](README.md)

@@ -73,8 +73,12 @@ for `tools\`. No path arguments are needed:
 
 ```bat
 koda jar-scan --target D:\apps ^
+  --target D:\worker-apps ^
   --output-dir reports --fail-on high --fail-on-kev
 ```
+
+`--target` may be repeated. The supplied roots are scanned together and produce
+one combined library report pair and SBOM.
 
 The installer keeps `KODA-CLI.cmd` as a compatibility alias and adds
 `%LOCALAPPDATA%\KODA` to the per-user `PATH`. Open a new Command Prompt after

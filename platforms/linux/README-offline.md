@@ -92,6 +92,18 @@ requested main file and its `-detail.html` sibling. For Java archives, use
 Windows desktop program exposes the same source pair as **HTML (main + detail)**
 in its report download menu.
 
+Repeat `--target` to combine multiple deployment roots in one library report.
+The shared archive inventory, CycloneDX SBOM, vulnerability aggregation, and
+HTML/Markdown outputs cover every supplied root (overlapping files are
+deduplicated):
+
+```bash
+koda jar-scan \
+  --target /deploy/api \
+  --target /deploy/worker \
+  --output-dir reports/java-scan
+```
+
 The archive contains the KODA source, Syft, Grype, Grype DB, selected NVD/CISA
 data, Playwright wheels for Python 3.10 through 3.14, and Chromium. The
 installer uses only those local files and refuses network installation if an

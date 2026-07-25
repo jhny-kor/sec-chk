@@ -64,6 +64,11 @@
       border: 1px solid #275943; border-radius: 8px; color: var(--green); background: var(--green-soft);
       font: 700 11px/1 "SFMono-Regular", Consolas, monospace;
     }
+    .classification-mark {
+      display: inline-flex; align-items: center; min-height: 30px; padding: 4px 10px;
+      border: 2px solid #ff4d5e; border-radius: 6px; color: #ff6b6b;
+      background: rgba(127,29,29,.25); font: 900 11px/1.2 Inter, Pretendard, sans-serif; letter-spacing: .06em; white-space: nowrap;
+    }
     .signal::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
     .lang {
       display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: #090f19;
@@ -201,6 +206,7 @@
       </div>
       <div class="actions">
         <span class="signal">OFFLINE SCAN COMPLETE</span>
+        <span class="classification-mark" title="대외 비인가">대외 비인가</span>
         <div class="lang" aria-label="언어 선택"><button class="active" type="button" data-language="ko">KO</button><button type="button" data-language="en">EN</button></div>
       </div>
     </header>

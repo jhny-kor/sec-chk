@@ -72,6 +72,7 @@ cap-drop ALL, CPU/메모리/PID 제한으로 실행됩니다. 대상 JAR은 읽�
 
 ```bash
 ./koda-docker jar-scan --target /jeus/domains/domain1/applications \
+  --target /jeus/domains/domain2/applications \
   --output-dir reports/java-scan --fail-on high --fail-on-kev
 
 ./koda-docker audit --target /jeus/domains/domain1/applications \
@@ -98,6 +99,7 @@ bash install.sh                 # 기본 prefix /home/user0/koda
 
 # 실행
 /home/user0/koda/koda jar-scan --target /deploy/app \
+  --target /deploy/worker-app \
   --output-dir reports/java-scan --fail-on high --fail-on-kev
 ```
 
@@ -149,8 +151,12 @@ Expand-Archive koda-vuln-data-<date>.zip -DestinationPath $env:LOCALAPPDATA\KODA
 
 ```bat
 koda jar-scan --target D:\apps ^
+  --target D:\worker-apps ^
   --output-dir reports --fail-on high --fail-on-kev
 ```
+
+`--target`을 반복 지정하면 여러 배포 폴더를 하나의 라이브러리 메인/상세
+리포트와 SBOM으로 통합합니다. 겹치는 아카이브 위치는 중복 제거합니다.
 
 데이터 zip 갱신 절차: [vuln-data-refresh.md](vuln-data-refresh.md) · 설치본
 상세: [windows.ko.md](windows.ko.md)

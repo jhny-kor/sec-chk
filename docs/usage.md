@@ -8,7 +8,7 @@ This guide covers the shared Python engine used by Linux, Windows, CI, and serve
 | --- | --- | --- |
 | Scan a repository before review or release | `scan --target . --standard owasp-asvs-5 --format html --output reports/source.html` | A summary HTML page plus a linked detail page for source, configuration, dependencies, secrets, and prevention gaps. |
 | Run a repeatable CI gate | `scan --changed-only --base origin/main --format sarif --fail-on high` | Changed-file scan, SARIF output, and a nonzero exit code at the chosen severity. |
-| Create an offline Java inventory | `jar-scan --target /deploy/apps` | CycloneDX, vulnerability, HTML, Markdown, and scan-metadata artifacts. |
+| Create an offline Java inventory | `jar-scan --target /deploy/apps [--target /deploy/worker-apps]` | CycloneDX, vulnerability, HTML, Markdown, and scan-metadata artifacts from all supplied roots. |
 | Compare a deployment to an approved baseline | `sbom-verify --target /deploy/apps --sbom approved.cdx.json` | Archive, version, PURL, and optional SHA-256 mismatch evidence. |
 | Check the current workstation | `host-scan --format json --min-severity info` | Opt-in host posture findings; network enrichment remains separately opt-in. |
 | Check a website you are authorized to test | `web-scan --url https://example.com` | Headers, TLS, cookie, CORS, and coverage findings. |
@@ -88,7 +88,7 @@ python3 -m security_scanner scan --target . --enable-osv --reachability --format
 python3 -m security_scanner scan --target . --changed-only --base origin/main --format sarif --fail-on high
 
 # Offline Java archive scan and deployed-SBOM verification
-python3 -m security_scanner jar-scan --target /deploy/apps --output-dir reports/java-scan --fail-on high --fail-on-kev
+python3 -m security_scanner jar-scan --target /deploy/apps --target /deploy/worker-apps --output-dir reports/java-scan --fail-on high --fail-on-kev
 python3 -m security_scanner sbom-verify --target /deploy/apps --sbom reports/approved-sbom.cdx.json --output-dir reports/sbom-verification --strict-hash --fail-on-mismatch
 ```
 
@@ -103,7 +103,9 @@ HTML/Markdown pair. If omitted, HTML opens in Korean with a Korean/English toggl
 Markdown is Korean. `server-library-report.html` is the landing page and
 `server-library-report-detail.html` contains the complete table. Java findings are grouped by library and installed version;
 `Fixed` lists advisory candidates and `Final` is the lowest candidate verified against
-the same Grype database with no matching vulnerability.
+the same Grype database with no matching vulnerability. Repeat `--target` to scan
+multiple roots into this one report pair; archive, component, SBOM, and vulnerability
+entries are combined and duplicate archive locations are removed.
 
 `--fail-on` exits nonzero when a finding meets the specified severity. `--enable-osv` queries OSV.dev using exact package names and versions. `--enable-vuln-intel` includes OSV and enriches available CVEs with CISA KEV and FIRST EPSS data; both options are off by default so ordinary scans remain offline.
 

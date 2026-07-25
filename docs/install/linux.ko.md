@@ -7,7 +7,7 @@ Linux는 `platforms/shared/python/`의 공통 엔진을 사용하며 사용자 �
 ```bash
 export PYTHONPATH=/opt/koda/platforms/shared/python
 python3 -m security_scanner jar-scan \
-  --target /deploy/apps --output-dir reports/java-scan \
+  --target /deploy/apps --target /deploy/worker-apps --output-dir reports/java-scan \
   --syft-bin /opt/koda/tools/syft --grype-bin /opt/koda/tools/grype \
   --nvd-data /opt/koda/vuln-data/nvd \
   --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json
@@ -15,6 +15,8 @@ python3 -m security_scanner jar-scan \
 
 언어를 생략하면 HTML은 한국어로 열리고 `한국어`/`English` 전환 버튼을
 표시합니다. `--language ko|en`을 지정하면 해당 언어로 고정됩니다.
+`--target`은 반복 지정할 수 있으며, 여러 폴더의 결과를 하나의 라이브러리
+메인/상세 리포트와 SBOM으로 통합합니다.
 
 - [한국어 문서 인덱스](../README.md)
 - [English Linux install](linux.md)

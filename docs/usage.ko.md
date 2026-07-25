@@ -21,9 +21,13 @@ python3 -m security_scanner scan --target /path/to/project --format html
 python3 -m security_scanner scan --target /path/to/project --standard owasp-asvs-5 --format html --output reports/source.html
 python3 -m security_scanner scan --target /path/to/project --standard sw-dev-security-49 --standard-category input-validation-expression --format html --output reports/sw49-input.html
 python3 -m security_scanner scan --target /path/to/project --format sarif --fail-on high
-python3 -m security_scanner jar-scan --target /deploy/apps --fail-on high --fail-on-kev
+python3 -m security_scanner jar-scan --target /deploy/apps --target /deploy/worker-apps --fail-on high --fail-on-kev
 python3 -m security_scanner sbom-verify --target /deploy/apps --sbom approved.cdx.json
 ```
+
+`jar-scan`의 `--target`은 반복 지정할 수 있습니다. 여러 폴더를 지정하면 모든
+아카이브·컴포넌트·취약점·SBOM을 중복 제거하여 하나의 라이브러리 메인/상세 리포트로
+생성합니다.
 
 JAR 보고서는 `--language ko` 또는 `--language en`으로 고정할 수 있습니다.
 옵션을 생략하면 HTML은 한국어로 열리고 `한국어`/`English` 전환 버튼을

@@ -49,6 +49,7 @@ offline NVD/CISA files on an approved connected host, then run:
 ~~~bash
 PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
   --target /jeus/domains/domain1/applications \
+  --target /jeus/domains/domain2/applications \
   --output-dir reports/java-scan \
   --syft-bin /opt/koda/tools/syft \
   --grype-bin /opt/koda/tools/grype \
@@ -60,6 +61,8 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
 This command does not download tools, update a vulnerability database, or
 contact NVD or CISA. The full data-transfer procedure and report
 contract are in [the offline Java SBOM runbook](../security/java-sbom-vulnerability-scan.en.md).
+Repeat `--target` to combine multiple deployment roots into the same report pair
+and SBOM; duplicate archive locations are removed.
 
 ## Install Offline Bundle
 

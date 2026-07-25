@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote
 
-from .java_archives import scan_archives
+from .java_archives import ArchiveScan, scan_archives
 from .java_inventory import JavaComponent, inventory_components
 from .sbom_verification_reporting import write_verification_reports
 
@@ -111,6 +111,9 @@ class SbomVerificationOptions:
     strict_hash: bool = False
     format: str = "html"
     vulnerabilities: tuple[dict[str, object], ...] = ()
+    # ``target`` remains the primary target for compatibility; ``targets``
+    # lets jar-scan verify one combined SBOM against repeated roots.
+    targets: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +129,8 @@ class SbomVerificationResult:
 def run_sbom_verification(options: SbomVerificationOptions) -> SbomVerificationResult:
     if options.sbom is None and options.baseline_sbom is None:
         raise ValueError("--sbom or --baseline-sbom is required")
-    scan = scan_archives(options.target, excludes=options.excludes, max_depth=options.max_depth)
+    target_paths = tuple(dict.fromkeys(path.expanduser().resolve() for path in (options.targets or (options.target,))))
+    scan = _scan_targets(target_paths, excludes=options.excludes, max_depth=options.max_depth)
     actual_components = tuple(_actual(component) for component in inventory_components(scan))
     sbom_components = _load_components(options.sbom) if options.sbom else ()
     baseline_components = _load_components(options.baseline_sbom) if options.baseline_sbom else ()
@@ -134,7 +138,8 @@ def run_sbom_verification(options: SbomVerificationOptions) -> SbomVerificationR
     baseline_changes = _compare_baseline(baseline_components, actual_components, options.vulnerabilities)
     summary = _summary(results, baseline_changes, actual_components, sbom_components)
     metadata = {
-        "target": str(options.target.expanduser().resolve()),
+        "target": ", ".join(str(path) for path in target_paths),
+        "targets": [str(path) for path in target_paths],
         "sbom": str(options.sbom.expanduser().resolve()) if options.sbom else "",
         "baseline_sbom": str(options.baseline_sbom.expanduser().resolve()) if options.baseline_sbom else "",
         "platform_target": "Linux x86_64",
@@ -146,6 +151,26 @@ def run_sbom_verification(options: SbomVerificationOptions) -> SbomVerificationR
     write_verification_reports(options.output_dir, results, baseline_changes, actual_components, summary, metadata, options.format)
     exit_code = _exit_code(options, results, baseline_changes)
     return SbomVerificationResult(exit_code, results, baseline_changes, summary, scan.warnings, metadata)
+
+
+def _scan_targets(
+    targets: tuple[Path, ...],
+    *,
+    excludes: tuple[str, ...],
+    max_depth: int | None,
+) -> ArchiveScan:
+    artifacts = []
+    warnings: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for target in targets:
+        scan = scan_archives(target, excludes=excludes, max_depth=max_depth)
+        warnings.extend(scan.warnings)
+        for artifact in scan.artifacts:
+            key = (artifact.location.display(), artifact.sha256)
+            if key not in seen:
+                seen.add(key)
+                artifacts.append(artifact)
+    return ArchiveScan(tuple(artifacts), tuple(dict.fromkeys(warnings)))
 
 
 def _actual(component: JavaComponent) -> ActualArchiveIdentity:

@@ -12,11 +12,16 @@ docker run --rm \
   --read-only \
   --network none \
   -v /deploy/apps:/scan:ro \
+  -v /deploy/worker-apps:/scan-worker:ro \
   -v "$PWD/reports:/reports" \
   koda-java-scanner:latest \
   jar-scan --target /scan --output-dir /reports \
+  --target /scan-worker \
   --fail-on high --fail-on-kev
 ```
+
+Repeat `--target` to combine multiple mounted deployment roots into one report
+pair and SBOM. Duplicate archive locations are removed.
 
 Mount the application directory read-only and retain the generated reports. Put
 approved Grype, NVD, and KEV data in the bundle's documented data location before

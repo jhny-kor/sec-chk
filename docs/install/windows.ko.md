@@ -10,12 +10,15 @@ Windows 설치본은 공통 Python 엔진과 Inno Setup 패키지를 사용합�
 ```powershell
 python -m security_scanner jar-scan `
   --target C:\deploy\apps `
+  --target C:\deploy\worker-apps `
   --output-dir reports\java-scan `
   --fail-on high --fail-on-kev
 ```
 
 `--language ko|en`은 HTML과 Markdown을 고정합니다. 생략하면 HTML은 한국어로
 열리고 `한국어`/`English` 전환 버튼을 표시하며 Markdown은 한국어입니다.
+`--target`은 반복 지정할 수 있으며, 지정한 폴더들을 하나의 라이브러리
+메인/상세 리포트와 SBOM으로 통합합니다.
 
 설치기는 `%LOCALAPPDATA%\KODA`를 사용자 `PATH`에 추가하고 `koda.cmd`를
 설치합니다. 설치 후 새 명령 프롬프트를 열어 `koda --help`로 실행하세요.

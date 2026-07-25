@@ -28,6 +28,38 @@ def _write_jar(path: Path, files: dict[str, str | bytes]) -> None:
 
 
 class JavaScanRuntimeTests(unittest.TestCase):
+    def test_java_scan_combines_repeated_target_roots_into_one_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "api"
+            second = root / "worker"
+            first.mkdir()
+            second.mkdir()
+            _write_jar(first / "api.jar", {"META-INF/maven/org.example/api/pom.properties": "groupId=org.example\nartifactId=api\nversion=1.0.0\n"})
+            _write_jar(second / "worker.jar", {"META-INF/maven/org.example/worker/pom.properties": "groupId=org.example\nartifactId=worker\nversion=2.0.0\n"})
+            output = root / "reports"
+
+            result = run_java_scan(
+                JavaScanOptions(
+                    target=first,
+                    targets=(first, second, first),
+                    output_dir=output,
+                    builtin_only=True,
+                    no_grype=True,
+                )
+            )
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.archive_count, 2)
+            self.assertEqual({component.name for component in result.components}, {"api", "worker"})
+            payload = json.loads((output / "server-vulnerabilities.json").read_text(encoding="utf-8"))
+            metadata = json.loads((output / "scan-metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["archives"]), 2)
+            self.assertEqual(len(payload["components"]), 2)
+            self.assertEqual(len(metadata["targets"]), 2)
+            self.assertIn(str(first.resolve()), payload["target"])
+            self.assertIn(str(second.resolve()), payload["target"])
+
     def test_scan_archives_accepts_a_single_jar_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

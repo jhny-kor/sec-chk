@@ -57,9 +57,11 @@ def main(argv: list[str] | None = None) -> int:
         from .java_vulnerability_scan import JavaScanOptions, run_java_scan
 
         try:
+            target_paths = tuple(expand_path(value, Path.cwd()) for value in args.target)
             result = run_java_scan(
                 JavaScanOptions(
-                    target=expand_path(args.target, Path.cwd()),
+                    target=target_paths[0],
+                    targets=target_paths,
                     output_dir=expand_path(args.output_dir, Path.cwd()),
                     syft_bin=Path(args.syft_bin).expanduser() if args.syft_bin else None,
                     grype_bin=Path(args.grype_bin).expanduser() if args.grype_bin else None,
@@ -783,7 +785,12 @@ def build_parser() -> argparse.ArgumentParser:
             "it is not a compatibility guarantee."
         ),
     )
-    jar_scan.add_argument("--target", required=True, help="JAR/WAR/EAR file or directory containing deployed Java archives")
+    jar_scan.add_argument(
+        "--target",
+        action="append",
+        required=True,
+        help="JAR/WAR/EAR file or directory containing deployed Java archives; repeat for multiple roots",
+    )
     jar_scan.add_argument("--output-dir", default="reports/java-scan", help="report directory")
     jar_scan.add_argument("--syft-bin", help="Syft executable; no automatic download")
     jar_scan.add_argument("--grype-bin", help="Grype executable; no automatic download")

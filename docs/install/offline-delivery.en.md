@@ -23,6 +23,7 @@ closed network.
 export PYTHONPATH=/opt/koda/platforms/shared/python
 python3 -m security_scanner jar-scan \
   --target /jeus/domains/domain1/applications \
+  --target /jeus/domains/domain2/applications \
   --output-dir reports/java-scan \
   --syft-bin /opt/koda/tools/syft \
   --grype-bin /opt/koda/tools/grype \
@@ -35,6 +36,8 @@ Use `--language en` for a fixed English report. If omitted, HTML opens in Korean
 with a Korean/English switch and Markdown is Korean. Findings are grouped by
 library and installed version; `Final` is the lowest candidate with no matching
 vulnerability in the same Grype database as of its database date.
+Repeat `--target` to combine multiple deployment roots into the same archive
+inventory, SBOM, and main/detail report pair; duplicate locations are removed.
 
 ## Validation
 

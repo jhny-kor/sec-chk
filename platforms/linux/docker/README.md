@@ -46,6 +46,7 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 # JAR 취약점 분석
 ./koda-docker jar-scan \
   --target /jeus/domains/domain1/applications \
+  --target /jeus/domains/domain2/applications \
   --output-dir /home/user0/projects/koda/reports/java-scan
 
 # 승인 SBOM과 실제 배포 파일 비교
