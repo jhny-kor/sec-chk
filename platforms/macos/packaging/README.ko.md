@@ -20,6 +20,10 @@ Syft, Grype, Grype DB, NVD, CISA KEV를 사용하며 앱 실행 중 다운로드
 않습니다. Intel 빌드는 Intel Mac에서 별도로 만들고
 `KODA_MACOS_ARCHS=x86_64`를 지정해야 합니다.
 
+App Store용 Java helper에는 명령줄 스캔 경로만 포함하며 대시보드 서버와
+Tk 폴더 선택기 모듈은 제외합니다. 이 제외 설정은 공유 Python, Windows,
+Linux 및 레거시 macOS 앱 빌드에는 적용되지 않습니다.
+
 App Store 제출은 다음 경로를 사용합니다.
 
 ```zsh

@@ -42,6 +42,11 @@ The Xcode app uses the native Swift scanner for its standard scan. Its Java arch
 dist/macos/KODA.app
 ```
 
+The App Store Java helper packages only the command-line scan path. Dashboard
+server and Tk folder-picker modules are explicitly excluded from this helper so
+Tcl/Tk is not shipped in the App Store bundle. This exclusion does not apply to
+the shared Python, Windows, Linux, or legacy macOS application lanes.
+
 The release scripts default to `arm64`, matching the bundled scanner helper.
 Build an Intel asset pack on an Intel macOS build host and set
 `KODA_MACOS_ARCHS=x86_64` before producing an Intel release. The staging phase

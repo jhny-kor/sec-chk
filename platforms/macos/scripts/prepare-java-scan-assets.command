@@ -122,6 +122,10 @@ fi
   --specpath "$cache_dir/pyinstaller-spec-$architecture" \
   --paths "$repo_root/platforms/shared/python" \
   --collect-submodules security_scanner \
+  --exclude-module security_scanner.server \
+  --exclude-module security_scanner.app \
+  --exclude-module tkinter \
+  --exclude-module _tkinter \
   "$repo_root/platforms/macos/packaging/java-scan-entry.py"
 
 find "$asset_dir/resources" "$asset_dir/tools/$architecture" -type f -print0 \

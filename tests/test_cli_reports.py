@@ -140,5 +140,26 @@ class WindowsAliasPackagingTests(unittest.TestCase):
         self.assertIn('ValueName: "Path"', iss)
 
 
+class MacAppStorePackagingTests(unittest.TestCase):
+    def test_java_helper_excludes_unused_dashboard_tk_modules(self) -> None:
+        app_store_script = (
+            ROOT / "platforms/macos/scripts/prepare-java-scan-assets.command"
+        ).read_text(encoding="utf-8")
+        legacy_script = (
+            ROOT / "platforms/macos/scripts/build-koda-app.command"
+        ).read_text(encoding="utf-8")
+
+        for module in (
+            "security_scanner.server",
+            "security_scanner.app",
+            "tkinter",
+            "_tkinter",
+        ):
+            self.assertIn(f"--exclude-module {module}", app_store_script)
+
+        self.assertIn("--hidden-import tkinter", legacy_script)
+        self.assertNotIn("--exclude-module tkinter", legacy_script)
+
+
 if __name__ == "__main__":
     unittest.main()
