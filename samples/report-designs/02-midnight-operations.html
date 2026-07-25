@@ -58,16 +58,16 @@
     .logo svg { width: 21px; height: 21px; }
     .brand strong { display: block; font-size: 15px; letter-spacing: .12em; }
     .brand span { display: block; overflow: hidden; color: var(--muted); font: 11px/1.4 "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
-    .actions { display: flex; align-items: center; gap: 10px; }
+    .actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
     .signal {
       display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px;
       border: 1px solid #275943; border-radius: 8px; color: var(--green); background: var(--green-soft);
       font: 700 11px/1 "SFMono-Regular", Consolas, monospace;
     }
     .classification-mark {
-      display: inline-flex; align-items: center; min-height: 30px; padding: 4px 10px;
-      border: 2px solid #ff4d5e; border-radius: 6px; color: #ff6b6b;
-      background: rgba(127,29,29,.25); font: 900 11px/1.2 Inter, Pretendard, sans-serif; letter-spacing: .06em; white-space: nowrap;
+      display: inline-flex; align-items: center; min-height: 38px; padding: 7px 14px;
+      border: 2px solid #ff4d5e; border-radius: 0; color: #ff6b6b;
+      background: none; font: 900 13px/1.2 Inter, Pretendard, sans-serif; letter-spacing: .06em; white-space: nowrap;
     }
     .signal::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
     .lang {
