@@ -78,7 +78,7 @@ else
   repo_root="$(CDPATH= cd -- "$script_dir/../.." && pwd)"
   shared_python="$repo_root/platforms/shared/python"
   cp -R "$shared_python/security_scanner" "$prefix/app/security_scanner"
-  for file in README.md pyproject.toml scanner_config.example.json scanner_config.documents.example.json LICENSE SECURITY.md PRIVACY.md koda-ignore.yml; do
+  for file in README.md pyproject.toml scanner_config.example.json scanner_config.documents.example.json LICENSE NOTICE SECURITY.md PRIVACY.md koda-ignore.yml; do
     if [ -f "$shared_python/$file" ]; then
       cp "$shared_python/$file" "$prefix/app/$file"
     elif [ -f "$repo_root/$file" ]; then

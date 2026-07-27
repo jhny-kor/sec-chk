@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Read-only local project security scanner with configurable targets and vulnerability categories."
 requires-python = ">=3.10"
 authors = [{ name = "Local" }]
+license = { file = "../../../LICENSE" }
 
 # The scanner core is standard-library only. Optional extras add heavier,
 # explicitly pinned third-party tools that stay out of the default install.

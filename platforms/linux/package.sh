@@ -30,7 +30,7 @@ cp -R "$script_dir/examples/." "$stage/examples/"
 chmod 0755 "$stage/bin/koda" "$stage/install.sh"
 
 cp -R "$shared_python/security_scanner" "$stage/app/security_scanner"
-for file in README.md pyproject.toml scanner_config.example.json scanner_config.documents.example.json LICENSE SECURITY.md PRIVACY.md koda-ignore.yml; do
+for file in README.md pyproject.toml scanner_config.example.json scanner_config.documents.example.json LICENSE NOTICE SECURITY.md PRIVACY.md koda-ignore.yml; do
   if [ -f "$shared_python/$file" ]; then
     cp "$shared_python/$file" "$stage/app/$file"
   elif [ -f "$repo_root/$file" ]; then

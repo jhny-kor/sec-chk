@@ -116,4 +116,6 @@ KODA is a local scanner and workflow aid. It does not replace full SAST, authent
 
 ## License
 
-[MIT](LICENSE). See [SECURITY.md](SECURITY.md) for vulnerability reporting and [PRIVACY.md](PRIVACY.md) for the privacy policy.
+[Apache License 2.0](LICENSE). If you redistribute this project or a derivative work, retain the copyright, license, and attribution notices, include a copy of the license, and clearly mark files that you changed as required by the license. See [NOTICE](NOTICE) for the project attribution.
+
+This license change applies to this version and later versions. Rights already granted for copies distributed under the previous MIT license are not retroactively revoked. See [SECURITY.md](SECURITY.md) for vulnerability reporting and [PRIVACY.md](PRIVACY.md) for the privacy policy.

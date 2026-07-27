@@ -829,7 +829,9 @@ Set-Content `
 foreach ($fileName in @(
     "README.md",
     "scanner_config.example.json",
-    "scanner_config.documents.example.json"
+    "scanner_config.documents.example.json",
+    "LICENSE",
+    "NOTICE"
 )) {
     $source = Join-Path $SharedPythonRoot $fileName
 
