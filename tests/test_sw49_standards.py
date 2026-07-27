@@ -15,6 +15,7 @@ if str(SHARED_PYTHON) not in sys.path:
     sys.path.insert(0, str(SHARED_PYTHON))
 
 from security_scanner.checks import code_patterns, secrets  # noqa: E402
+from security_scanner.cli import _has_failure  # noqa: E402
 from security_scanner.models import DEFAULT_CATEGORIES, Finding, TargetConfig  # noqa: E402
 from security_scanner.reporting import (  # noqa: E402
     build_dashboard_payload,
@@ -78,6 +79,13 @@ def _sw49_category(category_id: str):
 class Sw49ControlIntegrityTests(unittest.TestCase):
     def test_sw_dev_security_has_exactly_49_controls(self) -> None:
         self.assertEqual(len(SW49_CONTROLS), 49)
+
+    def test_source_profile_does_not_overclaim_full_automation(self) -> None:
+        support_counts = Counter(control.support_level for control in SW49_CONTROLS)
+        self.assertEqual(support_counts["automated"], 0)
+        self.assertEqual(support_counts["partial"], 35)
+        self.assertEqual(support_counts["manual-review"], 9)
+        self.assertEqual(support_counts["unsupported"], 5)
 
     def test_sw_dev_security_category_counts(self) -> None:
         counts = Counter(control.category_id for control in SW49_CONTROLS)
@@ -182,23 +190,25 @@ class Sw49MappingCorrectionTests(unittest.TestCase):
         for rule_id in ("code.wildcard-cors", "code.public-bind-all-interfaces", "code.logging-sensitive-data", "code.pii-logging"):
             self.assertIn(rule_id, CODE_PATTERN_RULE_IDS)
 
-    def test_owasp_profiles_unchanged_by_sw49_rework(self) -> None:
-        # Regression guard (§17.4): curated OWASP category mappings must not
-        # absorb the new SW49-focused rules.
-        new_rules = {
-            "code.open-redirect-user-input",
-            "code.xml-injection",
-            "code.ldap-injection",
-            "code.http-response-splitting",
-            "code.format-string-user-input",
-            "code.insufficient-key-length",
-            "code.insecure-random-security-use",
-            "code.tls-certificate-verification-disabled",
-            "code.password-hash-without-salt",
-            "secret.sensitive-comment",
-        }
-        for category in OWASP_TOP_10_2025.categories:
-            self.assertFalse(new_rules & set(category.rule_ids), f"{OWASP_TOP_10_2025.id}/{category.id}")
+    def test_owasp_profiles_only_absorb_rules_supported_by_official_categories(self) -> None:
+        by_id = {category.id: set(category.rule_ids) for category in OWASP_TOP_10_2025.categories}
+        self.assertTrue(
+            {
+                "code.xml-injection",
+                "code.ldap-injection",
+                "code.http-response-splitting",
+                "code.format-string-user-input",
+            }.issubset(by_id["a05-injection"])
+        )
+        self.assertTrue(
+            {
+                "code.insufficient-key-length",
+                "code.insecure-random-security-use",
+                "code.tls-certificate-verification-disabled",
+                "code.password-hash-without-salt",
+            }.issubset(by_id["a04-cryptographic-failures"])
+        )
+        self.assertNotIn("secret.sensitive-comment", by_id["a05-injection"])
 
 
 class Sw49EvaluationTests(unittest.TestCase):
@@ -232,10 +242,31 @@ class Sw49EvaluationTests(unittest.TestCase):
         # the finding must not leak into API misuse
         self.assertNotEqual(by_id["A-02"]["status"], "VULNERABLE")
 
-    def test_automated_control_passes_only_when_executed(self) -> None:
+    def test_review_candidate_is_not_reported_as_confirmed_violation(self) -> None:
+        finding = Finding(
+            rule_id="code.api-missing-rate-limit",
+            category="code",
+            severity="low",
+            title="candidate",
+            path=Path("src/app.py"),
+            line=1,
+            verification_status="needs_review",
+            verification_note="Project-wide middleware configuration must be checked.",
+        )
+        by_id = {
+            entry["official_id"]: entry
+            for entry in evaluate_sw49_controls([finding], ALL_SCAN_CATEGORIES)
+        }
+        self.assertEqual(by_id["S-16"]["status"], "NEEDS_REVIEW")
+        self.assertEqual(by_id["S-16"]["finding_count"], 1)
+        self.assertEqual(by_id["S-16"]["confirmed_finding_count"], 0)
+        self.assertEqual(by_id["S-16"]["review_finding_count"], 1)
+        self.assertFalse(_has_failure([finding], "low"))
+
+    def test_partial_control_without_confirmed_finding_stays_reviewable(self) -> None:
         results = evaluate_sw49_controls([], ALL_SCAN_CATEGORIES)
         by_id = {entry["official_id"]: entry for entry in results}
-        self.assertEqual(by_id["I-01"]["status"], "PASS")
+        self.assertEqual(by_id["I-01"]["status"], "NEEDS_REVIEW")
         self.assertTrue(by_id["I-01"]["executed"])
 
     def test_statuses_are_from_allowed_set(self) -> None:
@@ -269,9 +300,191 @@ class Sw49NewRuleFixtureTests(unittest.TestCase):
         self.assertNotIn("code.open-redirect-user-input", self._rule_ids("a.py", 'return redirect(url_for("home"))\n'))
         self.assertNotIn("code.open-redirect-user-input", self._rule_ids("a.py", '# redirect(request.args.get("next"))\n'))
 
+    def test_regex_only_candidates_are_explicitly_marked_for_review(self) -> None:
+        findings = self._scan("a.py", "app = FastAPI()\n")
+        finding = next(item for item in findings if item.rule_id == "code.api-missing-rate-limit")
+        self.assertEqual(finding.verification_status, "needs_review")
+        self.assertTrue(finding.verification_note)
+
+    def test_rate_limit_bootstrap_is_suppressed_when_control_is_configured(self) -> None:
+        content = """\
+app = FastAPI()
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+"""
+        self.assertNotIn("code.api-missing-rate-limit", self._rule_ids("a.py", content))
+
+    def test_safe_yaml_loader_and_internal_exception_logging_are_not_findings(self) -> None:
+        content = """\
+document = yaml.load(payload, Loader=yaml.SafeLoader)
+logger.exception("request failed")
+"""
+        rule_ids = self._rule_ids("a.py", content)
+        self.assertNotIn("code.unsafe-deserialization", rule_ids)
+        self.assertNotIn("code.stack-trace-exposure", rule_ids)
+
+    def test_multiline_sql_flow_is_confirmed_and_parameter_binding_is_safe(self) -> None:
+        vulnerable = """\
+user_id = request.args["id"]
+query = "SELECT * FROM users WHERE id = " + user_id
+cursor.execute(query)
+"""
+        findings = self._scan("a.py", vulnerable)
+        sql = next(item for item in findings if item.rule_id == "code.sql-dynamic-query")
+        self.assertEqual(sql.line, 3)
+        self.assertEqual(sql.verification_status, "confirmed")
+
+        safe = 'cursor.execute("SELECT * FROM users WHERE id = %s", (request.args["id"],))\n'
+        self.assertNotIn("code.sql-dynamic-query", self._rule_ids("a.py", safe))
+
+    def test_multiline_xss_flow_is_confirmed_and_sanitized_flow_is_safe(self) -> None:
+        vulnerable = """\
+const html = location.hash;
+element.innerHTML = html;
+"""
+        findings = self._scan("a.js", vulnerable)
+        xss = next(item for item in findings if item.rule_id == "code.xss-dom-sink")
+        self.assertEqual(xss.verification_status, "confirmed")
+
+        safe = """\
+const html = DOMPurify.sanitize(location.hash);
+element.innerHTML = html;
+"""
+        self.assertNotIn("code.xss-dom-sink", self._rule_ids("a.js", safe))
+
+        mixed = """\
+const safe = DOMPurify.sanitize("<b>fixed</b>");
+const tainted = location.hash;
+element.innerHTML = safe + tainted;
+"""
+        finding = next(item for item in self._scan("a.js", mixed) if item.rule_id == "code.xss-dom-sink")
+        self.assertEqual(finding.verification_status, "confirmed")
+
+    def test_command_argument_array_without_shell_is_not_confirmed(self) -> None:
+        safe = 'subprocess.run(["ping", "--", request.args["host"]], shell=False, check=True)\n'
+        self.assertNotIn("code.command-injection", self._rule_ids("a.py", safe))
+
+    def test_multiline_flows_cover_major_input_validation_controls(self) -> None:
+        fixtures = {
+            "code.command-injection": ("a.py", 'command = "ping " + request.args["host"]\nsubprocess.run(command, shell=True)\n'),
+            "code.path-traversal": ("a.py", 'filename = request.args["file"]\nopen(filename)\n'),
+            "code.eval-user-input": ("a.py", 'expression = request.args["expr"]\neval(expression)\n'),
+            "code.ssrf-user-url": ("a.py", 'target_url = request.args["url"]\nrequests.get(target_url)\n'),
+            "code.open-redirect-user-input": ("a.py", 'next_url = request.args["next"]\nredirect(next_url)\n'),
+            "code.ldap-injection": ("a.py", 'ldap_filter = request.args["filter"]\nldap_client.search(ldap_filter)\n'),
+            "code.http-response-splitting": ("a.java", 'String value = request.getParameter("value");\nresponse.setHeader("X-Value", value);\n'),
+        }
+        for rule_id, (filename, content) in fixtures.items():
+            with self.subTest(rule_id=rule_id):
+                finding = next(item for item in self._scan(filename, content) if item.rule_id == rule_id)
+                self.assertEqual(finding.verification_status, "confirmed")
+
+    def test_known_guards_stop_taint_before_major_sinks(self) -> None:
+        fixtures = {
+            "code.path-traversal": ("a.py", 'filename = secure_filename(request.args["file"])\nopen(filename)\n'),
+            "code.ssrf-user-url": ("a.py", 'target_url = validateUrl(request.args["url"])\nrequests.get(target_url)\n'),
+            "code.open-redirect-user-input": ("a.py", 'next_url = validateRedirect(request.args["next"])\nredirect(next_url)\n'),
+            "code.ldap-injection": ("a.py", 'ldap_filter = escapeLdap(request.args["filter"])\nldap_client.search(ldap_filter)\n'),
+            "code.http-response-splitting": ("a.java", 'String value = sanitizeHeader(request.getParameter("value"));\nresponse.setHeader("X-Value", value);\n'),
+        }
+        for rule_id, (filename, content) in fixtures.items():
+            with self.subTest(rule_id=rule_id):
+                self.assertNotIn(rule_id, self._rule_ids(filename, content))
+
     def test_xml_injection_vulnerable_and_safe(self) -> None:
         self.assertIn("code.xml-injection", self._rule_ids("a.py", 'doc = "<user>" + request.args.get("name")\n'))
         self.assertNotIn("code.xml-injection", self._rule_ids("a.py", 'doc = "<user>fixed</user>"\n'))
+
+    def test_java_xxe_hardened_factory_is_not_reported(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+builder.parse(request.getInputStream());
+'''
+        self.assertNotIn("code.xml-external-entity", self._rule_ids("SafeXml.java", source))
+
+    def test_java_xxe_full_external_entity_hardening_is_not_reported(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+dbFactory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+dbFactory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+dbFactory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+dbFactory.setXIncludeAware(false);
+dbFactory.setExpandEntityReferences(false);
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+builder.parse(xmlInputStream);
+'''
+        self.assertNotIn("code.xml-external-entity", self._rule_ids("SafeXml.java", source))
+
+    def test_java_xxe_unsafe_factory_with_untrusted_parse_is_reported(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+builder.parse(request.getInputStream());
+'''
+        findings = [finding for finding in self._scan("UnsafeXml.java", source) if finding.rule_id == "code.xml-external-entity"]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].line, 4)
+        self.assertIn("builder.parse", findings[0].evidence)
+
+    def test_java_xxe_hardening_after_builder_creation_is_too_late(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+builder.parse(request.getInputStream());
+'''
+        self.assertIn("code.xml-external-entity", self._rule_ids("LateHardening.java", source))
+
+    def test_java_xxe_ignored_configuration_failure_is_reported(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+try {
+    dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+} catch (ParserConfigurationException ignored) {
+}
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+builder.parse(xmlInputStream);
+'''
+        self.assertIn("code.xml-external-entity", self._rule_ids("IgnoredHardening.java", source))
+
+    def test_java_xxe_fail_closed_configuration_error_is_not_reported(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+try {
+    dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+} catch (ParserConfigurationException error) {
+    throw new IllegalStateException("Secure XML parser is unavailable", error);
+}
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+builder.parse(xmlInputStream);
+'''
+        self.assertNotIn("code.xml-external-entity", self._rule_ids("FailClosedHardening.java", source))
+
+    def test_java_xxe_commented_hardening_is_not_treated_as_safe(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+// dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+builder.parse(request.getInputStream());
+'''
+        self.assertIn("code.xml-external-entity", self._rule_ids("CommentedHardening.java", source))
+
+    def test_java_xxe_later_unsafe_override_is_reported(self) -> None:
+        source = '''
+DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);
+DocumentBuilder builder = dbFactory.newDocumentBuilder();
+builder.parse(xmlInputStream);
+'''
+        self.assertIn("code.xml-external-entity", self._rule_ids("OverriddenHardening.java", source))
+
+    def test_java_xxe_factory_without_parse_is_not_reported(self) -> None:
+        source = "DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();\n"
+        self.assertNotIn("code.xml-external-entity", self._rule_ids("FactoryOnly.java", source))
 
     def test_ldap_injection_vulnerable_and_safe(self) -> None:
         self.assertIn("code.ldap-injection", self._rule_ids("A.java", 'String filter = "(uid=" + userInput;\n'))
@@ -314,9 +527,30 @@ class Sw49NewRuleFixtureTests(unittest.TestCase):
         for finding in findings:
             if finding.rule_id == "secret.sensitive-comment":
                 self.assertNotIn("SuperSecret99Value", finding.evidence)
+                self.assertEqual(finding.verification_status, "needs_review")
         # placeholder / descriptive comments do not fire
         self.assertNotIn("secret.sensitive-comment", self._rule_ids("b.py", "# password = changeme\n"))
         self.assertNotIn("secret.sensitive-comment", self._rule_ids("c.py", "# The password field is validated below.\n"))
+
+    def test_generic_secret_assignment_is_review_only_but_provider_key_is_confirmed(self) -> None:
+        generic = next(
+            finding
+            for finding in self._scan("a.py", 'password = "ThisMayBeOnlyFixtureData99"\n')
+            if finding.rule_id == "secret.generic-assignment"
+        )
+        self.assertEqual(generic.verification_status, "needs_review")
+
+        provider = next(
+            finding
+            for finding in self._scan("a.env", "AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n")
+            if finding.rule_id == "secret.aws-access-key"
+        )
+        self.assertEqual(provider.verification_status, "confirmed")
+
+    def test_generic_search_api_is_not_promoted_to_ldap_injection(self) -> None:
+        content = 'query = request.args["q"]\nindex.search(query)\n'
+        findings = [finding for finding in self._scan("a.py", content) if finding.rule_id == "code.ldap-injection"]
+        self.assertTrue(all(finding.verification_status == "needs_review" for finding in findings))
 
     def test_unsupported_extensions_are_skipped(self) -> None:
         self.assertFalse(self._rule_ids("a.bin", "printf(user_input);\n") & {"code.format-string-user-input"})

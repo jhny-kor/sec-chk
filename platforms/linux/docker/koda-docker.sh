@@ -24,7 +24,8 @@ usage() {
 Usage:
   koda-docker <koda subcommand> [args...]     e.g. jar-scan, sbom-verify, list-categories
   koda-docker audit --target DIR --baseline SBOM --reports DIR [extra jar-scan args]
-  koda-docker dashboard start [--reports DIR] | status | logs [-f] | stop
+  koda-docker dashboard start [--reports DIR] [--port PORT] [--bind ADDRESS]
+  koda-docker dashboard status | logs [-f] | stop
 
 Path arguments (--target/--sbom/--baseline-sbom read-only, --output-dir/--output
 read-write) are bind-mounted automatically at the same absolute path.
@@ -38,6 +39,7 @@ Environment:
   KODA_ALLOW_CONCURRENT set 1 to allow parallel scans
   KODA_PORT             dashboard host port, default 8765
   KODA_DASHBOARD_BIND   dashboard bind address, default 127.0.0.1
+  KODA_SSBOM_TRACKER_URL optional http(s) URL shown as an SBOM Tracker button
   KODA_DOCKER_EXTRA_ARGS extra docker run options, whitespace-separated
 EOF
 }
@@ -65,14 +67,20 @@ base_run_opts() {
     -e XDG_CACHE_HOME=/tmp/koda-cache
 }
 
-declare -A mount_mode=()
+mount_paths=()
+mount_modes=()
 
 add_mount() {
-  local path="$1" mode="$2"
-  # rw wins when the same path is requested both ways.
-  if [ "${mount_mode[$path]:-}" != "rw" ]; then
-    mount_mode[$path]="$mode"
-  fi
+  local path="$1" mode="$2" index
+  for index in "${!mount_paths[@]}"; do
+    if [ "${mount_paths[$index]}" = "$path" ]; then
+      # rw wins when the same path is requested both ways.
+      [ "${mount_modes[$index]}" = "rw" ] || mount_modes[$index]="$mode"
+      return
+    fi
+  done
+  mount_paths+=("$path")
+  mount_modes+=("$mode")
 }
 
 require_path() {
@@ -133,13 +141,18 @@ run_cli() {
     fi
   fi
 
-  local run_opts=() path
+  local run_opts=() path index
   while IFS= read -r line; do run_opts+=("$line"); done < <(base_run_opts)
   run_opts+=(--network none)
-  for path in "${!mount_mode[@]}"; do
-    run_opts+=(-v "$path:$path:${mount_mode[$path]}")
+  for index in "${!mount_paths[@]}"; do
+    path="${mount_paths[$index]}"
+    run_opts+=(-v "$path:$path:${mount_modes[$index]}")
   done
-  exec docker run "${run_opts[@]}" "${extra_args[@]}" "$image" "${args[@]}"
+  local docker_opts=("${run_opts[@]}")
+  if [ "${#extra_args[@]}" -gt 0 ]; then
+    docker_opts+=("${extra_args[@]}")
+  fi
+  exec docker run "${docker_opts[@]}" "$image" "${args[@]}"
 }
 
 run_audit() {
@@ -172,14 +185,23 @@ run_audit() {
 
 dashboard_start() {
   local reports=""
+  local bind="${KODA_DASHBOARD_BIND:-127.0.0.1}"
+  local port="${KODA_PORT:-8765}"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --reports) reports="${2:-}"; shift 2 ;;
+      --port) port="${2:-}"; shift 2 ;;
+      --bind) bind="${2:-}"; shift 2 ;;
       *) echo "error: unknown dashboard start option: $1" >&2; exit 2 ;;
     esac
   done
-  local bind="${KODA_DASHBOARD_BIND:-127.0.0.1}"
-  local port="${KODA_PORT:-8765}"
+  case "$port" in
+    ''|*[!0-9]*) echo "error: dashboard port must be an integer from 1 to 65535: $port" >&2; exit 2 ;;
+  esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    echo "error: dashboard port must be an integer from 1 to 65535: $port" >&2
+    exit 2
+  fi
   if docker ps --format '{{.Names}}' | grep -qx "$dashboard_name"; then
     echo "dashboard already running: http://$bind:$port/security-dashboard.html"
     return 0
@@ -202,12 +224,19 @@ dashboard_start() {
     [ "$opt" = "--rm" ] || filtered+=("$opt")
   done
   filtered+=(-p "$bind:$port:8765")
+  if [ -n "${KODA_SSBOM_TRACKER_URL:-}" ]; then
+    filtered+=(-e "KODA_SSBOM_TRACKER_URL=${KODA_SSBOM_TRACKER_URL}")
+  fi
   if [ -n "$reports" ]; then
     mkdir -p "$reports"
     reports="$(realpath "$reports")"
     filtered+=(-v "$reports:$reports:rw")
   fi
-  docker run "${filtered[@]}" "${extra_args[@]}" "$image" \
+  local docker_opts=("${filtered[@]}")
+  if [ "${#extra_args[@]}" -gt 0 ]; then
+    docker_opts+=("${extra_args[@]}")
+  fi
+  docker run "${docker_opts[@]}" "$image" \
     serve --host 0.0.0.0 --port 8765 >/dev/null
   echo "dashboard started: http://$bind:$port/security-dashboard.html"
   echo "remote access: ssh -L $port:127.0.0.1:$port <user>@<server>"

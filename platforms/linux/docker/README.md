@@ -23,12 +23,23 @@ CISA KEV, Playwright Chromium(PDF 렌더러)이 포함됩니다.
 
 ## 설치
 
+전달 파일은 `koda-docker-offline-x86_64-<version>.tar.gz` 하나입니다. Docker
+Engine이 미리 설치된 Linux x86_64 서버로 이 파일만 이동하면 됩니다.
+
 ```bash
+# 1) 반입한 파일의 체크섬을 연결된 빌드 PC에서 전달받은 값과 비교(권장)
+sha256sum koda-docker-offline-x86_64-<version>.tar.gz
+
+# 2) 원하는 사용자 소유 경로에서 압축 해제
+mkdir -p /home/user0/projects/koda
 cd /home/user0/projects/koda
 tar -xzf koda-docker-offline-x86_64-<version>.tar.gz
 cd koda-docker-offline-x86_64-<version>
-bash install.sh                       # 기본 prefix /home/user0/projects/koda
-# KODA_DOCKER_PREFIX=/srv/koda bash install.sh
+bash install.sh --prefix /home/user0/projects/koda
+# 또는 KODA_DOCKER_PREFIX=/srv/koda bash install.sh
+
+# 이후 명령은 --prefix로 지정한 경로의 실행 래퍼를 사용합니다.
+export KODA_CLI=/home/user0/projects/koda/koda-docker
 ```
 
 설치 스크립트는 manifest 검증 → Docker 확인 → `docker load` → 아키텍처·라벨
@@ -44,20 +55,20 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 
 ```bash
 # JAR 취약점 분석
-./koda-docker jar-scan \
+"$KODA_CLI" jar-scan \
   --target /jeus/domains/domain1/applications \
   --target /jeus/domains/domain2/applications \
   --output-dir /home/user0/projects/koda/reports/java-scan
 
 # 승인 SBOM과 실제 배포 파일 비교
-./koda-docker sbom-verify \
+"$KODA_CLI" sbom-verify \
   --target /jeus/domains/domain1/applications \
   --sbom /home/user0/projects/koda/reports/approved-sbom.cdx.json \
   --output-dir /home/user0/projects/koda/reports/sbom-verification \
   --strict-hash --fail-on-version-conflict --fail-on-untracked --fail-on-mismatch
 
 # 승인 SBOM + 실제 JAR + 취약점 통합 점검 (jar-scan --verify-sbom 조합)
-./koda-docker audit \
+"$KODA_CLI" audit \
   --target /jeus/domains/domain1/applications \
   --baseline /home/user0/projects/koda/approved/production-sbom.cdx.json \
   --reports /home/user0/projects/koda/reports/production
@@ -75,23 +86,71 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 ## 대시보드
 
 ```bash
-./koda-docker dashboard start [--reports /home/user0/projects/koda/reports]
-./koda-docker dashboard status
-./koda-docker dashboard logs [-f]
-./koda-docker dashboard stop
+"$KODA_CLI" dashboard start [--reports /home/user0/projects/koda/reports]
+"$KODA_CLI" dashboard status
+"$KODA_CLI" dashboard logs [-f]
+"$KODA_CLI" dashboard stop
 ```
 
 기본 바인딩은 `127.0.0.1:8765`입니다. 원격 접속은 SSH 터널을 사용합니다.
 
+포트는 실행할 때 `--port`로 바꾸거나 `KODA_PORT`로 지정합니다. 컨테이너 내부
+포트는 항상 `8765`이고, 바뀌는 값은 호스트 공개 포트입니다.
+
 ```bash
-ssh -L 8765:127.0.0.1:8765 user0@<server-ip>
-# http://127.0.0.1:8765/security-dashboard.html
+# 호스트의 9876 포트로 공개
+"$KODA_CLI" dashboard start --port 9876
+# 또는
+KODA_PORT=9876 "$KODA_CLI" dashboard start
+```
+
+```bash
+ssh -L 9876:127.0.0.1:9876 user0@<server-ip>
+# http://127.0.0.1:9876/security-dashboard.html
 ```
 
 직접 접속이 승인된 경우에만 `KODA_DASHBOARD_BIND=0.0.0.0`을 명시적으로
 지정합니다. 대시보드 네트워크는 전용 브리지에 IP masquerade를 비활성화해
 컨테이너 발신 트래픽을 차단합니다. (`--internal` 네트워크는 포트 공개까지
 차단하므로 사용하지 않습니다.)
+
+### `security-sbom-dependecy` 포털 연결 버튼
+
+`security-sbom-dependecy`의 웹 포털을 나중에 같은 폐쇄망 서버에 올릴 때는
+브라우저가 열 수 있는 URL을 `KODA_SSBOM_TRACKER_URL`로 지정합니다. 기본값은
+비어 있어 버튼이 표시되지 않으며, 설정하면 대시보드 상단에 `SBOM Tracker
+열기` 버튼형 링크가 나타납니다. 링크는 새 탭에서 열리고 `http`/`https`만
+허용됩니다.
+
+포털의 `compose.yaml` 기본 공개 포트가 `8088`이므로 같은 서버에서 다음처럼
+연결할 수 있습니다.
+
+```bash
+# security-sbom-dependecy가 http://127.0.0.1:8088/ 에서 동작하는 경우
+export KODA_SSBOM_TRACKER_URL=http://127.0.0.1:8088/
+"$KODA_CLI" dashboard stop       # 이미 실행 중이면 환경변경 반영을 위해 재시작
+"$KODA_CLI" dashboard start --port 9876
+```
+
+원격 PC에서 두 서비스를 모두 SSH 터널로 열 경우에는 두 포트를 함께
+전달합니다.
+
+```bash
+ssh -L 9876:127.0.0.1:9876 -L 8088:127.0.0.1:8088 user0@<server-ip>
+```
+
+사용자 PC의 브라우저에서 `http://127.0.0.1:9876/security-dashboard.html`을
+열면 버튼으로 `http://127.0.0.1:8088/` 포털을 새 탭에서 열 수 있습니다. 서버
+호스트명이 브라우저에서 직접 해석되는 환경이면 `http://tracker.internal/`처럼
+그 주소를 지정하십시오. 이 기능은 브라우저 이동 링크이며, KODA가 Tracker의
+API 키나 SBOM을 자동으로 전달하지는 않습니다. SBOM 업로드는 기존
+`upload-sbom`/Tracker API 경계를 그대로 사용합니다.
+
+대시보드와 Tracker 양방향 버튼이 필요하면 Tracker 웹 앱에도 동일한 방식으로
+`VITE_KODA_DASHBOARD_URL` 환경변수를 추가하고, React 상단 네비게이션에
+`<a href={...} target="_blank" rel="noreferrer">KODA 대시보드</a>`를 조건부
+렌더링합니다. 이때 포털 컨테이너 내부 주소가 아니라 **사용자 브라우저가
+접속할 수 있는 주소**를 넣어야 합니다.
 
 ## 갱신과 롤백
 

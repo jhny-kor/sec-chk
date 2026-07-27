@@ -10,7 +10,7 @@ Official source: [MOIS Software Development Security Guide (revised 2021-11-30)]
 | Status | Meaning |
 | --- | --- |
 | `PASS` | A fully automated mapped rule ran and found no matching pattern |
-| `VULNERABLE` | A mapped rule detected a vulnerable pattern |
+| `VULNERABLE` | Deterministic analysis confirmed an untrusted source-to-sink flow without an effective guard |
 | `NEEDS_REVIEW` | Manual or partially automated evidence is still required |
 | `UNSUPPORTED` | KODA cannot assess the criterion; use external SAST/evidence |
 | `NOT_APPLICABLE` | The criterion does not apply to the target technology |
@@ -18,6 +18,10 @@ Official source: [MOIS Software Development Security Guide (revised 2021-11-30)]
 
 Zero findings do not prove compliance. Keep the profile result with the scan
 configuration, target scope, and manual evidence that supports each decision.
+Regex/API-only matches carry `verification_status=needs_review`; they do not
+become confirmed violations. KODA follows local aliases and recognizes common
+sanitizers and parameter binding, while cross-file, framework-global, and
+business-criticality context remains reviewable.
 
 - [English documentation index](../README.en.md)
 - [Korean SW development security 49 profile](sw-development-security-49.md)

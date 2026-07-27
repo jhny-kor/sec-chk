@@ -11,6 +11,7 @@ CATEGORIES = FILE_CATEGORIES + HOST_CATEGORIES
 DEFAULT_CATEGORIES = SECURITY_CATEGORIES
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 SEVERITY_RANK = {severity: index for index, severity in enumerate(SEVERITIES)}
+VERIFICATION_STATUSES = ("confirmed", "needs_review")
 
 
 @dataclass(frozen=True)
@@ -31,11 +32,27 @@ class Finding:
     # Optional reachability label for dependency findings (see reachability.py).
     # "" when not analyzed; otherwise "reachable" / "unreachable" / "unknown".
     reachable: str = ""
+    # Deterministic source-analysis judgement. ``confirmed`` means the scanner
+    # proved the required local context; ``needs_review`` is only a candidate.
+    verification_status: str = "confirmed"
+    verification_note: str = ""
     # Optional AI triage labels (see ai/triage.py). Severity is never derived from these.
     # verdict: "" when not triaged; otherwise "likely_true" / "likely_false" / "uncertain".
     triage_verdict: str = ""
     triage_confidence: float | None = None
     triage_note: str = ""
+
+    def __post_init__(self) -> None:
+        # Imported/merged reports are untrusted input. Unknown states must not
+        # silently become confirmed findings or trigger compliance gates.
+        if self.verification_status not in VERIFICATION_STATUSES:
+            object.__setattr__(self, "verification_status", "needs_review")
+            if not self.verification_note:
+                object.__setattr__(
+                    self,
+                    "verification_note",
+                    "알 수 없는 판정 상태를 안전하게 검토 필요로 변환했습니다.",
+                )
 
     def sort_key(self) -> tuple[int, str, str, int]:
         return (

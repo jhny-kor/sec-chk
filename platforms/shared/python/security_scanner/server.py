@@ -464,6 +464,8 @@ def _finding_from_payload(data: dict[str, object]) -> Finding:
         recommendation=str(data.get("recommendation") or ""),
         resource=str(data.get("resource") or ""),
         reachable=str(data.get("reachable") or ""),
+        verification_status=str(data.get("verification_status") or "confirmed"),
+        verification_note=str(data.get("verification_note") or ""),
         triage_verdict=str(data.get("triage_verdict") or ""),
         triage_confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
         triage_note=str(data.get("triage_note") or ""),

@@ -2700,7 +2700,9 @@ private enum NativeReportSanitizer {
             path: maskPath(finding.path),
             line: finding.line,
             evidence: maskText(finding.evidence),
-            recommendation: maskText(finding.recommendation)
+            recommendation: maskText(finding.recommendation),
+            verificationStatus: finding.verificationStatus,
+            verificationNote: maskText(finding.verificationNote)
         )
     }
 

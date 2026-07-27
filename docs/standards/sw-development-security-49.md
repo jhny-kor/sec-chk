@@ -13,7 +13,7 @@
 | 판정 | 의미 |
 | --- | --- |
 | `PASS` (통과) | 완전 자동 지원 기준의 룰이 실제로 실행되었고 취약 패턴이 없음 |
-| `VULNERABLE` (취약) | 연결된 룰이 실제 취약 패턴을 탐지함 |
+| `VULNERABLE` (취약) | 외부 입력에서 위험 동작까지의 흐름과 방어 부재를 결정론적으로 확인함 |
 | `NEEDS_REVIEW` (수동 검토 필요) | 부분 자동 또는 수동 검토 기준 — 정적 분석만으로 최종 판정 불가 |
 | `UNSUPPORTED` (미지원) | KODA가 해당 기준을 점검하지 못함 (외부 SAST 필요) |
 | `NOT_APPLICABLE` (해당 없음) | 대상 기술에서 적용되지 않음 |
@@ -21,13 +21,15 @@
 
 - 미지원·수동 검토·미실행 기준은 절대 `PASS`로 표시되지 않습니다.
 - 부분 자동(`partial`) 기준은 탐지 0건이어도 `NEEDS_REVIEW`로 남습니다. 자동화가 기준의 일부만 다루기 때문입니다.
+- 각 발견은 `verification_status`가 `confirmed` 또는 `needs_review`입니다. 위험 API·설정 한 줄만 일치한 결과는 `needs_review`이며 취약 확정 건수나 실패 게이트에 포함하지 않습니다.
+- 파일 내에서 확인 가능한 입력원, 변수 전달, sanitizer/allowlist, parameter binding, sink를 함께 분석합니다. 함수·파일·프로젝트 경계를 넘는 전역 설정과 업무 중요도는 검토 대상으로 남깁니다.
 
 ## 지원 수준 요약
 
 | 지원 수준 | 개수 |
 | --- | --- |
-| 자동 (automated) | 12 |
-| 부분 자동 (partial) | 23 |
+| 자동 (automated) | 0 |
+| 부분 자동 (partial) | 35 |
 | 수동 검토 (manual-review) | 9 |
 | 미지원 (unsupported) | 5 |
 
@@ -37,18 +39,18 @@
 
 | 기준 | CWE | 지원 수준 | KODA 룰 | 지원 언어 | 비고 |
 | --- | --- | --- | --- | --- | --- |
-| I-01 SQL 삽입 | 89 | 자동 | code.sql-dynamic-query, web.sql-injection-error-verified | 웹 언어 전반 | web.* 룰은 웹 점검 실행 시에만 |
-| I-02 코드 삽입 | 94, 95 | 자동 | code.eval-user-input | JS/TS/Python/PHP/Ruby | |
-| I-03 경로 조작 및 자원 삽입 | 22, 99 | 자동 | code.path-traversal | 웹 언어 전반 | |
-| I-04 크로스사이트 스크립트 | 79, 80 | 자동 | code.xss-dom-sink, web.reflected-xss-verified | HTML/JS/TS | 서버측 템플릿 XSS는 부분 탐지 |
-| I-05 운영체제 명령어 삽입 | 78 | 자동 | code.command-injection | 웹 언어 전반 | |
+| I-01 SQL 삽입 | 89 | 부분 자동 | code.sql-dynamic-query, web.sql-injection-error-verified | 웹 언어 전반 | web.* 룰은 웹 점검 실행 시에만 |
+| I-02 코드 삽입 | 94, 95 | 부분 자동 | code.eval-user-input | JS/TS/Python/PHP/Ruby | |
+| I-03 경로 조작 및 자원 삽입 | 22, 99 | 부분 자동 | code.path-traversal | 웹 언어 전반 | |
+| I-04 크로스사이트 스크립트 | 79, 80 | 부분 자동 | code.xss-dom-sink, web.reflected-xss-verified | HTML/JS/TS | 서버측 템플릿 XSS는 부분 탐지 |
+| I-05 운영체제 명령어 삽입 | 78 | 부분 자동 | code.command-injection | 웹 언어 전반 | |
 | I-06 위험한 형식 파일 업로드 | 434 | 부분 | code.unrestricted-file-upload | JS/TS/PHP/Python | 검증 로직 완전성은 수동 |
-| I-07 신뢰되지 않는 URL 자동접속 | 601 | 자동 | code.open-redirect-user-input, web.open-redirect-verified | 웹 언어 전반 | 신규 룰 |
-| I-08 부적절한 XML 외부 개체 참조 | 611 | 자동 | code.xml-external-entity | Java/Kotlin/C#/Python | |
+| I-07 신뢰되지 않는 URL 자동접속 | 601 | 부분 자동 | code.open-redirect-user-input, web.open-redirect-verified | 웹 언어 전반 | 신규 룰 |
+| I-08 부적절한 XML 외부 개체 참조 | 611 | 부분 자동 | code.xml-external-entity | Java/Kotlin/C#/Python | |
 | I-09 XML 삽입 | 91 | 부분 | code.xml-injection | Java/Kotlin/JS/TS/Python/PHP | 신규 룰, XXE와 별도 |
 | I-10 LDAP 삽입 | 90 | 부분 | code.ldap-injection | Java/Kotlin/Python | 신규 룰 |
 | I-11 크로스사이트 요청 위조 | 352 | 부분 | code.csrf-disabled | 웹 언어 전반 | 명시적 비활성화만 탐지 |
-| I-12 서버사이드 요청 위조 | 918 | 자동 | code.ssrf-user-url | 웹 언어 전반 | |
+| I-12 서버사이드 요청 위조 | 918 | 부분 자동 | code.ssrf-user-url | 웹 언어 전반 | |
 | I-13 HTTP 응답분할 | 113 | 부분 | code.http-response-splitting | 웹 언어 전반 | 신규 룰 |
 | I-14 정수형 오버플로우 | 190 | 수동 검토 | — | — | 데이터 흐름 분석 필요 |
 | I-15 보안기능 결정에 사용되는 부적절한 입력값 | 807, 20 | 수동 검토 | — | — | |
@@ -64,12 +66,12 @@
 | S-03 중요한 자원에 대한 잘못된 권한 설정 | 732 | 수동 검토 | — | |
 | S-04 취약한 암호화 알고리즘 사용 | 327 | 부분 | code.weak-hash | 대칭키 설정은 수동 |
 | S-05 암호화되지 않은 중요정보 | 311, 319 | 부분 | config.env-file-present, config.private-key-like-file, dependency.node-insecure-url, dependency.python-insecure-url, config.docker-add-http | 저장 암호화는 수동 |
-| S-06 하드코드된 중요정보 | 798 | 자동 | secret.* 6종 | |
+| S-06 하드코드된 중요정보 | 798 | 부분 자동 | secret.* 6종 | |
 | S-07 충분하지 않은 키 길이 사용 | 326 | 부분 | code.insufficient-key-length | 신규 룰, RSA/DSA/DH ≤1024 |
 | S-08 적절하지 않은 난수 값 사용 | 330, 338 | 부분 | code.insecure-random-security-use | 신규 룰, 보안 문맥 결합 탐지 |
 | S-09 취약한 비밀번호 허용 | 521 | 수동 검토 | — | |
 | S-10 부적절한 전자서명 확인 | 347 | 부분 | code.jwt-verification-disabled, code.jwt-none-algorithm | JWT 외 영역은 수동 |
-| S-11 부적절한 인증서 유효성 검증 | 295 | 자동 | code.tls-certificate-verification-disabled | 신규 룰 |
+| S-11 부적절한 인증서 유효성 검증 | 295 | 부분 자동 | code.tls-certificate-verification-disabled | 신규 룰 |
 | S-12 저장 쿠키를 통한 정보 노출 | 539 | 부분 | code.insecure-cookie-settings | 실제 민감정보 저장 여부는 수동 |
 | S-13 주석문 안에 포함된 시스템 주요정보 | 615 | 부분 | secret.sensitive-comment | 신규 룰, 증거 마스킹 |
 | S-14 솔트 없이 일방향 해시 함수 사용 | 759 | 부분 | code.password-hash-without-salt | 신규 룰, 비밀번호 문맥 결합 |
@@ -87,7 +89,7 @@
 
 | 기준 | CWE | 지원 수준 | KODA 룰 |
 | --- | --- | --- | --- |
-| E-01 오류 메시지 정보노출 | 209 | 자동 | config.debug-enabled, code.stack-trace-exposure |
+| E-01 오류 메시지 정보노출 | 209 | 부분 자동 | config.debug-enabled, code.stack-trace-exposure |
 | E-02 오류 상황 대응 부재 | 390, 755 | 부분 | code.empty-exception-handler |
 | E-03 부적절한 예외 처리 | 755, 396, 397 | 부분 | code.empty-exception-handler, code.stack-trace-exposure |
 
@@ -99,7 +101,7 @@
 | C-02 부적절한 자원 해제 | 404, 772 | 미지원 | — | 외부 SAST 필요 |
 | C-03 해제된 자원 사용 | 416 | 미지원 | — | 외부 SAST 필요 |
 | C-04 초기화되지 않은 변수 사용 | 457 | 미지원 | — | 외부 SAST 필요 |
-| C-05 신뢰할 수 없는 데이터의 역직렬화 | 502 | 자동 | code.unsafe-deserialization | API 오용에서 이동됨 |
+| C-05 신뢰할 수 없는 데이터의 역직렬화 | 502 | 부분 자동 | code.unsafe-deserialization | API 오용에서 이동됨 |
 
 ### 캡슐화 (4)
 

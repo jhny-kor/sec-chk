@@ -34,7 +34,7 @@ document as a separate standard.
 
 | KODA profile | Authoritative taxonomy check | KODA coverage and limitation |
 | --- | --- | --- |
-| OWASP Top 10:2025 | Matches the ten current official risk categories | Connects only directly related rules |
+| OWASP Top 10:2025 | Matches the ten current official risk categories | Connects only directly related rules. A04 includes key length, randomness, certificate verification, and password hashing; A05 includes LDAP, XML, CRLF, and format-string injection |
 | OWASP Proactive Controls 2024 | Corrected to the official C1-C10 names | Checks only repository evidence related to each preventive control |
 | OWASP ASVS 5.0.0 | Corrected to the 17 official chapters | Fifteen chapters have related static evidence; V10 OAuth/OIDC and V17 WebRTC are unsupported. KODA does not claim requirement-level compliance |
 | OWASP WSTG v4.2 | Corrected to the 12 official test areas | Nine areas have static hints. Information Gathering, Identity Management, and Business Logic are unsupported; live-target testing is required |
@@ -45,6 +45,13 @@ document as a separate standard.
 | OWASP SCVS | Matches the six official control families | Covers repository evidence and optional SBOM/VEX integrations only |
 | OWASP Top 10 for LLM Applications 2025 | Matches official LLM01-LLM10 | Checks related code and configuration hints; model and prompt attack validation remain external |
 | Dependency-Check / Dependency-Track baseline | KODA readiness profiles for using OWASP projects | Not represented as separate OWASP compliance standards |
+
+### Source finding semantics
+
+- Source rules do not judge each line independently. The scanner first examines the whole file for untrusted assignments and aliases, sanitizers, global authentication and rate-limit controls, and nearby timeout or debug guards.
+- A finding is `confirmed` only when untrusted input reaches an unguarded SQL, HTML, command, file, eval, HTTP, redirect, LDAP, response-header, deserialization, upload, mass-assignment, or format-string sink in the same file.
+- API or configuration pattern matches without a proven flow remain `needs_review` and do not contribute to risk scores or failure gates.
+- Cross-function and cross-file calls, framework-wide policy, object authorization, business flows, and deployment behavior still require design or runtime evidence. KODA does not infer ASVS compliance or completed WSTG/SAMM assessment from static findings.
 
 Official sources:
 

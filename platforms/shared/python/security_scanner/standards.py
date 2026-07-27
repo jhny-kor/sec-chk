@@ -200,6 +200,10 @@ INJECTION_RULE_IDS = (
     "code.sql-dynamic-query",
     "code.command-injection",
     "code.eval-user-input",
+    "code.xml-injection",
+    "code.ldap-injection",
+    "code.http-response-splitting",
+    "code.format-string-user-input",
 )
 
 INPUT_VALIDATION_RULE_IDS = (
@@ -291,6 +295,10 @@ SESSION_MANAGEMENT_RULE_IDS = (
 
 CRYPTOGRAPHY_RULE_IDS = SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS + (
     "code.weak-hash",
+    "code.insufficient-key-length",
+    "code.insecure-random-security-use",
+    "code.tls-certificate-verification-disabled",
+    "code.password-hash-without-salt",
 )
 
 WEB_FILE_HANDLING_RULE_IDS = (
@@ -705,29 +713,29 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     # 입력데이터 검증 및 표현 (17)
     _control(
         "I-01", "input-validation-expression", "SQL 삽입", "SQL Injection", ("CWE-89",),
-        ("code.sql-dynamic-query", "web.sql-injection-error-verified"), "automated", _WEB_LANGS,
+        ("code.sql-dynamic-query", "web.sql-injection-error-verified"), "partial", _WEB_LANGS,
         note_ko="동적 SQL 문자열 조립 패턴을 탐지합니다. ORM 내부 우회나 저장 프로시저는 수동 확인이 필요합니다.",
         note_en="Detects dynamic SQL string assembly. ORM bypasses and stored procedures need manual review.",
     ),
     _control(
         "I-02", "input-validation-expression", "코드 삽입", "Code Injection", ("CWE-94", "CWE-95"),
-        ("code.eval-user-input",), "automated",
+        ("code.eval-user-input",), "partial",
         ("JavaScript", "TypeScript", "Python", "PHP", "Ruby", "HTML"),
     ),
     _control(
         "I-03", "input-validation-expression", "경로 조작 및 자원 삽입", "Path Manipulation and Resource Injection", ("CWE-22", "CWE-99"),
-        ("code.path-traversal",), "automated", _WEB_LANGS,
+        ("code.path-traversal",), "partial", _WEB_LANGS,
     ),
     _control(
         "I-04", "input-validation-expression", "크로스사이트 스크립트", "Cross-site Scripting", ("CWE-79", "CWE-80"),
-        ("code.xss-dom-sink", "web.reflected-xss-verified"), "automated",
+        ("code.xss-dom-sink", "web.reflected-xss-verified"), "partial",
         ("HTML", "JavaScript", "TypeScript"),
         note_ko="DOM 싱크 패턴과 웹 능동 점검(실행 시)으로 확인합니다. 서버측 템플릿 XSS는 부분적으로만 탐지됩니다.",
         note_en="Covers DOM sinks and (when run) active web probes. Server-side template XSS is only partially detected.",
     ),
     _control(
         "I-05", "input-validation-expression", "운영체제 명령어 삽입", "OS Command Injection", ("CWE-78",),
-        ("code.command-injection",), "automated", _WEB_LANGS,
+        ("code.command-injection",), "partial", _WEB_LANGS,
     ),
     _control(
         "I-06", "input-validation-expression", "위험한 형식 파일 업로드", "Unrestricted Dangerous File Upload", ("CWE-434",),
@@ -738,11 +746,11 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "I-07", "input-validation-expression", "신뢰되지 않는 URL 주소로 자동접속 연결", "Open Redirect", ("CWE-601",),
-        ("code.open-redirect-user-input", "web.open-redirect-verified"), "automated", _WEB_LANGS,
+        ("code.open-redirect-user-input", "web.open-redirect-verified"), "partial", _WEB_LANGS,
     ),
     _control(
         "I-08", "input-validation-expression", "부적절한 XML 외부 개체 참조", "Improper XML External Entity Reference", ("CWE-611",),
-        ("code.xml-external-entity",), "automated", ("Java", "Kotlin", "C#", "Python"),
+        ("code.xml-external-entity",), "partial", ("Java", "Kotlin", "C#", "Python"),
     ),
     _control(
         "I-09", "input-validation-expression", "XML 삽입", "XML Injection", ("CWE-91",),
@@ -762,7 +770,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "I-12", "input-validation-expression", "서버사이드 요청 위조", "Server-Side Request Forgery", ("CWE-918",),
-        ("code.ssrf-user-url",), "automated", _WEB_LANGS,
+        ("code.ssrf-user-url",), "partial", _WEB_LANGS,
     ),
     _control(
         "I-13", "input-validation-expression", "HTTP 응답분할", "HTTP Response Splitting", ("CWE-113",),
@@ -826,7 +834,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "S-06", "security-features", "하드코드된 중요정보", "Hard-coded Sensitive Information", ("CWE-798",),
-        SECRET_RULE_IDS, "automated",
+        SECRET_RULE_IDS, "partial",
     ),
     _control(
         "S-07", "security-features", "충분하지 않은 키 길이 사용", "Insufficient Key Length", ("CWE-326",),
@@ -852,7 +860,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "S-11", "security-features", "부적절한 인증서 유효성 검증", "Improper Certificate Validation", ("CWE-295",),
-        ("code.tls-certificate-verification-disabled",), "automated",
+        ("code.tls-certificate-verification-disabled",), "partial",
         ("Java", "Kotlin", "Python", "Go", "JavaScript", "TypeScript", "C#", "PHP", "Ruby"),
     ),
     _control(
@@ -907,7 +915,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     # 에러처리 (3)
     _control(
         "E-01", "error-handling", "오류 메시지 정보노출", "Error Message Information Exposure", ("CWE-209",),
-        ("config.debug-enabled", "code.stack-trace-exposure"), "automated",
+        ("config.debug-enabled", "code.stack-trace-exposure"), "partial",
     ),
     _control(
         "E-02", "error-handling", "오류 상황 대응 부재", "Missing Error Handling", ("CWE-390", "CWE-755"),
@@ -940,7 +948,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "C-05", "code-error", "신뢰할 수 없는 데이터의 역직렬화", "Deserialization of Untrusted Data", ("CWE-502",),
-        ("code.unsafe-deserialization",), "automated", ("Python", "Java", "PHP", "Ruby", "C#"),
+        ("code.unsafe-deserialization",), "partial", ("Python", "Java", "PHP", "Ruby", "C#"),
     ),
     # 캡슐화 (4)
     _control(
@@ -1038,6 +1046,8 @@ def evaluate_sw49_controls(
     results: list[dict[str, object]] = []
     for control in SW49_CONTROLS:
         matched = [f for rule_id in control.rule_ids for f in findings_by_rule.get(rule_id, [])]
+        confirmed = [f for f in matched if f.verification_status == "confirmed"]
+        review_candidates = [f for f in matched if f.verification_status == "needs_review"]
         executed = False
         for rule_id in control.rule_ids:
             scanner_category = _rule_scanner_category(rule_id)
@@ -1048,8 +1058,11 @@ def evaluate_sw49_controls(
             executed = True
             break
 
-        if matched:
+        if confirmed:
             status = "VULNERABLE"
+            executed = True
+        elif review_candidates:
+            status = "NEEDS_REVIEW"
             executed = True
         elif control.support_level == "unsupported":
             status = "UNSUPPORTED"
@@ -1083,6 +1096,8 @@ def evaluate_sw49_controls(
                 "executed": executed,
                 "status": status,
                 "finding_count": len(matched),
+                "confirmed_finding_count": len(confirmed),
+                "review_finding_count": len(review_candidates),
                 "evidence": evidence,
                 "notes": dict(control.notes),
             }
@@ -1170,8 +1185,8 @@ _OWASP_TOP_10_2025_CATEGORIES = (
     StandardCategory(
         "a04-cryptographic-failures",
         {"en": "A04 Cryptographic Failures", "ko": "A04 암호화 오류"},
-        scanner_categories=("secrets", "configuration", "dependencies"),
-        rule_ids=SENSITIVE_DATA_RULE_IDS + INSECURE_TRANSPORT_RULE_IDS,
+        scanner_categories=("secrets", "configuration", "dependencies", "code"),
+        rule_ids=CRYPTOGRAPHY_RULE_IDS,
     ),
     StandardCategory(
         "a05-injection",

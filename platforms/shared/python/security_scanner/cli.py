@@ -1294,7 +1294,11 @@ def _has_failure(findings, fail_on: str) -> bool:
     from .models import SEVERITY_RANK
 
     threshold = SEVERITY_RANK[fail_on]
-    return any(SEVERITY_RANK[finding.severity] >= threshold for finding in findings)
+    return any(
+        finding.verification_status == "confirmed"
+        and SEVERITY_RANK[finding.severity] >= threshold
+        for finding in findings
+    )
 
 
 def _parse_headers(raw: list[str]) -> dict[str, str]:

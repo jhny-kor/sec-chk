@@ -14,6 +14,10 @@ struct NativeFinding: Hashable {
     let recommendation: String
     // Optional reachability label for dependency findings: "" / "reachable" / "unreachable" / "unknown".
     var reachable: String = ""
+    // Source regex matches are review candidates unless a context analyzer
+    // explicitly confirms a source-to-sink path.
+    var verificationStatus: String = "confirmed"
+    var verificationNote: String = ""
     // Optional AI triage labels (see NativeAITriage). Severity is never derived from these.
     var triageVerdict: String = ""
     var triageConfidence: Double? = nil
@@ -29,7 +33,8 @@ struct NativeScanResult {
 
     var riskScore: Int {
         findings.reduce(0) { total, finding in
-            total + Self.score(for: finding.severity)
+            guard finding.verificationStatus == "confirmed" else { return total }
+            return total + Self.score(for: finding.severity)
         }
     }
 
@@ -359,7 +364,7 @@ final class NativeSecurityScanner {
         evidence: String = "",
         recommendation: String = ""
     ) -> NativeFinding {
-        NativeFinding(
+        return NativeFinding(
             ruleID: ruleID,
             severity: severity,
             category: "host",
@@ -848,7 +853,7 @@ final class NativeSecurityScanner {
             ? reportLabel("noFindings", language: language)
             : result.findings.enumerated().map { index, finding in
                 """
-                \(index + 1). [\(severityLabel(finding.severity, language: language))] \(findingTitle(finding, language: language))
+                \(index + 1). [\(severityLabel(finding.severity, language: language))] [\(verificationLabel(finding, language: language))] \(findingTitle(finding, language: language))
                    Rule: \(finding.ruleID)
                    \(reportLabel("category", language: language)): \(categoryLabel(finding.category, language: language))
                    \(reportLabel("path", language: language)): \(finding.path)\(finding.line.map { ":\($0)" } ?? "")
@@ -1252,7 +1257,13 @@ final class NativeSecurityScanner {
                 path: "\(targetName)/\(finding.path)",
                 line: finding.line,
                 evidence: finding.evidence,
-                recommendation: finding.recommendation
+                recommendation: finding.recommendation,
+                reachable: finding.reachable,
+                verificationStatus: finding.verificationStatus,
+                verificationNote: finding.verificationNote,
+                triageVerdict: finding.triageVerdict,
+                triageConfidence: finding.triageConfidence,
+                triageNote: finding.triageNote
             )
         })
     }
@@ -1302,6 +1313,8 @@ final class NativeSecurityScanner {
         var findings: [NativeFinding] = []
         for (index, line) in lines.enumerated() {
             let lineNumber = index + 1
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let isComment = trimmed.hasPrefix("//") || trimmed.hasPrefix("#") || trimmed.hasPrefix("/*") || trimmed.hasPrefix("*")
             if line.contains("-----BEGIN") && line.contains("PRIVATE KEY-----") {
                 findings.append(finding("secret.private-key", "critical", "secrets", "개인 키가 파일에 포함됨", displayPath, lineNumber, line, "개인 키를 즉시 폐기하고 안전한 비밀 관리 저장소로 이동하세요."))
             }
@@ -1318,8 +1331,14 @@ final class NativeSecurityScanner {
                 findings.append(finding("secret.slack-token", "high", "secrets", "Slack 토큰으로 보이는 값 발견", displayPath, lineNumber, redact(line), "토큰을 폐기하고 Slack 앱 권한과 사용 이력을 확인하세요."))
             }
             if matches(#"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-./+=]{12,}"#, line),
+               !isComment,
                !matches(#"(?i)(getenv|process\.env|os\.environ|config\.get|placeholder|example)"#, line) {
-                findings.append(finding("secret.generic-assignment", "medium", "secrets", "하드코딩된 비밀값 의심 대입", displayPath, lineNumber, redact(line), "코드에 값을 직접 두지 말고 런타임 비밀 주입을 사용하세요."))
+                findings.append(finding("secret.generic-assignment", "medium", "secrets", "하드코딩된 비밀값 의심 대입", displayPath, lineNumber, redact(line), "코드에 값을 직접 두지 말고 런타임 비밀 주입을 사용하세요.", verificationStatus: "needs_review"))
+            }
+            if isComment,
+               matches(#"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-./+=]{8,}"#, line),
+               !matches(#"(?i)(placeholder|example|sample|dummy|redacted|your[_-])"#, line) {
+                findings.append(finding("secret.sensitive-comment", "medium", "secrets", "주석에 중요정보가 포함된 것으로 보임", displayPath, lineNumber, redact(line), "주석에서 자격증명과 내부 중요정보를 제거하고 실제 값이었다면 즉시 교체하세요.", verificationStatus: "needs_review"))
             }
         }
         return findings
@@ -1611,10 +1630,208 @@ final class NativeSecurityScanner {
         return [".cfg", ".conf", ".config", ".env", ".ini", ".json", ".properties", ".toml", ".yaml", ".yml"].contains(file.pathExtension.isEmpty ? "" : ".\(file.pathExtension.lowercased())")
     }
 
-    private func checkCode(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
+    private func checkJavaDocumentBuilderXXE(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
+        guard ["java", "kt"].contains(file.pathExtension.lowercased()) else { return [] }
+
+        let factoryPattern = #"(?i)\b(?:DocumentBuilderFactory\s+)?([A-Za-z_$][\w$]*)\s*=\s*DocumentBuilderFactory\s*\.\s*newInstance\s*\(\s*\)"#
+        let codeLines = lines.map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.hasPrefix("//") || trimmed.hasPrefix("/*") || trimmed.hasPrefix("*") ? "" : line
+        }
         var findings: [NativeFinding] = []
+
+        for factoryIndex in codeLines.indices {
+            guard let factory = firstCapture(factoryPattern, in: codeLines[factoryIndex]) else { continue }
+            let escapedFactory = NSRegularExpression.escapedPattern(for: factory)
+            let nextFactoryIndex = codeLines.indices.first {
+                $0 > factoryIndex && firstCapture(factoryPattern, in: codeLines[$0]) != nil
+            } ?? codeLines.endIndex
+            let builderPattern = "(?i)\\b(?:DocumentBuilder\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*\(escapedFactory)\\s*\\.\\s*newDocumentBuilder\\s*\\(\\s*\\)"
+
+            var builderIndex: Int?
+            var builder: String?
+            if factoryIndex + 1 < nextFactoryIndex {
+                for index in (factoryIndex + 1)..<nextFactoryIndex {
+                    if let capture = firstCapture(builderPattern, in: codeLines[index]) {
+                        builderIndex = index
+                        builder = capture
+                        break
+                    }
+                }
+            }
+            guard let builderIndex, let builder else { continue }
+
+            let escapedBuilder = NSRegularExpression.escapedPattern(for: builder)
+            let parsePattern = "(?i)\\b\(escapedBuilder)\\s*\\.\\s*parse\\s*\\((.*)"
+            var parseIndex: Int?
+            if builderIndex + 1 < nextFactoryIndex {
+                for index in (builderIndex + 1)..<nextFactoryIndex {
+                    guard let argument = firstCapture(parsePattern, in: codeLines[index]) else { continue }
+                    if matches(#"(?i)\b(request|req|body|payload|input|stream|reader|upload|xml)\w*\b|getInputStream\s*\(|getReader\s*\("#, argument) {
+                        parseIndex = index
+                        break
+                    }
+                }
+            }
+            guard let parseIndex else { continue }
+
+            let configuration = codeLines[(factoryIndex + 1)..<builderIndex].joined(separator: "\n")
+            if javaXMLFactoryIsHardened(factory: escapedFactory, configuration: configuration) {
+                continue
+            }
+
+            findings.append(finding(
+                "code.xml-external-entity",
+                "high",
+                "code",
+                "XML 외부 엔티티 처리가 허용될 수 있음",
+                displayPath,
+                parseIndex + 1,
+                lines[parseIndex],
+                "newDocumentBuilder() 호출 전에 DOCTYPE 또는 외부 엔티티 처리를 차단하고, 설정 예외 발생 시 파싱을 중단하세요.",
+                verificationStatus: "confirmed"
+            ))
+            if findings.count >= 5 { break }
+        }
+        return findings
+    }
+
+    private func javaXMLFactoryIsHardened(factory: String, configuration: String) -> Bool {
+        let ignoredConfigurationFailure = #"(?is)catch\s*\([^)]*(ParserConfigurationException|SAXNotRecognizedException|SAXNotSupportedException)[^)]*\)\s*\{((?:(?!\bthrow\b|\breturn\b).)*)\}"#
+        if matches(ignoredConfigurationFailure, configuration) { return false }
+
+        func lastBooleanCall(_ method: String) -> Bool? {
+            captures("(?i)\\b\(factory)\\s*\\.\\s*\(method)\\s*\\(\\s*(true|false)\\s*\\)", in: configuration)
+                .last
+                .map { $0.lowercased() == "true" }
+        }
+
+        func lastFeatureBoolean(_ uri: String) -> Bool? {
+            let escapedURI = NSRegularExpression.escapedPattern(for: uri)
+            return captures("(?i)\\b\(factory)\\s*\\.\\s*setFeature\\s*\\(\\s*[\"']\(escapedURI)[\"']\\s*,\\s*(true|false)\\s*\\)", in: configuration)
+                .last
+                .map { $0.lowercased() == "true" }
+        }
+
+        let doctype = lastFeatureBoolean("http://apache.org/xml/features/disallow-doctype-decl")
+        if doctype == true { return true }
+
+        let externalGeneral = lastFeatureBoolean("http://xml.org/sax/features/external-general-entities")
+        let externalParameter = lastFeatureBoolean("http://xml.org/sax/features/external-parameter-entities")
+        let externalDTD = lastFeatureBoolean("http://apache.org/xml/features/nonvalidating/load-external-dtd")
+        let xinclude = lastBooleanCall("setXIncludeAware")
+        let entityExpansion = lastBooleanCall("setExpandEntityReferences")
+        return externalGeneral == false
+            && externalParameter == false
+            && externalDTD == false
+            && xinclude == false
+            && entityExpansion == false
+    }
+
+    private func checkContextualSourceFlows(lines: [String], displayPath: String) -> [NativeFinding] {
+        let untrusted = #"(?i)(?:\b(?:req|request|ctx)\s*(?:\.|\[)|\$_(?:GET|POST|REQUEST|FILES)\b|\blocation\.(?:hash|search|href)\b|\binput\s*\(|\bsys\.argv\b|\bARGV\b)"#
+        let sanitizer = #"(?i)\b(DOMPurify\.sanitize|sanitizeHtml|escapeHtml|html\.escape|encodeForHTML|secure_filename|basename|realpath|canonicalPath|allowlist|allowed_hosts?|validate(?:Url|Path|Host|Redirect|Input)|escapeLdap|encodeForLDAP|stripCrLf|sanitizeHeader)\s*\([^)]*\)"#
+        let assignmentName = #"^\s*(?:(?:const|let|var|final)\s+)?(?:[A-Za-z_$][\w$<>\[\].,?]*\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]+)?="#
+        let sinks: [(String, String, String, String, String)] = [
+            ("code.sql-dynamic-query", #"(?i)\b(execute|executemany|query|raw|prepareStatement|createQuery)\s*\("#, "high", "동적 SQL 쿼리 구성", "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."),
+            ("code.xss-dom-sink", #"(?i)\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML)\b"#, "high", "DOM XSS 위험 sink", "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."),
+            ("code.command-injection", #"(?i)\b(os\.system|os\.popen|subprocess\.(run|call|Popen|check_output)|child_process\.(exec|execSync)|shell_exec|passthru|Runtime\.getRuntime\(\)\.exec)\s*\("#, "high", "명령어 삽입 위험", "쉘 실행을 피하고 고정 인자 배열과 허용목록을 사용하세요."),
+            ("code.path-traversal", #"(?i)\b(open|send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync)\s*\("#, "medium", "경로 조작 위험", "입력 경로를 정규화하고 허용된 루트 내부인지 검증하세요."),
+            ("code.eval-user-input", #"(?i)\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\("#, "high", "eval 계열 API에 사용자 입력이 연결됨", "동적 코드 실행을 제거하고 허용목록 기반 분기로 대체하세요."),
+            ("code.ssrf-user-url", #"(?i)\b(requests\.(get|post|put|patch|delete|request)|httpx\.(get|post|put|patch|delete|request)|urllib\.request\.urlopen|axios\.(get|post|put|patch|delete)|fetch|http\.get|https\.get)\b"#, "high", "사용자 입력 URL 요청으로 인한 SSRF 위험", "허용된 호스트만 요청하고 사설망 대역 접근을 차단하세요."),
+            ("code.open-redirect-user-input", #"(?i)\b(sendRedirect|redirect|(res|response|ctx)\.redirect)\s*\("#, "medium", "사용자 입력 기반 Open Redirect", "리다이렉트 대상은 내부 경로 허용목록에 매핑하세요."),
+            ("code.ldap-injection", #"(?i)\b(ldap([_-]?(client|connection|template))?|dirContext)\s*\.\s*(search|search_s|search_ext)\s*\("#, "high", "LDAP 필터 삽입 위험", "LDAP 필터 메타문자를 이스케이프하거나 파라미터화된 API를 사용하세요."),
+            ("code.http-response-splitting", #"(?i)\b(setHeader|addHeader|set_header|writeHead)\s*\("#, "medium", "HTTP 응답 분할 위험", "헤더 값의 CR/LF를 거부하고 허용 형식만 사용하세요."),
+            ("code.unsafe-deserialization", #"(?i)\b(pickle\.loads?|yaml\.load|ObjectInputStream|BinaryFormatter|unserialize|Marshal\.load|readObject)\b"#, "high", "신뢰할 수 없는 데이터 역직렬화", "안전 파서를 사용하고 신뢰할 수 없는 객체 역직렬화를 금지하세요."),
+            ("code.unrestricted-file-upload", #"(?i)\b(move_uploaded_file|save|writeFile|writeFileSync)\s*\("#, "medium", "검증되지 않은 업로드 저장", "파일 형식과 크기를 검증하고 서버측 파일명을 생성하세요."),
+            ("code.api-mass-assignment", #"(?i)\b(create|update|assign|save|insert|merge)\s*\("#, "medium", "API 요청 데이터의 mass assignment", "허용 필드만 명시적으로 매핑하세요."),
+            ("code.format-string-user-input", #"(?i)\b(printf|vprintf|syslog|fprintf|String\.format)\s*\("#, "high", "사용자 제어 포맷 문자열", "상수 포맷 문자열을 사용하고 동적 값은 별도 인자로 전달하세요.")
+        ]
+        var tainted = Set<String>()
+        var findings: [NativeFinding] = []
+        var seen = Set<String>()
+
+        func withoutSanitizers(_ text: String) -> String {
+            guard let regex = try? NSRegularExpression(pattern: sanitizer) else { return text }
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            return regex.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
+        }
+
+        func containsTaintedName(_ text: String) -> Bool {
+            tainted.contains { name in
+                matches("(?i)\\b\(NSRegularExpression.escapedPattern(for: name))\\b", text)
+            }
+        }
+
+        for (index, rawLine) in lines.enumerated() {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty || line.hasPrefix("//") || line.hasPrefix("#") || line.hasPrefix("/*") || line.hasPrefix("*") {
+                continue
+            }
+            if let name = firstCapture(assignmentName, in: line), let equals = line.firstIndex(of: "=") {
+                let expression = String(line[line.index(after: equals)...])
+                let remaining = withoutSanitizers(expression)
+                if matches(untrusted, remaining) || containsTaintedName(remaining) {
+                    tainted.insert(name)
+                } else {
+                    tainted.remove(name)
+                }
+            }
+
+            let remaining = withoutSanitizers(line)
+            guard matches(untrusted, remaining) || containsTaintedName(remaining) else { continue }
+            for (ruleID, sink, severity, title, recommendation) in sinks where matches(sink, line) {
+                if ruleID == "code.sql-dynamic-query" && matches(#"(?i)\b(execute|executemany|query)\s*\(\s*[\"'][^\"']*(\?|%s|:\w+|\$\d+)[^\"']*[\"']\s*,"#, line) {
+                    continue
+                }
+                if ruleID == "code.command-injection" && matches(#"(?i)subprocess\.(run|call|Popen|check_output)\s*\(\s*\["#, line) && !matches(#"(?i)shell\s*=\s*True"#, line) {
+                    continue
+                }
+                if ruleID == "code.unsafe-deserialization" && matches(#"(?i)yaml\.load\s*\([^\n]*(Loader\s*=\s*yaml\.SafeLoader|SafeLoader)"#, line) {
+                    continue
+                }
+                let key = "\(ruleID):\(index + 1)"
+                guard seen.insert(key).inserted else { continue }
+                findings.append(finding(
+                    ruleID,
+                    severity,
+                    "code",
+                    title,
+                    displayPath,
+                    index + 1,
+                    line,
+                    recommendation,
+                    verificationStatus: "confirmed"
+                ))
+                break
+            }
+        }
+        return findings
+    }
+
+    private func preferConfirmedFindings(_ findings: [NativeFinding]) -> [NativeFinding] {
+        var result: [NativeFinding] = []
+        for finding in findings {
+            if let index = result.firstIndex(where: { $0.ruleID == finding.ruleID && $0.line == finding.line && $0.path == finding.path }) {
+                if result[index].verificationStatus != "confirmed" && finding.verificationStatus == "confirmed" {
+                    result[index] = finding
+                }
+            } else {
+                result.append(finding)
+            }
+        }
+        return result
+    }
+
+    private func checkCode(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
+        var findings = checkJavaDocumentBuilderXXE(lines: lines, file: file, displayPath: displayPath)
+        findings += checkContextualSourceFlows(lines: lines, displayPath: displayPath)
+        let document = lines.joined(separator: "\n")
+        let hasRateLimit = matches(#"(?i)\b(express-rate-limit|rateLimit\s*\(|RateLimiter|SlowAPIMiddleware|@\w*limiter\.limit|Bucket4j|resilience4j.*ratelimit)"#, document)
+        let hasGlobalAuth = matches(#"(?i)\b(app|router|server)\.use\s*\([^\n]*(authenticate|authorize|requireAuth|requireAdmin)|\b(SecurityFilterChain|OncePerRequestFilter|AuthMiddleware|AuthorizationMiddleware)\b"#, document)
         for (index, line) in lines.enumerated() {
             let lineNumber = index + 1
+            let nearby = lines[max(0, index - 5)...min(lines.count - 1, index + 5)].joined(separator: "\n")
             if matches(#"(?i)\.innerHTML\s*=.*(location|document\.URL|request|params)"#, line) {
                 findings.append(finding("code.xss-dom-sink", "high", "code", "DOM XSS 위험 sink", displayPath, lineNumber, line, "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."))
             }
@@ -1636,7 +1853,8 @@ final class NativeSecurityScanner {
             if matches(#"(?i)\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\(.*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
                 findings.append(finding("code.eval-user-input", "high", "code", "eval 계열 API에 사용자 입력이 연결됨", displayPath, lineNumber, line, "동적 코드 실행을 제거하고 허용목록 기반 분기 처리로 대체하세요."))
             }
-            if matches(#"(?i)(pickle\.loads|yaml\.load|ObjectInputStream|unserialize\()"#, line) {
+            if matches(#"(?i)(pickle\.loads|yaml\.load|ObjectInputStream|unserialize\()"#, line)
+                && !matches(#"(?i)yaml\.load\s*\([^\n]*(Loader\s*=\s*yaml\.SafeLoader|SafeLoader)"#, line) {
                 findings.append(finding("code.unsafe-deserialization", "high", "code", "위험한 역직렬화 사용", displayPath, lineNumber, line, "신뢰할 수 없는 입력의 역직렬화를 금지하고 안전 로더를 사용하세요."))
             }
             if matches(#"(?i)\b(requests|httpx|urllib\.request|axios|fetch|http\.get|https\.get|RestTemplate|WebClient).*(get|post|open|request|\().*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
@@ -1657,7 +1875,7 @@ final class NativeSecurityScanner {
             if matches(#"(?i)(\bexcept\b[^:\n]*:\s*pass\b|\bcatch\s*(\([^)]*\))?\s*\{\s*\})"#, line) {
                 findings.append(finding("code.empty-exception-handler", "low", "code", "예외가 조용히 무시되는 것으로 보임", displayPath, lineNumber, line, "예상 예외를 명시적으로 처리하고 필요한 경우 보안 관련 실패를 기록하세요."))
             }
-            if matches(#"(?i)\b(printStackTrace|traceback\.print_exc|console\.trace|logger\.exception)\s*\("#, line) {
+            if matches(#"(?i)\b(printStackTrace|traceback\.print_exc|console\.trace)\s*\("#, line) {
                 findings.append(finding("code.stack-trace-exposure", "low", "code", "스택 트레이스 출력이 내부 정보를 노출할 수 있음", displayPath, lineNumber, line, "중앙 오류 처리로 전달하고 사용자 노출 경로에서는 원본 스택을 숨기세요."))
             }
             if matches(#"(?i)(@\w+\.route|(?:app|router|routes|server)\.(?:get|post|put|patch|delete|use)|Route|path)\s*\(.*['"]/api/(?!v\d+(?:/|$))[^'"]+['"]"#, line) {
@@ -1687,16 +1905,16 @@ final class NativeSecurityScanner {
             if matches(#"(?i)(SESSION_COOKIE_AGE\s*=\s*([7-9]\d{5,}|[1-9]\d{6,})|maxAge\s*[:=]\s*([7-9]\d{8,}|[1-9]\d{9,})|expiresIn\s*[:=]\s*["'](365d|[2-9]\d{2,}d|[1-9]\d+y)["'])"#, line) {
                 findings.append(finding("code.session-long-expiry", "low", "code", "세션 또는 토큰 만료 시간이 과도함", displayPath, lineNumber, line, "짧은 access token, 회전되는 refresh token, 장기 세션 예외 문서를 사용하세요."))
             }
-            if matches(#"(?i)((app|router|server)\.(get|post|put|patch|delete)\s*\(["'][^"']*/api/[^"']*(admin|user|account|payment|order|profile|secret|token)[^"']*["'][^\n]*\(?\s*(req|request|ctx)\s*\)?\s*=>)"#, line) {
+            if !hasGlobalAuth && matches(#"(?i)((app|router|server)\.(get|post|put|patch|delete)\s*\(["'][^"']*/api/[^"']*(admin|user|account|payment|order|profile|secret|token)[^"']*["'][^\n]*\(?\s*(req|request|ctx)\s*\)?\s*=>)"#, line) {
                 findings.append(finding("code.api-route-missing-auth", "medium", "code", "민감 API 라우트에 인증 가드가 보이지 않음", displayPath, lineNumber, line, "민감 API handler 실행 전에 라우트 수준 인증과 객체/기능 권한 검사를 강제하세요."))
             }
             if matches(#"(?i)(\b(create|update|assign|save|insert|merge)\s*\([^\n]*(req\.body|request\.body|body|params)|\.\.\.\s*(req\.body|request\.body|body))"#, line) {
                 findings.append(finding("code.api-mass-assignment", "medium", "code", "API 요청 body의 mass assignment 의심", displayPath, lineNumber, line, "허용 필드만 명시적으로 매핑하고 예상하지 않은 속성은 저장 전에 거부하세요."))
             }
-            if matches(#"(?i)(express\s*\(\)|FastAPI\s*\(|new\s+Koa\s*\(|SpringApplication\.run)"#, line) {
+            if !hasRateLimit && matches(#"(?i)(express\s*\(\)|FastAPI\s*\(|new\s+Koa\s*\(|SpringApplication\.run)"#, line) {
                 findings.append(finding("code.api-missing-rate-limit", "low", "code", "API rate limit 기준이 보이지 않음", displayPath, lineNumber, line, "로그인, 가입, 검색, export, 고비용 API에 rate limit과 남용 방지 통제를 추가하세요."))
             }
-            if matches(#"(?i)\b(requests\.(get|post|put|patch|delete)|httpx\.(get|post|put|patch|delete)|axios\.(get|post|put|patch|delete)|fetch)\s*\([^\n]*(https?://|url|endpoint)"#, line) && !matches(#"(?i)(timeout|signal|AbortController)"#, line) {
+            if matches(#"(?i)\b(requests\.(get|post|put|patch|delete)|httpx\.(get|post|put|patch|delete)|axios\.(get|post|put|patch|delete)|fetch)\s*\([^\n]*(https?://|url|endpoint)"#, line) && !matches(#"(?i)(timeout|signal|AbortController)\s*[:=]"#, nearby) {
                 findings.append(finding("code.external-api-no-timeout", "low", "code", "외부 API 호출에 timeout이 보이지 않음", displayPath, lineNumber, line, "외부 API 호출에 timeout, backoff 재시도, 목적지 allowlist를 적용하세요."))
             }
             if matches(#"(?i)(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))\s*\(.*(email|phone|mobile|address|birth|dob|ssn|resident|rrn|jumin|주민|전화|주소|생년|card[_-]?number)"#, line) {
@@ -1711,8 +1929,36 @@ final class NativeSecurityScanner {
             if matches(#"(?i)\b(technote|zeroboard)\b"#, line) {
                 findings.append(finding("code.legacy-board-software", "medium", "code", "레거시 게시판 소프트웨어 흔적", displayPath, lineNumber, line, "컴포넌트 사용 여부를 확인하고 최신 버전으로 교체하거나 제거하세요."))
             }
-            if matches(#"(?i)(resolve_entities\s*=\s*True|load_dtd\s*=\s*True|DocumentBuilderFactory|SAXParserFactory|XmlReaderSettings|XmlDocument)"#, line) {
+            let handledJavaDocumentBuilder = ["java", "kt"].contains(file.pathExtension.lowercased()) && line.contains("DocumentBuilderFactory")
+            if !handledJavaDocumentBuilder && matches(#"(?i)(resolve_entities\s*=\s*True|load_dtd\s*=\s*True|DocumentBuilderFactory|SAXParserFactory|XmlReaderSettings|XmlDocument)"#, line) {
                 findings.append(finding("code.xml-external-entity", "high", "code", "XML 외부 엔티티 처리가 허용될 수 있음", displayPath, lineNumber, line, "DTD와 외부 엔티티 해석을 비활성화한 안전한 XML parser 설정을 사용하세요."))
+            }
+            if matches(#"(?i)(sendRedirect\s*\(.*request\.getParameter|(res|response|ctx)\.redirect\s*\(.*(req\.|request\.|params|query|body)|\bredirect\s*\(.*(request\.|req\.|params|query|body))"#, line) {
+                findings.append(finding("code.open-redirect-user-input", "medium", "code", "사용자 입력 기반 Open Redirect 의심", displayPath, lineNumber, line, "리다이렉트 대상은 내부 경로 허용목록에 매핑하고 외부 URL은 거부하세요."))
+            }
+            if matches(#"(?i)(<[A-Za-z][\w:-]*>.*(\+|%|\$\{).*(request|req\.|params|query|body|input))"#, line) {
+                findings.append(finding("code.xml-injection", "medium", "code", "XML 문자열 삽입 의심", displayPath, lineNumber, line, "문자열 연결 대신 XML serializer를 사용하고 입력을 XML 문맥에 맞게 인코딩하세요."))
+            }
+            if matches(#"(?i)(LdapTemplate|DirContext|ldap\w*).*search.*(\+|\.format\(|f[\"'])"#, line) {
+                findings.append(finding("code.ldap-injection", "high", "code", "LDAP 필터 삽입 의심", displayPath, lineNumber, line, "LDAP 필터 메타문자를 이스케이프하거나 파라미터화된 API를 사용하세요."))
+            }
+            if matches(#"(?i)\b(setHeader|addHeader|set_header|writeHead)\s*\(.*(request\.|req\.|params|query|body|input)"#, line) {
+                findings.append(finding("code.http-response-splitting", "medium", "code", "HTTP 응답 분할 의심", displayPath, lineNumber, line, "헤더 값의 CR/LF를 거부하고 허용 형식만 사용하세요."))
+            }
+            if matches(#"(?i)(\b(printf|vprintf|syslog)\s*\(\s*[A-Za-z_][\w>.\-\[\]]*\s*\)|\bString\.format\s*\(\s*[A-Za-z_][\w.\[\]]*\s*[,\)])"#, line) {
+                findings.append(finding("code.format-string-user-input", "high", "code", "변수 기반 포맷 문자열 사용", displayPath, lineNumber, line, "상수 포맷 문자열을 사용하고 동적 값은 별도 인자로 전달하세요."))
+            }
+            if matches(#"(?i)(\bRSA\b.{0,60}\b(512|768|1024)\b|\bKeyPairGenerator\b.*initialize\s*\(\s*(512|768|1024))"#, line) {
+                findings.append(finding("code.insufficient-key-length", "medium", "code", "부족한 암호키 길이 의심", displayPath, lineNumber, line, "RSA/DSA/DH는 최소 2048비트 또는 승인된 현대적 타원곡선 알고리즘을 사용하세요."))
+            }
+            if matches(#"(?i)\b(token|otp|nonce|salt|session[_-]?id|secret|password|api[_-]?key)\w*\s*[:=].*(Math\.random|new\s+Random\s*\(|random\.(random|randint|choice)|\brand\s*\()"#, line) {
+                findings.append(finding("code.insecure-random-security-use", "medium", "code", "보안 용도에 비암호학적 난수 사용", displayPath, lineNumber, line, "토큰·키·인증코드에는 CSPRNG를 사용하세요."))
+            }
+            if matches(#"(?i)(verify\s*=\s*False|rejectUnauthorized\s*[:=]\s*false|InsecureSkipVerify\s*:\s*true|check_hostname\s*=\s*False|ssl\.CERT_NONE)"#, line) {
+                findings.append(finding("code.tls-certificate-verification-disabled", "high", "code", "TLS 인증서 검증 비활성화", displayPath, lineNumber, line, "인증서와 호스트명 검증을 유지하고 올바른 신뢰 저장소를 구성하세요."))
+            }
+            if matches(#"(?i)\b(password|passwd|pwd|pin)\w*\b.*\b(hashlib\.(md5|sha1|sha256)|MessageDigest\.getInstance|crypto\.createHash)\b"#, line) {
+                findings.append(finding("code.password-hash-without-salt", "medium", "code", "솔트 없는 비밀번호 해시 의심", displayPath, lineNumber, line, "비밀번호는 고유 솔트를 적용하는 Argon2, bcrypt, scrypt 또는 PBKDF2로 저장하세요."))
             }
             if matches(#"(?i)(system|developer|prompt|messages?)\s*[:=].*(\+|f["']|`\$\{).*(request|req\.|params|query|body|input\(|user)"#, line) {
                 findings.append(finding("code.llm-prompt-user-concat", "medium", "code", "LLM 프롬프트에 사용자 입력이 직접 결합됨", displayPath, lineNumber, line, "시스템 지시는 고정하고 사용자 콘텐츠는 별도 메시지 필드로 분리하며 프롬프트 인젝션 테스트를 추가하세요."))
@@ -1724,7 +1970,7 @@ final class NativeSecurityScanner {
                 findings.append(finding("code.llm-sensitive-data-in-prompt", "medium", "code", "민감정보가 LLM 프롬프트로 전달될 수 있음", displayPath, lineNumber, line, "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요."))
             }
         }
-        return findings
+        return preferConfirmedFindings(findings)
     }
 
     private func checkScreenQuality(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
@@ -2508,9 +2754,11 @@ final class NativeSecurityScanner {
         _ path: String,
         _ line: Int?,
         _ evidence: String,
-        _ recommendation: String
+        _ recommendation: String,
+        verificationStatus: String? = nil
     ) -> NativeFinding {
-        NativeFinding(
+        let resolvedStatus = verificationStatus ?? (category == "code" ? "needs_review" : "confirmed")
+        return NativeFinding(
             ruleID: ruleID,
             severity: severity,
             category: category,
@@ -2518,7 +2766,11 @@ final class NativeSecurityScanner {
             path: path,
             line: line,
             evidence: String(evidence.trimmingCharacters(in: .whitespacesAndNewlines).prefix(220)),
-            recommendation: recommendation
+            recommendation: recommendation,
+            verificationStatus: resolvedStatus,
+            verificationNote: resolvedStatus == "needs_review"
+                ? "소스 파일 전체의 설정과 방어 패턴을 확인했지만 위험 흐름을 확정할 근거가 부족하여 추가 검토가 필요합니다."
+                : ""
         )
     }
 
@@ -2631,7 +2883,7 @@ private extension NativeSecurityScanner {
             """
             <tr>
               <td><span class="badge \(finding.severity.htmlEscaped)">\(severityLabel(finding.severity, language: language))</span></td>
-              <td><strong>\(findingTitle(finding, language: language).htmlEscaped)</strong><br><code>\(finding.ruleID.htmlEscaped)</code> | \(categoryLabel(finding.category, language: language).htmlEscaped)</td>
+              <td><strong>\(findingTitle(finding, language: language).htmlEscaped)</strong><br><span>\(verificationLabel(finding, language: language).htmlEscaped)</span> · <code>\(finding.ruleID.htmlEscaped)</code> | \(categoryLabel(finding.category, language: language).htmlEscaped)</td>
               <td>\(finding.path.htmlEscaped)\(finding.line.map { ":\($0)" } ?? "")</td>
               <td><code>\(finding.evidence.htmlEscaped)</code><br><span>\(findingRecommendation(finding, language: language).htmlEscaped)</span></td>
             </tr>
@@ -2730,7 +2982,7 @@ private extension NativeSecurityScanner {
         let rows = result.findings.map { finding in
             let columns = [
                 severityLabel(finding.severity, language: language),
-                findingTitle(finding, language: language),
+                "\(verificationLabel(finding, language: language)) · \(findingTitle(finding, language: language))",
                 finding.ruleID,
                 categoryLabel(finding.category, language: language),
                 "\(finding.path)\(finding.line.map { ":\($0)" } ?? "")",
@@ -2785,7 +3037,7 @@ private extension NativeSecurityScanner {
             ? reportLabel("noFindings", language: language)
             : result.findings.enumerated().map { index, finding in
                 """
-                \(index + 1). [\(severityLabel(finding.severity, language: language))] \(findingTitle(finding, language: language))
+                \(index + 1). [\(severityLabel(finding.severity, language: language))] [\(verificationLabel(finding, language: language))] \(findingTitle(finding, language: language))
                    Rule: \(finding.ruleID)
                    \(reportLabel("category", language: language)): \(categoryLabel(finding.category, language: language))
                    \(reportLabel("path", language: language)): \(finding.path)\(finding.line.map { ":\($0)" } ?? "")
@@ -2830,6 +3082,13 @@ private extension NativeSecurityScanner {
         case (.en, "low"): return "Low"
         case (.en, _): return "Info"
         }
+    }
+
+    func verificationLabel(_ finding: NativeFinding, language: AppLanguage) -> String {
+        if finding.verificationStatus == "needs_review" {
+            return language == .ko ? "검토 필요" : "Needs review"
+        }
+        return language == .ko ? "문맥 확인" : "Context confirmed"
     }
 
     func renderSeverityBars(_ counts: [String: Int], language: AppLanguage) -> String {

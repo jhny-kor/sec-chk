@@ -55,7 +55,10 @@ class CodePatternRule:
     extensions: frozenset[str] = frozenset(CODE_EXTENSIONS)
 
 
-UNTRUSTED_SOURCE = r"(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"
+UNTRUSTED_SOURCE = (
+    r"(?:\b(?:req|request|ctx)\s*(?:\.|\[)|\$_(?:GET|POST|REQUEST|FILES)\b|"
+    r"\blocation\.(?:hash|search|href)\b|\binput\s*\(|\bsys\.argv\b|\bARGV\b)"
+)
 LOGGING_API = (
     r"(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|"
     r"logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))"
@@ -234,7 +237,7 @@ CODE_PATTERN_RULES = (
         "code.stack-trace-exposure",
         "Stack trace output may expose internals",
         "low",
-        re.compile(r"\b(printStackTrace|traceback\.print_exc|console\.trace|logger\.exception)\s*\(", re.IGNORECASE),
+        re.compile(r"\b(printStackTrace|traceback\.print_exc|console\.trace)\s*\(", re.IGNORECASE),
         "A stack trace output API appears in application code and may expose internals if enabled in user-facing flows.",
         "Route exceptions through centralized error handling and avoid returning or printing raw stack traces outside local debugging.",
         frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".swift", ".ts", ".tsx"}),
@@ -603,6 +606,427 @@ CODE_PATTERN_RULES = (
 )
 
 
+_JAVA_XML_FACTORY = re.compile(
+    r"\b(?:DocumentBuilderFactory\s+)?([A-Za-z_$][\w$]*)\s*=\s*DocumentBuilderFactory\s*\.\s*newInstance\s*\(\s*\)",
+)
+_JAVA_XML_UNTRUSTED_INPUT = re.compile(
+    r"\b(request|req|body|payload|input|stream|reader|upload|xml)\w*\b|getInputStream\s*\(|getReader\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _java_document_builder_xxe_findings(path: Path, lines: list[str]) -> list[Finding]:
+    """Find DocumentBuilder XXE paths only when an unsafe builder reaches untrusted XML."""
+    findings: list[Finding] = []
+    analysis_lines = _strip_java_comments(lines)
+
+    for factory_index, raw_line in enumerate(analysis_lines):
+        factory_match = _JAVA_XML_FACTORY.search(raw_line)
+        if not factory_match:
+            continue
+
+        factory = factory_match.group(1)
+        factory_ref = re.escape(factory)
+        next_factory_index = next(
+            (
+                index
+                for index in range(factory_index + 1, len(analysis_lines))
+                if _JAVA_XML_FACTORY.search(analysis_lines[index])
+            ),
+            len(analysis_lines),
+        )
+        builder_pattern = re.compile(
+            rf"\b(?:DocumentBuilder\s+)?([A-Za-z_$][\w$]*)\s*=\s*{factory_ref}\s*\.\s*newDocumentBuilder\s*\(\s*\)",
+        )
+        builder_match: re.Match[str] | None = None
+        builder_index: int | None = None
+        for index in range(factory_index + 1, next_factory_index):
+            builder_match = builder_pattern.search(analysis_lines[index])
+            if builder_match:
+                builder_index = index
+                break
+
+        if builder_match is None or builder_index is None:
+            continue
+
+        builder = builder_match.group(1)
+        parse_pattern = re.compile(rf"\b{re.escape(builder)}\s*\.\s*parse\s*\((.*)", re.IGNORECASE)
+        parse_match: re.Match[str] | None = None
+        parse_index: int | None = None
+        for index in range(builder_index + 1, next_factory_index):
+            candidate = parse_pattern.search(analysis_lines[index])
+            if candidate and _JAVA_XML_UNTRUSTED_INPUT.search(candidate.group(1)):
+                parse_match = candidate
+                parse_index = index
+                break
+
+        if parse_match is None or parse_index is None:
+            continue
+
+        configuration_lines = analysis_lines[factory_index + 1 : builder_index]
+        if _java_xml_factory_is_hardened(factory, configuration_lines):
+            continue
+
+        evidence = lines[parse_index].strip()
+        findings.append(
+            Finding(
+                rule_id="code.xml-external-entity",
+                category="code",
+                severity="high",
+                title="XML parser may allow external entity processing",
+                path=path,
+                line=parse_index + 1,
+                evidence=_trim_evidence(evidence),
+                description=(
+                    "Potentially untrusted XML reaches DocumentBuilder.parse() before safe DTD or external entity "
+                    "configuration is confirmed."
+                ),
+                recommendation=(
+                    "Disable DOCTYPE declarations, or disable external general entities, external parameter entities, "
+                    "external DTD loading, XInclude, and entity expansion before newDocumentBuilder()."
+                ),
+            )
+        )
+        if len(findings) >= 5:
+            break
+
+    return findings
+
+
+def _strip_java_comments(lines: list[str]) -> list[str]:
+    stripped: list[str] = []
+    in_block_comment = False
+    for raw_line in lines:
+        output: list[str] = []
+        quote: str | None = None
+        escaped = False
+        index = 0
+        while index < len(raw_line):
+            current = raw_line[index]
+            following = raw_line[index + 1] if index + 1 < len(raw_line) else ""
+            if in_block_comment:
+                if current == "*" and following == "/":
+                    in_block_comment = False
+                    index += 2
+                else:
+                    index += 1
+                continue
+            if quote:
+                output.append(current)
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == quote:
+                    quote = None
+                index += 1
+                continue
+            if current in {'"', "'"}:
+                quote = current
+                output.append(current)
+                index += 1
+                continue
+            if current == "/" and following == "/":
+                break
+            if current == "/" and following == "*":
+                in_block_comment = True
+                index += 2
+                continue
+            output.append(current)
+            index += 1
+        stripped.append("".join(output))
+    return stripped
+
+
+def _last_java_boolean_call(factory_ref: str, method: str, configuration: str) -> bool | None:
+    matches = list(
+        re.finditer(
+            rf"\b{factory_ref}\s*\.\s*{method}\s*\(\s*(true|false)\s*\)",
+            configuration,
+            re.IGNORECASE,
+        )
+    )
+    return matches[-1].group(1).lower() == "true" if matches else None
+
+
+def _java_xml_factory_is_hardened(factory: str, configuration_lines: list[str]) -> bool:
+    configuration = "\n".join(configuration_lines)
+    factory_ref = re.escape(factory)
+
+    # A swallowed parser-configuration failure makes the control fail open.
+    for catch in re.finditer(
+        r"catch\s*\([^)]*(?:ParserConfigurationException|SAXNotRecognizedException|SAXNotSupportedException)[^)]*\)\s*\{([^}]*)\}",
+        configuration,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        if not re.search(r"\b(throw|return)\b", catch.group(1)):
+            return False
+
+    feature_states: dict[str, bool] = {}
+    feature_pattern = re.compile(
+        rf"\b{factory_ref}\s*\.\s*setFeature\s*\(\s*[\"']([^\"']+)[\"']\s*,\s*(true|false)\s*\)",
+        re.IGNORECASE,
+    )
+    for feature in feature_pattern.finditer(configuration):
+        feature_states[feature.group(1).lower()] = feature.group(2).lower() == "true"
+
+    if feature_states.get("http://apache.org/xml/features/disallow-doctype-decl") is True:
+        return True
+
+    external_entities_disabled = all(
+        feature_states.get(feature) is False
+        for feature in (
+            "http://xml.org/sax/features/external-general-entities",
+            "http://xml.org/sax/features/external-parameter-entities",
+            "http://apache.org/xml/features/nonvalidating/load-external-dtd",
+        )
+    )
+    xinclude_disabled = _last_java_boolean_call(factory_ref, "setXIncludeAware", configuration) is False
+    entity_expansion_disabled = (
+        _last_java_boolean_call(factory_ref, "setExpandEntityReferences", configuration) is False
+    )
+    if external_entities_disabled and xinclude_disabled and entity_expansion_disabled:
+        return True
+
+    return False
+
+
+_RULE_BY_ID = {rule.rule_id: rule for rule in CODE_PATTERN_RULES}
+_ASSIGNMENT = re.compile(
+    r"^\s*(?:(?:const|let|var|final)\s+)?"
+    r"(?:(?:[A-Za-z_$][\w$<>\[\].,?]*\s+))?"
+    r"([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(.+)$"
+)
+_UNTRUSTED = re.compile(UNTRUSTED_SOURCE, re.IGNORECASE)
+_SANITIZERS = re.compile(
+    r"\b(DOMPurify\.sanitize|sanitizeHtml|escapeHtml|html\.escape|encodeForHTML|"
+    r"secure_filename|Path\.GetFileName|basename|realpath|canonicalPath|"
+    r"allowlist|allowed_hosts?|validate(?:Url|Path|Host|Redirect|Input)|"
+    r"escapeLdap|encodeForLDAP|stripCrLf|sanitizeHeader)\b",
+    re.IGNORECASE,
+)
+
+_CONTEXT_SINKS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("code.sql-dynamic-query", re.compile(r"\b(execute|executemany|query|raw|prepareStatement|createQuery)\s*\(", re.IGNORECASE)),
+    ("code.xss-dom-sink", re.compile(r"\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML)\b", re.IGNORECASE)),
+    ("code.command-injection", re.compile(r"\b(os\.system|os\.popen|subprocess\.(?:run|call|Popen|check_output)|child_process\.(?:exec|execSync)|shell_exec|passthru|Runtime\.getRuntime\(\)\.exec)\s*\(", re.IGNORECASE)),
+    ("code.path-traversal", re.compile(r"\b(open|send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync)\s*\(", re.IGNORECASE)),
+    ("code.eval-user-input", re.compile(r"\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\(", re.IGNORECASE)),
+    ("code.ssrf-user-url", re.compile(r"\b(requests\.(?:get|post|put|patch|delete|request)|httpx\.(?:get|post|put|patch|delete|request)|urllib\.request\.urlopen|axios\.(?:get|post|put|patch|delete)|fetch|http\.get|https\.get|RestTemplate|WebClient)\b", re.IGNORECASE)),
+    ("code.open-redirect-user-input", re.compile(r"\b(sendRedirect|redirect|(?:res|response|ctx)\.redirect)\s*\(", re.IGNORECASE)),
+    (
+        "code.ldap-injection",
+        re.compile(
+            r"\b(?:ldap(?:[_-]?(?:client|connection|template))?|dirContext)\s*\.\s*(?:search|search_s|search_ext)\s*\(",
+            re.IGNORECASE,
+        ),
+    ),
+    ("code.http-response-splitting", re.compile(r"\b(setHeader|addHeader|set_header|writeHead)\s*\(", re.IGNORECASE)),
+    ("code.unsafe-deserialization", re.compile(r"\b(pickle\.loads?|yaml\.load|ObjectInputStream|BinaryFormatter|unserialize|Marshal\.load|readObject)\b", re.IGNORECASE)),
+    ("code.unrestricted-file-upload", re.compile(r"\b(move_uploaded_file|save|writeFile|writeFileSync)\s*\(", re.IGNORECASE)),
+    ("code.api-mass-assignment", re.compile(r"\b(create|update|assign|save|insert|merge)\s*\(", re.IGNORECASE)),
+    ("code.format-string-user-input", re.compile(r"\b(printf|vprintf|syslog|fprintf|String\.format)\s*\(", re.IGNORECASE)),
+    ("code.xml-injection", re.compile(r"(?:<[A-Za-z][\w:-]*>|XML|Document)\b.*(?:\+|%|\.format\(|\$\{)", re.IGNORECASE)),
+    ("code.llm-prompt-user-concat", re.compile(r"\b(system|developer|prompt|messages?)\b.*(?:\+|f[\"']|`\$\{)", re.IGNORECASE)),
+)
+
+
+def _contains_name(expression: str, names: set[str]) -> bool:
+    return any(re.search(rf"\b{re.escape(name)}\b", expression) for name in names)
+
+
+def _without_sanitizer_calls(expression: str) -> str:
+    """Remove balanced sanitizer-call expressions before checking remaining taint.
+
+    This keeps `sanitize(trusted) + tainted` unsafe while treating
+    `sanitize(tainted)` as a guarded value. It is deliberately parser-light and
+    falls back to the original text when a call is incomplete.
+    """
+    output = expression
+    offset = 0
+    for match in list(_SANITIZERS.finditer(expression)):
+        start = match.start() + offset
+        cursor = match.end() + offset
+        while cursor < len(output) and output[cursor].isspace():
+            cursor += 1
+        if cursor >= len(output) or output[cursor] != "(":
+            continue
+        depth = 0
+        quote: str | None = None
+        escaped = False
+        end = cursor
+        while end < len(output):
+            char = output[end]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+            elif char in {'"', "'"}:
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    end += 1
+                    break
+            end += 1
+        if depth != 0:
+            continue
+        output = output[:start] + (" " * (end - start)) + output[end:]
+        offset = len(output) - len(expression)
+    return output
+
+
+def _has_unsanitized_taint(expression: str, tainted: set[str]) -> bool:
+    remaining = _without_sanitizer_calls(expression)
+    return bool(_UNTRUSTED.search(remaining) or _contains_name(remaining, tainted))
+
+
+def _safe_command_arguments(line: str) -> bool:
+    return bool(
+        re.search(r"\bsubprocess\.(?:run|call|Popen|check_output)\s*\(\s*\[", line, re.IGNORECASE)
+        and not re.search(r"shell\s*=\s*True", line, re.IGNORECASE)
+    )
+
+
+def _safe_sql_binding(line: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(execute|executemany|query|prepareStatement|createQuery)\s*\(\s*[furb]*[\"'][^\"']*(?:\?|%s|:\w+|\$\d+)[^\"']*[\"']\s*,",
+            line,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _candidate_is_suppressed(
+    rule_id: str,
+    line: str,
+    document: str,
+    lines: list[str] | None = None,
+    line_number: int | None = None,
+) -> bool:
+    if lines is not None and line_number is not None:
+        start = max(0, line_number - 6)
+        end = min(len(lines), line_number + 5)
+        nearby = "\n".join(lines[start:end])
+    else:
+        nearby = line
+    if rule_id == "code.api-missing-rate-limit" and re.search(
+        r"\b(express-rate-limit|rateLimit\s*\(|RateLimiter|SlowAPIMiddleware|@\w*limiter\.limit|Bucket4j|resilience4j[^\n]*ratelimit)",
+        document,
+        re.IGNORECASE,
+    ):
+        return True
+    if rule_id == "code.api-route-missing-auth" and re.search(
+        r"\b(app|router|server)\.use\s*\([^\n]*(?:authenticate|authorize|requireAuth|requireAdmin)|"
+        r"\b(?:SecurityFilterChain|OncePerRequestFilter|AuthMiddleware|AuthorizationMiddleware)\b",
+        document,
+        re.IGNORECASE,
+    ):
+        return True
+    if rule_id == "code.unsafe-deserialization" and re.search(
+        r"yaml\.load\s*\([^\n]*(?:Loader\s*=\s*yaml\.SafeLoader|SafeLoader)", line, re.IGNORECASE
+    ):
+        return True
+    if rule_id == "code.command-injection" and _safe_command_arguments(line):
+        return True
+    if rule_id == "code.sql-dynamic-query" and _safe_sql_binding(line):
+        return True
+    if rule_id in {
+        "code.xss-dom-sink",
+        "code.path-traversal",
+        "code.ssrf-user-url",
+        "code.open-redirect-user-input",
+        "code.ldap-injection",
+        "code.http-response-splitting",
+    } and _SANITIZERS.search(line):
+        return True
+    if rule_id == "code.api-route-missing-auth" and re.search(
+        r"\b(requireAuth|requireAdmin|authenticate|authorize|isAuthenticated|checkPermission)\b", line, re.IGNORECASE
+    ):
+        return True
+    if rule_id == "code.weak-hash" and re.search(
+        r"\b(checksum|etag|cache[_-]?key|content[_-]?hash|file[_-]?hash)\b", nearby, re.IGNORECASE
+    ):
+        return True
+    if rule_id == "code.external-api-no-timeout" and re.search(
+        r"\b(timeout|signal|AbortController)\s*[:=]", nearby, re.IGNORECASE
+    ):
+        return True
+    if rule_id == "code.stack-trace-exposure" and re.search(
+        r"\b(?:if|guard)\b[^\n]*(?:DEBUG|development|isDev|devMode)", nearby, re.IGNORECASE
+    ):
+        return True
+    return False
+
+
+def _contextual_dataflow_findings(path: Path, lines: list[str]) -> list[Finding]:
+    """Confirm simple intra-file source-to-sink flows and sanitizer boundaries.
+
+    This intentionally stays conservative: aliases and direct assignments are
+    followed, while unresolved inter-procedural or project-wide context remains
+    a review candidate instead of being promoted to a violation.
+    """
+    findings: list[Finding] = []
+    tainted: set[str] = set()
+    sanitized: set[str] = set()
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        if not line or _is_comment(line):
+            continue
+
+        assignment = _ASSIGNMENT.match(line)
+        if assignment:
+            name, expression = assignment.groups()
+            if _has_unsanitized_taint(expression, tainted):
+                tainted.add(name)
+                sanitized.discard(name)
+            elif _SANITIZERS.search(expression):
+                tainted.discard(name)
+                sanitized.add(name)
+            else:
+                tainted.discard(name)
+                sanitized.discard(name)
+
+        reaches_sink = _has_unsanitized_taint(line, tainted)
+        if not reaches_sink:
+            continue
+
+        for rule_id, sink in _CONTEXT_SINKS:
+            if not sink.search(line):
+                continue
+            if rule_id == "code.command-injection" and _safe_command_arguments(line):
+                continue
+            if rule_id == "code.sql-dynamic-query" and _safe_sql_binding(line):
+                continue
+            rule = _RULE_BY_ID[rule_id]
+            findings.append(
+                Finding(
+                    rule_id=rule.rule_id,
+                    category="code",
+                    severity=rule.severity,
+                    title=rule.title,
+                    path=path,
+                    line=line_number,
+                    evidence=_trim_evidence(line),
+                    description=rule.description,
+                    recommendation=rule.recommendation,
+                    verification_status="confirmed",
+                    verification_note="동일 파일에서 외부 입력이 방어 처리 없이 위험 동작까지 전달되는 흐름을 확인했습니다.",
+                )
+            )
+            break
+        if len(findings) >= 45:
+            break
+    return findings
+
+
 def check_file(path: Path, target: TargetConfig) -> list[Finding]:
     if not is_text_candidate(path) or (path.suffix.lower() not in CODE_EXTENSIONS and path.name not in CODE_FILENAMES):
         return []
@@ -611,9 +1035,15 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
     if lines is None:
         return []
 
-    findings: list[Finding] = []
-    per_rule_counts: dict[str, int] = {}
     suffix = path.suffix.lower()
+    findings = _java_document_builder_xxe_findings(path, lines) if suffix in {".java", ".kt"} else []
+    findings.extend(_contextual_dataflow_findings(path, lines))
+    per_rule_counts: dict[str, int] = {}
+    seen_locations: set[tuple[str, int | None]] = set()
+    for finding in findings:
+        per_rule_counts[finding.rule_id] = per_rule_counts.get(finding.rule_id, 0) + 1
+        seen_locations.add((finding.rule_id, finding.line))
+    document = "\n".join(lines)
     filename = path.name
     for line_number, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()
@@ -622,9 +1052,19 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
         for rule in CODE_PATTERN_RULES:
             if suffix not in rule.extensions and filename not in rule.extensions:
                 continue
+            if (
+                rule.rule_id == "code.xml-external-entity"
+                and suffix in {".java", ".kt"}
+                and "DocumentBuilderFactory" in line
+            ):
+                continue
             if per_rule_counts.get(rule.rule_id, 0) >= 5:
                 continue
             if rule.pattern.search(line):
+                if (rule.rule_id, line_number) in seen_locations:
+                    continue
+                if _candidate_is_suppressed(rule.rule_id, line, document, lines, line_number):
+                    continue
                 findings.append(
                     Finding(
                         rule_id=rule.rule_id,
@@ -636,6 +1076,11 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
                         evidence=_trim_evidence(line),
                         description=rule.description,
                         recommendation=rule.recommendation,
+                        verification_status="needs_review",
+                        verification_note=(
+                            "소스 파일 전체의 설정과 방어 패턴을 함께 확인했지만 위험 흐름을 확정할 "
+                            "충분한 근거가 없습니다. 함수 간 호출과 업무 중요도를 추가 검토해야 합니다."
+                        ),
                     )
                 )
                 per_rule_counts[rule.rule_id] = per_rule_counts.get(rule.rule_id, 0) + 1

@@ -119,6 +119,16 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
                         evidence=_redact_line(line.strip(), secret_value),
                         description="A secret-like value appears in a local project file.",
                         recommendation=rule.recommendation,
+                        verification_status=(
+                            "needs_review"
+                            if rule.rule_id in ("secret.generic-assignment", "secret.sensitive-comment")
+                            else "confirmed"
+                        ),
+                        verification_note=(
+                            "비밀값 형태의 휴리스틱 탐지입니다. 실제 자격증명인지 저장소와 사용 문맥을 확인해야 합니다."
+                            if rule.rule_id in ("secret.generic-assignment", "secret.sensitive-comment")
+                            else "비밀 제공자 고유 형식 또는 개인 키 본문을 확인했습니다."
+                        ),
                     )
                 )
                 per_rule_counts[rule.rule_id] = per_rule_counts.get(rule.rule_id, 0) + 1

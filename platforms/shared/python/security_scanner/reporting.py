@@ -251,7 +251,7 @@ TRANSLATIONS = {
         "all_locations": "All locations",
         "risk_score_metric": "Risk Score",
         "risk_score_sub": "weighted local score",
-        "risk_score_formula": "Calculation: critical 100, high 40, medium 10, low 3, info 1 per finding.",
+        "risk_score_formula": "Calculation uses context-confirmed findings only: critical 100, high 40, medium 10, low 3, info 1.",
         "critical_sub": "immediate review",
         "high_sub": "near-term fix",
         "medium_sub": "planned remediation",
@@ -489,7 +489,7 @@ TRANSLATIONS = {
         "all_locations": "모든 위치",
         "risk_score_metric": "위험 점수",
         "risk_score_sub": "가중 로컬 점수",
-        "risk_score_formula": "계산: 발견 항목마다 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점씩 합산합니다.",
+        "risk_score_formula": "계산: 문맥 확인된 항목만 치명 100점, 높음 40점, 중간 10점, 낮음 3점, 정보 1점씩 합산합니다.",
         "critical_sub": "즉시 검토",
         "high_sub": "빠른 수정 필요",
         "medium_sub": "계획된 조치",
@@ -1336,8 +1336,11 @@ def render_markdown(
                     f"- {labels['category']}: `{_category_label(finding.category, language)}`",
                     f"- {labels['target']}: `{_target_display(finding.target, summary)}`",
                     f"- {labels['location']}: `{location}`",
+                    f"- {'판정' if language == 'ko' else 'Verification'}: `{_source_verification_label(finding.verification_status, language)}`",
                 ]
             )
+            if finding.verification_note:
+                lines.append(f"- {'판정 근거' if language == 'ko' else 'Verification note'}: {finding.verification_note}")
             if finding.evidence:
                 lines.append(f"- {labels['evidence']}: `{finding.evidence}`")
             if display["description"]:
@@ -1494,6 +1497,8 @@ def _finding_from_payload(item: dict[str, object]) -> Finding:
         description=str(item.get("description", "")),
         recommendation=str(item.get("recommendation", "")),
         resource=str(item.get("resource", "")),
+        verification_status=str(item.get("verification_status", "confirmed")),
+        verification_note=str(item.get("verification_note", "")),
     )
 
 
@@ -1943,10 +1948,30 @@ def render_html_pair(
         count=1,
         flags=re.DOTALL,
     )
+    main_html = main_html.replace(
+        '<main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span>',
+        '<main><header class="report-brand"><div class="brand"><span class="koda-main-mark">K</span><span class="brand-copy"><strong>KODA</strong><span>Korean On-Device Auditor</span></span></div><div class="report-header-actions">',
+        1,
+    ).replace(
+        '</div><section class="koda-main-hero">',
+        '<span class="report-mode">STATIC ANALYSIS REPORT</span></div></header><section class="koda-main-hero">',
+        1,
+    )
     detail_html = _render_html_detail(payload, report_language).replace(
+        "</style>",
+        f"{_SOURCE_DETAIL_EXTRA_CSS}</style>",
+        1,
+    ).replace(
         '<div class="language-buttons"><button id="lang-ko" type="button">한국어</button>'
         '<button id="lang-en" type="button">English</button></div>',
         "",
+    )
+    detail_html = re.sub(
+        r'<header class="report-head"><div><small>(.*?)</small><h1>(.*?)</h1></div><span class="external-classification-badge">대외 비인가</span></header>',
+        r'<header class="report-brand"><div class="brand"><span class="source-detail-mark" aria-hidden="true">K</span><span class="brand-copy"><strong>KODA</strong><span>Korean On-Device Auditor</span></span></div><div class="report-header-actions"><span class="external-classification-badge">대외 비인가</span><span class="report-mode">STATIC ANALYSIS REPORT</span></div></header><div class="report-head-title"><small>\1</small><h1>\2</h1></div>',
+        detail_html,
+        count=1,
+        flags=re.DOTALL,
     )
     for value, label in (
         ("critical", "치명"),
@@ -2157,16 +2182,23 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         priority = f"Priority action: {_format_main_count(critical_count)} Critical · {_format_main_count(high_count)} High. Use the detailed report for file locations, source context, and remediation guidance."
     findings = _source_report_findings(payload, language)
     summary_heading = "소스 취약점 요약" if is_ko else "Source finding summary"
-    summary_intro = "파일·행·규칙별 핵심 결과입니다." if is_ko else "Key results by file, line, and rule."
+    summary_intro = "문맥 확인 결과와 추가 검토가 필요한 후보를 구분한 파일·행·규칙별 결과입니다." if is_ko else "Results by file, line, and rule, separating context-confirmed findings from review candidates."
     table_headers = (
         ("심각도", "규칙", "위치", "발견 내용", "기준")
         if is_ko
         else ("Severity", "Rule", "Location", "Finding", "Standard")
     )
-    grouped: dict[tuple[str, str], dict[str, object]] = {}
+    grouped: dict[tuple[str, str, str], dict[str, object]] = {}
     for item in findings:
-        key = (str(item.get("severity") or "info").lower(), str(item.get("rule_id") or "—"))
-        group = grouped.setdefault(key, {"severity": key[0], "rule_id": key[1], "items": []})
+        key = (
+            str(item.get("severity") or "info").lower(),
+            str(item.get("rule_id") or "—"),
+            str(item.get("verification_status") or "confirmed"),
+        )
+        group = grouped.setdefault(
+            key,
+            {"severity": key[0], "rule_id": key[1], "verification_status": key[2], "items": []},
+        )
         group["items"].append(item)
 
     table_rows_parts: list[str] = []
@@ -2177,8 +2209,13 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         standards = list(dict.fromkeys(_source_standard_text(payload, item, language) for item in group_items))
         severity = str(group["severity"])
         rule_id = str(group["rule_id"])
+        verification_status = str(group["verification_status"])
+        verification_label = _source_verification_label(verification_status, language)
         location_html = _source_collapsible_lines(locations, language)
-        finding_html = "<br>".join(html.escape(value) for value in finding_texts)
+        finding_html = (
+            f'<span class="source-verification source-verification--{html.escape(verification_status)}">{html.escape(verification_label)}</span><br>'
+            + "<br>".join(html.escape(value) for value in finding_texts)
+        )
         standard_html = f'<span class="source-criteria">{html.escape(chr(10).join(standards))}</span>'
         searchable = " ".join((severity, rule_id, *locations, *finding_texts, *standards)).casefold()
         table_rows_parts.append(
@@ -2213,6 +2250,13 @@ def _source_severity_label(severity: str, language: str) -> str:
     key = severity.lower()
     labels = {"critical": "치명", "high": "높음", "medium": "중간", "low": "낮음", "info": "정보"}
     return labels.get(key, severity) if language == "ko" else key.capitalize()
+
+
+def _source_verification_label(status: object, language: str) -> str:
+    confirmed = str(status or "confirmed") == "confirmed"
+    if language == "ko":
+        return "문맥 확인" if confirmed else "검토 필요"
+    return "Context confirmed" if confirmed else "Needs review"
 
 
 def _source_location(item: dict[str, object]) -> str:
@@ -2289,11 +2333,18 @@ def _source_standard_text(payload: dict[str, object], item: dict[str, object], l
     return str(item.get("category") or item.get("rule_id") or "—")
 
 
+_SOURCE_DETAIL_EXTRA_CSS = """
+.report-brand{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px;margin-bottom:22px;padding:10px 0 16px;border-bottom:1px solid #dce4ee}.report-brand .brand{display:flex;align-items:center;gap:12px}.source-detail-mark{display:grid;place-items:center;width:44px;height:44px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-size:18px;font-weight:900}.report-brand .brand-copy strong{display:block;color:#10233f;font-size:17px;letter-spacing:-.02em}.report-brand .brand-copy span{display:block;color:#60708a;font-size:12px;font-weight:500}.report-header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.report-mode{display:inline-flex;align-items:center;height:36px;padding:0 12px;border:1px solid #b8cdf1;border-radius:999px;color:#0b3b89;background:#edf4ff;font-size:11px;font-weight:800;letter-spacing:.04em}.report-head-title{display:grid;gap:3px;margin-bottom:20px}.report-head-title small{color:#60708a;font-weight:800;letter-spacing:.04em}.report-head-title h1{margin:0;font-size:clamp(28px,4vw,46px);letter-spacing:-.04em}.external-classification-badge{display:inline-flex;align-items:center;min-height:46px;margin-left:0;padding:9px 18px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:14px;font-weight:900;letter-spacing:.06em;white-space:nowrap}
+.source-verification{display:inline-flex;padding:3px 7px;border-radius:999px;background:#e8f4ff;color:#0b3b89;font-size:10px;font-weight:850}.source-verification--needs_review{background:#fff4d6;color:#7a5400}
+@media(max-width:760px){.report-brand{align-items:flex-start;flex-wrap:wrap}.external-classification-badge{margin-left:0}}
+"""
+
+
 _SOURCE_MAIN_EXTRA_CSS = """
-.source-main-filters{display:grid;grid-template-columns:minmax(240px,1.6fr) repeat(3,minmax(150px,1fr));gap:10px;margin:18px 0 0;padding:14px;border:1px solid #dce4ee;border-radius:16px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}
+.report-brand{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:26px}.report-brand .brand{display:flex;align-items:center;gap:12px}.report-brand .brand-copy strong{display:block;color:#10233f;font-size:17px;letter-spacing:-.02em}.report-brand .brand-copy span{display:block;color:#60708a;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none}.report-header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.report-mode{display:inline-flex;align-items:center;height:36px;padding:0 12px;border:1px solid #b8cdf1;border-radius:999px;color:#0b3b89;background:#edf4ff;font-size:11px;font-weight:800;letter-spacing:.04em}.report-brand .koda-main-classification-badge{margin-left:0}.koda-main-classification-badge{min-height:46px;padding:9px 18px;font-size:14px}.source-main-filters{display:grid;grid-template-columns:minmax(240px,1.6fr) repeat(3,minmax(150px,1fr));gap:10px;margin:18px 0 0;padding:14px;border:1px solid #dce4ee;border-radius:16px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}
 .source-main-filters label{display:grid;gap:5px;color:#60708a;font-size:11px;font-weight:800}.source-main-filters input,.source-main-filters select{width:100%;min-height:42px;border:1px solid #cbd6e5;border-radius:10px;padding:0 11px;background:#fff;color:#10233f}.source-main-filter-count{grid-column:1/-1;color:#60708a;font-size:12px}.source-severity-panel{margin:18px 0 0;padding:20px;border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}.source-severity-panel h2{margin:0;font-size:18px}.source-severity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.source-severity-card{min-width:0;padding:14px;border:1px solid #e7edf4;border-radius:12px;background:#f8fafc}.source-severity-card strong{display:block;font-size:12px}.source-severity-card b{display:block;margin-top:3px;font-size:22px}.source-severity-locations{margin-top:8px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}@media(max-width:820px){.source-main-filters{grid-template-columns:1fr 1fr}.source-severity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.source-main-filters{grid-template-columns:1fr}.source-severity-grid{grid-template-columns:1fr}}
-.source-summary-table th:first-child,.source-summary-table td:first-child{min-width:92px;white-space:nowrap}
-.source-summary-table{table-layout:fixed}.source-summary-table th{position:relative}.source-criteria{display:block;white-space:pre-line}.source-location-list{display:grid;gap:5px}.source-location-list code{overflow-wrap:anywhere}.source-collapse-item[hidden],.source-collapse-toggle[hidden]{display:none!important}.source-collapse-controls{display:flex;gap:6px;margin-top:2px}.source-collapse-toggle{min-height:30px;padding:0 8px;border:1px solid #cbd6e5;border-radius:8px;color:#0b3b89;background:#fff;cursor:pointer;font-size:11px;font-weight:750}.source-severity-details{margin-top:8px}.source-severity-details summary{color:#0b3b89;font-size:11px;font-weight:800;cursor:pointer}.source-severity-locations{margin-top:7px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.column-resizer{position:absolute;top:0;right:-5px;z-index:3;width:10px;height:100%;cursor:col-resize;touch-action:none;user-select:none}.column-resizer::after{content:"";position:absolute;top:24%;bottom:24%;left:4px;width:2px;border-radius:2px;background:transparent}.column-resizer:hover::after,.column-resizer:focus-visible::after{background:#1368e8}
+.source-summary-wrap{overflow:auto;padding:0 20px 20px}.source-summary-table{border-left:1px solid #dce4ee;border-right:1px solid #dce4ee}.source-summary-table th:first-child,.source-summary-table td:first-child{min-width:92px;white-space:nowrap}
+.source-summary-table{table-layout:fixed}.source-summary-table th{position:relative}.source-criteria{display:block;white-space:pre-line}.source-verification{display:inline-flex;margin-top:6px;padding:3px 7px;border-radius:999px;background:#e8f4ff;color:#0b3b89;font-size:10px;font-weight:850}.source-verification--needs_review{background:#fff4d6;color:#7a5400}.source-location-list{display:grid;gap:5px}.source-location-list code{overflow-wrap:anywhere}.source-collapse-item[hidden],.source-collapse-toggle[hidden]{display:none!important}.source-collapse-controls{display:flex;gap:6px;margin-top:2px}.source-collapse-toggle{min-height:30px;padding:0 8px;border:1px solid #cbd6e5;border-radius:8px;color:#0b3b89;background:#fff;cursor:pointer;font-size:11px;font-weight:750}.source-severity-details{margin-top:8px}.source-severity-details summary{color:#0b3b89;font-size:11px;font-weight:800;cursor:pointer}.source-severity-locations{margin-top:7px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.column-resizer{position:absolute;top:0;right:-5px;z-index:3;width:10px;height:100%;cursor:col-resize;touch-action:none;user-select:none}.column-resizer::after{content:"";position:absolute;top:24%;bottom:24%;left:4px;width:2px;border-radius:2px;background:transparent}.column-resizer:hover::after,.column-resizer:focus-visible::after{background:#1368e8}
 """
 
 
@@ -2368,7 +2419,7 @@ def _render_html_detail(payload: dict[str, object], language: str) -> str:
         search = " ".join(str(item.get(key) or "") for key in ("title", "rule_id", "path", "evidence", "description")).lower()
         cards.append(
             f'<article class="finding" data-severity="{html.escape(severity)}" data-location="{html.escape(location.rsplit(":", 1)[0], quote=True)}" data-search="{html.escape(search, quote=True)}">'
-            f'<header><div><span class="source-severity source-severity--{html.escape(severity)}">{html.escape(_source_severity_label(severity, language))}</span> <code>{html.escape(str(item.get("rule_id") or ""))}</code></div><strong>#{index}</strong></header>'
+            f'<header><div><span class="source-severity source-severity--{html.escape(severity)}">{html.escape(_source_severity_label(severity, language))}</span> <code>{html.escape(str(item.get("rule_id") or ""))}</code> <span class="source-verification source-verification--{html.escape(str(item.get("verification_status") or "confirmed"))}">{html.escape(_source_verification_label(item.get("verification_status"), language))}</span></div><strong>#{index}</strong></header>'
             f'<h2>{html.escape(str(item.get("title") or item.get("evidence") or "—"))}</h2><p class="location"><code>{html.escape(location)}</code></p>'
             f'<section><h3>{html.escape(problem)}</h3><p>{html.escape(str(item.get("description") or item.get("evidence") or "—"))}</p></section>'
             f'<section><h3>{html.escape(evidence_label)}</h3><pre>{html.escape(str(item.get("evidence") or "—"))}</pre></section>'
@@ -2591,6 +2642,8 @@ def _finding_payload(finding: Finding) -> dict[str, object]:
         "recommendation": finding.recommendation,
         "resource": finding.resource,
         "reachable": finding.reachable,
+        "verification_status": finding.verification_status,
+        "verification_note": finding.verification_note,
         "triage_verdict": finding.triage_verdict,
         "triage_confidence": finding.triage_confidence,
         "triage_note": finding.triage_note,
@@ -2621,12 +2674,16 @@ def _summary(
     by_target = Counter({target: 0 for target in target_names})
     by_target.update(finding.target for finding in findings)
     by_severity = Counter(finding.severity for finding in findings)
-    risk_score = sum(by_severity[severity] * SEVERITY_WEIGHTS[severity] for severity in SEVERITIES)
+    confirmed_by_severity = Counter(
+        finding.severity for finding in findings if finding.verification_status == "confirmed"
+    )
+    risk_score = sum(confirmed_by_severity[severity] * SEVERITY_WEIGHTS[severity] for severity in SEVERITIES)
     resolved_target_paths = dict(target_paths or {})
     return {
         "target_count": len(target_names) if target_names else len({finding.target for finding in findings if finding.target}),
         "risk_score": risk_score,
         "by_severity": dict(by_severity),
+        "by_verification": dict(Counter(finding.verification_status for finding in findings)),
         "by_category": dict(Counter(finding.category for finding in findings)),
         "by_target": dict(by_target),
         "target_paths": resolved_target_paths,
@@ -2692,6 +2749,8 @@ def _sarif_result(finding: Finding) -> dict[str, object]:
             "severity": finding.severity,
             "target": finding.target,
             "evidence": finding.evidence,
+            "verification_status": finding.verification_status,
+            "verification_note": finding.verification_note,
         },
     }
 
@@ -4084,7 +4143,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     function riskScore(items) {
       const weights = { critical: 100, high: 40, medium: 10, low: 3, info: 1 };
-      return items.reduce((total, item) => total + (weights[item.severity] || 0), 0);
+      return items.reduce((total, item) => total + (item.verification_status === "confirmed" ? (weights[item.severity] || 0) : 0), 0);
     }
 
     function labels() {
