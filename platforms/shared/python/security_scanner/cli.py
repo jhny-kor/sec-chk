@@ -734,7 +734,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--format", choices=("markdown", "json", "html", "sarif", "cyclonedx", "cyclonedx-vex"), help="report format")
     scan.add_argument("--output", type=Path, help="report output path")
-    scan.add_argument("--language", choices=("en", "ko"), help="report display language")
+    scan.add_argument("--language", choices=("ko",), default="ko", help="report language (Korean only)")
     scan.add_argument("--min-severity", choices=SEVERITIES, help="minimum severity to include")
     scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
     scan.add_argument("--max-file-size", type=int, help="maximum file size to scan in bytes")
@@ -796,7 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
     jar_scan.add_argument("--grype-bin", help="Grype executable; no automatic download")
     jar_scan.add_argument("--nvd-data", help="NVD JSON 2.0 file, .json.gz file, or directory")
     jar_scan.add_argument("--cisa-kev", help="CISA known_exploited_vulnerabilities.json")
-    jar_scan.add_argument("--language", choices=("ko", "en"), default=None, help="report language; omit for a Korean HTML report with a Korean/English toggle")
+    jar_scan.add_argument("--language", choices=("ko",), default="ko", help="report language (Korean only)")
     jar_scan.add_argument("--exclude", action="append", default=[], help="archive relative-path/name glob to skip")
     jar_scan.add_argument("--max-depth", type=_positive_int, help="optional nested archive depth limit; the default scans all depths")
     jar_scan.add_argument("--timeout", type=_positive_float, default=300.0, help="Syft/Grype timeout in seconds")
@@ -1121,7 +1121,7 @@ def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | N
         format=args.format or "markdown",
         output=args.output.resolve() if args.output else None,
         min_severity=args.min_severity or "low",
-        language=args.language or "en",
+        language=args.language or "ko",
     )
     enable_vuln_intel = bool(getattr(args, "enable_vuln_intel", False))
     return ScannerConfig(

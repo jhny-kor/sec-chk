@@ -103,7 +103,7 @@ def _report_from_dict(raw: dict[str, Any], base_dir: Path) -> ReportConfig:
     if min_severity not in SEVERITIES:
         raise ConfigError(f"Unknown min_severity: {min_severity}")
 
-    language = str(raw.get("language", "en")).lower()
+    language = str(raw.get("language", "ko")).lower()
     if language not in SUPPORTED_LANGUAGES:
         raise ConfigError("report.language must be 'en' or 'ko'.")
 

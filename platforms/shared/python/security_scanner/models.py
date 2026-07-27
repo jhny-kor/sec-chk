@@ -79,7 +79,7 @@ class ReportConfig:
     format: str = "markdown"
     output: Path | None = None
     min_severity: str = "low"
-    language: str = "en"
+    language: str = "ko"
 
 
 @dataclass(frozen=True)

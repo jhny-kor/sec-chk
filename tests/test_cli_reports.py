@@ -53,6 +53,15 @@ class CliReportTests(unittest.TestCase):
         help_text = build_parser()._subparsers._group_actions[0].choices["jar-scan"].format_help()
         self.assertIn("repeat for multiple roots", help_text)
 
+    def test_scan_reports_accept_korean_language_only(self) -> None:
+        parser = build_parser()
+        self.assertEqual(parser.parse_args(["scan", "--target", "."]).language, "ko")
+        self.assertEqual(parser.parse_args(["jar-scan", "--target", "."]).language, "ko")
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["scan", "--target", ".", "--language", "en"])
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["jar-scan", "--target", ".", "--language", "en"])
+
     def test_source_html_writes_main_and_detail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -79,11 +88,13 @@ class CliReportTests(unittest.TestCase):
             self.assertTrue(output.is_file())
             self.assertTrue(detail.is_file())
             main_html = output.read_text(encoding="utf-8")
-            self.assertNotIn("source-detail.html", main_html)
-            self.assertIn("Total findings", main_html)
-            self.assertIn("Critical", main_html)
-            self.assertIn("Priority action", main_html)
-            self.assertIn("Source finding summary", main_html)
+            self.assertIn('href="source-detail.html"', main_html)
+            self.assertIn("상세 보고서 더보기", main_html)
+            self.assertIn("전체 취약점", main_html)
+            self.assertIn("치명", main_html)
+            self.assertIn("우선 조치", main_html)
+            self.assertIn("소스 취약점 요약", main_html)
+            self.assertIn("max-width:1560px", main_html)
             self.assertIn('class="source-summary-table"', main_html)
             self.assertIn("code.sql-dynamic-query", main_html)
             self.assertIn("source.py:1", main_html)
@@ -98,22 +109,24 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("code.sql-dynamic-query", detail_html)
             self.assertNotIn('href="source.html"', detail_html)
             self.assertIn("source-detail-guide-open", detail_html)
-            self.assertIn("Analysis standards guide", detail_html)
-            self.assertIn("Source Code Vulnerability Detail", detail_html)
+            self.assertIn("분석 기준 안내", detail_html)
+            self.assertIn("소스코드 취약점 상세", detail_html)
             self.assertIn('class="finding"', detail_html)
-            self.assertIn("Problem description", detail_html)
-            self.assertIn("Remediation", detail_html)
+            self.assertIn("문제 설명", detail_html)
+            self.assertIn("조치 방법", detail_html)
             self.assertNotIn('id="settings-toggle"', detail_html)
             self.assertNotIn('id="web-scan-run"', detail_html)
             self.assertIn("대외 비인가", detail_html)
             self.assertIn("external-classification-badge", detail_html)
-            self.assertLess(detail_html.index("대외 비인가"), detail_html.index('id="lang-ko"'))
+            self.assertNotIn('id="lang-ko"', detail_html)
+            self.assertNotIn('id="lang-en"', detail_html)
+            self.assertIn("max-width:1560px", detail_html)
             self.assertIn("border-radius: 0", detail_html)
             self.assertIn("background: none", detail_html)
             self.assertIn('source_context', detail_html)
             self.assertIn("source-code-line", detail_html)
             self.assertIn('id="location"', detail_html)
-            self.assertIn("All locations", detail_html)
+            self.assertIn("전체 위치", detail_html)
 
     def test_source_html_redacts_secret_context_and_embedded_payload(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
