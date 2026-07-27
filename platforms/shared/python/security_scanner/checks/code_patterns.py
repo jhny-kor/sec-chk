@@ -55,15 +55,30 @@ class CodePatternRule:
     extensions: frozenset[str] = frozenset(CODE_EXTENSIONS)
 
 
-UNTRUSTED_SOURCE = (
-    r"(?:\b(?:req|request|ctx)\s*(?:\.|\[)|\$_(?:GET|POST|REQUEST|FILES)\b|"
-    r"\blocation\.(?:hash|search|href)\b|\binput\s*\(|\bsys\.argv\b|\bARGV\b)"
+# Remote, attacker-supplied input. `ctx` needs a request-shaped member: a bare
+# `ctx.` also matches a canvas 2D context, a crypto context, and most other
+# graphics or codec handles.
+REMOTE_SOURCE = (
+    r"\b(?:req|request)\s*(?:\.|\[)|"
+    r"\bctx\s*(?:\.\s*(?:request|req|query|params|body|headers|cookies)\b|\[)|"
+    r"\$_(?:GET|POST|REQUEST|FILES)\b|"
+    r"\blocation\.(?:hash|search|href)\b"
 )
+# Operator-supplied input. Reading the file named on your own command line is
+# what a CLI is for, so these raise review candidates but never confirm a flow.
+LOCAL_SOURCE = r"\binput\s*\(|\bsys\.argv\b|\bARGV\b"
+UNTRUSTED_SOURCE = rf"(?:{REMOTE_SOURCE}|{LOCAL_SOURCE})"
 LOGGING_API = (
     r"(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|"
     r"logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))"
 )
-SENSITIVE_NAME = r"(pass" r"(word)?|pwd|secret|token|api[_-]?key|authorization|credential|session|cookie)"
+# Bounded so `passed`, `bypass`, `tokenize` and `cache_token` are not secrets,
+# while the compound names that really do carry credentials still match.
+SENSITIVE_NAME = (
+    r"\b(?:pass" r"(?:word)?|passwd|pwd|secret|credentials?|authorization|"
+    r"(?:access|refresh|auth|id|bearer|csrf|xsrf|session)[_-]?tokens?|tokens?|"
+    r"api[_-]?keys?|secret[_-]?keys?|private[_-]?keys?|session[_-]?ids?|sessions?|cookies?)\b"
+)
 XML_PARSER_API = (
     r"(Document" r"BuilderFactory|SAX" r"ParserFactory|Xml" r"ReaderSettings|Xml" r"Document)"
 )
@@ -112,7 +127,8 @@ CODE_PATTERN_RULES = (
         "Potential path traversal",
         "medium",
         re.compile(
-            rf"\b(open|send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync)\s*"
+            rf"(?:(?<![.\w])open|\b(?:os|io|codecs|shutil|aiofiles)\.open|"
+            rf"\b(?:send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync))\s*"
             rf"\([^#\n]*({UNTRUSTED_SOURCE}|path\.join\([^)]*(req|request|params|query)|\.\.)",
             re.IGNORECASE,
         ),
@@ -151,7 +167,11 @@ CODE_PATTERN_RULES = (
         "Potential code injection through eval-like API",
         "high",
         re.compile(
-            rf"\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\([^#\n]*{UNTRUSTED_SOURCE}",
+            # setTimeout/setInterval only execute code when their first argument
+            # is a string; a callback that merely mentions `request` is normal.
+            # `Function` stays case-sensitive: the JS `function` keyword is not a sink.
+            rf"(?:\b(?:eval|exec|(?-i:Function)|instance_eval|class_eval)\s*\([^#\n]*{UNTRUSTED_SOURCE}"
+            rf"|\b(?:setTimeout|setInterval)\s*\(\s*[\"'`][^#\n]*{UNTRUSTED_SOURCE})",
             re.IGNORECASE,
         ),
         "User-controlled input appears to reach an eval-like code execution API.",
@@ -615,10 +635,9 @@ _JAVA_XML_UNTRUSTED_INPUT = re.compile(
 )
 
 
-def _java_document_builder_xxe_findings(path: Path, lines: list[str]) -> list[Finding]:
+def _java_document_builder_xxe_findings(path: Path, lines: list[str], analysis_lines: list[str]) -> list[Finding]:
     """Find DocumentBuilder XXE paths only when an unsafe builder reaches untrusted XML."""
     findings: list[Finding] = []
-    analysis_lines = _strip_java_comments(lines)
 
     for factory_index, raw_line in enumerate(analysis_lines):
         factory_match = _JAVA_XML_FACTORY.search(raw_line)
@@ -693,24 +712,70 @@ def _java_document_builder_xxe_findings(path: Path, lines: list[str]) -> list[Fi
     return findings
 
 
-def _strip_java_comments(lines: list[str]) -> list[str]:
+_SLASH_COMMENT_SUFFIXES = frozenset(
+    {
+        ".c", ".cc", ".cpp", ".cs", ".cxx", ".go", ".h", ".hpp", ".java", ".js",
+        ".jsx", ".kt", ".php", ".rs", ".swift", ".ts", ".tsx", ".vue",
+    }
+)
+_HASH_COMMENT_SUFFIXES = frozenset({".conf", ".config", ".php", ".properties", ".py", ".rb"})
+_HTML_COMMENT_SUFFIXES = frozenset({".html", ".jsp", ".vue", ".xml"})
+_TRIPLE_QUOTE_SUFFIXES = frozenset({".py"})
+_BACKTICK_STRING_SUFFIXES = frozenset({".go", ".js", ".jsx", ".ts", ".tsx", ".vue"})
+
+
+def _code_view(lines: list[str], suffix: str) -> list[str]:
+    """Return the file with comments removed, keeping line numbers aligned.
+
+    Every rule runs against this view instead of the raw line so that
+    commented-out code, block comments, and multi-line docstrings are never
+    reported as live findings. String *contents* are preserved because rules
+    such as dynamic-SQL detection need the literal text; only multi-line
+    string bodies (Python docstrings) are dropped, since a rule cannot tell
+    prose from code inside them.
+    """
+    line_tokens: tuple[str, ...] = ()
+    if suffix in _SLASH_COMMENT_SUFFIXES:
+        line_tokens += ("//",)
+    if suffix in _HASH_COMMENT_SUFFIXES:
+        line_tokens += ("#",)
+    block_open, block_close = ("/*", "*/") if suffix in _SLASH_COMMENT_SUFFIXES else ("", "")
+    html_comments = suffix in _HTML_COMMENT_SUFFIXES
+    triples = ('"""', "'''") if suffix in _TRIPLE_QUOTE_SUFFIXES else ()
+    quotes = {'"', "'"} | ({"`"} if suffix in _BACKTICK_STRING_SUFFIXES else set())
+
+    if not line_tokens and not block_open and not html_comments:
+        return lines
+
     stripped: list[str] = []
-    in_block_comment = False
+    open_block: str | None = None
+    open_triple: str | None = None
+
     for raw_line in lines:
         output: list[str] = []
+        # Single-quote strings never span lines in these languages, so quote
+        # state must reset per line or one stray apostrophe blinds the rest.
         quote: str | None = None
         escaped = False
         index = 0
+        # Indexed scanning, never slicing: a minified line is a single very long
+        # line, and `raw_line[index:]` per character makes that quadratic.
         while index < len(raw_line):
-            current = raw_line[index]
-            following = raw_line[index + 1] if index + 1 < len(raw_line) else ""
-            if in_block_comment:
-                if current == "*" and following == "/":
-                    in_block_comment = False
-                    index += 2
-                else:
-                    index += 1
+            if open_triple is not None:
+                end = raw_line.find(open_triple, index)
+                if end < 0:
+                    break
+                index = end + len(open_triple)
+                open_triple = None
                 continue
+            if open_block is not None:
+                end = raw_line.find(open_block, index)
+                if end < 0:
+                    break
+                index = end + len(open_block)
+                open_block = None
+                continue
+            current = raw_line[index]
             if quote:
                 output.append(current)
                 if escaped:
@@ -721,16 +786,36 @@ def _strip_java_comments(lines: list[str]) -> list[str]:
                     quote = None
                 index += 1
                 continue
-            if current in {'"', "'"}:
+            triple = next((token for token in triples if raw_line.startswith(token, index)), None)
+            if triple is not None:
+                end = raw_line.find(triple, index + len(triple))
+                if end < 0:
+                    open_triple = triple
+                    break
+                # Opened and closed on one line: a normal string literal.
+                output.append(raw_line[index : end + len(triple)])
+                index = end + len(triple)
+                continue
+            if any(raw_line.startswith(token, index) for token in line_tokens):
+                break
+            if block_open and raw_line.startswith(block_open, index):
+                end = raw_line.find(block_close, index + len(block_open))
+                if end < 0:
+                    open_block = block_close
+                    break
+                index = end + len(block_close)
+                continue
+            if html_comments and raw_line.startswith("<!--", index):
+                end = raw_line.find("-->", index + 4)
+                if end < 0:
+                    open_block = "-->"
+                    break
+                index = end + 3
+                continue
+            if current in quotes:
                 quote = current
                 output.append(current)
                 index += 1
-                continue
-            if current == "/" and following == "/":
-                break
-            if current == "/" and following == "*":
-                in_block_comment = True
-                index += 2
                 continue
             output.append(current)
             index += 1
@@ -797,7 +882,15 @@ _ASSIGNMENT = re.compile(
     r"(?:(?:[A-Za-z_$][\w$<>\[\].,?]*\s+))?"
     r"([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(.+)$"
 )
-_UNTRUSTED = re.compile(UNTRUSTED_SOURCE, re.IGNORECASE)
+# The confirming dataflow pass only follows remote input; a local CLI argument
+# is not enough evidence to call a flow proven.
+_UNTRUSTED = re.compile(rf"(?:{REMOTE_SOURCE})", re.IGNORECASE)
+# Mass assignment is about binding a whole request body onto a model, not about
+# any call that happens to mention the request.
+_REQUEST_BODY = re.compile(
+    r"\b(?:req|request)\s*\.\s*(?:body|data|json|POST|form|params|query|values)\b",
+    re.IGNORECASE,
+)
 _SANITIZERS = re.compile(
     r"\b(DOMPurify\.sanitize|sanitizeHtml|escapeHtml|html\.escape|encodeForHTML|"
     r"secure_filename|Path\.GetFileName|basename|realpath|canonicalPath|"
@@ -810,8 +903,11 @@ _CONTEXT_SINKS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("code.sql-dynamic-query", re.compile(r"\b(execute|executemany|query|raw|prepareStatement|createQuery)\s*\(", re.IGNORECASE)),
     ("code.xss-dom-sink", re.compile(r"\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML)\b", re.IGNORECASE)),
     ("code.command-injection", re.compile(r"\b(os\.system|os\.popen|subprocess\.(?:run|call|Popen|check_output)|child_process\.(?:exec|execSync)|shell_exec|passthru|Runtime\.getRuntime\(\)\.exec)\s*\(", re.IGNORECASE)),
-    ("code.path-traversal", re.compile(r"\b(open|send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync)\s*\(", re.IGNORECASE)),
-    ("code.eval-user-input", re.compile(r"\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\(", re.IGNORECASE)),
+    # Bare `open(` or an explicit filesystem module only: `self.parent.open()`
+    # in a URL opener is not a file API.
+    ("code.path-traversal", re.compile(r"(?<![.\w])open\s*\(|\b(?:os|io|codecs|shutil|aiofiles)\.open\s*\(|\b(send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync)\s*\(", re.IGNORECASE)),
+    ("code.eval-user-input", re.compile(r"\b(eval|exec|(?-i:Function)|instance_eval|class_eval)\s*\(", re.IGNORECASE)),
+    ("code.eval-user-input", re.compile(r"\b(?:setTimeout|setInterval)\s*\(\s*[\"'`]", re.IGNORECASE)),
     ("code.ssrf-user-url", re.compile(r"\b(requests\.(?:get|post|put|patch|delete|request)|httpx\.(?:get|post|put|patch|delete|request)|urllib\.request\.urlopen|axios\.(?:get|post|put|patch|delete)|fetch|http\.get|https\.get|RestTemplate|WebClient)\b", re.IGNORECASE)),
     ("code.open-redirect-user-input", re.compile(r"\b(sendRedirect|redirect|(?:res|response|ctx)\.redirect)\s*\(", re.IGNORECASE)),
     (
@@ -829,6 +925,26 @@ _CONTEXT_SINKS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("code.xml-injection", re.compile(r"(?:<[A-Za-z][\w:-]*>|XML|Document)\b.*(?:\+|%|\.format\(|\$\{)", re.IGNORECASE)),
     ("code.llm-prompt-user-concat", re.compile(r"\b(system|developer|prompt|messages?)\b.*(?:\+|f[\"']|`\$\{)", re.IGNORECASE)),
 )
+
+
+# Rules that match a sensitive *word*. Plain English inside a string literal
+# ("session established") is prose, not data being logged, so these rules are
+# re-checked against the line with literal prose removed.
+_PROSE_SENSITIVE_RULES = frozenset(
+    {"code.logging-sensitive-data", "code.pii-logging", "code.llm-sensitive-data-in-prompt"}
+)
+_STRING_LITERAL = re.compile(r"(['\"`])(?:\\.|(?!\1).)*?\1")
+# Only interpolated expressions stay. A bare label inside a literal is prose:
+# `"shlex: token="` is a debug caption, not a credential reaching the log.
+_LITERAL_KEEP = re.compile(r"\$\{[^}]*\}|\{[^{}]*\}")
+
+
+def _mask_literal_prose(line: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        kept = " ".join(item.group(0) for item in _LITERAL_KEEP.finditer(match.group(0)))
+        return f'"{kept}"'
+
+    return _STRING_LITERAL.sub(replace, line)
 
 
 def _contains_name(expression: str, names: set[str]) -> bool:
@@ -950,9 +1066,17 @@ def _candidate_is_suppressed(
         r"\b(requireAuth|requireAdmin|authenticate|authorize|isAuthenticated|checkPermission)\b", line, re.IGNORECASE
     ):
         return True
-    if rule_id == "code.weak-hash" and re.search(
-        r"\b(checksum|etag|cache[_-]?key|content[_-]?hash|file[_-]?hash)\b", nearby, re.IGNORECASE
+    # `usedforsecurity=False` is the caller declaring this hash is not a
+    # security control; `\b` would miss `file_checksum`, because `_` is itself
+    # a word character.
+    if rule_id == "code.weak-hash" and (
+        re.search(r"usedforsecurity\s*=\s*False", line, re.IGNORECASE)
+        or re.search(
+            r"\w*(?:checksum|etag|cache[_-]?key|content[_-]?hash|file[_-]?hash)\w*", nearby, re.IGNORECASE
+        )
     ):
+        return True
+    if rule_id in _PROSE_SENSITIVE_RULES and not _RULE_BY_ID[rule_id].pattern.search(_mask_literal_prose(line)):
         return True
     if rule_id == "code.external-api-no-timeout" and re.search(
         r"\b(timeout|signal|AbortController)\s*[:=]", nearby, re.IGNORECASE
@@ -965,7 +1089,92 @@ def _candidate_is_suppressed(
     return False
 
 
-def _contextual_dataflow_findings(path: Path, lines: list[str]) -> list[Finding]:
+_MAX_CONTINUATION_LINES = 4
+
+
+def _open_depth(text: str) -> int:
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for char in text:
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {'"', "'", "`"}:
+            quote = char
+        elif char in {"(", "["}:
+            depth += 1
+        elif char in {")", "]"}:
+            depth -= 1
+    return depth
+
+
+def _logical_lines(code_lines: list[str]) -> list[str]:
+    """Join argument lists that continue onto following lines.
+
+    A statement split over several lines is still one statement, and matching
+    each fragment alone is exactly the single-line reading this scanner avoids.
+    A line ending in ``{`` opens a block rather than an argument list, so a
+    route handler is never merged into its own declaration.
+    """
+    joined: list[str] = []
+    for index, line in enumerate(code_lines):
+        text = line
+        if not line.rstrip().endswith("{"):
+            cursor = index
+            while (
+                _open_depth(text) > 0
+                and cursor + 1 < len(code_lines)
+                and cursor - index < _MAX_CONTINUATION_LINES
+            ):
+                cursor += 1
+                text = f"{text} {code_lines[cursor].strip()}"
+        joined.append(text)
+    return joined
+
+
+def _call_arguments(line: str, call_end: int) -> str | None:
+    """Return the argument text of a call whose name ends at ``call_end``.
+
+    Returns ``None`` when the sink is not a call (for example an ``innerHTML``
+    assignment) so the caller can fall back to line scope.
+    """
+    cursor = call_end
+    while cursor < len(line) and line[cursor].isspace():
+        cursor += 1
+    if cursor >= len(line) or line[cursor] != "(":
+        return None
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for index in range(cursor, len(line)):
+        char = line[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {'"', "'", "`"}:
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return line[cursor + 1 : index]
+    # Unbalanced (call continues on the next line): treat the remainder as args.
+    return line[cursor + 1 :]
+
+
+def _contextual_dataflow_findings(path: Path, lines: list[str], code_lines: list[str]) -> list[Finding]:
     """Confirm simple intra-file source-to-sink flows and sanitizer boundaries.
 
     This intentionally stays conservative: aliases and direct assignments are
@@ -976,8 +1185,8 @@ def _contextual_dataflow_findings(path: Path, lines: list[str]) -> list[Finding]
     tainted: set[str] = set()
     sanitized: set[str] = set()
 
-    for line_number, raw_line in enumerate(lines, start=1):
-        line = raw_line.strip()
+    for line_number, code_line in enumerate(code_lines, start=1):
+        line = code_line.strip()
         if not line or _is_comment(line):
             continue
 
@@ -999,11 +1208,20 @@ def _contextual_dataflow_findings(path: Path, lines: list[str]) -> list[Finding]
             continue
 
         for rule_id, sink in _CONTEXT_SINKS:
-            if not sink.search(line):
+            match = sink.search(line)
+            if not match:
+                continue
+            # Taint anywhere on the line is not enough for a call sink: the
+            # untrusted value has to be an argument of that call, otherwise
+            # `ctx.save()` next to unrelated request handling reads as a flow.
+            arguments = _call_arguments(line, match.end())
+            if arguments is not None and not _has_unsanitized_taint(arguments, tainted):
                 continue
             if rule_id == "code.command-injection" and _safe_command_arguments(line):
                 continue
             if rule_id == "code.sql-dynamic-query" and _safe_sql_binding(line):
+                continue
+            if rule_id == "code.api-mass-assignment" and not _REQUEST_BODY.search(arguments or line):
                 continue
             rule = _RULE_BY_ID[rule_id]
             findings.append(
@@ -1014,7 +1232,7 @@ def _contextual_dataflow_findings(path: Path, lines: list[str]) -> list[Finding]
                     title=rule.title,
                     path=path,
                     line=line_number,
-                    evidence=_trim_evidence(line),
+                    evidence=_trim_evidence(lines[line_number - 1].strip()),
                     description=rule.description,
                     recommendation=rule.recommendation,
                     verification_status="confirmed",
@@ -1036,17 +1254,23 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
         return []
 
     suffix = path.suffix.lower()
-    findings = _java_document_builder_xxe_findings(path, lines) if suffix in {".java", ".kt"} else []
-    findings.extend(_contextual_dataflow_findings(path, lines))
+    # Every rule below reads the whole-file code view, not the raw line, so a
+    # single line is never judged out of its file context.
+    code_lines = _code_view(lines, suffix)
+    statements = _logical_lines(code_lines)
+    findings = (
+        _java_document_builder_xxe_findings(path, lines, code_lines) if suffix in {".java", ".kt"} else []
+    )
+    findings.extend(_contextual_dataflow_findings(path, lines, statements))
     per_rule_counts: dict[str, int] = {}
     seen_locations: set[tuple[str, int | None]] = set()
     for finding in findings:
         per_rule_counts[finding.rule_id] = per_rule_counts.get(finding.rule_id, 0) + 1
         seen_locations.add((finding.rule_id, finding.line))
-    document = "\n".join(lines)
+    document = "\n".join(code_lines)
     filename = path.name
-    for line_number, raw_line in enumerate(lines, start=1):
-        line = raw_line.strip()
+    for line_number, code_line in enumerate(statements, start=1):
+        line = code_line.strip()
         if not line or _is_comment(line):
             continue
         for rule in CODE_PATTERN_RULES:
@@ -1063,7 +1287,7 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
             if rule.pattern.search(line):
                 if (rule.rule_id, line_number) in seen_locations:
                     continue
-                if _candidate_is_suppressed(rule.rule_id, line, document, lines, line_number):
+                if _candidate_is_suppressed(rule.rule_id, line, document, code_lines, line_number):
                     continue
                 findings.append(
                     Finding(
@@ -1073,7 +1297,7 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
                         title=rule.title,
                         path=path,
                         line=line_number,
-                        evidence=_trim_evidence(line),
+                        evidence=_trim_evidence(lines[line_number - 1].strip()),
                         description=rule.description,
                         recommendation=rule.recommendation,
                         verification_status="needs_review",

@@ -1630,14 +1630,151 @@ final class NativeSecurityScanner {
         return [".cfg", ".conf", ".config", ".env", ".ini", ".json", ".properties", ".toml", ".yaml", ".yml"].contains(file.pathExtension.isEmpty ? "" : ".\(file.pathExtension.lowercased())")
     }
 
-    private func checkJavaDocumentBuilderXXE(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
+    /// Remote, attacker-supplied input. `req`/`request` must be *dereferenced*:
+    /// the bare word also appears in `urllib.request` and in ordinary prose.
+    private static let remoteSource = #"(?:\b(?:req|request)\s*(?:\.|\[)|\bctx\s*(?:\.\s*(?:request|req|query|params|body|headers|cookies)\b|\[)|\$_(?:GET|POST|REQUEST|FILES)\b|\blocation\.(?:hash|search|href)\b)"#
+
+    /// Bounded so `passed`, `bypass`, `tokenize` and `cache_token` are not
+    /// secrets, while the compound names that really do carry credentials match.
+    private static let sensitiveName = #"\b(?:pass(?:word)?|passwd|pwd|secret|credentials?|authorization|(?:access|refresh|auth|id|bearer|csrf|xsrf|session)[_-]?tokens?|tokens?|api[_-]?keys?|secret[_-]?keys?|private[_-]?keys?|session[_-]?ids?|sessions?|cookies?)\b"#
+
+    private static let slashCommentSuffixes: Set<String> = [
+        "c", "cc", "cpp", "cs", "cxx", "go", "h", "hpp", "java", "js",
+        "jsx", "kt", "php", "rs", "swift", "ts", "tsx", "vue"
+    ]
+    private static let hashCommentSuffixes: Set<String> = ["conf", "config", "php", "properties", "py", "rb"]
+    private static let htmlCommentSuffixes: Set<String> = ["html", "htm", "jsp", "jspx", "vue", "xml"]
+    private static let tripleQuoteSuffixes: Set<String> = ["py"]
+    private static let backtickStringSuffixes: Set<String> = ["go", "js", "jsx", "ts", "tsx", "vue"]
+
+    private func hasPrefix(_ needle: [Character], _ characters: [Character], at index: Int) -> Bool {
+        guard index >= 0, index + needle.count <= characters.count else { return false }
+        for offset in 0..<needle.count where characters[index + offset] != needle[offset] {
+            return false
+        }
+        return true
+    }
+
+    private func matchIndex(_ needle: [Character], _ characters: [Character], from start: Int) -> Int? {
+        guard !needle.isEmpty else { return nil }
+        var index = max(0, start)
+        while index + needle.count <= characters.count {
+            if hasPrefix(needle, characters, at: index) { return index }
+            index += 1
+        }
+        return nil
+    }
+
+    /// Returns the file with comments removed, keeping line numbers aligned.
+    ///
+    /// Every source rule runs against this view instead of the raw line, so
+    /// commented-out code, block comments and multi-line docstrings are never
+    /// reported as live findings. String *contents* are preserved because rules
+    /// such as dynamic-SQL detection need the literal text; only multi-line
+    /// string bodies are dropped, since a rule cannot tell prose from code there.
+    private func codeView(lines: [String], suffix: String) -> [String] {
+        var lineTokens: [[Character]] = []
+        if Self.slashCommentSuffixes.contains(suffix) { lineTokens.append(Array("//")) }
+        if Self.hashCommentSuffixes.contains(suffix) { lineTokens.append(Array("#")) }
+        let blockOpen = Array("/*")
+        let blockClose = Array("*/")
+        let htmlOpen = Array("<!--")
+        let htmlClose = Array("-->")
+        let hasBlockComment = Self.slashCommentSuffixes.contains(suffix)
+        let hasHTMLComment = Self.htmlCommentSuffixes.contains(suffix)
+        let triples: [[Character]] = Self.tripleQuoteSuffixes.contains(suffix)
+            ? [Array("\"\"\""), Array("'''")]
+            : []
+        var quotes: Set<Character> = ["\"", "'"]
+        if Self.backtickStringSuffixes.contains(suffix) { quotes.insert("`") }
+        guard !lineTokens.isEmpty || hasBlockComment || hasHTMLComment else { return lines }
+
+        var stripped: [String] = []
+        stripped.reserveCapacity(lines.count)
+        var openBlock: [Character]?
+        var openTriple: [Character]?
+
+        for rawLine in lines {
+            let characters = Array(rawLine)
+            var output = ""
+            // Single-quote strings never span lines in these languages, so quote
+            // state resets per line or one stray apostrophe blinds the rest.
+            var quote: Character?
+            var escaped = false
+            var index = 0
+            while index < characters.count {
+                if let triple = openTriple {
+                    guard let end = matchIndex(triple, characters, from: index) else { break }
+                    index = end + triple.count
+                    openTriple = nil
+                    continue
+                }
+                if let close = openBlock {
+                    guard let end = matchIndex(close, characters, from: index) else { break }
+                    index = end + close.count
+                    openBlock = nil
+                    continue
+                }
+                let current = characters[index]
+                if let active = quote {
+                    output.append(current)
+                    if escaped {
+                        escaped = false
+                    } else if current == "\\" {
+                        escaped = true
+                    } else if current == active {
+                        quote = nil
+                    }
+                    index += 1
+                    continue
+                }
+                if let triple = triples.first(where: { hasPrefix($0, characters, at: index) }) {
+                    if let end = matchIndex(triple, characters, from: index + triple.count) {
+                        // Opened and closed on one line: an ordinary string literal.
+                        output.append(String(characters[index..<(end + triple.count)]))
+                        index = end + triple.count
+                        continue
+                    }
+                    openTriple = triple
+                    break
+                }
+                if lineTokens.contains(where: { hasPrefix($0, characters, at: index) }) {
+                    break
+                }
+                if hasBlockComment, hasPrefix(blockOpen, characters, at: index) {
+                    if let end = matchIndex(blockClose, characters, from: index + blockOpen.count) {
+                        index = end + blockClose.count
+                        continue
+                    }
+                    openBlock = blockClose
+                    break
+                }
+                if hasHTMLComment, hasPrefix(htmlOpen, characters, at: index) {
+                    if let end = matchIndex(htmlClose, characters, from: index + htmlOpen.count) {
+                        index = end + htmlClose.count
+                        continue
+                    }
+                    openBlock = htmlClose
+                    break
+                }
+                if quotes.contains(current) {
+                    quote = current
+                    output.append(current)
+                    index += 1
+                    continue
+                }
+                output.append(current)
+                index += 1
+            }
+            stripped.append(output)
+        }
+        return stripped
+    }
+
+    private func checkJavaDocumentBuilderXXE(lines: [String], codeLines: [String], file: URL, displayPath: String) -> [NativeFinding] {
         guard ["java", "kt"].contains(file.pathExtension.lowercased()) else { return [] }
 
         let factoryPattern = #"(?i)\b(?:DocumentBuilderFactory\s+)?([A-Za-z_$][\w$]*)\s*=\s*DocumentBuilderFactory\s*\.\s*newInstance\s*\(\s*\)"#
-        let codeLines = lines.map { line -> String in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            return trimmed.hasPrefix("//") || trimmed.hasPrefix("/*") || trimmed.hasPrefix("*") ? "" : line
-        }
         var findings: [NativeFinding] = []
 
         for factoryIndex in codeLines.indices {
@@ -1728,16 +1865,116 @@ final class NativeSecurityScanner {
             && entityExpansion == false
     }
 
-    private func checkContextualSourceFlows(lines: [String], displayPath: String) -> [NativeFinding] {
-        let untrusted = #"(?i)(?:\b(?:req|request|ctx)\s*(?:\.|\[)|\$_(?:GET|POST|REQUEST|FILES)\b|\blocation\.(?:hash|search|href)\b|\binput\s*\(|\bsys\.argv\b|\bARGV\b)"#
+    private func openDepth(_ text: String) -> Int {
+        var depth = 0
+        var quote: Character?
+        var escaped = false
+        for character in text {
+            if let active = quote {
+                if escaped {
+                    escaped = false
+                } else if character == "\\" {
+                    escaped = true
+                } else if character == active {
+                    quote = nil
+                }
+                continue
+            }
+            if character == "\"" || character == "'" || character == "`" {
+                quote = character
+            } else if character == "(" || character == "[" {
+                depth += 1
+            } else if character == ")" || character == "]" {
+                depth -= 1
+            }
+        }
+        return depth
+    }
+
+    /// Joins argument lists that continue onto following lines.
+    ///
+    /// A statement split over several lines is still one statement, and matching
+    /// each fragment alone is exactly the single-line reading this scanner
+    /// avoids. A line ending in `{` opens a block rather than an argument list,
+    /// so a route handler is never merged into its own declaration.
+    private func logicalLines(_ codeLines: [String]) -> [String] {
+        let maxContinuationLines = 4
+        var joined: [String] = []
+        joined.reserveCapacity(codeLines.count)
+        for (index, line) in codeLines.enumerated() {
+            var text = line
+            if !line.trimmingCharacters(in: .whitespaces).hasSuffix("{") {
+                var cursor = index
+                while openDepth(text) > 0,
+                      cursor + 1 < codeLines.count,
+                      cursor - index < maxContinuationLines {
+                    cursor += 1
+                    text += " " + codeLines[cursor].trimmingCharacters(in: .whitespaces)
+                }
+            }
+            joined.append(text)
+        }
+        return joined
+    }
+
+    /// Returns the argument text of a call whose name ends at `callEnd`, or nil
+    /// when the sink is not a call (an `innerHTML` assignment, say) so the
+    /// caller can fall back to line scope.
+    private func callArguments(_ line: String, callEnd: Int) -> String? {
+        let characters = Array(line)
+        var cursor = callEnd
+        while cursor < characters.count, characters[cursor].isWhitespace { cursor += 1 }
+        guard cursor < characters.count, characters[cursor] == "(" else { return nil }
+        var depth = 0
+        var quote: Character?
+        var escaped = false
+        var index = cursor
+        while index < characters.count {
+            let current = characters[index]
+            if let active = quote {
+                if escaped {
+                    escaped = false
+                } else if current == "\\" {
+                    escaped = true
+                } else if current == active {
+                    quote = nil
+                }
+            } else if current == "\"" || current == "'" || current == "`" {
+                quote = current
+            } else if current == "(" {
+                depth += 1
+            } else if current == ")" {
+                depth -= 1
+                if depth == 0 {
+                    return String(characters[(cursor + 1)..<index])
+                }
+            }
+            index += 1
+        }
+        // Unbalanced (the call continues on the next line): treat the rest as args.
+        return String(characters[(cursor + 1)...])
+    }
+
+    private func checkContextualSourceFlows(lines: [String], codeLines: [String], displayPath: String) -> [NativeFinding] {
+        // Remote input only. `ctx` needs a request-shaped member: a bare `ctx.`
+        // also matches a canvas 2D context, a crypto context, and most other
+        // graphics or codec handles. Operator input (`sys.argv`, `input()`) is
+        // deliberately absent: reading the file named on your own command line
+        // is what a CLI is for, so it raises a candidate but never confirms.
+        let untrusted = #"(?i)(?:\b(?:req|request)\s*(?:\.|\[)|\bctx\s*(?:\.\s*(?:request|req|query|params|body|headers|cookies)\b|\[)|\$_(?:GET|POST|REQUEST|FILES)\b|\blocation\.(?:hash|search|href)\b)"#
+        let requestBody = #"(?i)\b(?:req|request)\s*\.\s*(?:body|data|json|POST|form|params|query|values)\b"#
         let sanitizer = #"(?i)\b(DOMPurify\.sanitize|sanitizeHtml|escapeHtml|html\.escape|encodeForHTML|secure_filename|basename|realpath|canonicalPath|allowlist|allowed_hosts?|validate(?:Url|Path|Host|Redirect|Input)|escapeLdap|encodeForLDAP|stripCrLf|sanitizeHeader)\s*\([^)]*\)"#
         let assignmentName = #"^\s*(?:(?:const|let|var|final)\s+)?(?:[A-Za-z_$][\w$<>\[\].,?]*\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]+)?="#
         let sinks: [(String, String, String, String, String)] = [
             ("code.sql-dynamic-query", #"(?i)\b(execute|executemany|query|raw|prepareStatement|createQuery)\s*\("#, "high", "동적 SQL 쿼리 구성", "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."),
             ("code.xss-dom-sink", #"(?i)\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML)\b"#, "high", "DOM XSS 위험 sink", "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."),
             ("code.command-injection", #"(?i)\b(os\.system|os\.popen|subprocess\.(run|call|Popen|check_output)|child_process\.(exec|execSync)|shell_exec|passthru|Runtime\.getRuntime\(\)\.exec)\s*\("#, "high", "명령어 삽입 위험", "쉘 실행을 피하고 고정 인자 배열과 허용목록을 사용하세요."),
-            ("code.path-traversal", #"(?i)\b(open|send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync)\s*\("#, "medium", "경로 조작 위험", "입력 경로를 정규화하고 허용된 루트 내부인지 검증하세요."),
-            ("code.eval-user-input", #"(?i)\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\("#, "high", "eval 계열 API에 사용자 입력이 연결됨", "동적 코드 실행을 제거하고 허용목록 기반 분기로 대체하세요."),
+            // Bare `open(` or an explicit filesystem module only: `self.parent.open()`
+            // in a URL opener is not a file API.
+            ("code.path-traversal", #"(?i)(?<![.\w])open\s*\(|\b(?:os|io|codecs|shutil|aiofiles)\.open\s*\(|\b(send_file|FileResponse|readFile|readFileSync|createReadStream|writeFile|writeFileSync)\s*\("#, "medium", "경로 조작 위험", "입력 경로를 정규화하고 허용된 루트 내부인지 검증하세요."),
+            ("code.eval-user-input", #"(?i)\b(eval|exec|(?-i:Function)|instance_eval|class_eval)\s*\("#, "high", "eval 계열 API에 사용자 입력이 연결됨", "동적 코드 실행을 제거하고 허용목록 기반 분기로 대체하세요."),
+            // Timers only execute code when their first argument is a string.
+            ("code.eval-user-input", #"(?i)\b(setTimeout|setInterval)\s*\(\s*["'`]"#, "high", "eval 계열 API에 사용자 입력이 연결됨", "동적 코드 실행을 제거하고 허용목록 기반 분기로 대체하세요."),
             ("code.ssrf-user-url", #"(?i)\b(requests\.(get|post|put|patch|delete|request)|httpx\.(get|post|put|patch|delete|request)|urllib\.request\.urlopen|axios\.(get|post|put|patch|delete)|fetch|http\.get|https\.get)\b"#, "high", "사용자 입력 URL 요청으로 인한 SSRF 위험", "허용된 호스트만 요청하고 사설망 대역 접근을 차단하세요."),
             ("code.open-redirect-user-input", #"(?i)\b(sendRedirect|redirect|(res|response|ctx)\.redirect)\s*\("#, "medium", "사용자 입력 기반 Open Redirect", "리다이렉트 대상은 내부 경로 허용목록에 매핑하세요."),
             ("code.ldap-injection", #"(?i)\b(ldap([_-]?(client|connection|template))?|dirContext)\s*\.\s*(search|search_s|search_ext)\s*\("#, "high", "LDAP 필터 삽입 위험", "LDAP 필터 메타문자를 이스케이프하거나 파라미터화된 API를 사용하세요."),
@@ -1763,7 +2000,7 @@ final class NativeSecurityScanner {
             }
         }
 
-        for (index, rawLine) in lines.enumerated() {
+        for (index, rawLine) in codeLines.enumerated() {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty || line.hasPrefix("//") || line.hasPrefix("#") || line.hasPrefix("/*") || line.hasPrefix("*") {
                 continue
@@ -1781,6 +2018,13 @@ final class NativeSecurityScanner {
             let remaining = withoutSanitizers(line)
             guard matches(untrusted, remaining) || containsTaintedName(remaining) else { continue }
             for (ruleID, sink, severity, title, recommendation) in sinks where matches(sink, line) {
+                // Taint anywhere on the line is not enough for a call sink: the
+                // untrusted value has to be an argument of that call, otherwise
+                // `ctx.save()` beside unrelated request handling reads as a flow.
+                if let callEnd = matchEnd(sink, line), let arguments = callArguments(line, callEnd: callEnd) {
+                    let argumentTaint = withoutSanitizers(arguments)
+                    guard matches(untrusted, argumentTaint) || containsTaintedName(argumentTaint) else { continue }
+                }
                 if ruleID == "code.sql-dynamic-query" && matches(#"(?i)\b(execute|executemany|query)\s*\(\s*[\"'][^\"']*(\?|%s|:\w+|\$\d+)[^\"']*[\"']\s*,"#, line) {
                     continue
                 }
@@ -1788,6 +2032,11 @@ final class NativeSecurityScanner {
                     continue
                 }
                 if ruleID == "code.unsafe-deserialization" && matches(#"(?i)yaml\.load\s*\([^\n]*(Loader\s*=\s*yaml\.SafeLoader|SafeLoader)"#, line) {
+                    continue
+                }
+                // Mass assignment is about binding a whole request body onto a
+                // model, not about any call that happens to mention the request.
+                if ruleID == "code.api-mass-assignment" && !matches(requestBody, line) {
                     continue
                 }
                 let key = "\(ruleID):\(index + 1)"
@@ -1799,7 +2048,7 @@ final class NativeSecurityScanner {
                     title,
                     displayPath,
                     index + 1,
-                    line,
+                    lines[index],
                     recommendation,
                     verificationStatus: "confirmed"
                 ))
@@ -1823,151 +2072,199 @@ final class NativeSecurityScanner {
         return result
     }
 
+    /// Drops prose inside string literals, keeping interpolations and labelled
+    /// keys, so a sensitive *word* in an English log message is not read as
+    /// sensitive *data* reaching the log.
+    private func maskLiteralProse(_ line: String) -> String {
+        guard let literals = try? NSRegularExpression(pattern: #"(['"`])(?:\\.|(?!\1).)*?\1"#),
+              // Only interpolations stay. A bare label inside a literal is prose:
+              // `"shlex: token="` is a debug caption, not a credential in a log.
+              let keep = try? NSRegularExpression(pattern: #"\$\{[^}]*\}|\{[^{}]*\}"#) else {
+            return line
+        }
+        var output = line
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+        for match in literals.matches(in: line, range: range).reversed() {
+            guard let literalRange = Range(match.range, in: line) else { continue }
+            let literal = String(line[literalRange])
+            let literalNSRange = NSRange(literal.startIndex..<literal.endIndex, in: literal)
+            let kept = keep.matches(in: literal, range: literalNSRange).compactMap { item -> String? in
+                guard let keptRange = Range(item.range, in: literal) else { return nil }
+                return String(literal[keptRange])
+            }
+            output.replaceSubrange(literalRange, with: "\"\(kept.joined(separator: " "))\"")
+        }
+        return output
+    }
+
     private func checkCode(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
-        var findings = checkJavaDocumentBuilderXXE(lines: lines, file: file, displayPath: displayPath)
-        findings += checkContextualSourceFlows(lines: lines, displayPath: displayPath)
-        let document = lines.joined(separator: "\n")
+        // Every rule below reads the whole-file code view, not the raw line, so a
+        // single line is never judged out of its file context.
+        let codeLines = codeView(lines: lines, suffix: file.pathExtension.lowercased())
+        let statements = logicalLines(codeLines)
+        var findings = checkJavaDocumentBuilderXXE(lines: lines, codeLines: codeLines, file: file, displayPath: displayPath)
+        findings += checkContextualSourceFlows(lines: lines, codeLines: statements, displayPath: displayPath)
+        let document = codeLines.joined(separator: "\n")
         let hasRateLimit = matches(#"(?i)\b(express-rate-limit|rateLimit\s*\(|RateLimiter|SlowAPIMiddleware|@\w*limiter\.limit|Bucket4j|resilience4j.*ratelimit)"#, document)
         let hasGlobalAuth = matches(#"(?i)\b(app|router|server)\.use\s*\([^\n]*(authenticate|authorize|requireAuth|requireAdmin)|\b(SecurityFilterChain|OncePerRequestFilter|AuthMiddleware|AuthorizationMiddleware)\b"#, document)
-        for (index, line) in lines.enumerated() {
+        let sanitizerOnLine = #"(?i)\b(DOMPurify\.sanitize|sanitizeHtml|escapeHtml|html\.escape|encodeForHTML|secure_filename|Path\.GetFileName|basename|realpath|canonicalPath|allowlist|allowed_hosts?|validate(?:Url|Path|Host|Redirect|Input)|escapeLdap|encodeForLDAP|stripCrLf|sanitizeHeader)\b"#
+        for (index, line) in statements.enumerated() {
             let lineNumber = index + 1
-            let nearby = lines[max(0, index - 5)...min(lines.count - 1, index + 5)].joined(separator: "\n")
-            if matches(#"(?i)\.innerHTML\s*=.*(location|document\.URL|request|params)"#, line) {
-                findings.append(finding("code.xss-dom-sink", "high", "code", "DOM XSS 위험 sink", displayPath, lineNumber, line, "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."))
+            let rawLine = lines[index]
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            let nearby = codeLines[max(0, index - 5)...min(codeLines.count - 1, index + 5)].joined(separator: "\n")
+            let hasSanitizer = matches(sanitizerOnLine, line)
+            if !hasSanitizer && matches(#"(?i)\.innerHTML\s*=.*(location|document\.URL|request|params)"#, line) {
+                findings.append(finding("code.xss-dom-sink", "high", "code", "DOM XSS 위험 sink", displayPath, lineNumber, rawLine, "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."))
             }
-            if matches(#"(?i)(execute|query)\s*\(.*(SELECT|INSERT|UPDATE|DELETE).*(\+|f"|%\s)"#, line) {
-                findings.append(finding("code.sql-dynamic-query", "high", "code", "동적 SQL 쿼리 구성", displayPath, lineNumber, line, "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."))
+            if matches(#"(?i)(execute|query)\s*\(.*(SELECT|INSERT|UPDATE|DELETE).*(\+|f"|%\s)"#, line)
+                && !matches(#"(?i)\b(execute|executemany|query|prepareStatement|createQuery)\s*\(\s*[furb]*[\"'][^\"']*(\?|%s|:\w+|\$\d+)[^\"']*[\"']\s*,"#, line) {
+                findings.append(finding("code.sql-dynamic-query", "high", "code", "동적 SQL 쿼리 구성", displayPath, lineNumber, rawLine, "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."))
             }
-            if matches(#"(?i)(os\.system|subprocess\.[A-Za-z_]+|exec\().*(shell\s*=\s*True|\+|request|params)"#, line) {
-                findings.append(finding("code.command-injection", "high", "code", "명령어 삽입 위험", displayPath, lineNumber, line, "쉘 실행을 피하고 인자를 배열로 전달하며 입력을 allowlist로 검증하세요."))
+            if matches(#"(?i)(os\.system|subprocess\.[A-Za-z_]+|exec\().*(shell\s*=\s*True|\+|request|params)"#, line)
+                && !(matches(#"(?i)subprocess\.(run|call|Popen|check_output)\s*\(\s*\["#, line) && !matches(#"(?i)shell\s*=\s*True"#, line)) {
+                findings.append(finding("code.command-injection", "high", "code", "명령어 삽입 위험", displayPath, lineNumber, rawLine, "쉘 실행을 피하고 인자를 배열로 전달하며 입력을 allowlist로 검증하세요."))
             }
-            if matches(#"(?i)(send_file|sendfile|readFile|createReadStream).*(request|req\.|params|query)"#, line) {
-                findings.append(finding("code.path-traversal", "medium", "code", "경로 조작 위험", displayPath, lineNumber, line, "사용자 입력 경로를 정규화하고 허용된 루트 내부인지 검증하세요."))
+            if !hasSanitizer && matches(#"(?i)\b(send_file|sendfile|readFile|readFileSync|createReadStream)\s*\(.*"# + Self.remoteSource, line) {
+                findings.append(finding("code.path-traversal", "medium", "code", "경로 조작 위험", displayPath, lineNumber, rawLine, "사용자 입력 경로를 정규화하고 허용된 루트 내부인지 검증하세요."))
             }
             if matches(#"(?i)(@csrf_exempt|csrf\s*:\s*false|csrf\.disable|verify_csrf_token.*false|skip_before_action\s+:verify_authenticity_token|protect_from_forgery\s+except:)"#, line) {
-                findings.append(finding("code.csrf-disabled", "medium", "code", "CSRF 보호가 비활성화된 것으로 보임", displayPath, lineNumber, line, "브라우저 인증 기반 상태 변경 요청에는 CSRF 보호를 유지하세요."))
+                findings.append(finding("code.csrf-disabled", "medium", "code", "CSRF 보호가 비활성화된 것으로 보임", displayPath, lineNumber, rawLine, "브라우저 인증 기반 상태 변경 요청에는 CSRF 보호를 유지하세요."))
             }
             if matches(#"(?i)(@AllowAnonymous|@Public\(\)|permitAll\(\)|auth\s*:\s*false|AllowAny|permission_classes\s*=\s*\[\s*\]|skip_before_action\s+:authenticate)"#, line) {
-                findings.append(finding("code.auth-disabled-endpoint", "medium", "code", "인증 또는 인가가 우회된 엔드포인트", displayPath, lineNumber, line, "공개 의도가 명확한지 확인하고 민감 기능에는 권한 검사를 적용하세요."))
+                findings.append(finding("code.auth-disabled-endpoint", "medium", "code", "인증 또는 인가가 우회된 엔드포인트", displayPath, lineNumber, rawLine, "공개 의도가 명확한지 확인하고 민감 기능에는 권한 검사를 적용하세요."))
             }
-            if matches(#"(?i)\b(eval|exec|Function|setTimeout|setInterval|instance_eval|class_eval)\s*\(.*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
-                findings.append(finding("code.eval-user-input", "high", "code", "eval 계열 API에 사용자 입력이 연결됨", displayPath, lineNumber, line, "동적 코드 실행을 제거하고 허용목록 기반 분기 처리로 대체하세요."))
+            // `Function` stays case-sensitive (the JS `function` keyword is not a
+            // sink) and timers only execute code when their first argument is a string.
+            if matches(#"(?i)(?:\b(eval|exec|(?-i:Function)|instance_eval|class_eval)\s*\(|\b(setTimeout|setInterval)\s*\(\s*["'`]).*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
+                findings.append(finding("code.eval-user-input", "high", "code", "eval 계열 API에 사용자 입력이 연결됨", displayPath, lineNumber, rawLine, "동적 코드 실행을 제거하고 허용목록 기반 분기 처리로 대체하세요."))
             }
             if matches(#"(?i)(pickle\.loads|yaml\.load|ObjectInputStream|unserialize\()"#, line)
                 && !matches(#"(?i)yaml\.load\s*\([^\n]*(Loader\s*=\s*yaml\.SafeLoader|SafeLoader)"#, line) {
-                findings.append(finding("code.unsafe-deserialization", "high", "code", "위험한 역직렬화 사용", displayPath, lineNumber, line, "신뢰할 수 없는 입력의 역직렬화를 금지하고 안전 로더를 사용하세요."))
+                findings.append(finding("code.unsafe-deserialization", "high", "code", "위험한 역직렬화 사용", displayPath, lineNumber, rawLine, "신뢰할 수 없는 입력의 역직렬화를 금지하고 안전 로더를 사용하세요."))
             }
-            if matches(#"(?i)\b(requests|httpx|urllib\.request|axios|fetch|http\.get|https\.get|RestTemplate|WebClient).*(get|post|open|request|\().*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
-                findings.append(finding("code.ssrf-user-url", "high", "code", "사용자 입력 URL 요청으로 인한 SSRF 위험", displayPath, lineNumber, line, "허용된 호스트만 요청하고 사설망 대역 접근을 차단하세요."))
+            if !hasSanitizer && matches(#"(?i)\b(requests|httpx|urllib\.request|axios|fetch|http\.get|https\.get|RestTemplate|WebClient).*(get|post|open|request|\().*(req\.|request\.|\$_(GET|POST|REQUEST|FILES)|params|query|body|location\.|input\(|sys\.argv|ARGV)"#, line) {
+                findings.append(finding("code.ssrf-user-url", "high", "code", "사용자 입력 URL 요청으로 인한 SSRF 위험", displayPath, lineNumber, rawLine, "허용된 호스트만 요청하고 사설망 대역 접근을 차단하세요."))
             }
             if matches(#"(?i)(move_uploaded_file\s*\(\s*\$_FILES|\.save\s*\(.*(filename|originalname|req\.file)|multer\s*\(\s*\{\s*dest\s*:)"#, line) {
-                findings.append(finding("code.unrestricted-file-upload", "medium", "code", "파일 업로드 제한이 부족할 수 있음", displayPath, lineNumber, line, "확장자와 콘텐츠 유형을 검증하고 서버측 파일명을 생성하세요."))
+                findings.append(finding("code.unrestricted-file-upload", "medium", "code", "파일 업로드 제한이 부족할 수 있음", displayPath, lineNumber, rawLine, "확장자와 콘텐츠 유형을 검증하고 서버측 파일명을 생성하세요."))
             }
             if matches(#"(?i)\b(gets|strcpy|strcat|sprintf|vsprintf)\s*\("#, line) {
-                findings.append(finding("code.dangerous-c-buffer-api", "medium", "code", "위험한 C/C++ 버퍼 API 사용", displayPath, lineNumber, line, "버퍼 크기를 검증하고 bounded API로 대체하세요."))
+                findings.append(finding("code.dangerous-c-buffer-api", "medium", "code", "위험한 C/C++ 버퍼 API 사용", displayPath, lineNumber, rawLine, "버퍼 크기를 검증하고 bounded API로 대체하세요."))
             }
             if matches(#"(?i)\b(express\.json|bodyParser\.json|express\.urlencoded|bodyParser\.urlencoded)\s*\(\s*\)"#, line) {
-                findings.append(finding("code.unbounded-request-body", "low", "code", "요청 본문 크기 제한이 명시되지 않음", displayPath, lineNumber, line, "요청 본문 크기 제한을 설정하고 과대 요청을 조기에 거부하세요."))
+                findings.append(finding("code.unbounded-request-body", "low", "code", "요청 본문 크기 제한이 명시되지 않음", displayPath, lineNumber, rawLine, "요청 본문 크기 제한을 설정하고 과대 요청을 조기에 거부하세요."))
             }
-            if matches(#"(?i)(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))\s*\(.*(password|pwd|secret|token|api[_-]?key|authorization|credential|session|cookie)"#, line) {
-                findings.append(finding("code.logging-sensitive-data", "medium", "code", "민감정보가 로그에 기록될 수 있음", displayPath, lineNumber, line, "로그에서 민감값을 제거하거나 마스킹된 식별자만 기록하세요."))
+            // Checked against the line with literal prose removed: "session
+            // established" is an English message, not a session value in a log.
+            if matches(#"(?i)(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))\s*\(.*"# + Self.sensitiveName, maskLiteralProse(line)) {
+                findings.append(finding("code.logging-sensitive-data", "medium", "code", "민감정보가 로그에 기록될 수 있음", displayPath, lineNumber, rawLine, "로그에서 민감값을 제거하거나 마스킹된 식별자만 기록하세요."))
             }
             if matches(#"(?i)(\bexcept\b[^:\n]*:\s*pass\b|\bcatch\s*(\([^)]*\))?\s*\{\s*\})"#, line) {
-                findings.append(finding("code.empty-exception-handler", "low", "code", "예외가 조용히 무시되는 것으로 보임", displayPath, lineNumber, line, "예상 예외를 명시적으로 처리하고 필요한 경우 보안 관련 실패를 기록하세요."))
+                findings.append(finding("code.empty-exception-handler", "low", "code", "예외가 조용히 무시되는 것으로 보임", displayPath, lineNumber, rawLine, "예상 예외를 명시적으로 처리하고 필요한 경우 보안 관련 실패를 기록하세요."))
             }
-            if matches(#"(?i)\b(printStackTrace|traceback\.print_exc|console\.trace)\s*\("#, line) {
-                findings.append(finding("code.stack-trace-exposure", "low", "code", "스택 트레이스 출력이 내부 정보를 노출할 수 있음", displayPath, lineNumber, line, "중앙 오류 처리로 전달하고 사용자 노출 경로에서는 원본 스택을 숨기세요."))
+            if matches(#"(?i)\b(printStackTrace|traceback\.print_exc|console\.trace)\s*\("#, line)
+                && !matches(#"(?i)\b(if|guard)\b[^\n]*(DEBUG|development|isDev|devMode)"#, nearby) {
+                findings.append(finding("code.stack-trace-exposure", "low", "code", "스택 트레이스 출력이 내부 정보를 노출할 수 있음", displayPath, lineNumber, rawLine, "중앙 오류 처리로 전달하고 사용자 노출 경로에서는 원본 스택을 숨기세요."))
             }
             if matches(#"(?i)(@\w+\.route|(?:app|router|routes|server)\.(?:get|post|put|patch|delete|use)|Route|path)\s*\(.*['"]/api/(?!v\d+(?:/|$))[^'"]+['"]"#, line) {
-                findings.append(finding("code.unversioned-api-route", "low", "code", "API 라우트에 버전이 명시되지 않음", displayPath, lineNumber, line, "공개 API에는 /api/v1 같은 명시적 버전 경로를 사용하세요."))
+                findings.append(finding("code.unversioned-api-route", "low", "code", "API 라우트에 버전이 명시되지 않음", displayPath, lineNumber, rawLine, "공개 API에는 /api/v1 같은 명시적 버전 경로를 사용하세요."))
             }
             if matches(#"(?i)mktemp\s*\("#, line) {
-                findings.append(finding("code.insecure-temp-file", "medium", "code", "불안전한 임시 파일 생성", displayPath, lineNumber, line, "경쟁 조건을 피하기 위해 안전한 임시 파일 API를 사용하세요."))
+                findings.append(finding("code.insecure-temp-file", "medium", "code", "불안전한 임시 파일 생성", displayPath, lineNumber, rawLine, "경쟁 조건을 피하기 위해 안전한 임시 파일 API를 사용하세요."))
             }
             if matches(#"(?i)(CORS|Access-Control-Allow-Origin).*(\*|origins\s*=\s*['\"]\*)"#, line) {
-                findings.append(finding("code.wildcard-cors", "medium", "code", "와일드카드 CORS 설정", displayPath, lineNumber, line, "허용 origin을 명시적으로 제한하세요."))
+                findings.append(finding("code.wildcard-cors", "medium", "code", "와일드카드 CORS 설정", displayPath, lineNumber, rawLine, "허용 origin을 명시적으로 제한하세요."))
             }
             if matches(#"(?i)(host\s*=\s*['\"]0\.0\.0\.0|listen\([^)]*0\.0\.0\.0)"#, line) {
-                findings.append(finding("code.public-bind-all-interfaces", "low", "code", "전체 인터페이스 바인딩", displayPath, lineNumber, line, "개발 서버는 localhost에만 바인딩하세요."))
+                findings.append(finding("code.public-bind-all-interfaces", "low", "code", "전체 인터페이스 바인딩", displayPath, lineNumber, rawLine, "개발 서버는 localhost에만 바인딩하세요."))
             }
-            if matches(#"(?i)(md5|sha1)\s*\("#, line) {
-                findings.append(finding("code.weak-hash", "medium", "code", "약한 해시 알고리즘 사용", displayPath, lineNumber, line, "SHA-256 이상 또는 비밀번호에는 bcrypt/argon2를 사용하세요."))
+            // `usedforsecurity=False` is the caller declaring this hash is not a
+            // security control; `\b` would miss `file_checksum`, because `_` is
+            // a word character.
+            if matches(#"(?i)(md5|sha1)\s*\("#, line)
+                && !matches(#"(?i)usedforsecurity\s*=\s*False"#, line)
+                && !matches(#"(?i)\w*(checksum|etag|cache[_-]?key|content[_-]?hash|file[_-]?hash)\w*"#, nearby) {
+                findings.append(finding("code.weak-hash", "medium", "code", "약한 해시 알고리즘 사용", displayPath, lineNumber, rawLine, "SHA-256 이상 또는 비밀번호에는 bcrypt/argon2를 사용하세요."))
             }
             if matches(#"(?i)(secure\s*:\s*false|httpOnly\s*:\s*false|SameSite\s*=\s*None)"#, line) {
-                findings.append(finding("code.insecure-cookie-settings", "medium", "code", "쿠키/세션 보안 설정 약화", displayPath, lineNumber, line, "Secure, HttpOnly, SameSite 속성을 적절히 설정하세요."))
+                findings.append(finding("code.insecure-cookie-settings", "medium", "code", "쿠키/세션 보안 설정 약화", displayPath, lineNumber, rawLine, "Secure, HttpOnly, SameSite 속성을 적절히 설정하세요."))
             }
             if matches(#"(?i)(verify_signature\s*[:=]\s*False|verify\s*[:=]\s*false|jwt\.decode.*(verify\s*=\s*False|verify_signature.*False))"#, line) {
-                findings.append(finding("code.jwt-verification-disabled", "high", "code", "JWT 서명 검증이 비활성화된 것으로 보임", displayPath, lineNumber, line, "모든 JWT에 대해 서명, issuer, audience, 만료, 알고리즘 검증을 강제하세요."))
+                findings.append(finding("code.jwt-verification-disabled", "high", "code", "JWT 서명 검증이 비활성화된 것으로 보임", displayPath, lineNumber, rawLine, "모든 JWT에 대해 서명, issuer, audience, 만료, 알고리즘 검증을 강제하세요."))
             }
             if matches(#"(?i)(algorithms?\s*[:=]\s*\[[^\]]*["']none["']|alg\s*[:=]\s*["']none["'])"#, line) {
-                findings.append(finding("code.jwt-none-algorithm", "high", "code", "JWT none 알고리즘 허용 의심", displayPath, lineNumber, line, "승인된 서명 알고리즘 allowlist만 허용하고 unsigned token은 거부하세요."))
+                findings.append(finding("code.jwt-none-algorithm", "high", "code", "JWT none 알고리즘 허용 의심", displayPath, lineNumber, rawLine, "승인된 서명 알고리즘 allowlist만 허용하고 unsigned token은 거부하세요."))
             }
             if matches(#"(?i)(SESSION_COOKIE_AGE\s*=\s*([7-9]\d{5,}|[1-9]\d{6,})|maxAge\s*[:=]\s*([7-9]\d{8,}|[1-9]\d{9,})|expiresIn\s*[:=]\s*["'](365d|[2-9]\d{2,}d|[1-9]\d+y)["'])"#, line) {
-                findings.append(finding("code.session-long-expiry", "low", "code", "세션 또는 토큰 만료 시간이 과도함", displayPath, lineNumber, line, "짧은 access token, 회전되는 refresh token, 장기 세션 예외 문서를 사용하세요."))
+                findings.append(finding("code.session-long-expiry", "low", "code", "세션 또는 토큰 만료 시간이 과도함", displayPath, lineNumber, rawLine, "짧은 access token, 회전되는 refresh token, 장기 세션 예외 문서를 사용하세요."))
             }
-            if !hasGlobalAuth && matches(#"(?i)((app|router|server)\.(get|post|put|patch|delete)\s*\(["'][^"']*/api/[^"']*(admin|user|account|payment|order|profile|secret|token)[^"']*["'][^\n]*\(?\s*(req|request|ctx)\s*\)?\s*=>)"#, line) {
-                findings.append(finding("code.api-route-missing-auth", "medium", "code", "민감 API 라우트에 인증 가드가 보이지 않음", displayPath, lineNumber, line, "민감 API handler 실행 전에 라우트 수준 인증과 객체/기능 권한 검사를 강제하세요."))
+            if !hasGlobalAuth
+                && !matches(#"(?i)\b(requireAuth|requireAdmin|authenticate|authorize|isAuthenticated|checkPermission)\b"#, line)
+                && matches(#"(?i)((app|router|server)\.(get|post|put|patch|delete)\s*\(["'][^"']*/api/[^"']*(admin|user|account|payment|order|profile|secret|token)[^"']*["'][^\n]*\(?\s*(req|request|ctx)\s*\)?\s*=>)"#, line) {
+                findings.append(finding("code.api-route-missing-auth", "medium", "code", "민감 API 라우트에 인증 가드가 보이지 않음", displayPath, lineNumber, rawLine, "민감 API handler 실행 전에 라우트 수준 인증과 객체/기능 권한 검사를 강제하세요."))
             }
-            if matches(#"(?i)(\b(create|update|assign|save|insert|merge)\s*\([^\n]*(req\.body|request\.body|body|params)|\.\.\.\s*(req\.body|request\.body|body))"#, line) {
-                findings.append(finding("code.api-mass-assignment", "medium", "code", "API 요청 body의 mass assignment 의심", displayPath, lineNumber, line, "허용 필드만 명시적으로 매핑하고 예상하지 않은 속성은 저장 전에 거부하세요."))
+            if matches(#"(?i)(\b(create|update|assign|save|insert|merge)\s*\([^\n]*\b(req|request)\s*\.\s*(body|data|json|POST|form|params|query|values)\b|\.\.\.\s*(req|request)\s*\.\s*body\b)"#, line) {
+                findings.append(finding("code.api-mass-assignment", "medium", "code", "API 요청 body의 mass assignment 의심", displayPath, lineNumber, rawLine, "허용 필드만 명시적으로 매핑하고 예상하지 않은 속성은 저장 전에 거부하세요."))
             }
             if !hasRateLimit && matches(#"(?i)(express\s*\(\)|FastAPI\s*\(|new\s+Koa\s*\(|SpringApplication\.run)"#, line) {
-                findings.append(finding("code.api-missing-rate-limit", "low", "code", "API rate limit 기준이 보이지 않음", displayPath, lineNumber, line, "로그인, 가입, 검색, export, 고비용 API에 rate limit과 남용 방지 통제를 추가하세요."))
+                findings.append(finding("code.api-missing-rate-limit", "low", "code", "API rate limit 기준이 보이지 않음", displayPath, lineNumber, rawLine, "로그인, 가입, 검색, export, 고비용 API에 rate limit과 남용 방지 통제를 추가하세요."))
             }
             if matches(#"(?i)\b(requests\.(get|post|put|patch|delete)|httpx\.(get|post|put|patch|delete)|axios\.(get|post|put|patch|delete)|fetch)\s*\([^\n]*(https?://|url|endpoint)"#, line) && !matches(#"(?i)(timeout|signal|AbortController)\s*[:=]"#, nearby) {
-                findings.append(finding("code.external-api-no-timeout", "low", "code", "외부 API 호출에 timeout이 보이지 않음", displayPath, lineNumber, line, "외부 API 호출에 timeout, backoff 재시도, 목적지 allowlist를 적용하세요."))
+                findings.append(finding("code.external-api-no-timeout", "low", "code", "외부 API 호출에 timeout이 보이지 않음", displayPath, lineNumber, rawLine, "외부 API 호출에 timeout, backoff 재시도, 목적지 allowlist를 적용하세요."))
             }
-            if matches(#"(?i)(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))\s*\(.*(email|phone|mobile|address|birth|dob|ssn|resident|rrn|jumin|주민|전화|주소|생년|card[_-]?number)"#, line) {
-                findings.append(finding("code.pii-logging", "medium", "code", "개인정보 로깅 의심", displayPath, lineNumber, line, "개인정보는 로그에서 제거하거나 마스킹하고 보관 기간과 접근 권한을 문서화하세요."))
+            if matches(#"(?i)(console\.(log|debug|info|warn|error)|logger\.(debug|info|warning|warn|error|exception)|logging\.(debug|info|warning|warn|error|exception)|print|System\.out\.println|NSLog|Log\.(d|i|w|e))\s*\(.*(email|phone|mobile|address|birth|dob|ssn|resident|rrn|jumin|주민|전화|주소|생년|card[_-]?number)"#, maskLiteralProse(line)) {
+                findings.append(finding("code.pii-logging", "medium", "code", "개인정보 로깅 의심", displayPath, lineNumber, rawLine, "개인정보는 로그에서 제거하거나 마스킹하고 보관 기간과 접근 권한을 문서화하세요."))
             }
             if matches(#"(?i)Options\s+Indexes"#, line) {
-                findings.append(finding("code.directory-listing-enabled", "medium", "code", "디렉터리 리스팅 활성화", displayPath, lineNumber, line, "디렉터리 인덱싱을 비활성화하세요."))
+                findings.append(finding("code.directory-listing-enabled", "medium", "code", "디렉터리 리스팅 활성화", displayPath, lineNumber, rawLine, "디렉터리 인덱싱을 비활성화하세요."))
             }
             if matches(#"(?i)WebDAV(Module| enabled| true)"#, line) {
-                findings.append(finding("code.webdav-enabled", "medium", "code", "WebDAV 활성화 흔적", displayPath, lineNumber, line, "필요하지 않은 WebDAV 기능을 비활성화하세요."))
+                findings.append(finding("code.webdav-enabled", "medium", "code", "WebDAV 활성화 흔적", displayPath, lineNumber, rawLine, "필요하지 않은 WebDAV 기능을 비활성화하세요."))
             }
             if matches(#"(?i)\b(technote|zeroboard)\b"#, line) {
-                findings.append(finding("code.legacy-board-software", "medium", "code", "레거시 게시판 소프트웨어 흔적", displayPath, lineNumber, line, "컴포넌트 사용 여부를 확인하고 최신 버전으로 교체하거나 제거하세요."))
+                findings.append(finding("code.legacy-board-software", "medium", "code", "레거시 게시판 소프트웨어 흔적", displayPath, lineNumber, rawLine, "컴포넌트 사용 여부를 확인하고 최신 버전으로 교체하거나 제거하세요."))
             }
             let handledJavaDocumentBuilder = ["java", "kt"].contains(file.pathExtension.lowercased()) && line.contains("DocumentBuilderFactory")
             if !handledJavaDocumentBuilder && matches(#"(?i)(resolve_entities\s*=\s*True|load_dtd\s*=\s*True|DocumentBuilderFactory|SAXParserFactory|XmlReaderSettings|XmlDocument)"#, line) {
-                findings.append(finding("code.xml-external-entity", "high", "code", "XML 외부 엔티티 처리가 허용될 수 있음", displayPath, lineNumber, line, "DTD와 외부 엔티티 해석을 비활성화한 안전한 XML parser 설정을 사용하세요."))
+                findings.append(finding("code.xml-external-entity", "high", "code", "XML 외부 엔티티 처리가 허용될 수 있음", displayPath, lineNumber, rawLine, "DTD와 외부 엔티티 해석을 비활성화한 안전한 XML parser 설정을 사용하세요."))
             }
-            if matches(#"(?i)(sendRedirect\s*\(.*request\.getParameter|(res|response|ctx)\.redirect\s*\(.*(req\.|request\.|params|query|body)|\bredirect\s*\(.*(request\.|req\.|params|query|body))"#, line) {
-                findings.append(finding("code.open-redirect-user-input", "medium", "code", "사용자 입력 기반 Open Redirect 의심", displayPath, lineNumber, line, "리다이렉트 대상은 내부 경로 허용목록에 매핑하고 외부 URL은 거부하세요."))
+            if !hasSanitizer && matches(#"(?i)(sendRedirect\s*\(.*request\.getParameter|(res|response|ctx)\.redirect\s*\(.*(req\.|request\.|params|query|body)|\bredirect\s*\(.*(request\.|req\.|params|query|body))"#, line) {
+                findings.append(finding("code.open-redirect-user-input", "medium", "code", "사용자 입력 기반 Open Redirect 의심", displayPath, lineNumber, rawLine, "리다이렉트 대상은 내부 경로 허용목록에 매핑하고 외부 URL은 거부하세요."))
             }
             if matches(#"(?i)(<[A-Za-z][\w:-]*>.*(\+|%|\$\{).*(request|req\.|params|query|body|input))"#, line) {
-                findings.append(finding("code.xml-injection", "medium", "code", "XML 문자열 삽입 의심", displayPath, lineNumber, line, "문자열 연결 대신 XML serializer를 사용하고 입력을 XML 문맥에 맞게 인코딩하세요."))
+                findings.append(finding("code.xml-injection", "medium", "code", "XML 문자열 삽입 의심", displayPath, lineNumber, rawLine, "문자열 연결 대신 XML serializer를 사용하고 입력을 XML 문맥에 맞게 인코딩하세요."))
             }
-            if matches(#"(?i)(LdapTemplate|DirContext|ldap\w*).*search.*(\+|\.format\(|f[\"'])"#, line) {
-                findings.append(finding("code.ldap-injection", "high", "code", "LDAP 필터 삽입 의심", displayPath, lineNumber, line, "LDAP 필터 메타문자를 이스케이프하거나 파라미터화된 API를 사용하세요."))
+            if !hasSanitizer && matches(#"(?i)(LdapTemplate|DirContext|ldap\w*).*search.*(\+|\.format\(|f[\"'])"#, line) {
+                findings.append(finding("code.ldap-injection", "high", "code", "LDAP 필터 삽입 의심", displayPath, lineNumber, rawLine, "LDAP 필터 메타문자를 이스케이프하거나 파라미터화된 API를 사용하세요."))
             }
-            if matches(#"(?i)\b(setHeader|addHeader|set_header|writeHead)\s*\(.*(request\.|req\.|params|query|body|input)"#, line) {
-                findings.append(finding("code.http-response-splitting", "medium", "code", "HTTP 응답 분할 의심", displayPath, lineNumber, line, "헤더 값의 CR/LF를 거부하고 허용 형식만 사용하세요."))
+            if !hasSanitizer && matches(#"(?i)\b(setHeader|addHeader|set_header|writeHead)\s*\(.*(request\.|req\.|params|query|body|input)"#, line) {
+                findings.append(finding("code.http-response-splitting", "medium", "code", "HTTP 응답 분할 의심", displayPath, lineNumber, rawLine, "헤더 값의 CR/LF를 거부하고 허용 형식만 사용하세요."))
             }
             if matches(#"(?i)(\b(printf|vprintf|syslog)\s*\(\s*[A-Za-z_][\w>.\-\[\]]*\s*\)|\bString\.format\s*\(\s*[A-Za-z_][\w.\[\]]*\s*[,\)])"#, line) {
-                findings.append(finding("code.format-string-user-input", "high", "code", "변수 기반 포맷 문자열 사용", displayPath, lineNumber, line, "상수 포맷 문자열을 사용하고 동적 값은 별도 인자로 전달하세요."))
+                findings.append(finding("code.format-string-user-input", "high", "code", "변수 기반 포맷 문자열 사용", displayPath, lineNumber, rawLine, "상수 포맷 문자열을 사용하고 동적 값은 별도 인자로 전달하세요."))
             }
             if matches(#"(?i)(\bRSA\b.{0,60}\b(512|768|1024)\b|\bKeyPairGenerator\b.*initialize\s*\(\s*(512|768|1024))"#, line) {
-                findings.append(finding("code.insufficient-key-length", "medium", "code", "부족한 암호키 길이 의심", displayPath, lineNumber, line, "RSA/DSA/DH는 최소 2048비트 또는 승인된 현대적 타원곡선 알고리즘을 사용하세요."))
+                findings.append(finding("code.insufficient-key-length", "medium", "code", "부족한 암호키 길이 의심", displayPath, lineNumber, rawLine, "RSA/DSA/DH는 최소 2048비트 또는 승인된 현대적 타원곡선 알고리즘을 사용하세요."))
             }
             if matches(#"(?i)\b(token|otp|nonce|salt|session[_-]?id|secret|password|api[_-]?key)\w*\s*[:=].*(Math\.random|new\s+Random\s*\(|random\.(random|randint|choice)|\brand\s*\()"#, line) {
-                findings.append(finding("code.insecure-random-security-use", "medium", "code", "보안 용도에 비암호학적 난수 사용", displayPath, lineNumber, line, "토큰·키·인증코드에는 CSPRNG를 사용하세요."))
+                findings.append(finding("code.insecure-random-security-use", "medium", "code", "보안 용도에 비암호학적 난수 사용", displayPath, lineNumber, rawLine, "토큰·키·인증코드에는 CSPRNG를 사용하세요."))
             }
             if matches(#"(?i)(verify\s*=\s*False|rejectUnauthorized\s*[:=]\s*false|InsecureSkipVerify\s*:\s*true|check_hostname\s*=\s*False|ssl\.CERT_NONE)"#, line) {
-                findings.append(finding("code.tls-certificate-verification-disabled", "high", "code", "TLS 인증서 검증 비활성화", displayPath, lineNumber, line, "인증서와 호스트명 검증을 유지하고 올바른 신뢰 저장소를 구성하세요."))
+                findings.append(finding("code.tls-certificate-verification-disabled", "high", "code", "TLS 인증서 검증 비활성화", displayPath, lineNumber, rawLine, "인증서와 호스트명 검증을 유지하고 올바른 신뢰 저장소를 구성하세요."))
             }
-            if matches(#"(?i)\b(password|passwd|pwd|pin)\w*\b.*\b(hashlib\.(md5|sha1|sha256)|MessageDigest\.getInstance|crypto\.createHash)\b"#, line) {
-                findings.append(finding("code.password-hash-without-salt", "medium", "code", "솔트 없는 비밀번호 해시 의심", displayPath, lineNumber, line, "비밀번호는 고유 솔트를 적용하는 Argon2, bcrypt, scrypt 또는 PBKDF2로 저장하세요."))
+            // Either order: the credential can precede or follow the hash call.
+            if matches(#"(?i)(\b(password|passwd|pwd|pin|credential)\w*\b.*\b(hashlib\.(md5|sha1|sha256)|MessageDigest\.getInstance|DigestUtils\.(md5|sha1|sha256)\w*|crypto\.createHash)\b|\b(hashlib\.(md5|sha1|sha256)|crypto\.createHash)\b.*\b(password|passwd|pwd|pin)\b)"#, line) {
+                findings.append(finding("code.password-hash-without-salt", "medium", "code", "솔트 없는 비밀번호 해시 의심", displayPath, lineNumber, rawLine, "비밀번호는 고유 솔트를 적용하는 Argon2, bcrypt, scrypt 또는 PBKDF2로 저장하세요."))
             }
-            if matches(#"(?i)(system|developer|prompt|messages?)\s*[:=].*(\+|f["']|`\$\{).*(request|req\.|params|query|body|input\(|user)"#, line) {
-                findings.append(finding("code.llm-prompt-user-concat", "medium", "code", "LLM 프롬프트에 사용자 입력이 직접 결합됨", displayPath, lineNumber, line, "시스템 지시는 고정하고 사용자 콘텐츠는 별도 메시지 필드로 분리하며 프롬프트 인젝션 테스트를 추가하세요."))
+            if matches(#"(?i)\b(system|developer|prompt|messages?)\s*[:=].*(\+|f["']|`\$\{).*"# + Self.remoteSource, line) {
+                findings.append(finding("code.llm-prompt-user-concat", "medium", "code", "LLM 프롬프트에 사용자 입력이 직접 결합됨", displayPath, lineNumber, rawLine, "시스템 지시는 고정하고 사용자 콘텐츠는 별도 메시지 필드로 분리하며 프롬프트 인젝션 테스트를 추가하세요."))
             }
             if matches(#"(?i)(tool_choice\s*[:=]\s*["']auto|function_call\s*[:=]\s*["']auto|tools\s*[:=]\s*\[[^\]]*(exec|shell|browser|http|file|database))"#, line) {
-                findings.append(finding("code.llm-tool-unrestricted", "high", "code", "LLM 도구 호출 권한이 넓게 열려 있음", displayPath, lineNumber, line, "작업별 도구 allowlist, 인자 검증, 부작용 확인, 도구 호출 로그를 적용하세요."))
+                findings.append(finding("code.llm-tool-unrestricted", "high", "code", "LLM 도구 호출 권한이 넓게 열려 있음", displayPath, lineNumber, rawLine, "작업별 도구 allowlist, 인자 검증, 부작용 확인, 도구 호출 로그를 적용하세요."))
             }
             if matches(#"(?i)(openai|anthropic|chat\.completions|responses\.create|generateContent).*(password|pwd|secret|token|api[_-]?key|authorization|credential|session|cookie)"#, line) {
-                findings.append(finding("code.llm-sensitive-data-in-prompt", "medium", "code", "민감정보가 LLM 프롬프트로 전달될 수 있음", displayPath, lineNumber, line, "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요."))
+                findings.append(finding("code.llm-sensitive-data-in-prompt", "medium", "code", "민감정보가 LLM 프롬프트로 전달될 수 있음", displayPath, lineNumber, rawLine, "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요."))
             }
         }
         return preferConfirmedFindings(findings)
@@ -2801,6 +3098,10 @@ private func firstCapture(_ pattern: String, in text: String) -> String? {
     captures(pattern, in: text).first
 }
 
+private func matchEnd(_ pattern: String, _ text: String) -> Int? {
+    NativeRegexCache.shared.matchEnd(pattern, text)
+}
+
 private final class NativeRegexCache {
     static let shared = NativeRegexCache()
 
@@ -2811,6 +3112,17 @@ private final class NativeRegexCache {
         guard let regex = regex(for: pattern) else { return false }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.firstMatch(in: text, range: range) != nil
+    }
+
+    /// Character offset just past the first match, for slicing a call's arguments.
+    func matchEnd(_ pattern: String, _ text: String) -> Int? {
+        guard let regex = regex(for: pattern) else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let matched = Range(match.range, in: text) else {
+            return nil
+        }
+        return text.distance(from: text.startIndex, to: matched.upperBound)
     }
 
     func captures(_ pattern: String, _ text: String) -> [String] {
