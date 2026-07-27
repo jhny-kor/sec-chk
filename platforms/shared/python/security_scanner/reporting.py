@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import html
 import json
+import re
 import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -1918,11 +1919,37 @@ def render_html_pair(
     # detail artifact, while the detail page remains independently openable.
     report_language = "ko"
     main_html = _render_html_main(payload, report_language, detail_href)
+    main_html = main_html.replace(
+        'class="koda-main-classification-badge"',
+        'class="koda-main-classification-badge" style="order:2"',
+    ).replace(
+        'class="standards-guide-button" type="button" style="',
+        'class="standards-guide-button" type="button" style="order:1;',
+    )
+    main_html = re.sub(
+        r'(<div class="koda-main-brand">.*?)(<span class="koda-main-classification-badge"[^>]*>대외 비인가</span>)'
+        r'(<button id="source-main-guide-open"[^>]*>안내</button>)',
+        r'\1\3\2',
+        main_html,
+        count=1,
+        flags=re.DOTALL,
+    )
     detail_html = _render_html_detail(payload, report_language).replace(
         '<div class="language-buttons"><button id="lang-ko" type="button">한국어</button>'
         '<button id="lang-en" type="button">English</button></div>',
         "",
     )
+    for value, label in (
+        ("critical", "치명"),
+        ("high", "높음"),
+        ("medium", "중간"),
+        ("low", "낮음"),
+        ("info", "정보"),
+    ):
+        detail_html = detail_html.replace(
+            f'<option value="{value}">{value.capitalize() if value != "info" else "Info"}</option>',
+            f'<option value="{value}">{label}</option>',
+        )
     return main_html, detail_html
 
 
@@ -2012,7 +2039,9 @@ def _standards_guide_markup(language: str, prefix: str, standard_id: str = DEFAU
             ),
         )
     rows_html = "".join(
-        f'<li><strong>{html.escape(label)}</strong><span>{html.escape(description)}</span></li>'
+        f'<li class="standards-guide-item" style="display:grid;gap:4px;padding:10px 12px;border:1px solid #e1e8f2;border-radius:10px;background:#f8fafc">'
+        f'<strong class="standards-guide-name" style="display:block">{html.escape(label)}</strong>'
+        f'<span class="standards-guide-description" style="display:block;color:#60708a">{html.escape(description)}</span></li>'
         for label, description in rows
     )
     button = f'<button id="{prefix}-open" class="standards-guide-button" type="button" style="min-height:36px;padding:0 12px;border:1px solid #b8cdf1;border-radius:999px;color:#0b3b89;background:#edf4ff;cursor:pointer;font-weight:800">{html.escape(button_text)}</button>'

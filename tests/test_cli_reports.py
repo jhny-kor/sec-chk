@@ -101,7 +101,11 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("source-main-guide-open", main_html)
             self.assertIn("OWASP ASVS 5.0", main_html)
             self.assertIn("대외 비인가", main_html)
-            self.assertLess(main_html.index("대외 비인가"), main_html.index("source-main-guide-open"))
+            self.assertIn('class="koda-main-classification-badge" style="order:2"', main_html)
+            self.assertIn('class="standards-guide-button" type="button" style="order:1;', main_html)
+            self.assertLess(main_html.index("source-main-guide-open"), main_html.index("대외 비인가"))
+            self.assertIn('class="standards-guide-name" style="display:block">OWASP ASVS 5.0</strong>', main_html)
+            self.assertIn('class="standards-guide-description" style="display:block;color:#60708a">', main_html)
             self.assertIn("border:2px solid #ef4444", main_html)
             self.assertIn("border-radius:0", main_html)
             self.assertIn("background:none", main_html)
@@ -127,6 +131,9 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("source-code-line", detail_html)
             self.assertIn('id="location"', detail_html)
             self.assertIn("전체 위치", detail_html)
+            self.assertIn('<option value="critical">치명</option>', detail_html)
+            self.assertIn('<option value="info">정보</option>', detail_html)
+            self.assertNotIn('<option value="critical">Critical</option>', detail_html)
 
     def test_source_html_redacts_secret_context_and_embedded_payload(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
