@@ -298,9 +298,14 @@ class JavaScanTests(unittest.TestCase):
             write_reports(output, (), (group,), 1, (), "2026-07-23", language="ko")
             main_html = (output / "server-library-report.html").read_text(encoding="utf-8")
             detail_html = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
+            vulnerability_details_html = (output / "server-vulnerability-details.html").read_text(encoding="utf-8")
 
         self.assertIn("전체 취약점", main_html)
         self.assertIn("치명", main_html)
+        self.assertIn('id="main-vulnerability-library"', main_html)
+        self.assertIn('id="main-vulnerability-kev"', main_html)
+        self.assertIn('id="main-vulnerability-table"', main_html)
+        self.assertIn("server-vulnerability-details.html", main_html)
         self.assertIn('card card--critical', main_html)
         self.assertIn("우선 조치", main_html)
         self.assertIn("라이브러리별 조치 현황", main_html)
@@ -331,6 +336,10 @@ class JavaScanTests(unittest.TestCase):
         self.assertIn("KEV만 보기", detail_html)
         self.assertIn(".metric--critical .metric-label", detail_html)
         self.assertNotIn(".metric--critical{background:", detail_html)
+        self.assertIn("취약점별 상세 리포트", vulnerability_details_html)
+        self.assertIn("원문 보기", vulnerability_details_html)
+        self.assertIn("문제 파일", vulnerability_details_html)
+        self.assertIn("CVE-2026-0301", vulnerability_details_html)
 
     def test_fixed_versions_render_one_line_per_vulnerability_id(self) -> None:
         records = (
@@ -373,14 +382,16 @@ class JavaScanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             write_reports(output, (), groups, 1319, (), "2026-07-23", language="ko")
-            rendered = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
+            main_rendered = (output / "server-library-report.html").read_text(encoding="utf-8")
+            detail_rendered = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
 
-        self.assertNotIn(">더보기<", rendered)
-        self.assertNotIn(">접기<", rendered)
-        self.assertNotIn('class="collapse-item" hidden', rendered)
-        self.assertIn("1,319", rendered)
-        self.assertLess(rendered.index("해석 시 유의사항"), rendered.index("라이브러리별 조치 현황"))
-        self.assertIn("border-right:1px solid", rendered)
+        self.assertIn("더보기 (1)", main_rendered)
+        self.assertIn(">접기</button>", main_rendered)
+        self.assertIn('collapse-item" hidden', main_rendered)
+        self.assertIn("1,319", detail_rendered)
+        self.assertLess(detail_rendered.index("해석 시 유의사항"), detail_rendered.index("라이브러리별 조치 현황"))
+        self.assertIn("border-right:1px solid", detail_rendered)
+        self.assertNotIn("더보기 (1)", detail_rendered)
 
     def test_offline_run_writes_all_reports_and_combines_local_feeds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -475,6 +486,7 @@ class JavaScanTests(unittest.TestCase):
             self.assertTrue((root / "reports/server-vulnerabilities.json").exists())
             self.assertTrue((root / "reports/server-library-report.html").exists())
             self.assertTrue((root / "reports/server-library-report-detail.html").exists())
+            self.assertTrue((root / "reports/server-vulnerability-details.html").exists())
             self.assertTrue((root / "reports/server-library-report.md").exists())
             self.assertTrue((root / "reports/scan-metadata.json").exists())
             self.assertTrue((root / "reports/warnings.json").exists())

@@ -1920,6 +1920,13 @@ def render_html_pair(
     report_language = "ko"
     main_html = _render_html_main(payload, report_language, detail_href)
     main_html = main_html.replace(
+        '<section class="source-summary-panel">',
+        f'{_source_main_filter_markup(payload, report_language)}<section class="source-summary-panel">',
+        1,
+    )
+    main_html = main_html.replace('</style>', f'{_SOURCE_MAIN_EXTRA_CSS}</style>', 1)
+    main_html = main_html.replace('</body>', f'{_SOURCE_MAIN_FILTER_SCRIPT}</body>', 1)
+    main_html = main_html.replace(
         'class="koda-main-classification-badge"',
         'class="koda-main-classification-badge" style="order:2"',
     ).replace(
@@ -2160,23 +2167,92 @@ def _source_location(item: dict[str, object]) -> str:
 
 def _source_standard_text(payload: dict[str, object], item: dict[str, object], language: str) -> str:
     mappings = payload.get("rule_mappings")
-    mapping = mappings.get(str(item.get("rule_id") or ""), {}) if isinstance(mappings, dict) else {}
-    if isinstance(mapping, dict):
-        values = mapping.get("mappings") or mapping.get("standards") or []
-        if isinstance(values, list):
-            labels = []
-            for value in values[:3]:
-                if isinstance(value, dict):
-                    label = value.get("label") or value.get("title") or value.get("id")
-                    if isinstance(label, dict):
-                        label = label.get(language) or label.get("en")
-                else:
-                    label = value
-                if label:
-                    labels.append(str(label))
-            if labels:
-                return " · ".join(labels)
+    mapping = mappings.get(str(item.get("rule_id") or ""), []) if isinstance(mappings, dict) else []
+    values = (mapping.get("mappings") or mapping.get("standards") or []) if isinstance(mapping, dict) else mapping
+    if isinstance(values, list):
+        scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
+        selected_standard = str(scan.get("standard") or "")
+        selected_category = str(scan.get("standard_category") or "")
+        selected = [
+            value for value in values
+            if isinstance(value, dict)
+            and (not selected_standard or str(value.get("standard_id") or value.get("standard") or "") == selected_standard)
+            and (not selected_category or selected_category == "all" or str(value.get("category_id") or value.get("category") or "") == selected_category)
+        ]
+        values = selected or values
+        labels = []
+        for value in values[:4]:
+            if isinstance(value, dict):
+                standard = value.get("standard_labels") or value.get("standard_label") or value.get("standard_id")
+                category = value.get("category_labels") or value.get("category_label") or value.get("category_id")
+                if isinstance(standard, dict):
+                    standard = standard.get(language) or standard.get("ko") or standard.get("en")
+                if isinstance(category, dict):
+                    category = category.get(language) or category.get("ko") or category.get("en")
+                label = " · ".join(str(part) for part in (standard, category) if part)
+            else:
+                label = value
+            if label and str(label) not in labels:
+                labels.append(str(label))
+        if labels:
+            return " ｜ ".join(labels)
+    scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
+    standard_id = str(scan.get("standard") or "")
+    category_id = str(scan.get("standard_category") or "")
+    for standard in payload.get("standards", ()) if isinstance(payload.get("standards"), list) else ():
+        if not isinstance(standard, dict) or str(standard.get("id") or "") != standard_id:
+            continue
+        standard_labels = standard.get("labels") if isinstance(standard.get("labels"), dict) else {}
+        standard_label = str(standard_labels.get(language) or standard_labels.get("ko") or standard_labels.get("en") or standard_id)
+        for category in standard.get("categories", ()) if isinstance(standard.get("categories"), list) else ():
+            if not isinstance(category, dict) or str(category.get("id") or "") != category_id:
+                continue
+            category_labels = category.get("labels") if isinstance(category.get("labels"), dict) else {}
+            category_label = str(category_labels.get(language) or category_labels.get("ko") or category_labels.get("en") or category_id)
+            return f"{standard_label} · {category_label}"
+        return standard_label
     return str(item.get("category") or item.get("rule_id") or "—")
+
+
+_SOURCE_MAIN_EXTRA_CSS = """
+.source-main-filters{display:grid;grid-template-columns:minmax(240px,1.6fr) repeat(3,minmax(150px,1fr));gap:10px;margin:18px 0 0;padding:14px;border:1px solid #dce4ee;border-radius:16px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}
+.source-main-filters label{display:grid;gap:5px;color:#60708a;font-size:11px;font-weight:800}.source-main-filters input,.source-main-filters select{width:100%;min-height:42px;border:1px solid #cbd6e5;border-radius:10px;padding:0 11px;background:#fff;color:#10233f}.source-main-filter-count{grid-column:1/-1;color:#60708a;font-size:12px}.source-severity-panel{margin:18px 0 0;padding:20px;border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}.source-severity-panel h2{margin:0;font-size:18px}.source-severity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.source-severity-card{min-width:0;padding:14px;border:1px solid #e7edf4;border-radius:12px;background:#f8fafc}.source-severity-card strong{display:block;font-size:12px}.source-severity-card b{display:block;margin-top:3px;font-size:22px}.source-severity-locations{margin-top:8px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}@media(max-width:820px){.source-main-filters{grid-template-columns:1fr 1fr}.source-severity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.source-main-filters{grid-template-columns:1fr}.source-severity-grid{grid-template-columns:1fr}}
+.source-summary-table th:first-child,.source-summary-table td:first-child{min-width:92px;white-space:nowrap}
+"""
+
+
+def _source_main_filter_markup(payload: dict[str, object], language: str) -> str:
+    findings = _source_report_findings(payload, language)
+    locations = sorted({_source_location(item).rsplit(":", 1)[0] for item in findings})
+    standards = sorted({_source_standard_text(payload, item, language) for item in findings})
+    def options(values: list[str]) -> str:
+        return "".join(
+            f'<option value="{html.escape(value, quote=True)}">{html.escape(value)}</option>'
+            for value in values
+            if value
+        )
+
+    by_severity: dict[str, list[str]] = {severity: [] for severity in ("critical", "high", "medium", "low", "info")}
+    for item in findings:
+        by_severity.setdefault(str(item.get("severity") or "info").lower(), []).append(_source_location(item))
+    severity_labels = {"critical": "치명", "high": "높음", "medium": "중간", "low": "낮음", "info": "정보"}
+    severity_cards = "".join(
+        f'<article class="source-severity-card"><strong>{severity_labels.get(severity, severity)}</strong><b>{len(values):,}건</b><div class="source-severity-locations">{html.escape(" · ".join(dict.fromkeys(values)) or "위치 없음")}</div></article>'
+        for severity, values in by_severity.items()
+    )
+    return (
+        '<section class="source-main-filters" aria-label="상세정보 필터">'
+        '<label>상세정보 검색<input id="source-main-query" type="search" placeholder="규칙, 위치, 발견 내용 검색"></label>'
+        '<label>심각도<select id="source-main-severity"><option value="">전체 심각도</option><option value="critical">치명</option><option value="high">높음</option><option value="medium">중간</option><option value="low">낮음</option><option value="info">정보</option></select></label>'
+        f'<label>위치<select id="source-main-location"><option value="">전체 위치</option>{options(locations)}</select></label>'
+        f'<label>점검 기준<select id="source-main-standard"><option value="">전체 기준</option>{options(standards)}</select></label>'
+        f'<span id="source-main-filter-count" class="source-main-filter-count" aria-live="polite">전체 {len(findings):,}건</span></section>'
+        '<section class="source-severity-panel"><h2>심각도별 위치</h2><p>심각도별 발견 개수와 해당 위치를 한 번에 확인합니다.</p>'
+        f'<div class="source-severity-grid">{severity_cards}</div></section>'
+    )
+
+
+_SOURCE_MAIN_FILTER_SCRIPT = '''<script>(function(){const q=document.getElementById("source-main-query"),severity=document.getElementById("source-main-severity"),location=document.getElementById("source-main-location"),standard=document.getElementById("source-main-standard"),count=document.getElementById("source-main-filter-count"),table=document.querySelector(".source-summary-table");if(!q||!severity||!location||!standard||!count||!table)return;const rows=[...table.querySelectorAll("tbody tr")];const apply=()=>{const query=q.value.trim().toLowerCase(),selectedSeverity=severity.value,selectedLocation=location.value,selectedStandard=standard.value,labels={critical:"치명",high:"높음",medium:"중간",low:"낮음",info:"정보"};let visible=0;rows.forEach(row=>{const cells=row.cells||[],rowSeverity=(cells[0]?.textContent||"").trim(),rowLocation=(cells[2]?.textContent||"").trim(),rowStandard=(cells[4]?.textContent||"").trim(),haystack=row.textContent.toLowerCase();const hidden=!!((query&&!haystack.includes(query))||(selectedSeverity&&!rowSeverity.includes(labels[selectedSeverity]))||(selectedLocation&&!rowLocation.includes(selectedLocation))||(selectedStandard&&!rowStandard.includes(selectedStandard)));row.hidden=hidden;if(!hidden)visible+=1;});count.textContent=`필터 결과 ${visible.toLocaleString()}건 / 전체 ${rows.length.toLocaleString()}건`;};[q,severity,location,standard].forEach(control=>{control.addEventListener("input",apply);control.addEventListener("change",apply)});apply();})();</script>'''
 
 
 def _render_html_detail(payload: dict[str, object], language: str) -> str:
@@ -2221,7 +2297,7 @@ def _render_html_detail(payload: dict[str, object], language: str) -> str:
             f'<section><h3>{html.escape(problem)}</h3><p>{html.escape(str(item.get("description") or item.get("evidence") or "—"))}</p></section>'
             f'<section><h3>{html.escape(evidence_label)}</h3><pre>{html.escape(str(item.get("evidence") or "—"))}</pre></section>'
             f'<section><h3>{html.escape(context_label)}</h3><div class="source_context source-context">{context_html}</div></section>'
-            f'<section><h3>{html.escape(remediation)}</h3><p>{html.escape(str(item.get("recommendation") or "—"))}</p><p class="standards">{html.escape(_source_standard_text(payload, item, language))}</p></section></article>'
+            f'<section><h3>{html.escape(remediation)}</h3><p>{html.escape(str(item.get("recommendation") or "—"))}</p><p class="standards"><strong>점검 기준</strong><br>{html.escape(_source_standard_text(payload, item, language))}</p></section></article>'
         )
     empty = "탐지된 취약점이 없습니다." if is_ko else "No findings were detected."
     cards_html = "".join(cards) or f'<p class="empty">{empty}</p>'
