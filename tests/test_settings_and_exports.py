@@ -5,10 +5,12 @@ import importlib.util
 import sys
 import http.client
 import json
+import os
 import threading
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
@@ -20,6 +22,7 @@ from security_scanner.reporting import (
     build_rule_catalog,
     filter_disabled_rules,
     PdfExportError,
+    render_html,
     render_html_pair_zip_from_payload,
     render_hwpx,
     render_markdown_from_payload,
@@ -99,6 +102,19 @@ class DisabledRuleFilterTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
+    def test_optional_sbom_tracker_link_is_opt_in_and_safe(self) -> None:
+        with patch.dict(os.environ, {"KODA_SSBOM_TRACKER_URL": "http://127.0.0.1:8088/"}):
+            document = render_html([], language="ko")
+        self.assertIn('href="http://127.0.0.1:8088/"', document)
+        self.assertIn("SBOM Tracker 열기", document)
+        self.assertIn('target="_blank"', document)
+        self.assertIn('rel="noopener noreferrer"', document)
+
+        with patch.dict(os.environ, {"KODA_SSBOM_TRACKER_URL": "javascript:alert(1)"}):
+            unsafe_document = render_html([], language="ko")
+        self.assertNotIn("javascript:alert", unsafe_document)
+        self.assertNotIn("SBOM Tracker 열기", unsafe_document)
+
     def test_markdown_export_lists_findings(self) -> None:
         markdown = render_markdown_from_payload(SAMPLE_PAYLOAD, "ko")
         self.assertIn("secret.aws-access-key", markdown)

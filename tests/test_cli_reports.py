@@ -11,9 +11,32 @@ if str(SHARED_PYTHON) not in sys.path:
     sys.path.insert(0, str(SHARED_PYTHON))
 
 from security_scanner.cli import build_parser, main  # noqa: E402
+from security_scanner.reporting import _render_html_main, _source_main_filter_markup  # noqa: E402
 
 
 class CliReportTests(unittest.TestCase):
+    def test_source_summary_groups_same_severity_and_rule_and_collapses_locations(self) -> None:
+        findings = [
+            {"severity": "high", "rule_id": "code.same-rule", "path": f"source-{index}.py", "line": index, "title": "같은 문제"}
+            for index in range(1, 5)
+        ]
+        payload = {
+            "summary": {"displayed_finding_count": 4, "by_severity": {"critical": 0, "high": 4, "medium": 0, "low": 0}},
+            "scan": {"standard": "local", "standard_category": "all", "path": "src"},
+            "standards": [{"id": "local", "labels": {"ko": "로컬 기준"}, "categories": []}],
+            "findings_by_language": {"ko": findings},
+            "rule_mappings": {"code.same-rule": {"mappings": [{"standard_labels": {"ko": "점검 기준명"}, "category_labels": {"ko": "매핑 항목"}}]}},
+            "generated_display": "2026-07-27",
+        }
+        document = _render_html_main(payload, "ko", "source-detail.html") + _source_main_filter_markup(payload, "ko")
+        self.assertEqual(document.count('<td><code>code.same-rule</code></td>'), 1)
+        self.assertIn('data-finding-count="4"', document)
+        self.assertIn("source-collapse-more", document)
+        self.assertIn("더보기 (1)", document)
+        self.assertIn('class="source-severity-details"', document)
+        self.assertNotIn('class="source-severity-details" open', document)
+        self.assertIn("점검 기준명\n매핑 항목", document)
+
     def test_report_samples_mark_external_distribution(self) -> None:
         samples = sorted((ROOT / "samples" / "report-designs").glob("*.html"))
         self.assertTrue(samples)
@@ -96,6 +119,11 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("소스 취약점 요약", main_html)
             self.assertIn("max-width:1560px", main_html)
             self.assertIn('class="source-summary-table"', main_html)
+            self.assertIn('class="column-resizer"', main_html)
+            self.assertIn('data-column-index="4"', main_html)
+            self.assertIn('class="source-criteria"', main_html)
+            self.assertIn('class="source-severity-details"', main_html)
+            self.assertNotIn('class="source-severity-details" open', main_html)
             self.assertIn('id="source-main-query"', main_html)
             self.assertIn('id="source-main-standard"', main_html)
             self.assertIn("심각도별 위치", main_html)

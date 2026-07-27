@@ -246,7 +246,13 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn('href="server-library-report-detail.html"', main_report)
             self.assertIn("상세 보고서 더보기", main_report)
             self.assertIn("아카이브", main_report)
+            self.assertIn("확인불가", main_report)
             self.assertIn("KEV", main_report)
+            self.assertIn('grid-template-columns:repeat(4,minmax(0,1fr))', main_report)
+            self.assertIn('grid-template-columns:repeat(5,minmax(0,1fr))', main_report)
+            self.assertIn('data-column-index="5"', main_report)
+            self.assertNotIn("summary-edge-hint", main_report)
+            self.assertNotIn("← 왼쪽 끝", main_report)
             self.assertIn("max-width:1560px", main_report)
             self.assertIn("대외 비인가", main_report)
             self.assertIn("border:2px solid #ef4444", main_report)
@@ -264,7 +270,9 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn("background:none", html_report)
             self.assertIn("table-layout:fixed", html_report)
             self.assertIn("ArrowRight", html_report)
-            self.assertIn("table-scroll-hint", html_report)
+            self.assertNotIn("← 왼쪽 끝", html_report)
+            self.assertNotIn('class="library-card-accordion" open', html_report)
+            self.assertNotIn('class="workspace-accordion" open', html_report)
             self.assertIn("severity.value", html_report)
             self.assertIn("KODA Java 라이브러리 취약점 보고서", markdown_report)
 
@@ -340,6 +348,10 @@ class JavaScanTests(unittest.TestCase):
         self.assertIn("원문 보기", vulnerability_details_html)
         self.assertIn("문제 파일", vulnerability_details_html)
         self.assertIn("CVE-2026-0301", vulnerability_details_html)
+        self.assertIn('class="vulnerability-report-toolbar"', vulnerability_details_html)
+        self.assertIn('id="vulnerability-detail-count"', vulnerability_details_html)
+        self.assertIn("#vulnerability-detail-count", vulnerability_details_html)
+        self.assertIn("minmax(220px,auto)", vulnerability_details_html)
 
     def test_fixed_versions_render_one_line_per_vulnerability_id(self) -> None:
         records = (

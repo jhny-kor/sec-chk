@@ -3,12 +3,14 @@ from __future__ import annotations
 import io
 import html
 import json
+import os
 import re
 import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from threading import BoundedSemaphore
+from urllib.parse import urlparse
 
 from . import __version__
 from .checks.secrets import SECRET_RULES, _redact_line
@@ -1976,10 +1978,41 @@ def _render_html_payload(payload: dict[str, object], language: str, *, summary_h
     # Main and detail reports are independent artifacts.  Do not inject a
     # cross-page back link; the caller can open either file directly.
     replacements["__INITIAL_SUMMARY_LINK_HTML__"] = ""
+    replacements["__INITIAL_SSBOM_TRACKER_LINK_HTML__"] = _sbom_tracker_link_markup(language)
     content = HTML_TEMPLATE
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
     return content
+
+
+def _sbom_tracker_url() -> str:
+    """Return a safe, explicitly configured SBOM Tracker URL.
+
+    The link is intentionally opt-in so an air-gapped deployment never shows a
+    dead or unintended external destination. Credentials in URLs are rejected
+    because the value is copied into rendered HTML.
+    """
+    value = os.environ.get("KODA_SSBOM_TRACKER_URL", "").strip()
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    if parsed.username is not None or parsed.password is not None:
+        return ""
+    return value
+
+
+def _sbom_tracker_link_markup(language: str) -> str:
+    url = _sbom_tracker_url()
+    if not url:
+        return ""
+    label = "SBOM Tracker 열기" if language == "ko" else "Open SBOM Tracker"
+    return (
+        '<a class="topbar-action topbar-action-link" '
+        f'href="{html.escape(url, quote=True)}" target="_blank" '
+        f'rel="noopener noreferrer">{html.escape(label)}</a>'
+    )
 
 
 _STANDARDS_GUIDE_COPY = {
@@ -2130,19 +2163,42 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         if is_ko
         else ("Severity", "Rule", "Location", "Finding", "Standard")
     )
-    table_rows = "".join(
-        f'<tr><td><span class="source-severity source-severity--{html.escape(str(item.get("severity", "info")))}">{html.escape(_source_severity_label(str(item.get("severity", "info")), language))}</span></td>'
-        f'<td><code>{html.escape(str(item.get("rule_id", "")))}</code></td>'
-        f'<td><code>{html.escape(_source_location(item))}</code></td>'
-        f'<td>{html.escape(str(item.get("title") or item.get("evidence") or "—"))}</td>'
-        f'<td>{html.escape(_source_standard_text(payload, item, language))}</td></tr>'
-        for item in findings
-    ) or f'<tr><td colspan="5">{"탐지된 취약점이 없습니다." if is_ko else "No findings were detected."}</td></tr>'
+    grouped: dict[tuple[str, str], dict[str, object]] = {}
+    for item in findings:
+        key = (str(item.get("severity") or "info").lower(), str(item.get("rule_id") or "—"))
+        group = grouped.setdefault(key, {"severity": key[0], "rule_id": key[1], "items": []})
+        group["items"].append(item)
+
+    table_rows_parts: list[str] = []
+    for group in grouped.values():
+        group_items = group["items"]
+        locations = list(dict.fromkeys(_source_location(item) for item in group_items))
+        finding_texts = list(dict.fromkeys(str(item.get("title") or item.get("evidence") or "—") for item in group_items))
+        standards = list(dict.fromkeys(_source_standard_text(payload, item, language) for item in group_items))
+        severity = str(group["severity"])
+        rule_id = str(group["rule_id"])
+        location_html = _source_collapsible_lines(locations, language)
+        finding_html = "<br>".join(html.escape(value) for value in finding_texts)
+        standard_html = f'<span class="source-criteria">{html.escape(chr(10).join(standards))}</span>'
+        searchable = " ".join((severity, rule_id, *locations, *finding_texts, *standards)).casefold()
+        table_rows_parts.append(
+            f'<tr data-source-group="true" data-severity="{html.escape(severity)}" data-finding-count="{len(group_items)}" data-search="{html.escape(searchable, quote=True)}">'
+            f'<td><span class="source-severity source-severity--{html.escape(severity)}">{html.escape(_source_severity_label(severity, language))}</span></td>'
+            f'<td><code>{html.escape(rule_id)}</code></td><td>{location_html}</td><td>{finding_html}</td><td>{standard_html}</td></tr>'
+        )
+    table_rows = "".join(table_rows_parts) or f'<tr><td colspan="5">{"탐지된 취약점이 없습니다." if is_ko else "No findings were detected."}</td></tr>'
+    columns = (("severity", 120), ("rule", 220), ("location", 300), ("finding", 300), ("standard", 300))
+    table_width = sum(width for _, width in columns)
+    colgroup = "<colgroup>" + "".join(f'<col style="width:{width}px">' for _, width in columns) + "</colgroup>"
+    resizable_headers = "".join(
+        f'<th scope="col">{html.escape(header)}<span class="column-resizer" role="separator" aria-orientation="vertical" aria-label="열 너비 조절" title="열 너비 조절" tabindex="0" data-column-index="{index}"></span></th>'
+        for index, header in enumerate(table_headers)
+    )
     guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-main-guide", standard_id)
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
-:root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1120px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}.source-summary-panel{{overflow:hidden;margin-top:18px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}}.source-summary-head{{padding:20px 22px 14px;border-bottom:1px solid var(--line)}}.source-summary-head h2{{margin:0;font-size:20px}}.source-summary-head p{{margin:5px 0 0;color:var(--muted)}}.source-summary-wrap{{overflow:auto}}.source-summary-table{{width:100%;min-width:820px;border-collapse:collapse}}.source-summary-table th{{padding:11px 13px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px;letter-spacing:.04em}}.source-summary-table td{{padding:13px;border-top:1px solid #e7edf4;vertical-align:top}}.source-summary-table th:not(:last-child),.source-summary-table td:not(:last-child){{border-right:1px solid #e7edf4}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}code{{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#0b3b89}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
+:root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1120px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}.source-summary-panel{{overflow:hidden;margin-top:18px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}}.source-summary-head{{padding:20px 22px 14px;border-bottom:1px solid var(--line)}}.source-summary-head h2{{margin:0;font-size:20px}}.source-summary-head p{{margin:5px 0 0;color:var(--muted)}}.source-summary-wrap{{overflow:auto}}.source-summary-table{{width:{table_width}px;min-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}}.source-summary-table th{{position:relative;padding:11px 13px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px;letter-spacing:.04em}}.source-summary-table td{{padding:13px;border-top:1px solid #e7edf4;vertical-align:top;overflow-wrap:anywhere}}.source-summary-table th:not(:last-child),.source-summary-table td:not(:last-child){{border-right:1px solid #e7edf4}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}code{{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#0b3b89}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
 main{{max-width:1560px;padding:28px}}.detail-cta{{display:flex;justify-content:flex-end;margin-top:18px}}.detail-cta a{{display:inline-flex;align-items:center;gap:10px;min-height:48px;padding:0 20px;border:1px solid #0b3b89;border-radius:13px;color:#fff;background:linear-gradient(135deg,#1368e8,#0b3b89);box-shadow:0 12px 24px rgba(19,104,232,.24);text-decoration:none;font-weight:850;transition:transform .16s ease,box-shadow .16s ease}}.detail-cta a:hover{{transform:translateY(-2px);box-shadow:0 16px 30px rgba(19,104,232,.3)}}.detail-cta a:focus-visible{{outline:3px solid #8ec5ff;outline-offset:3px}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table"><thead><tr>{''.join(f'<th>{html.escape(header)}</th>' for header in table_headers)}</tr></thead><tbody>{table_rows}</tbody></table></div></section><div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section><div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
 
 
 def _source_report_findings(payload: dict[str, object], language: str) -> list[dict[str, object]]:
@@ -2163,6 +2219,25 @@ def _source_location(item: dict[str, object]) -> str:
     path = str(item.get("path") or item.get("target") or "—")
     line = item.get("line")
     return f"{path}:{line}" if line not in (None, "", 0) else path
+
+
+def _source_collapsible_lines(values: list[str], language: str) -> str:
+    unique_values = list(dict.fromkeys(str(value) for value in values if str(value).strip())) or ["—"]
+    visible = unique_values[:3]
+    hidden = unique_values[3:]
+    items = "".join(
+        f'<code class="source-collapse-item"{" hidden" if index >= 3 else ""}>{html.escape(value)}</code>'
+        for index, value in enumerate(unique_values)
+    )
+    if not hidden:
+        return f'<div class="source-location-list">{items}</div>'
+    more = "더보기" if language == "ko" else "More"
+    collapse = "접기" if language == "ko" else "Collapse"
+    controls = (
+        f'<div class="source-collapse-controls"><button type="button" class="source-collapse-toggle source-collapse-more" aria-expanded="false">{more} ({len(hidden)})</button>'
+        f'<button type="button" class="source-collapse-toggle source-collapse-less" aria-expanded="true" hidden>{collapse}</button></div>'
+    )
+    return f'<div class="source-location-list">{items}{controls}</div>'
 
 
 def _source_standard_text(payload: dict[str, object], item: dict[str, object], language: str) -> str:
@@ -2189,13 +2264,13 @@ def _source_standard_text(payload: dict[str, object], item: dict[str, object], l
                     standard = standard.get(language) or standard.get("ko") or standard.get("en")
                 if isinstance(category, dict):
                     category = category.get(language) or category.get("ko") or category.get("en")
-                label = " · ".join(str(part) for part in (standard, category) if part)
+                label = "\n".join(str(part) for part in (standard, category) if part)
             else:
                 label = value
             if label and str(label) not in labels:
                 labels.append(str(label))
         if labels:
-            return " ｜ ".join(labels)
+            return "\n\n".join(labels)
     scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
     standard_id = str(scan.get("standard") or "")
     category_id = str(scan.get("standard_category") or "")
@@ -2209,7 +2284,7 @@ def _source_standard_text(payload: dict[str, object], item: dict[str, object], l
                 continue
             category_labels = category.get("labels") if isinstance(category.get("labels"), dict) else {}
             category_label = str(category_labels.get(language) or category_labels.get("ko") or category_labels.get("en") or category_id)
-            return f"{standard_label} · {category_label}"
+            return f"{standard_label}\n{category_label}"
         return standard_label
     return str(item.get("category") or item.get("rule_id") or "—")
 
@@ -2218,6 +2293,7 @@ _SOURCE_MAIN_EXTRA_CSS = """
 .source-main-filters{display:grid;grid-template-columns:minmax(240px,1.6fr) repeat(3,minmax(150px,1fr));gap:10px;margin:18px 0 0;padding:14px;border:1px solid #dce4ee;border-radius:16px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}
 .source-main-filters label{display:grid;gap:5px;color:#60708a;font-size:11px;font-weight:800}.source-main-filters input,.source-main-filters select{width:100%;min-height:42px;border:1px solid #cbd6e5;border-radius:10px;padding:0 11px;background:#fff;color:#10233f}.source-main-filter-count{grid-column:1/-1;color:#60708a;font-size:12px}.source-severity-panel{margin:18px 0 0;padding:20px;border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}.source-severity-panel h2{margin:0;font-size:18px}.source-severity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.source-severity-card{min-width:0;padding:14px;border:1px solid #e7edf4;border-radius:12px;background:#f8fafc}.source-severity-card strong{display:block;font-size:12px}.source-severity-card b{display:block;margin-top:3px;font-size:22px}.source-severity-locations{margin-top:8px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}@media(max-width:820px){.source-main-filters{grid-template-columns:1fr 1fr}.source-severity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.source-main-filters{grid-template-columns:1fr}.source-severity-grid{grid-template-columns:1fr}}
 .source-summary-table th:first-child,.source-summary-table td:first-child{min-width:92px;white-space:nowrap}
+.source-summary-table{table-layout:fixed}.source-summary-table th{position:relative}.source-criteria{display:block;white-space:pre-line}.source-location-list{display:grid;gap:5px}.source-location-list code{overflow-wrap:anywhere}.source-collapse-item[hidden],.source-collapse-toggle[hidden]{display:none!important}.source-collapse-controls{display:flex;gap:6px;margin-top:2px}.source-collapse-toggle{min-height:30px;padding:0 8px;border:1px solid #cbd6e5;border-radius:8px;color:#0b3b89;background:#fff;cursor:pointer;font-size:11px;font-weight:750}.source-severity-details{margin-top:8px}.source-severity-details summary{color:#0b3b89;font-size:11px;font-weight:800;cursor:pointer}.source-severity-locations{margin-top:7px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.column-resizer{position:absolute;top:0;right:-5px;z-index:3;width:10px;height:100%;cursor:col-resize;touch-action:none;user-select:none}.column-resizer::after{content:"";position:absolute;top:24%;bottom:24%;left:4px;width:2px;border-radius:2px;background:transparent}.column-resizer:hover::after,.column-resizer:focus-visible::after{background:#1368e8}
 """
 
 
@@ -2237,7 +2313,7 @@ def _source_main_filter_markup(payload: dict[str, object], language: str) -> str
         by_severity.setdefault(str(item.get("severity") or "info").lower(), []).append(_source_location(item))
     severity_labels = {"critical": "치명", "high": "높음", "medium": "중간", "low": "낮음", "info": "정보"}
     severity_cards = "".join(
-        f'<article class="source-severity-card"><strong>{severity_labels.get(severity, severity)}</strong><b>{len(values):,}건</b><div class="source-severity-locations">{html.escape(" · ".join(dict.fromkeys(values)) or "위치 없음")}</div></article>'
+        f'<article class="source-severity-card"><strong>{severity_labels.get(severity, severity)}</strong><b>{len(values):,}건</b><details class="source-severity-details"><summary>상세 경로 보기</summary><div class="source-severity-locations">{html.escape(" · ".join(dict.fromkeys(values)) or "위치 없음")}</div></details></article>'
         for severity, values in by_severity.items()
     )
     return (
@@ -2252,7 +2328,7 @@ def _source_main_filter_markup(payload: dict[str, object], language: str) -> str
     )
 
 
-_SOURCE_MAIN_FILTER_SCRIPT = '''<script>(function(){const q=document.getElementById("source-main-query"),severity=document.getElementById("source-main-severity"),location=document.getElementById("source-main-location"),standard=document.getElementById("source-main-standard"),count=document.getElementById("source-main-filter-count"),table=document.querySelector(".source-summary-table");if(!q||!severity||!location||!standard||!count||!table)return;const rows=[...table.querySelectorAll("tbody tr")];const apply=()=>{const query=q.value.trim().toLowerCase(),selectedSeverity=severity.value,selectedLocation=location.value,selectedStandard=standard.value,labels={critical:"치명",high:"높음",medium:"중간",low:"낮음",info:"정보"};let visible=0;rows.forEach(row=>{const cells=row.cells||[],rowSeverity=(cells[0]?.textContent||"").trim(),rowLocation=(cells[2]?.textContent||"").trim(),rowStandard=(cells[4]?.textContent||"").trim(),haystack=row.textContent.toLowerCase();const hidden=!!((query&&!haystack.includes(query))||(selectedSeverity&&!rowSeverity.includes(labels[selectedSeverity]))||(selectedLocation&&!rowLocation.includes(selectedLocation))||(selectedStandard&&!rowStandard.includes(selectedStandard)));row.hidden=hidden;if(!hidden)visible+=1;});count.textContent=`필터 결과 ${visible.toLocaleString()}건 / 전체 ${rows.length.toLocaleString()}건`;};[q,severity,location,standard].forEach(control=>{control.addEventListener("input",apply);control.addEventListener("change",apply)});apply();})();</script>'''
+_SOURCE_MAIN_FILTER_SCRIPT = '''<script>(function(){const q=document.getElementById("source-main-query"),severity=document.getElementById("source-main-severity"),location=document.getElementById("source-main-location"),standard=document.getElementById("source-main-standard"),count=document.getElementById("source-main-filter-count"),table=document.querySelector(".source-summary-table");if(!q||!severity||!location||!standard||!count||!table)return;const rows=[...table.querySelectorAll("tbody tr[data-source-group]")],labels={critical:"치명",high:"높음",medium:"중간",low:"낮음",info:"정보"};const apply=()=>{const query=q.value.trim().toLowerCase(),selectedSeverity=severity.value,selectedLocation=location.value,selectedStandard=standard.value;let visible=0;rows.forEach(row=>{const rowSeverity=row.dataset.severity||"",rowLocation=(row.cells[2]?.textContent||"").trim(),rowStandard=(row.cells[4]?.textContent||"").trim(),haystack=(row.dataset.search||row.textContent).toLowerCase();const hidden=!!((query&&!haystack.includes(query))||(selectedSeverity&&rowSeverity!==selectedSeverity)||(selectedLocation&&!rowLocation.includes(selectedLocation))||(selectedStandard&&!rowStandard.includes(selectedStandard)));row.hidden=hidden;if(!hidden)visible+=Number(row.dataset.findingCount||1)});count.textContent=`필터 결과 ${visible.toLocaleString()}건 / 전체 ${[...table.querySelectorAll("tbody tr[data-source-group]")].reduce((total,row)=>total+Number(row.dataset.findingCount||1),0).toLocaleString()}건`;};[q,severity,location,standard].forEach(control=>{control.addEventListener("input",apply);control.addEventListener("change",apply)});table.querySelectorAll(".column-resizer").forEach(handle=>{const index=Number(handle.dataset.columnIndex),column=table.querySelectorAll("col")[index];if(!column)return;const resize=width=>{const previous=column.getBoundingClientRect().width,next=Math.max(64,width);column.style.width=`${next}px`;table.style.width=`${Math.max(table.getBoundingClientRect().width+next-previous,table.parentElement.clientWidth)}px`};handle.addEventListener("pointerdown",event=>{event.preventDefault();const startX=event.clientX,startWidth=column.getBoundingClientRect().width;handle.setPointerCapture(event.pointerId);const move=current=>resize(startWidth+current.clientX-startX);handle.addEventListener("pointermove",move);handle.addEventListener("pointerup",()=>handle.removeEventListener("pointermove",move),{once:true})});handle.addEventListener("keydown",event=>{if(event.key==="ArrowLeft"||event.key==="ArrowRight"){event.preventDefault();resize(column.getBoundingClientRect().width+(event.key==="ArrowRight"?16:-16))}})});document.querySelectorAll(".source-collapse-controls").forEach(controls=>{const root=controls.parentElement,items=[...root.querySelectorAll(".source-collapse-item")],more=controls.querySelector(".source-collapse-more"),less=controls.querySelector(".source-collapse-less");more?.addEventListener("click",()=>{items.forEach(item=>item.hidden=false);more.hidden=true;if(less)less.hidden=false;more.setAttribute("aria-expanded","true")});less?.addEventListener("click",()=>{items.forEach((item,index)=>item.hidden=index>=3);more.hidden=false;if(less)less.hidden=true;more.setAttribute("aria-expanded","false")})});apply();})();</script>'''
 
 
 def _render_html_detail(payload: dict[str, object], language: str) -> str:
@@ -2644,7 +2720,7 @@ HTML_TEMPLATE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>__INITIAL_TITLE__</title>
-  <style>
+<style>
     :root {
       --bg: #f6f7f9;
       --panel: #ffffff;
@@ -2729,6 +2805,13 @@ HTML_TEMPLATE = """<!doctype html>
       font-size: 12px;
       font-weight: 800;
       flex: 0 0 auto;
+    }
+
+    .topbar-action-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
     }
 
     .external-classification-badge {
@@ -3681,6 +3764,7 @@ HTML_TEMPLATE = """<!doctype html>
             <button id="lang-en" type="button">EN</button>
           </div>
           __INITIAL_SUMMARY_LINK_HTML__
+          __INITIAL_SSBOM_TRACKER_LINK_HTML__
           __INITIAL_STANDARDS_GUIDE_BUTTON__
           <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
           <button id="settings-toggle" class="topbar-action" type="button">⚙ 설정</button>
