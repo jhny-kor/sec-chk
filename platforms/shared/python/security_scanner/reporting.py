@@ -1920,7 +1920,7 @@ def render_html_pair(
     # ``detail_href`` remains accepted for callers that used the old linked
     # summary contract; both artifacts are intentionally standalone now.
     main_html = _render_html_main(payload, language)
-    return main_html, _render_html_payload(payload, language, summary_href=summary_href)
+    return main_html, _render_html_detail(payload, language)
 
 
 def _render_html_payload(payload: dict[str, object], language: str, *, summary_href: str | None = None) -> str:
@@ -2083,10 +2083,120 @@ def _render_html_main(payload: dict[str, object], language: str) -> str:
         priority = f"우선 조치: 치명 {_format_main_count(critical_count)}건 · 높음 {_format_main_count(high_count)}건. 상세 보고서에서 파일 위치, 문제행 문맥과 수정 방법을 확인하세요."
     else:
         priority = f"Priority action: {_format_main_count(critical_count)} Critical · {_format_main_count(high_count)} High. Use the detailed report for file locations, source context, and remediation guidance."
+    findings = _source_report_findings(payload, language)
+    summary_heading = "소스 취약점 요약" if is_ko else "Source finding summary"
+    summary_intro = "파일·행·규칙별 핵심 결과입니다." if is_ko else "Key results by file, line, and rule."
+    table_headers = (
+        ("심각도", "규칙", "위치", "발견 내용", "기준")
+        if is_ko
+        else ("Severity", "Rule", "Location", "Finding", "Standard")
+    )
+    table_rows = "".join(
+        f'<tr><td><span class="source-severity source-severity--{html.escape(str(item.get("severity", "info")))}">{html.escape(_source_severity_label(str(item.get("severity", "info")), language))}</span></td>'
+        f'<td><code>{html.escape(str(item.get("rule_id", "")))}</code></td>'
+        f'<td><code>{html.escape(_source_location(item))}</code></td>'
+        f'<td>{html.escape(str(item.get("title") or item.get("evidence") or "—"))}</td>'
+        f'<td>{html.escape(_source_standard_text(payload, item, language))}</td></tr>'
+        for item in findings
+    ) or f'<tr><td colspan="5">{"탐지된 취약점이 없습니다." if is_ko else "No findings were detected."}</td></tr>'
     guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-main-guide", standard_id)
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
-:root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-action{{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:13px 17px;border-radius:11px;color:#fff;background:#1368e8;text-decoration:none;font-weight:800}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
+:root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1120px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}.source-summary-panel{{overflow:hidden;margin-top:18px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}}.source-summary-head{{padding:20px 22px 14px;border-bottom:1px solid var(--line)}}.source-summary-head h2{{margin:0;font-size:20px}}.source-summary-head p{{margin:5px 0 0;color:var(--muted)}}.source-summary-wrap{{overflow:auto}}.source-summary-table{{width:100%;min-width:820px;border-collapse:collapse}}.source-summary-table th{{padding:11px 13px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px;letter-spacing:.04em}}.source-summary-table td{{padding:13px;border-top:1px solid #e7edf4;vertical-align:top}}.source-summary-table th:not(:last-child),.source-summary-table td:not(:last-child){{border-right:1px solid #e7edf4}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}code{{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#0b3b89}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table"><thead><tr>{''.join(f'<th>{html.escape(header)}</th>' for header in table_headers)}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
+
+
+def _source_report_findings(payload: dict[str, object], language: str) -> list[dict[str, object]]:
+    localized = payload.get("findings_by_language")
+    if not isinstance(localized, dict):
+        return []
+    values = localized.get(language) or localized.get("en") or localized.get("ko") or []
+    return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
+
+
+def _source_severity_label(severity: str, language: str) -> str:
+    key = severity.lower()
+    labels = {"critical": "치명", "high": "높음", "medium": "중간", "low": "낮음", "info": "정보"}
+    return labels.get(key, severity) if language == "ko" else key.capitalize()
+
+
+def _source_location(item: dict[str, object]) -> str:
+    path = str(item.get("path") or item.get("target") or "—")
+    line = item.get("line")
+    return f"{path}:{line}" if line not in (None, "", 0) else path
+
+
+def _source_standard_text(payload: dict[str, object], item: dict[str, object], language: str) -> str:
+    mappings = payload.get("rule_mappings")
+    mapping = mappings.get(str(item.get("rule_id") or ""), {}) if isinstance(mappings, dict) else {}
+    if isinstance(mapping, dict):
+        values = mapping.get("mappings") or mapping.get("standards") or []
+        if isinstance(values, list):
+            labels = []
+            for value in values[:3]:
+                if isinstance(value, dict):
+                    label = value.get("label") or value.get("title") or value.get("id")
+                    if isinstance(label, dict):
+                        label = label.get(language) or label.get("en")
+                else:
+                    label = value
+                if label:
+                    labels.append(str(label))
+            if labels:
+                return " · ".join(labels)
+    return str(item.get("category") or item.get("rule_id") or "—")
+
+
+def _render_html_detail(payload: dict[str, object], language: str) -> str:
+    is_ko = language == "ko"
+    findings = _source_report_findings(payload, language)
+    scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
+    title = "소스코드 취약점 상세" if is_ko else "Source Code Vulnerability Detail"
+    problem = "문제 설명" if is_ko else "Problem description"
+    evidence_label = "탐지 근거" if is_ko else "Evidence"
+    remediation = "조치 방법" if is_ko else "Remediation"
+    context_label = "소스 문맥" if is_ko else "Source context"
+    unavailable = "소스 문맥을 표시할 수 없습니다." if is_ko else "Source context is unavailable for this finding."
+    all_locations = "전체 위치" if is_ko else "All locations"
+    cards: list[str] = []
+    location_options = sorted({_source_location(item).rsplit(":", 1)[0] for item in findings})
+    for index, item in enumerate(findings, 1):
+        severity = str(item.get("severity") or "info").lower()
+        location = _source_location(item)
+        source_context = item.get("source_context")
+        context_rows: list[str] = []
+        context_values = source_context.get("lines", []) if isinstance(source_context, dict) else source_context
+        if isinstance(context_values, list):
+            for row in context_values:
+                if not isinstance(row, dict):
+                    continue
+                number = row.get("number") or row.get("line") or row.get("line_number") or ""
+                content = row.get("text") or row.get("content") or ""
+                focus = bool(row.get("is_focus") or row.get("focus"))
+                redaction_marker = "<!-- <redacted sensitive source line> -->" if row.get("redacted") else ""
+                context_rows.append(f'{redaction_marker}<div class="source-code-line{" source-code-line--focus" if focus else ""}"><span>{html.escape(str(number))}</span><code>{html.escape(str(content))}</code></div>')
+        if context_rows:
+            context_html = "".join(context_rows)
+        elif str(item.get("rule_id") or "").startswith("secret."):
+            context_html = '<!-- <redacted sensitive source line> --><p class="unavailable">&lt;redacted sensitive source line&gt;</p>'
+        else:
+            context_html = f'<p class="unavailable">{html.escape(unavailable)}</p>'
+        search = " ".join(str(item.get(key) or "") for key in ("title", "rule_id", "path", "evidence", "description")).lower()
+        cards.append(
+            f'<article class="finding" data-severity="{html.escape(severity)}" data-location="{html.escape(location.rsplit(":", 1)[0], quote=True)}" data-search="{html.escape(search, quote=True)}">'
+            f'<header><div><span class="source-severity source-severity--{html.escape(severity)}">{html.escape(_source_severity_label(severity, language))}</span> <code>{html.escape(str(item.get("rule_id") or ""))}</code></div><strong>#{index}</strong></header>'
+            f'<h2>{html.escape(str(item.get("title") or item.get("evidence") or "—"))}</h2><p class="location"><code>{html.escape(location)}</code></p>'
+            f'<section><h3>{html.escape(problem)}</h3><p>{html.escape(str(item.get("description") or item.get("evidence") or "—"))}</p></section>'
+            f'<section><h3>{html.escape(evidence_label)}</h3><pre>{html.escape(str(item.get("evidence") or "—"))}</pre></section>'
+            f'<section><h3>{html.escape(context_label)}</h3><div class="source_context source-context">{context_html}</div></section>'
+            f'<section><h3>{html.escape(remediation)}</h3><p>{html.escape(str(item.get("recommendation") or "—"))}</p><p class="standards">{html.escape(_source_standard_text(payload, item, language))}</p></section></article>'
+        )
+    empty = "탐지된 취약점이 없습니다." if is_ko else "No findings were detected."
+    cards_html = "".join(cards) or f'<p class="empty">{empty}</p>'
+    options = "".join(f'<option value="{html.escape(value, quote=True)}">{html.escape(value)}</option>' for value in location_options)
+    guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-detail-guide", str(scan.get("standard") or DEFAULT_STANDARD))
+    return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
+:root{{--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f7fb;color:var(--ink);font:15px/1.6 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:auto;padding:32px 22px 64px}}.report-head{{display:flex;align-items:center;gap:12px;margin-bottom:20px}}.report-head h1{{margin:0;font-size:clamp(28px,5vw,46px)}}.external-classification-badge{{margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius: 0;color:#b42318;background: none;font-weight:900}}.toolbar{{display:grid;grid-template-columns:1fr 170px 220px auto;gap:10px;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fff}}input,select{{min-height:40px;border:1px solid #cbd6e5;border-radius:9px;padding:0 11px;background:#fff}}.finding{{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(15,35,64,.05)}}.finding[hidden]{{display:none}}.finding header{{display:flex;justify-content:space-between;gap:14px}}.finding h2{{margin:14px 0 4px;font-size:22px}}.finding h3{{margin:18px 0 6px;font-size:14px}}.location,.unavailable,.standards{{color:var(--muted)}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}pre,.source-context{{overflow:auto;padding:14px;border-radius:10px;background:#0d1b2e;color:#dce8f8}}pre{{white-space:pre-wrap}}.source-code-line{{display:grid;grid-template-columns:48px 1fr;gap:12px;padding:2px 8px}}.source-code-line span{{color:#7890ad;text-align:right}}.source-code-line code{{color:inherit;white-space:pre}}.source-code-line--focus{{background:#46350e;outline:1px solid #d6a514}}@media(max-width:760px){{.toolbar{{grid-template-columns:1fr}}.report-head{{align-items:flex-start;flex-wrap:wrap}}.external-classification-badge{{margin-left:0}}}}
+</style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>KODA · STATIC ANALYSIS · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비인가</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select>{guide_button}</div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section>{guide_dialog}</main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script>{guide_script}</body></html>'''
 
 
 def _format_main_count(value: object) -> str:
