@@ -69,7 +69,7 @@ categories are rejected instead of being reported as automatically passed.
 - Trend charts are not included yet because the scanner does not persist historical scan snapshots.
 - SBOM, CVE, EPSS, and advisory lookups are deferred because the first version remains offline and dependency-free.
 - Standard selections are mapping profiles over the implemented local rules, not a claim of full standard coverage.
-- CWE Top 25 coverage is still heuristic; use-after-free and null-pointer dereference remain unsupported because they need deeper language-aware analysis.
+- CWE Top 25 coverage is still heuristic; Java/Kotlin null dereference has limited same-file evidence, while use-after-free and deeper interprocedural null analysis remain unsupported.
 - ISMS-P 2.8 is a supporting-evidence profile, not an ISMS-P audit result; full coverage needs checklist/evidence workflows outside static file scanning.
 - ASVS, Proactive Controls, and the Korean profiles are mapping profiles over
   the implemented local rules; formal compliance still requires the standard's

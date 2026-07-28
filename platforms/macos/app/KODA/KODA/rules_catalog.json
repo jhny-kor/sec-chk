@@ -858,6 +858,31 @@
           "description": "로그 또는 콘솔 출력에 이메일, 전화번호, 주소, 주민번호 등 개인정보 필드가 포함될 수 있습니다."
         },
         {
+          "id": "code.weak-hash",
+          "title": "약한 해시 알고리즘 사용 의심",
+          "description": "비밀번호, 서명, 무결성 확인에 부적절할 수 있는 MD5 또는 SHA-1 사용 패턴입니다."
+        },
+        {
+          "id": "code.insufficient-key-length",
+          "title": "충분하지 않은 암호 키 길이",
+          "description": "비대칭 키가 2048비트 미만으로 생성되는 것으로 보입니다."
+        },
+        {
+          "id": "code.insecure-random-security-use",
+          "title": "보안 문맥에서 비암호학적 난수 사용",
+          "description": "토큰·인증코드 등 보안 목적 값이 비암호학적 난수 API로 생성되는 것으로 보입니다."
+        },
+        {
+          "id": "code.tls-certificate-verification-disabled",
+          "title": "TLS 인증서 검증 비활성화",
+          "description": "외부 연결에서 인증서 또는 호스트명 검증이 꺼져 있는 것으로 보입니다."
+        },
+        {
+          "id": "code.password-hash-without-salt",
+          "title": "솔트 없는 비밀번호 해시 가능성",
+          "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
+        },
+        {
           "id": "code.xss-dom-sink",
           "title": "XSS 의심 HTML 출력 지점",
           "description": "사용자 입력으로 보이는 값이 HTML 렌더링 지점으로 전달되는 패턴입니다."
@@ -876,6 +901,26 @@
           "id": "code.eval-user-input",
           "title": "eval 계열 API를 통한 코드 삽입 의심",
           "description": "사용자 입력이 동적 코드 실행 API로 전달되는 패턴입니다."
+        },
+        {
+          "id": "code.xml-injection",
+          "title": "문자열 조립을 통한 XML 삽입 가능성",
+          "description": "사용자 입력이 이스케이프 없이 XML 본문에 문자열 연결로 삽입되는 것으로 보입니다."
+        },
+        {
+          "id": "code.ldap-injection",
+          "title": "LDAP 필터 조립을 통한 LDAP 삽입 가능성",
+          "description": "LDAP 검색 필터가 이스케이프 없이 동적 입력으로 조립되는 것으로 보입니다."
+        },
+        {
+          "id": "code.http-response-splitting",
+          "title": "HTTP 응답분할 가능성",
+          "description": "사용자 입력이 CR/LF 필터링 없이 HTTP 응답 헤더로 전달되는 것으로 보입니다."
+        },
+        {
+          "id": "code.format-string-user-input",
+          "title": "포맷 스트링이 외부에서 제어될 가능성",
+          "description": "변수가 포맷 문자열로 직접 사용되어 포맷 지시자 삽입이 가능할 수 있습니다."
         },
         {
           "id": "code.csrf-disabled",
@@ -1023,6 +1068,26 @@
           "id": "code.weak-hash",
           "title": "약한 해시 알고리즘 사용 의심",
           "description": "비밀번호, 서명, 무결성 확인에 부적절할 수 있는 MD5 또는 SHA-1 사용 패턴입니다."
+        },
+        {
+          "id": "code.insufficient-key-length",
+          "title": "충분하지 않은 암호 키 길이",
+          "description": "비대칭 키가 2048비트 미만으로 생성되는 것으로 보입니다."
+        },
+        {
+          "id": "code.insecure-random-security-use",
+          "title": "보안 문맥에서 비암호학적 난수 사용",
+          "description": "토큰·인증코드 등 보안 목적 값이 비암호학적 난수 API로 생성되는 것으로 보입니다."
+        },
+        {
+          "id": "code.tls-certificate-verification-disabled",
+          "title": "TLS 인증서 검증 비활성화",
+          "description": "외부 연결에서 인증서 또는 호스트명 검증이 꺼져 있는 것으로 보입니다."
+        },
+        {
+          "id": "code.password-hash-without-salt",
+          "title": "솔트 없는 비밀번호 해시 가능성",
+          "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
         },
         {
           "id": "code.xss-dom-sink",
@@ -1615,6 +1680,11 @@
           "id": "code.unrestricted-file-upload",
           "title": "제한 없는 파일 업로드 의심",
           "description": "업로드 파일을 클라이언트가 제어하는 이름이나 느슨한 저장 설정으로 저장하는 패턴입니다."
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
         },
         {
           "id": "code.unsafe-deserialization",
@@ -3017,6 +3087,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
           "id": "code.unsafe-deserialization",
           "title": "위험한 역직렬화 API 사용",
           "description": "신뢰할 수 없는 데이터에 위험할 수 있는 역직렬화 API가 사용된 패턴입니다."
@@ -3259,6 +3334,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
           "id": "code.unsafe-deserialization",
           "title": "위험한 역직렬화 API 사용",
           "description": "신뢰할 수 없는 데이터에 위험할 수 있는 역직렬화 API가 사용된 패턴입니다."
@@ -3499,6 +3579,11 @@
           "id": "code.empty-exception-handler",
           "title": "빈 예외 처리 블록",
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
         },
         {
           "id": "code.unsafe-deserialization",
@@ -4328,6 +4413,11 @@
           "id": "code.password-hash-without-salt",
           "title": "솔트 없는 비밀번호 해시 가능성",
           "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
         }
       ]
     },
@@ -4357,6 +4447,26 @@
           "description": "사용자 입력이 동적 코드 실행 API로 전달되는 패턴입니다."
         },
         {
+          "id": "code.xml-injection",
+          "title": "문자열 조립을 통한 XML 삽입 가능성",
+          "description": "사용자 입력이 이스케이프 없이 XML 본문에 문자열 연결로 삽입되는 것으로 보입니다."
+        },
+        {
+          "id": "code.ldap-injection",
+          "title": "LDAP 필터 조립을 통한 LDAP 삽입 가능성",
+          "description": "LDAP 검색 필터가 이스케이프 없이 동적 입력으로 조립되는 것으로 보입니다."
+        },
+        {
+          "id": "code.http-response-splitting",
+          "title": "HTTP 응답분할 가능성",
+          "description": "사용자 입력이 CR/LF 필터링 없이 HTTP 응답 헤더로 전달되는 것으로 보입니다."
+        },
+        {
+          "id": "code.format-string-user-input",
+          "title": "포맷 스트링이 외부에서 제어될 가능성",
+          "description": "변수가 포맷 문자열로 직접 사용되어 포맷 지시자 삽입이 가능할 수 있습니다."
+        },
+        {
           "id": "code.xml-external-entity",
           "title": "XML 외부 엔티티 처리 위험",
           "description": "외부 엔티티 처리를 비활성화하지 않으면 위험할 수 있는 XML 파서 사용 패턴입니다."
@@ -4365,16 +4475,6 @@
           "id": "code.unsafe-deserialization",
           "title": "위험한 역직렬화 API 사용",
           "description": "신뢰할 수 없는 데이터에 위험할 수 있는 역직렬화 API가 사용된 패턴입니다."
-        },
-        {
-          "id": "code.ldap-injection",
-          "title": "LDAP 필터 조립을 통한 LDAP 삽입 가능성",
-          "description": "LDAP 검색 필터가 이스케이프 없이 동적 입력으로 조립되는 것으로 보입니다."
-        },
-        {
-          "id": "code.format-string-user-input",
-          "title": "포맷 스트링이 외부에서 제어될 가능성",
-          "description": "변수가 포맷 문자열로 직접 사용되어 포맷 지시자 삽입이 가능할 수 있습니다."
         },
         {
           "id": "code.dangerous-c-buffer-api",
@@ -5139,6 +5239,26 @@
           "description": "비밀번호, 서명, 무결성 확인에 부적절할 수 있는 MD5 또는 SHA-1 사용 패턴입니다."
         },
         {
+          "id": "code.insufficient-key-length",
+          "title": "충분하지 않은 암호 키 길이",
+          "description": "비대칭 키가 2048비트 미만으로 생성되는 것으로 보입니다."
+        },
+        {
+          "id": "code.insecure-random-security-use",
+          "title": "보안 문맥에서 비암호학적 난수 사용",
+          "description": "토큰·인증코드 등 보안 목적 값이 비암호학적 난수 API로 생성되는 것으로 보입니다."
+        },
+        {
+          "id": "code.tls-certificate-verification-disabled",
+          "title": "TLS 인증서 검증 비활성화",
+          "description": "외부 연결에서 인증서 또는 호스트명 검증이 꺼져 있는 것으로 보입니다."
+        },
+        {
+          "id": "code.password-hash-without-salt",
+          "title": "솔트 없는 비밀번호 해시 가능성",
+          "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
+        },
+        {
           "id": "code.open-redirect-user-input",
           "title": "사용자 입력 기반 오픈 리다이렉트 가능성",
           "description": "리다이렉트 대상 URL이 허용 목록 없이 사용자 입력으로 구성되는 것으로 보입니다."
@@ -5846,6 +5966,11 @@
           "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
         },
         {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
           "id": "dependency.package-json-invalid",
           "title": "잘못된 package.json",
           "description": "잘못된 의존성 매니페스트는 의존성 검토와 재현 가능한 설치를 방해할 수 있습니다."
@@ -6401,6 +6526,11 @@
           "id": "code.password-hash-without-salt",
           "title": "솔트 없는 비밀번호 해시 가능성",
           "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
         },
         {
           "id": "prevention.ci-security-scan-missing",
@@ -7194,6 +7324,11 @@
           "id": "code.password-hash-without-salt",
           "title": "솔트 없는 비밀번호 해시 가능성",
           "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
         },
         {
           "id": "prevention.pre-commit-hook-missing",
@@ -8098,6 +8233,11 @@
           "id": "code.password-hash-without-salt",
           "title": "솔트 없는 비밀번호 해시 가능성",
           "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다."
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "NULL 포인터 역참조 가능성",
+          "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
         },
         {
           "id": "prevention.ssdf-workflow-missing",
@@ -9289,6 +9429,31 @@
           "description": ""
         },
         {
+          "id": "code.weak-hash",
+          "title": "Weak hash",
+          "description": ""
+        },
+        {
+          "id": "code.insufficient-key-length",
+          "title": "Insufficient key length",
+          "description": ""
+        },
+        {
+          "id": "code.insecure-random-security-use",
+          "title": "Insecure random security use",
+          "description": ""
+        },
+        {
+          "id": "code.tls-certificate-verification-disabled",
+          "title": "Tls certificate verification disabled",
+          "description": ""
+        },
+        {
+          "id": "code.password-hash-without-salt",
+          "title": "Password hash without salt",
+          "description": ""
+        },
+        {
           "id": "code.xss-dom-sink",
           "title": "Xss dom sink",
           "description": ""
@@ -9306,6 +9471,26 @@
         {
           "id": "code.eval-user-input",
           "title": "Eval user input",
+          "description": ""
+        },
+        {
+          "id": "code.xml-injection",
+          "title": "Xml injection",
+          "description": ""
+        },
+        {
+          "id": "code.ldap-injection",
+          "title": "Ldap injection",
+          "description": ""
+        },
+        {
+          "id": "code.http-response-splitting",
+          "title": "Http response splitting",
+          "description": ""
+        },
+        {
+          "id": "code.format-string-user-input",
+          "title": "Format string user input",
           "description": ""
         },
         {
@@ -9453,6 +9638,26 @@
         {
           "id": "code.weak-hash",
           "title": "Weak hash",
+          "description": ""
+        },
+        {
+          "id": "code.insufficient-key-length",
+          "title": "Insufficient key length",
+          "description": ""
+        },
+        {
+          "id": "code.insecure-random-security-use",
+          "title": "Insecure random security use",
+          "description": ""
+        },
+        {
+          "id": "code.tls-certificate-verification-disabled",
+          "title": "Tls certificate verification disabled",
+          "description": ""
+        },
+        {
+          "id": "code.password-hash-without-salt",
+          "title": "Password hash without salt",
           "description": ""
         },
         {
@@ -10045,6 +10250,11 @@
         {
           "id": "code.unrestricted-file-upload",
           "title": "Unrestricted file upload",
+          "description": ""
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
           "description": ""
         },
         {
@@ -11448,6 +11658,11 @@
           "description": ""
         },
         {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
           "id": "code.unsafe-deserialization",
           "title": "Unsafe deserialization",
           "description": ""
@@ -11690,6 +11905,11 @@
           "description": ""
         },
         {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
           "id": "code.unsafe-deserialization",
           "title": "Unsafe deserialization",
           "description": ""
@@ -11929,6 +12149,11 @@
         {
           "id": "code.empty-exception-handler",
           "title": "Empty exception handler",
+          "description": ""
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
           "description": ""
         },
         {
@@ -12759,6 +12984,11 @@
           "id": "code.password-hash-without-salt",
           "title": "Password hash without salt",
           "description": ""
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
+          "description": ""
         }
       ]
     },
@@ -12788,13 +13018,8 @@
           "description": ""
         },
         {
-          "id": "code.xml-external-entity",
-          "title": "Xml external entity",
-          "description": ""
-        },
-        {
-          "id": "code.unsafe-deserialization",
-          "title": "Unsafe deserialization",
+          "id": "code.xml-injection",
+          "title": "Xml injection",
           "description": ""
         },
         {
@@ -12803,8 +13028,23 @@
           "description": ""
         },
         {
+          "id": "code.http-response-splitting",
+          "title": "Http response splitting",
+          "description": ""
+        },
+        {
           "id": "code.format-string-user-input",
           "title": "Format string user input",
+          "description": ""
+        },
+        {
+          "id": "code.xml-external-entity",
+          "title": "Xml external entity",
+          "description": ""
+        },
+        {
+          "id": "code.unsafe-deserialization",
+          "title": "Unsafe deserialization",
           "description": ""
         },
         {
@@ -13570,6 +13810,26 @@
           "description": ""
         },
         {
+          "id": "code.insufficient-key-length",
+          "title": "Insufficient key length",
+          "description": ""
+        },
+        {
+          "id": "code.insecure-random-security-use",
+          "title": "Insecure random security use",
+          "description": ""
+        },
+        {
+          "id": "code.tls-certificate-verification-disabled",
+          "title": "Tls certificate verification disabled",
+          "description": ""
+        },
+        {
+          "id": "code.password-hash-without-salt",
+          "title": "Password hash without salt",
+          "description": ""
+        },
+        {
           "id": "code.open-redirect-user-input",
           "title": "Open redirect user input",
           "description": ""
@@ -14277,6 +14537,11 @@
           "description": ""
         },
         {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
           "id": "dependency.package-json-invalid",
           "title": "Package json invalid",
           "description": ""
@@ -14831,6 +15096,11 @@
         {
           "id": "code.password-hash-without-salt",
           "title": "Password hash without salt",
+          "description": ""
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
           "description": ""
         },
         {
@@ -15624,6 +15894,11 @@
         {
           "id": "code.password-hash-without-salt",
           "title": "Password hash without salt",
+          "description": ""
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
           "description": ""
         },
         {
@@ -16528,6 +16803,11 @@
         {
           "id": "code.password-hash-without-salt",
           "title": "Password hash without salt",
+          "description": ""
+        },
+        {
+          "id": "code.null-pointer-dereference",
+          "title": "Null pointer dereference",
           "description": ""
         },
         {

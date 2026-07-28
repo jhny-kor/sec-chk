@@ -1193,6 +1193,11 @@ RULE_TRANSLATIONS_KO = {
         "description": "자격증명이 전용 KDF 없이 빠른 해시 함수로 직접 해싱되는 것으로 보입니다.",
         "recommendation": "bcrypt, scrypt, Argon2, PBKDF2 같은 솔트 적용 KDF로 비밀번호를 해싱하세요.",
     },
+    "code.null-pointer-dereference": {
+        "title": "NULL 포인터 역참조 가능성",
+        "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다.",
+        "recommendation": "참조 전에 null을 검사하고, non-null 반환 계약이나 Objects.requireNonNull·Optional.orElseThrow 같은 실패 폐쇄형 처리를 사용하세요.",
+    },
     "secret.sensitive-comment": {
         "title": "주석 안에 포함된 민감정보",
         "description": "주석에 자격증명으로 보이는 값이 남아 있습니다. 발견 증거는 마스킹되어 표시됩니다.",

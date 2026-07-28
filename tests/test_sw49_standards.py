@@ -83,9 +83,9 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
     def test_source_profile_does_not_overclaim_full_automation(self) -> None:
         support_counts = Counter(control.support_level for control in SW49_CONTROLS)
         self.assertEqual(support_counts["automated"], 0)
-        self.assertEqual(support_counts["partial"], 35)
+        self.assertEqual(support_counts["partial"], 36)
         self.assertEqual(support_counts["manual-review"], 9)
-        self.assertEqual(support_counts["unsupported"], 5)
+        self.assertEqual(support_counts["unsupported"], 4)
 
     def test_sw_dev_security_category_counts(self) -> None:
         counts = Counter(control.category_id for control in SW49_CONTROLS)
@@ -151,6 +151,11 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
 
 
 class Sw49MappingCorrectionTests(unittest.TestCase):
+    def test_official_guide_cwe_cross_references_are_preserved(self) -> None:
+        by_id = {control.official_id: control for control in SW49_CONTROLS}
+        self.assertTrue({"CWE-259", "CWE-321"}.issubset(by_id["S-06"].cwe_ids))
+        self.assertIn("CWE-754", by_id["E-03"].cwe_ids)
+
     def test_encapsulation_no_longer_maps_unrelated_rules(self) -> None:
         rule_ids = set(_sw49_category("encapsulation").rule_ids)
         for wrong in (
@@ -217,7 +222,7 @@ class Sw49EvaluationTests(unittest.TestCase):
         by_id = {entry["official_id"]: entry for entry in results}
         self.assertEqual(len(results), 49)
         # unsupported controls are never PASS
-        for official_id in ("C-01", "C-02", "C-03", "C-04", "A-01"):
+        for official_id in ("C-02", "C-03", "C-04", "A-01"):
             self.assertEqual(by_id[official_id]["status"], "UNSUPPORTED")
         # manual-review controls stay NEEDS_REVIEW
         for official_id in ("S-02", "S-03", "S-09", "T-02", "P-01", "P-03", "P-04", "I-14", "I-15"):
@@ -229,7 +234,7 @@ class Sw49EvaluationTests(unittest.TestCase):
         results = evaluate_sw49_controls([], scanned_categories=())
         by_id = {entry["official_id"]: entry for entry in results}
         self.assertEqual(by_id["I-01"]["status"], "NOT_SCANNED")
-        self.assertEqual(by_id["C-01"]["status"], "UNSUPPORTED")
+        self.assertEqual(by_id["C-02"]["status"], "UNSUPPORTED")
         self.assertFalse(by_id["I-01"]["executed"])
 
     def test_vulnerable_when_mapped_rule_fires(self) -> None:
@@ -241,6 +246,12 @@ class Sw49EvaluationTests(unittest.TestCase):
         self.assertEqual(by_id["C-05"]["evidence"], ["src/app.py:1"])
         # the finding must not leak into API misuse
         self.assertNotEqual(by_id["A-02"]["status"], "VULNERABLE")
+
+    def test_null_pointer_finding_maps_to_c01(self) -> None:
+        results = evaluate_sw49_controls([_finding("code.null-pointer-dereference")], ALL_SCAN_CATEGORIES)
+        by_id = {entry["official_id"]: entry for entry in results}
+        self.assertEqual(by_id["C-01"]["status"], "VULNERABLE")
+        self.assertEqual(by_id["C-01"]["confirmed_finding_count"], 1)
 
     def test_review_candidate_is_not_reported_as_confirmed_violation(self) -> None:
         finding = Finding(
@@ -499,6 +510,155 @@ builder.parse(xmlInputStream);
         self.assertIn("code.format-string-user-input", self._rule_ids("a.c", "printf(user_input);\n"))
         self.assertNotIn("code.format-string-user-input", self._rule_ids("a.c", 'printf("%s", user_input);\n'))
         self.assertNotIn("code.format-string-user-input", self._rule_ids("a.c", 'sprintf(buffer, "%d", n);\n'))
+        self.assertNotIn(
+            "code.format-string-user-input",
+            self._rule_ids(
+                "A.java",
+                'private static final String KEY_PATTERN = "%s:%s";\n'
+                "String key = String.format(KEY_PATTERN, serviceId, judgmentCode);\n",
+            ),
+        )
+
+    def test_minified_javascript_is_not_treated_as_application_source(self) -> None:
+        minified = (
+            '/*! jQuery v1.9.1 */(function(e,t){var token=Math.random();'
+            'try{}catch(e){};t.innerHTML=location.hash})(window,document);\n'
+        )
+        self.assertFalse(self._scan("jquery-1.9.1.min.js", minified))
+        self.assertFalse(self._scan("jquery.min.js", minified))
+        self.assertIn(
+            "code.xss-dom-sink",
+            self._rule_ids("bundle.min.js", "/*! React v18.3.1 */\nconst value = location.hash; target.innerHTML = value;\n"),
+        )
+        self.assertIn(
+            "code.xss-dom-sink",
+            self._rule_ids("jquery.js", "const value = location.hash; target.innerHTML = value;\n"),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "thirdparty" / "jquery-1.9.1.js"
+            path.parent.mkdir()
+            path.write_text(minified, encoding="utf-8")
+            self.assertFalse(code_patterns.check_file(path, TargetConfig(name="t", path=Path(tmp))))
+
+            application_path = Path(tmp) / "thirdparty" / "application.js"
+            application_path.write_text("const value = location.hash; target.innerHTML = value;\n", encoding="utf-8")
+            self.assertIn(
+                "code.xss-dom-sink",
+                {item.rule_id for item in code_patterns.check_file(application_path, TargetConfig(name="t", path=Path(tmp)))},
+            )
+
+    def test_java_null_pointer_definite_and_nullable_candidates(self) -> None:
+        definite = """\
+User user = null;
+user.getName();
+"""
+        finding = next(
+            item
+            for item in self._scan("NullDeref.java", definite)
+            if item.rule_id == "code.null-pointer-dereference"
+        )
+        self.assertEqual(finding.line, 2)
+        self.assertEqual(finding.verification_status, "confirmed")
+
+        alias = """\
+User user = null;
+User selected = user;
+selected.getName();
+"""
+        finding = next(
+            item
+            for item in self._scan("NullAlias.java", alias)
+            if item.rule_id == "code.null-pointer-dereference"
+        )
+        self.assertEqual(finding.line, 3)
+        self.assertEqual(finding.verification_status, "confirmed")
+
+        nullable_lookup = "String name = users.get(userId).getName();\n"
+        finding = next(
+            item
+            for item in self._scan("NullableLookup.java", nullable_lookup)
+            if item.rule_id == "code.null-pointer-dereference"
+        )
+        self.assertEqual(finding.verification_status, "needs_review")
+
+    def test_java_null_pointer_guards_and_non_null_wrappers_are_safe(self) -> None:
+        guarded = """\
+User user = null;
+if (user == null) {
+    return;
+}
+user.getName();
+"""
+        self.assertNotIn("code.null-pointer-dereference", self._rule_ids("Guarded.java", guarded))
+        self.assertNotIn(
+            "code.null-pointer-dereference",
+            self._rule_ids("Required.java", "Objects.requireNonNull(users.get(userId)).getName();\n"),
+        )
+        self.assertNotIn(
+            "code.null-pointer-dereference",
+            self._rule_ids("OptionalValue.java", "users.findById(userId).orElseThrow().getName();\n"),
+        )
+        self.assertNotIn(
+            "code.null-pointer-dereference",
+            self._rule_ids(
+                "NonNullBranch.java",
+                "User user = users.get(userId);\nif (user != null) {\n    user.getName();\n}\n",
+            ),
+        )
+        self.assertNotIn(
+            "code.null-pointer-dereference",
+            self._rule_ids(
+                "SingleStatementGuard.java",
+                "User user = users.get(userId);\nif (user != null)\n    user.getName();\n",
+            ),
+        )
+        self.assertNotIn(
+            "code.null-pointer-dereference",
+            self._rule_ids(
+                "RequiredStatement.java",
+                "User user = users.get(userId);\nObjects.requireNonNull(user);\nuser.getName();\n",
+            ),
+        )
+
+    def test_java_null_pointer_else_branch_and_typed_map_are_reviewed(self) -> None:
+        else_branch = """\
+User user = users.get(userId);
+if (user != null) {
+    user.getName();
+} else {
+    user.getName();
+}
+"""
+        findings = [
+            item for item in self._scan("ElseBranch.java", else_branch)
+            if item.rule_id == "code.null-pointer-dereference"
+        ]
+        self.assertEqual([item.line for item in findings], [5])
+
+        typed_map = """\
+Map<String, User> entries;
+User selected = entries.get(userId);
+selected.getName();
+"""
+        finding = next(
+            item for item in self._scan("TypedMap.java", typed_map)
+            if item.rule_id == "code.null-pointer-dereference"
+        )
+        self.assertEqual(finding.line, 3)
+        self.assertEqual(finding.verification_status, "needs_review")
+
+    def test_java_null_pointer_cap_keeps_late_confirmed_finding(self) -> None:
+        source = "\n".join(
+            [f"users.get(id{index}).getName();" for index in range(5)]
+            + ["User definite = null;", "definite.getName();"]
+        )
+        findings = [
+            item for item in self._scan("Priority.java", source)
+            if item.rule_id == "code.null-pointer-dereference"
+        ]
+        self.assertEqual(len(findings), 5)
+        self.assertTrue(any(item.line == 7 and item.verification_status == "confirmed" for item in findings))
 
     def test_insufficient_key_length_vulnerable_and_safe(self) -> None:
         self.assertIn("code.insufficient-key-length", self._rule_ids("a.py", "key = RSA.generate(1024)\n"))
@@ -580,11 +740,14 @@ class Sw49ReportTests(unittest.TestCase):
         self.assertIn("미지원", report)
         self.assertIn("CWE-89", report)
 
-    def test_markdown_unsupported_not_shown_as_pass(self) -> None:
+    def test_markdown_partial_and_unsupported_controls_are_not_shown_as_pass(self) -> None:
         report = render_markdown_from_payload(self._payload([]), "ko")
         c01_row = next(line for line in report.splitlines() if line.startswith("| C-01"))
-        self.assertIn("미지원", c01_row)
+        self.assertIn("부분 자동", c01_row)
         self.assertNotIn("통과", c01_row)
+        c02_row = next(line for line in report.splitlines() if line.startswith("| C-02"))
+        self.assertIn("미지원", c02_row)
+        self.assertNotIn("통과", c02_row)
 
     def test_xlsx_and_hwpx_include_49_rows(self) -> None:
         payload = self._payload([])

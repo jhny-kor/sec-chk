@@ -615,6 +615,17 @@ CODE_PATTERN_RULES = (
         frozenset({".cs", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".ts", ".tsx"}),
     ),
     CodePatternRule(
+        "code.null-pointer-dereference",
+        "Potential null pointer dereference",
+        "medium",
+        # Java/Kotlin nullability needs state tracking, so the real detector is
+        # `_java_null_pointer_findings` rather than a line-only expression.
+        re.compile(r"(?!)"),
+        "A value that is null or returned by a known nullable lookup appears to be dereferenced.",
+        "Check for null before dereferencing, return a non-null type, or use a fail-closed wrapper such as Objects.requireNonNull or Optional.orElseThrow.",
+        frozenset({".java", ".kt"}),
+    ),
+    CodePatternRule(
         "code.llm-sensitive-data-in-prompt",
         "Sensitive data may be sent to an LLM prompt",
         "medium",
@@ -633,6 +644,210 @@ _JAVA_XML_UNTRUSTED_INPUT = re.compile(
     r"\b(request|req|body|payload|input|stream|reader|upload|xml)\w*\b|getInputStream\s*\(|getReader\s*\(",
     re.IGNORECASE,
 )
+
+_JAVA_ASSIGNMENT = re.compile(
+    r"^\s*(?:(?:final|var|val)\s+)?(?:[A-Za-z_$][\w$<>\[\].,?]*\s+)?"
+    r"([A-Za-z_$][\w$]*)\s*=\s*(.+?)\s*;?\s*$"
+)
+_JAVA_NULL_GUARD = re.compile(
+    r"\bif\s*\(\s*([A-Za-z_$][\w$]*)\s*==\s*null\s*\)|"
+    r"\bif\s*\(\s*null\s*==\s*([A-Za-z_$][\w$]*)\s*\)"
+)
+_JAVA_NONNULL_GUARD = re.compile(
+    r"\bif\s*\(\s*([A-Za-z_$][\w$]*)\s*!=\s*null\s*\)|"
+    r"\bif\s*\(\s*null\s*!=\s*([A-Za-z_$][\w$]*)\s*\)"
+)
+_JAVA_MAP_DECLARATION = re.compile(
+    r"\b(?:Map|HashMap|ConcurrentHashMap|SortedMap|NavigableMap)\s*<[^;=]+>\s*([A-Za-z_$][\w$]*)"
+)
+_JAVA_KNOWN_NULLABLE_CALL = re.compile(
+    r"(?:\brequest\s*\.\s*getParameter|\bSystem\s*\.\s*(?:getenv|getProperty)|"
+    r"\b(?:[A-Za-z_$][\w$]*(?:Map|Cache|Repository|Repo|Dao)|map|cache|users|items|records)"
+    r"\s*\.\s*(?:get|findBy\w*|lookup\w*))\s*\([^;]*?\)",
+    re.IGNORECASE,
+)
+_JAVA_NULL_SAFE_CHAIN = re.compile(
+    r"\.(?:orElseThrow|orElseGet|orElse|ifPresent|isPresent)\s*\(|"
+    r"\bObjects\s*\.\s*requireNonNull\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _java_guard_exits(lines: list[str], start: int) -> bool:
+    """Return true when a small null-guard block exits before fall-through."""
+    if "{" not in lines[start]:
+        return bool(re.search(r"\b(?:return|throw)\b", lines[start]))
+    depth = 0
+    saw_block = False
+    for index in range(start, min(len(lines), start + 7)):
+        line = lines[index]
+        if "{" in line:
+            saw_block = True
+        depth += line.count("{") - line.count("}")
+        if re.search(r"\b(?:return|throw)\b", line):
+            return True
+        if saw_block and index > start and depth <= 0:
+            break
+    return False
+
+
+def _java_null_pointer_findings(path: Path, lines: list[str], analysis_lines: list[str]) -> list[Finding]:
+    """Conservative intra-file Java/Kotlin null-state analysis.
+
+    Definite ``x = null; x.member`` paths are confirmed. Dereferences of a
+    small allowlist of APIs whose contracts permit null are review candidates.
+    Arbitrary method returns are deliberately not inferred.
+    """
+    rule = _RULE_BY_ID["code.null-pointer-dereference"]
+    definitely_null: set[str] = set()
+    possibly_null: set[str] = set()
+    nullable_receivers: set[str] = set()
+    nonnull_scopes: list[tuple[str, int]] = []
+    nonnull_next_statement: dict[str, int] = {}
+    brace_depth = 0
+    findings: list[Finding] = []
+    seen_lines: set[int] = set()
+
+    for index, line in enumerate(analysis_lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        nonnull_next_statement = {
+            name: statement_index
+            for name, statement_index in nonnull_next_statement.items()
+            if statement_index >= index
+        }
+        if re.search(r"\belse\b", stripped):
+            # A fact established by the positive branch is not valid in else.
+            nonnull_scopes.clear()
+        nonnull_scopes = [(name, depth) for name, depth in nonnull_scopes if brace_depth >= depth]
+        map_declaration = _JAVA_MAP_DECLARATION.search(stripped)
+        if map_declaration:
+            nullable_receivers.add(map_declaration.group(1))
+
+        nonnull_guard = _JAVA_NONNULL_GUARD.search(stripped)
+        nonnull_on_line: str | None = None
+        if nonnull_guard:
+            name = nonnull_guard.group(1) or nonnull_guard.group(2)
+            if "{" in stripped:
+                nonnull_scopes.append((name, brace_depth + 1))
+            else:
+                next_statement = next(
+                    (candidate for candidate in range(index + 1, len(analysis_lines)) if analysis_lines[candidate].strip()),
+                    index,
+                )
+                if next_statement == index:
+                    nonnull_on_line = name
+                else:
+                    nonnull_next_statement[name] = next_statement
+
+        required_nonnull = re.search(
+            r"\bObjects\s*\.\s*requireNonNull\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*;",
+            stripped,
+        )
+        if required_nonnull:
+            name = required_nonnull.group(1)
+            definitely_null.discard(name)
+            possibly_null.discard(name)
+
+        guard = _JAVA_NULL_GUARD.search(stripped)
+        if guard and _java_guard_exits(analysis_lines, index):
+            name = guard.group(1) or guard.group(2)
+            definitely_null.discard(name)
+            possibly_null.discard(name)
+            continue
+
+        for name in sorted(definitely_null | possibly_null):
+            if not re.search(rf"\b{re.escape(name)}\s*\.(?!\s*class\b)", stripped):
+                continue
+            if (
+                name == nonnull_on_line
+                or nonnull_next_statement.get(name) == index
+                or any(scope_name == name for scope_name, _ in nonnull_scopes)
+            ):
+                continue
+            if _JAVA_NULL_SAFE_CHAIN.search(stripped):
+                continue
+            line_number = index + 1
+            if line_number in seen_lines:
+                continue
+            confirmed = name in definitely_null
+            findings.append(
+                Finding(
+                    rule_id=rule.rule_id,
+                    category="code",
+                    severity=rule.severity,
+                    title=rule.title,
+                    path=path,
+                    line=line_number,
+                    evidence=_trim_evidence(lines[index].strip()),
+                    description=rule.description,
+                    recommendation=rule.recommendation,
+                    verification_status="confirmed" if confirmed else "needs_review",
+                    verification_note=(
+                        "동일 파일에서 null 대입 후 방어 없이 멤버를 참조하는 흐름을 확인했습니다."
+                        if confirmed
+                        else "null을 반환할 수 있는 API 결과를 즉시 참조합니다. API 계약과 입력 조건을 검토해야 합니다."
+                    ),
+                )
+            )
+            seen_lines.add(line_number)
+
+        typed_map_chain = any(
+            re.search(rf"\b{re.escape(receiver)}\s*\.\s*get\s*\([^;]*?\)\s*\.\s*[A-Za-z_$]", stripped)
+            for receiver in nullable_receivers
+        )
+        if (_JAVA_KNOWN_NULLABLE_CALL.search(stripped) or typed_map_chain) and re.search(r"\)\s*\.\s*[A-Za-z_$]", stripped):
+            if not _JAVA_NULL_SAFE_CHAIN.search(stripped):
+                line_number = index + 1
+                if line_number not in seen_lines:
+                    findings.append(
+                        Finding(
+                            rule_id=rule.rule_id,
+                            category="code",
+                            severity=rule.severity,
+                            title=rule.title,
+                            path=path,
+                            line=line_number,
+                            evidence=_trim_evidence(lines[index].strip()),
+                            description=rule.description,
+                            recommendation=rule.recommendation,
+                            verification_status="needs_review",
+                            verification_note="null을 반환할 수 있는 조회 API의 결과를 즉시 참조합니다. 조회 실패 경로를 확인해야 합니다.",
+                        )
+                    )
+                    seen_lines.add(line_number)
+
+        assignment = _JAVA_ASSIGNMENT.match(stripped)
+        if assignment:
+            name, expression = assignment.groups()
+            normalized_expression = expression.rstrip(";").strip()
+            typed_map_lookup = any(
+                re.search(rf"\b{re.escape(receiver)}\s*\.\s*get\s*\(", expression)
+                for receiver in nullable_receivers
+            )
+            if normalized_expression == "null" or normalized_expression in definitely_null:
+                definitely_null.add(name)
+                possibly_null.discard(name)
+            elif normalized_expression in possibly_null or (
+                (_JAVA_KNOWN_NULLABLE_CALL.search(expression) or typed_map_lookup)
+                and not _JAVA_NULL_SAFE_CHAIN.search(expression)
+            ):
+                definitely_null.discard(name)
+                possibly_null.add(name)
+            else:
+                definitely_null.discard(name)
+                possibly_null.discard(name)
+
+        brace_depth += stripped.count("{") - stripped.count("}")
+
+    # Bound report noise without allowing early review candidates to hide a
+    # later definite dereference.
+    return sorted(
+        findings,
+        key=lambda finding: (finding.verification_status != "confirmed", finding.line or 0),
+    )[:5]
 
 
 def _java_document_builder_xxe_findings(path: Path, lines: list[str], analysis_lines: list[str]) -> list[Finding]:
@@ -1053,6 +1268,13 @@ def _candidate_is_suppressed(
         return True
     if rule_id == "code.sql-dynamic-query" and _safe_sql_binding(line):
         return True
+    if rule_id == "code.format-string-user-input":
+        constant = re.search(r"\bString\.format\s*\(\s*([A-Z][A-Z0-9_]*)\s*[,)]", line)
+        if constant and re.search(
+            rf"\b(?:static\s+)?final\s+String\s+{re.escape(constant.group(1))}\s*=\s*[\"']",
+            document,
+        ):
+            return True
     if rule_id in {
         "code.xss-dom-sink",
         "code.path-traversal",
@@ -1253,14 +1475,40 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
     if lines is None:
         return []
 
+    # Recognized dependency sources are inventory input, not meaningful
+    # application source for line-regex analysis. A banner alone is insufficient:
+    # first-party bundles often include a library banner before application code.
+    if path.suffix.lower() in {".js", ".mjs", ".cjs"}:
+        parts = {part.lower().replace("-", "_") for part in path.parts}
+        banner = "\n".join(lines[:5])[:2000]
+        is_dependency_path = bool(parts.intersection({"node_modules", "vendor", "vendors", "thirdparty", "third_party"}))
+        has_library_banner = bool(re.search(
+            r"(?i)\b(jquery|lodash|bootstrap|angular|react|vue|moment)\b[^\n]{0,100}\bv?\d+(?:\.\d+)+",
+            banner,
+        ))
+        versioned_library_file = re.match(
+            r"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
+            r"[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$",
+            path.name,
+        )
+        named_library_file = re.match(
+            r"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
+            r"(?:\.min)?\.(?:js|mjs|cjs)$",
+            path.name,
+        )
+        if versioned_library_file or (named_library_file and (is_dependency_path or has_library_banner)) or (
+            is_dependency_path and has_library_banner
+        ):
+            return []
+
     suffix = path.suffix.lower()
     # Every rule below reads the whole-file code view, not the raw line, so a
     # single line is never judged out of its file context.
     code_lines = _code_view(lines, suffix)
     statements = _logical_lines(code_lines)
-    findings = (
-        _java_document_builder_xxe_findings(path, lines, code_lines) if suffix in {".java", ".kt"} else []
-    )
+    findings = _java_document_builder_xxe_findings(path, lines, code_lines) if suffix in {".java", ".kt"} else []
+    if suffix in {".java", ".kt"}:
+        findings.extend(_java_null_pointer_findings(path, lines, code_lines))
     findings.extend(_contextual_dataflow_findings(path, lines, statements))
     per_rule_counts: dict[str, int] = {}
     seen_locations: set[tuple[str, int | None]] = set()

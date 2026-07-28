@@ -125,6 +125,7 @@ CODE_PATTERN_RULE_IDS = (
     "code.insecure-random-security-use",
     "code.tls-certificate-verification-disabled",
     "code.password-hash-without-salt",
+    "code.null-pointer-dereference",
 )
 
 PREVENTION_RULE_IDS = (
@@ -833,7 +834,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
         note_en="Detects plaintext transport URLs and sensitive files in the repo; at-rest encryption needs manual review.",
     ),
     _control(
-        "S-06", "security-features", "하드코드된 중요정보", "Hard-coded Sensitive Information", ("CWE-798",),
+        "S-06", "security-features", "하드코드된 중요정보", "Hard-coded Sensitive Information", ("CWE-259", "CWE-321", "CWE-798"),
         SECRET_RULE_IDS, "partial",
     ),
     _control(
@@ -922,15 +923,15 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
         ("code.empty-exception-handler",), "partial",
     ),
     _control(
-        "E-03", "error-handling", "부적절한 예외 처리", "Improper Exception Handling", ("CWE-755", "CWE-396", "CWE-397"),
+        "E-03", "error-handling", "부적절한 예외 처리", "Improper Exception Handling", ("CWE-754", "CWE-755", "CWE-396", "CWE-397"),
         ("code.empty-exception-handler", "code.stack-trace-exposure"), "partial",
     ),
     # 코드오류 (5)
     _control(
         "C-01", "code-error", "Null Pointer 역참조", "Null Pointer Dereference", ("CWE-476",),
-        (), "unsupported",
-        note_ko="흐름 분석이 필요해 로컬 룰로 점검하지 못합니다. 외부 SAST 연동이 필요합니다.",
-        note_en="Needs flow analysis; not checkable with local rules. Requires external SAST.",
+        ("code.null-pointer-dereference",), "partial",
+        note_ko="Java/Kotlin의 명시적 null 대입과 알려진 nullable 조회 API의 동일 파일 역참조만 점검합니다. 함수 간 흐름은 외부 SAST 검토가 필요합니다.",
+        note_en="Checks explicit null assignments and known nullable lookup dereferences in the same Java/Kotlin file. Interprocedural flows still require external SAST.",
     ),
     _control(
         "C-02", "code-error", "부적절한 자원 해제", "Improper Resource Release", ("CWE-404", "CWE-772"),
@@ -1498,6 +1499,8 @@ _CWE_TOP_25_2025_CATEGORIES = (
     StandardCategory(
         "cwe-476-null-pointer-dereference",
         {"en": "CWE-476 NULL Pointer Dereference", "ko": "CWE-476 NULL 포인터 역참조"},
+        scanner_categories=("code",),
+        rule_ids=("code.null-pointer-dereference",),
     ),
     StandardCategory(
         "cwe-121-stack-buffer-overflow",
@@ -1580,8 +1583,8 @@ CWE_TOP_25_2025 = SecurityStandard(
         "MITRE CWE Top 25:2025 약점 중 경량 로컬 근거를 만들 수 있는 항목을 매핑한 프로파일입니다.",
     ),
     coverage=_text(
-        "Automatic file-based checks. Deep memory lifetime and null-dereference analysis remains unsupported.",
-        "자동 점검을 실행합니다. 메모리 수명과 NULL 역참조의 깊은 분석은 아직 지원하지 않습니다.",
+        "Automatic file-based checks. Deep memory-lifetime and interprocedural null-dereference analysis remains unsupported.",
+        "자동 파일 점검을 실행합니다. 메모리 수명과 함수 간 NULL 역참조의 깊은 분석은 아직 지원하지 않습니다.",
     ),
     references=(
         _reference("MITRE CWE Top 25:2025", "MITRE CWE Top 25:2025", "https://cwe.mitre.org/top25/archive/2025/2025_cwe_top25.html"),

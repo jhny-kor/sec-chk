@@ -1771,6 +1771,152 @@ final class NativeSecurityScanner {
         return stripped
     }
 
+    private func checkJavaNullPointerDereference(lines: [String], codeLines: [String], file: URL, displayPath: String) -> [NativeFinding] {
+        guard ["java", "kt"].contains(file.pathExtension.lowercased()) else { return [] }
+
+        func captureGroups(_ pattern: String, _ text: String) -> [String]? {
+            guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            guard let match = expression.firstMatch(in: text, range: range) else { return nil }
+            return (1..<match.numberOfRanges).map { index in
+                guard let swiftRange = Range(match.range(at: index), in: text) else { return "" }
+                return String(text[swiftRange])
+            }
+        }
+
+        func guardExits(_ start: Int) -> Bool {
+            if !codeLines[start].contains("{") {
+                return matches(#"\b(return|throw)\b"#, codeLines[start])
+            }
+            var depth = 0
+            var sawBlock = false
+            for index in start..<min(codeLines.count, start + 7) {
+                let line = codeLines[index]
+                if line.contains("{") { sawBlock = true }
+                depth += line.filter { $0 == "{" }.count - line.filter { $0 == "}" }.count
+                if matches(#"\b(return|throw)\b"#, line) { return true }
+                if sawBlock && index > start && depth <= 0 { break }
+            }
+            return false
+        }
+
+        let assignmentPattern = #"^\s*(?:(?:final|var|val)\s+)?(?:[A-Za-z_$][\w$<>\[\].,?]*\s+)?([A-Za-z_$][\w$]*)\s*=\s*(.+?)\s*;?\s*$"#
+        let mapPattern = #"\b(?:Map|HashMap|ConcurrentHashMap|SortedMap|NavigableMap)\s*<[^;=]+>\s*([A-Za-z_$][\w$]*)"#
+        let nullableCallPattern = #"(?i)(?:\brequest\s*\.\s*getParameter|\bSystem\s*\.\s*(?:getenv|getProperty)|\b(?:[A-Za-z_$][\w$]*(?:Map|Cache|Repository|Repo|Dao)|map|cache|users|items|records)\s*\.\s*(?:get|findBy\w*|lookup\w*))\s*\([^;]*?\)"#
+        let nullSafePattern = #"(?i)\.(?:orElseThrow|orElseGet|orElse|ifPresent|isPresent)\s*\(|\bObjects\s*\.\s*requireNonNull\s*\("#
+        var definitelyNull = Set<String>()
+        var possiblyNull = Set<String>()
+        var nullableReceivers = Set<String>()
+        var nonnullScopes: [(name: String, depth: Int)] = []
+        var nonnullNextStatement: [String: Int] = [:]
+        var braceDepth = 0
+        var findings: [NativeFinding] = []
+        var seenLines = Set<Int>()
+
+        for index in codeLines.indices {
+            let stripped = codeLines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            if stripped.isEmpty { continue }
+
+            nonnullNextStatement = nonnullNextStatement.filter { $0.value >= index }
+            if matches(#"\belse\b"#, stripped) { nonnullScopes.removeAll() }
+            nonnullScopes = nonnullScopes.filter { braceDepth >= $0.depth }
+            if let receiver = firstCapture(mapPattern, in: stripped) { nullableReceivers.insert(receiver) }
+
+            var nonnullOnLine: String?
+            let positiveGuard = firstCapture(#"\bif\s*\(\s*([A-Za-z_$][\w$]*)\s*!=\s*null\s*\)"#, in: stripped)
+                ?? firstCapture(#"\bif\s*\(\s*null\s*!=\s*([A-Za-z_$][\w$]*)\s*\)"#, in: stripped)
+            if let name = positiveGuard {
+                if stripped.contains("{") {
+                    nonnullScopes.append((name, braceDepth + 1))
+                } else if let next = codeLines.indices.dropFirst(index + 1).first(where: {
+                    !codeLines[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }) {
+                    nonnullNextStatement[name] = next
+                } else {
+                    nonnullOnLine = name
+                }
+            }
+
+            if let required = firstCapture(#"\bObjects\s*\.\s*requireNonNull\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*;"#, in: stripped) {
+                definitelyNull.remove(required)
+                possiblyNull.remove(required)
+            }
+
+            let nullGuard = firstCapture(#"\bif\s*\(\s*([A-Za-z_$][\w$]*)\s*==\s*null\s*\)"#, in: stripped)
+                ?? firstCapture(#"\bif\s*\(\s*null\s*==\s*([A-Za-z_$][\w$]*)\s*\)"#, in: stripped)
+            if let name = nullGuard, guardExits(index) {
+                definitelyNull.remove(name)
+                possiblyNull.remove(name)
+                braceDepth += stripped.filter { $0 == "{" }.count - stripped.filter { $0 == "}" }.count
+                continue
+            }
+
+            for name in definitelyNull.union(possiblyNull).sorted() {
+                let escaped = NSRegularExpression.escapedPattern(for: name)
+                guard matches("\\b\(escaped)\\s*\\.(?!\\s*class\\b)", stripped) else { continue }
+                if name == nonnullOnLine || nonnullNextStatement[name] == index || nonnullScopes.contains(where: { $0.name == name }) { continue }
+                if matches(nullSafePattern, stripped) { continue }
+                let lineNumber = index + 1
+                guard !seenLines.contains(lineNumber) else { continue }
+                let confirmed = definitelyNull.contains(name)
+                findings.append(finding(
+                    "code.null-pointer-dereference", "medium", "code", "Null 포인터 역참조 가능성",
+                    displayPath, lineNumber, lines[index],
+                    "null 여부를 확인한 뒤 참조하고, nullable 조회 결과는 Objects.requireNonNull 또는 Optional.orElseThrow 등으로 명시적으로 처리하세요.",
+                    verificationStatus: confirmed ? "confirmed" : "needs_review"
+                ))
+                seenLines.insert(lineNumber)
+            }
+
+            let typedMapChain = nullableReceivers.contains { receiver in
+                let escaped = NSRegularExpression.escapedPattern(for: receiver)
+                return matches("\\b\(escaped)\\s*\\.\\s*get\\s*\\([^;]*?\\)\\s*\\.\\s*[A-Za-z_$]", stripped)
+            }
+            if (matches(nullableCallPattern, stripped) || typedMapChain)
+                && matches(#"\)\s*\.\s*[A-Za-z_$]"#, stripped)
+                && !matches(nullSafePattern, stripped) {
+                let lineNumber = index + 1
+                if !seenLines.contains(lineNumber) {
+                    findings.append(finding(
+                        "code.null-pointer-dereference", "medium", "code", "Null 포인터 역참조 가능성",
+                        displayPath, lineNumber, lines[index],
+                        "nullable 조회 결과를 즉시 참조하지 말고 null 또는 값 부재 경로를 명시적으로 처리하세요."
+                    ))
+                    seenLines.insert(lineNumber)
+                }
+            }
+
+            if let groups = captureGroups(assignmentPattern, stripped), groups.count == 2 {
+                let name = groups[0]
+                let expression = groups[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: ";"))
+                let typedMapLookup = nullableReceivers.contains { receiver in
+                    let escaped = NSRegularExpression.escapedPattern(for: receiver)
+                    return matches("\\b\(escaped)\\s*\\.\\s*get\\s*\\(", expression)
+                }
+                if expression == "null" || definitelyNull.contains(expression) {
+                    definitelyNull.insert(name)
+                    possiblyNull.remove(name)
+                } else if possiblyNull.contains(expression)
+                    || ((matches(nullableCallPattern, expression) || typedMapLookup) && !matches(nullSafePattern, expression)) {
+                    definitelyNull.remove(name)
+                    possiblyNull.insert(name)
+                } else {
+                    definitelyNull.remove(name)
+                    possiblyNull.remove(name)
+                }
+            }
+
+            braceDepth += stripped.filter { $0 == "{" }.count - stripped.filter { $0 == "}" }.count
+        }
+        return findings.sorted {
+            if $0.verificationStatus != $1.verificationStatus {
+                return $0.verificationStatus == "confirmed"
+            }
+            return ($0.line ?? 0) < ($1.line ?? 0)
+        }.prefix(5).map { $0 }
+    }
+
     private func checkJavaDocumentBuilderXXE(lines: [String], codeLines: [String], file: URL, displayPath: String) -> [NativeFinding] {
         guard ["java", "kt"].contains(file.pathExtension.lowercased()) else { return [] }
 
@@ -2069,7 +2215,15 @@ final class NativeSecurityScanner {
                 result.append(finding)
             }
         }
-        return result
+        let selected = Set(Dictionary(grouping: result, by: \.ruleID).values.flatMap { group in
+            group.sorted {
+                if $0.verificationStatus != $1.verificationStatus {
+                    return $0.verificationStatus == "confirmed"
+                }
+                return ($0.line ?? 0) < ($1.line ?? 0)
+            }.prefix(5)
+        })
+        return result.filter { selected.contains($0) }
     }
 
     /// Drops prose inside string literals, keeping interpolations and labelled
@@ -2098,11 +2252,29 @@ final class NativeSecurityScanner {
     }
 
     private func checkCode(lines: [String], file: URL, displayPath: String) -> [NativeFinding] {
+        if ["js", "mjs", "cjs"].contains(file.pathExtension.lowercased()) {
+            let normalizedPath = "/" + displayPath.lowercased()
+                .replacingOccurrences(of: "-", with: "_")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/"
+            let banner = lines.prefix(5).joined(separator: "\n")
+            let isVendoredPath = normalizedPath.contains("/vendor/")
+                || normalizedPath.contains("/vendors/")
+                || normalizedPath.contains("/thirdparty/")
+                || normalizedPath.contains("/third_party/")
+                || normalizedPath.contains("/node_modules/")
+            let hasLibraryBanner = matches(#"(?i)\b(jquery|lodash|bootstrap|angular|react|vue|moment)\b[^\n]{0,100}\bv?\d+(?:\.\d+)+"#, banner)
+            let isVersionedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
+            let isNamedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
+            if isVersionedLibraryFile || (isNamedLibraryFile && (isVendoredPath || hasLibraryBanner)) || (isVendoredPath && hasLibraryBanner) {
+                return []
+            }
+        }
         // Every rule below reads the whole-file code view, not the raw line, so a
         // single line is never judged out of its file context.
         let codeLines = codeView(lines: lines, suffix: file.pathExtension.lowercased())
         let statements = logicalLines(codeLines)
         var findings = checkJavaDocumentBuilderXXE(lines: lines, codeLines: codeLines, file: file, displayPath: displayPath)
+        findings += checkJavaNullPointerDereference(lines: lines, codeLines: codeLines, file: file, displayPath: displayPath)
         findings += checkContextualSourceFlows(lines: lines, codeLines: statements, displayPath: displayPath)
         let document = codeLines.joined(separator: "\n")
         let hasRateLimit = matches(#"(?i)\b(express-rate-limit|rateLimit\s*\(|RateLimiter|SlowAPIMiddleware|@\w*limiter\.limit|Bucket4j|resilience4j.*ratelimit)"#, document)
@@ -2241,7 +2413,11 @@ final class NativeSecurityScanner {
             if !hasSanitizer && matches(#"(?i)\b(setHeader|addHeader|set_header|writeHead)\s*\(.*(request\.|req\.|params|query|body|input)"#, line) {
                 findings.append(finding("code.http-response-splitting", "medium", "code", "HTTP 응답 분할 의심", displayPath, lineNumber, rawLine, "헤더 값의 CR/LF를 거부하고 허용 형식만 사용하세요."))
             }
-            if matches(#"(?i)(\b(printf|vprintf|syslog)\s*\(\s*[A-Za-z_][\w>.\-\[\]]*\s*\)|\bString\.format\s*\(\s*[A-Za-z_][\w.\[\]]*\s*[,\)])"#, line) {
+            let formatConstant = firstCapture(#"\bString\.format\s*\(\s*([A-Z][A-Z0-9_]*)\s*[,)]"#, in: line)
+            let hasFixedFormatDeclaration = formatConstant.map { name in
+                matches(#"\b(?:static\s+)?final\s+String\s+"# + NSRegularExpression.escapedPattern(for: name) + #"\s*=\s*[\"']"#, document)
+            } ?? false
+            if !hasFixedFormatDeclaration && matches(#"(?i)(\b(printf|vprintf|syslog)\s*\(\s*[A-Za-z_][\w>.\-\[\]]*\s*\)|\bString\.format\s*\(\s*[A-Za-z_][\w.\[\]]*\s*[,\)])"#, line) {
                 findings.append(finding("code.format-string-user-input", "high", "code", "변수 기반 포맷 문자열 사용", displayPath, lineNumber, rawLine, "상수 포맷 문자열을 사용하고 동적 값은 별도 인자로 전달하세요."))
             }
             if matches(#"(?i)(\bRSA\b.{0,60}\b(512|768|1024)\b|\bKeyPairGenerator\b.*initialize\s*\(\s*(512|768|1024))"#, line) {
@@ -3640,6 +3816,7 @@ private extension NativeSecurityScanner {
         case "code.webdav-enabled": return "WebDAV enabled"
         case "code.legacy-board-software": return "Legacy bulletin-board software marker"
         case "code.xml-external-entity": return "XML parser may allow external entities"
+        case "code.null-pointer-dereference": return "Possible null pointer dereference"
         case "code.llm-prompt-user-concat": return "LLM prompt concatenates user-controlled input"
         case "code.llm-tool-unrestricted": return "LLM tool or function access is broad"
         case "code.llm-sensitive-data-in-prompt": return "Sensitive data may be sent to an LLM prompt"
@@ -3924,6 +4101,8 @@ private extension NativeSecurityScanner {
             return "Confirm the component is still used, then update, isolate, or remove it."
         case "code.xml-external-entity":
             return "Disable DTD and external entity resolution in XML parser configuration."
+        case "code.null-pointer-dereference":
+            return "Check for null before dereferencing and handle absent lookup results explicitly."
         case "code.llm-prompt-user-concat":
             return "Keep system and developer instructions fixed, separate user content into user-message fields, and add prompt-injection tests."
         case "code.llm-tool-unrestricted":

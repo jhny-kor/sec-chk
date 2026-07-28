@@ -70,7 +70,7 @@ Official sources:
 
 | KODA profile | Relationship to the authoritative source | KODA coverage |
 | --- | --- | --- |
-| CWE Top 25:2025 | Corrected to the official order, CWE IDs, and names of the 25 MITRE entries | Connects direct local evidence to 17 entries and marks eight entries that need memory-safety or semantic analysis as unsupported |
+| CWE Top 25:2025 | Corrected to the official order, CWE IDs, and names of the 25 MITRE entries | Connects direct local evidence to 18 entries and leaves seven memory-safety or semantic-analysis entries unsupported. CWE-476 has limited same-file Java/Kotlin evidence |
 
 Official sources:
 
