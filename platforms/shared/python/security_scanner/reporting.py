@@ -209,7 +209,7 @@ TRANSLATIONS = {
         "sw49_intro": "All 49 official implementation-stage weaknesses. Controls without automated coverage are never marked PASS.",
         "sw49_zero_note": "No vulnerable items were detected within the automated checks that actually ran. Unsupported, manual-review, and not-scanned controls must be confirmed separately; this does not mean all 49 controls are satisfied.",
         "sw49_columns": {
-            "official_id": "Control",
+            "official_id": "Official item (KODA ID)",
             "category": "Type",
             "title": "Weakness",
             "cwe": "CWE",
@@ -447,7 +447,7 @@ TRANSLATIONS = {
         "sw49_intro": "공식 구현단계 보안약점 49개 전체 상태입니다. 자동 점검이 없는 기준은 통과로 표시하지 않습니다.",
         "sw49_zero_note": "현재 실행된 자동 점검 범위에서는 취약 항목이 탐지되지 않았습니다. 미지원·수동 검토·미실행 기준은 별도로 확인해야 하며, 전체 49개 기준의 준수를 의미하지 않습니다.",
         "sw49_columns": {
-            "official_id": "기준 ID",
+            "official_id": "공식 항목 (KODA ID)",
             "category": "분류",
             "title": "기준명",
             "cwe": "CWE",
@@ -1240,6 +1240,9 @@ def render_report(
     target_paths: dict[str, str] | None = None,
     components: tuple[DependencyComponent, ...] = (),
     warnings: tuple[str, ...] = (),
+    standard: str = DEFAULT_STANDARD,
+    standard_category: str = DEFAULT_STANDARD_CATEGORY,
+    scanned_categories: tuple[str, ...] = (),
 ) -> str:
     if report_format == "cyclonedx":
         return render_cyclonedx(components)
@@ -1253,9 +1256,22 @@ def render_report(
             target_paths=target_paths,
             components=components,
             warnings=warnings,
+            standard=standard,
+            standard_category=standard_category,
+            scanned_categories=scanned_categories,
         )
     if report_format == "markdown":
-        return render_markdown(findings, target_names, language, target_paths=target_paths)
+        report = render_markdown(
+            findings,
+            target_names,
+            language,
+            target_paths=target_paths,
+            standard_mappings=_rule_mappings_for_findings(findings, standard, standard_category),
+        )
+        if standard == "sw-dev-security-49":
+            sw49 = sw49_payload(findings, scanned_categories, standard_category)
+            report = report.rstrip("\n") + "\n" + "\n".join(_sw49_markdown_lines(sw49, language)) + "\n"
+        return report
     if report_format == "html":
         return render_html(findings, target_names, language, target_paths=target_paths, components=components)
     if report_format == "sarif":
@@ -1271,7 +1287,11 @@ def render_json(
     target_paths: dict[str, str] | None = None,
     components: tuple[DependencyComponent, ...] = (),
     warnings: tuple[str, ...] = (),
+    standard: str = DEFAULT_STANDARD,
+    standard_category: str = DEFAULT_STANDARD_CATEGORY,
+    scanned_categories: tuple[str, ...] = (),
 ) -> str:
+    all_mappings = _rule_mappings_for_findings(findings, standard, standard_category)
     payload = {
         "generated_at": _generated_at()[0],
         "language": _labels(language)["html_lang"],
@@ -1279,8 +1299,13 @@ def render_json(
         "summary": _summary(findings, target_names, target_paths),
         "warnings": list(warnings),
         "components": [component_payload(component) for component in components],
-        "findings": [_finding_payload(finding) for finding in findings],
+        "findings": [
+            _finding_payload(finding, all_mappings.get(finding.rule_id, ()))
+            for finding in findings
+        ],
     }
+    if standard == "sw-dev-security-49":
+        payload["sw49"] = sw49_payload(findings, scanned_categories, standard_category)
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
@@ -1290,6 +1315,7 @@ def render_markdown(
     language: str = "en",
     *,
     target_paths: dict[str, str] | None = None,
+    standard_mappings: dict[str, list[dict[str, object]]] | None = None,
 ) -> str:
     labels = _labels(language)
     generated_at, generated_display = _generated_at()
@@ -1348,6 +1374,15 @@ def render_markdown(
                 lines.append(f"- {'판정 근거' if language == 'ko' else 'Verification note'}: {finding.verification_note}")
             if finding.evidence:
                 lines.append(f"- {labels['evidence']}: `{finding.evidence}`")
+            mapping_texts = [
+                _standard_mapping_text(mapping, language)
+                for mapping in (standard_mappings or {}).get(finding.rule_id, ())
+                if isinstance(mapping, dict)
+            ]
+            mapping_texts = list(dict.fromkeys(text for text in mapping_texts if text))
+            if mapping_texts:
+                mapping_label = "공식 점검 기준" if language == "ko" else "Official criteria"
+                lines.append(f"- {mapping_label}: " + "; ".join(mapping_texts))
             if display["description"]:
                 lines.append(f"- {labels['why_it_matters']}: {display['description']}")
             if display["recommendation"]:
@@ -1480,8 +1515,8 @@ def build_rule_catalog(language: str = "ko") -> list[dict[str, object]]:
 # --- Downloadable exports built from the dashboard payload (stdlib only) --------
 
 _EXPORT_COLUMNS = {
-    "en": ("Severity", "Category", "Rule", "Title", "Path", "Line", "Recommendation"),
-    "ko": ("심각도", "분류", "룰", "제목", "경로", "줄", "권장 조치"),
+    "en": ("Severity", "Category", "Rule", "Title", "Path", "Line", "Official criteria / CWE", "Recommendation"),
+    "ko": ("심각도", "분류", "룰", "제목", "경로", "줄", "공식 점검 기준 / CWE", "권장 조치"),
 }
 
 
@@ -1508,9 +1543,15 @@ def _finding_from_payload(item: dict[str, object]) -> Finding:
 
 
 def render_markdown_from_payload(payload: dict[str, object], language: str = "ko") -> str:
-    findings = [_finding_from_payload(item) for item in _payload_findings(payload)]
+    findings = [_finding_from_payload(item) for item in _payload_findings(payload, language)]
     target_names = tuple(sorted({finding.target for finding in findings if finding.target}))
-    report = render_markdown(findings, target_names, language)
+    mappings = payload.get("rule_mappings")
+    report = render_markdown(
+        findings,
+        target_names,
+        language,
+        standard_mappings=mappings if isinstance(mappings, dict) else None,
+    )
     sw49 = _payload_sw49(payload)
     if sw49:
         report = report.rstrip("\n") + "\n" + "\n".join(_sw49_markdown_lines(sw49, language)) + "\n"
@@ -1519,7 +1560,7 @@ def render_markdown_from_payload(payload: dict[str, object], language: str = "ko
 
 def render_html_pair_zip_from_payload(payload: dict[str, object], language: str = "ko") -> bytes:
     """Export the dashboard findings as a linked main/detail HTML pair."""
-    findings = [_finding_from_payload(item) for item in _payload_findings(payload)]
+    findings = [_finding_from_payload(item) for item in _payload_findings(payload, language)]
     target_names = tuple(sorted({finding.target for finding in findings if finding.target}))
     scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
     standard = str(scan.get("standard") or DEFAULT_STANDARD)
@@ -1534,6 +1575,9 @@ def render_html_pair_zip_from_payload(payload: dict[str, object], language: str 
         kind=str(scan.get("kind") or "source"),
         standard=standard,
         standard_category=standard_category,
+        warnings=tuple(str(item) for item in scan.get("warnings", ()) if str(item).strip()),
+        enable_osv=bool(scan.get("enable_osv", False)),
+        scanned_categories=tuple(str(item) for item in scan.get("scanned_categories", ()) if str(item).strip()),
     )
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -1558,8 +1602,11 @@ def _sw49_display_row(entry: dict[str, object], language: str) -> dict[str, str]
     notes = entry.get("notes", {})
     status = str(entry.get("status", ""))
     support = str(entry.get("support_level", ""))
+    guide_id = str(entry.get("guide_id", "")).strip()
+    koda_id = str(entry.get("official_id", "")).strip()
+    display_id = f"{guide_id} ({koda_id})" if guide_id and koda_id else guide_id or koda_id
     return {
-        "official_id": str(entry.get("official_id", "")),
+        "official_id": display_id,
         "category": str(category_labels.get(language) or category_labels.get("en") or entry.get("category_id", "")) if isinstance(category_labels, dict) else str(entry.get("category_id", "")),
         "title": str(title.get(language) or title.get("en") or "") if isinstance(title, dict) else str(title),
         "cwe": ", ".join(str(item) for item in entry.get("cwe_ids", [])),
@@ -1614,9 +1661,37 @@ def _sw49_markdown_lines(sw49: dict[str, object], language: str) -> list[str]:
     return lines
 
 
-def _payload_findings(payload: dict[str, object]) -> list[dict[str, object]]:
-    findings = payload.get("findings", [])
-    return [item for item in findings if isinstance(item, dict)]
+def _payload_findings(payload: dict[str, object], language: str = "en") -> list[dict[str, object]]:
+    """Return findings from either API payloads or dashboard payloads.
+
+    Older export callers pass a top-level ``findings`` list, while the
+    dashboard stores localized findings under ``findings_by_language``.  Both
+    shapes are accepted so downloading a report from the dashboard cannot
+    silently turn a populated scan into a zero-finding report.
+    """
+    findings = payload.get("findings")
+    if isinstance(findings, list):
+        return [item for item in findings if isinstance(item, dict)]
+
+    localized = payload.get("findings_by_language")
+    if not isinstance(localized, dict):
+        return []
+    values = localized.get(language) or localized.get("en") or localized.get("ko") or []
+    return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
+
+
+def _finding_mapping_text(item: dict[str, object], language: str) -> str:
+    mappings = item.get("standard_mappings")
+    if isinstance(mappings, dict):
+        mappings = mappings.get("mappings") or mappings.get("standards") or []
+    if not isinstance(mappings, list):
+        return ""
+    values = [
+        _standard_mapping_text(mapping, language)
+        for mapping in mappings
+        if isinstance(mapping, dict)
+    ]
+    return "\n".join(dict.fromkeys(value for value in values if value))
 
 
 def _col_ref(index: int) -> str:
@@ -1638,7 +1713,7 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
     """Minimal but valid .xlsx (inlineStr cells, no shared-strings table)."""
     headers = _EXPORT_COLUMNS.get(language, _EXPORT_COLUMNS["en"])
     rows: list[list[object]] = [list(headers)]
-    for item in _payload_findings(payload):
+    for item in _payload_findings(payload, language):
         rows.append(
             [
                 item.get("severity", ""),
@@ -1647,6 +1722,7 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
                 item.get("title", ""),
                 item.get("path", ""),
                 item.get("line", ""),
+                _finding_mapping_text(item, language),
                 item.get("recommendation", ""),
             ]
         )
@@ -1808,7 +1884,7 @@ def render_hwpx(payload: dict[str, object], language: str = "ko") -> bytes:
     sec_pr = section[section.find("<hp:secPr") : section.find("</hp:secPr>") + len("</hp:secPr>")]
 
     generated_at, generated_display = _generated_at()
-    findings = _payload_findings(payload)
+    findings = _payload_findings(payload, language)
     para_id = 1000
     paragraphs = [_hwpx_paragraph(str(labels.get("report_heading", "Report")), "12", "21", para_id, sec_pr=sec_pr)]
     para_id += 1
@@ -1831,6 +1907,9 @@ def render_hwpx(payload: dict[str, object], language: str = "ko") -> bytes:
                 location = f"{location}:{line}"
             recommendation = str(item.get("recommendation", "")).strip()
             text = f"[{sev_label}] {item.get('title', '')} · {location}"
+            criteria = _finding_mapping_text(item, language)
+            if criteria:
+                text += f" · {criteria.replace(chr(10), '; ')}"
             if recommendation:
                 text += f" · {recommendation}"
             para_id += 1
@@ -1848,7 +1927,7 @@ def render_hwpx(payload: dict[str, object], language: str = "ko") -> bytes:
                 continue
             row = _sw49_display_row(entry, language)
             text = (
-                f"{row['official_id']} {row['title']} · {row['category']} · {row['support']} · "
+                f"{row['official_id']} {row['title']} · {row['category']} · {row['cwe']} · {row['support']} · "
                 f"{row['executed']} · {row['status']}"
             )
             if row["finding_count"] not in ("", "0"):
@@ -2125,6 +2204,55 @@ def _standards_guide_markup(language: str, prefix: str, standard_id: str = DEFAU
     return button, dialog, script
 
 
+def _source_sw49_table_markup(payload: dict[str, object], language: str) -> str:
+    sw49 = _payload_sw49(payload)
+    if not sw49:
+        return ""
+    labels = _labels(language)
+    is_ko = language == "ko"
+    heading = str(labels.get("sw49_heading", "소프트웨어 개발보안 49 기준 현황"))
+    intro = str(labels.get("sw49_intro", ""))
+    summary = " · ".join(line.lstrip("- ") for line in _sw49_summary_lines(sw49, language))
+    columns = (
+        ("공식 항목 (KODA ID)", "기준명", "CWE", "지원 수준", "실행 상태", "판정", "발견 건수")
+        if is_ko
+        else ("Official item (KODA ID)", "Weakness", "CWE", "Support", "Executed", "Verdict", "Findings")
+    )
+    head = "".join(f"<th>{html.escape(column)}</th>" for column in columns)
+    rows: list[str] = []
+    for entry in sw49.get("controls", ()):
+        if not isinstance(entry, dict):
+            continue
+        row = _sw49_display_row(entry, language)
+        control_id = str(entry.get("control_id") or "")
+        status = str(entry.get("status") or "")
+        values = (
+            row["official_id"],
+            row["title"],
+            row["cwe"],
+            row["support"],
+            row["executed"],
+            row["status"],
+            row["finding_count"],
+        )
+        cells = "".join(f"<td>{html.escape(value)}</td>" for value in values)
+        rows.append(
+            f'<tr data-sw49-control="{html.escape(control_id, quote=True)}" '
+            f'data-sw49-status="{html.escape(status, quote=True)}">{cells}</tr>'
+        )
+    zero_note = ""
+    status_counts = sw49.get("status_counts")
+    if isinstance(status_counts, dict) and not status_counts.get("VULNERABLE"):
+        zero_note = f'<p class="sw49-zero-note">{html.escape(str(labels.get("sw49_zero_note", "")))}</p>'
+    return (
+        '<section class="source-sw49-panel">'
+        f'<div class="source-summary-head"><h2>{html.escape(heading)}</h2><p>{html.escape(intro)}</p>'
+        f'<p class="sw49-summary">{html.escape(summary)}</p></div>'
+        '<div class="source-sw49-wrap"><table class="source-sw49-table"><thead><tr>'
+        f'{head}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>{zero_note}</section>'
+    )
+
+
 def _render_html_main(payload: dict[str, object], language: str, detail_href: str) -> str:
     labels = _labels(language)
     summary = payload.get("summary", {})
@@ -2237,10 +2365,11 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         for index, header in enumerate(table_headers)
     )
     guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-main-guide", standard_id)
+    sw49_table = _source_sw49_table_markup(payload, language)
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 :root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1120px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}.source-summary-panel{{overflow:hidden;margin-top:18px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}}.source-summary-head{{padding:20px 22px 14px;border-bottom:1px solid var(--line)}}.source-summary-head h2{{margin:0;font-size:20px}}.source-summary-head p{{margin:5px 0 0;color:var(--muted)}}.source-summary-wrap{{overflow:auto}}.source-summary-table{{width:{table_width}px;min-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}}.source-summary-table th{{position:relative;padding:11px 13px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px;letter-spacing:.04em}}.source-summary-table td{{padding:13px;border-top:1px solid #e7edf4;vertical-align:top;overflow-wrap:anywhere}}.source-summary-table th:not(:last-child),.source-summary-table td:not(:last-child){{border-right:1px solid #e7edf4}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}code{{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#0b3b89}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
 main{{max-width:1560px;padding:28px}}.detail-cta{{display:flex;justify-content:flex-end;margin-top:18px}}.detail-cta a{{display:inline-flex;align-items:center;gap:10px;min-height:48px;padding:0 20px;border:1px solid #0b3b89;border-radius:13px;color:#fff;background:linear-gradient(135deg,#1368e8,#0b3b89);box-shadow:0 12px 24px rgba(19,104,232,.24);text-decoration:none;font-weight:850;transition:transform .16s ease,box-shadow .16s ease}}.detail-cta a:hover{{transform:translateY(-2px);box-shadow:0 16px 30px rgba(19,104,232,.3)}}.detail-cta a:focus-visible{{outline:3px solid #8ec5ff;outline-offset:3px}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section><div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{sw49_table}<div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
 
 
 def _source_report_findings(payload: dict[str, object], language: str) -> list[dict[str, object]]:
@@ -2297,27 +2426,24 @@ def _source_standard_text(payload: dict[str, object], item: dict[str, object], l
         scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
         selected_standard = str(scan.get("standard") or "")
         selected_category = str(scan.get("standard_category") or "")
+        scoped_metadata = any(
+            isinstance(value, dict) and bool(value.get("standard_id") or value.get("standard"))
+            for value in values
+        )
         selected = [
             value for value in values
             if isinstance(value, dict)
             and (not selected_standard or str(value.get("standard_id") or value.get("standard") or "") == selected_standard)
             and (not selected_category or selected_category == "all" or str(value.get("category_id") or value.get("category") or "") == selected_category)
         ]
-        values = selected or values
-        labels = []
-        for value in values[:4]:
-            if isinstance(value, dict):
-                standard = value.get("standard_labels") or value.get("standard_label") or value.get("standard_id")
-                category = value.get("category_labels") or value.get("category_label") or value.get("category_id")
-                if isinstance(standard, dict):
-                    standard = standard.get(language) or standard.get("ko") or standard.get("en")
-                if isinstance(category, dict):
-                    category = category.get(language) or category.get("ko") or category.get("en")
-                label = "\n".join(str(part) for part in (standard, category) if part)
-            else:
-                label = value
-            if label and str(label) not in labels:
-                labels.append(str(label))
+        if selected_standard and scoped_metadata:
+            values = selected
+        labels = [
+            _standard_mapping_text(value, language)
+            for value in values
+            if isinstance(value, dict)
+        ]
+        labels = list(dict.fromkeys(label for label in labels if label))
         if labels:
             return "\n\n".join(labels)
     scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
@@ -2350,6 +2476,7 @@ _SOURCE_MAIN_EXTRA_CSS = """
 .source-main-filters label{display:grid;gap:5px;color:#60708a;font-size:11px;font-weight:800}.source-main-filters input,.source-main-filters select{width:100%;min-height:42px;border:1px solid #cbd6e5;border-radius:10px;padding:0 11px;background:#fff;color:#10233f}.source-main-filter-count{grid-column:1/-1;color:#60708a;font-size:12px}.source-severity-panel{margin:18px 0 0;padding:20px;border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 8px 20px rgba(15,35,64,.04)}.source-severity-panel h2{margin:0;font-size:18px}.source-severity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.source-severity-card{min-width:0;padding:14px;border:1px solid #e7edf4;border-radius:12px;background:#f8fafc}.source-severity-card strong{display:block;font-size:12px}.source-severity-card b{display:block;margin-top:3px;font-size:22px}.source-severity-locations{margin-top:8px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}@media(max-width:820px){.source-main-filters{grid-template-columns:1fr 1fr}.source-severity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.source-main-filters{grid-template-columns:1fr}.source-severity-grid{grid-template-columns:1fr}}
 .source-summary-wrap{overflow:auto;padding:0 20px 20px}.source-summary-table{border-left:1px solid #dce4ee;border-right:1px solid #dce4ee}.source-summary-table th:first-child,.source-summary-table td:first-child{min-width:92px;white-space:nowrap}
 .source-summary-table{table-layout:fixed}.source-summary-table th{position:relative}.source-criteria{display:block;white-space:pre-line}.source-verification{display:inline-flex;margin-top:6px;padding:3px 7px;border-radius:999px;background:#e8f4ff;color:#0b3b89;font-size:10px;font-weight:850}.source-verification--needs_review{background:#fff4d6;color:#7a5400}.source-location-list{display:grid;gap:5px}.source-location-list code{overflow-wrap:anywhere}.source-collapse-item[hidden],.source-collapse-toggle[hidden]{display:none!important}.source-collapse-controls{display:flex;gap:6px;margin-top:2px}.source-collapse-toggle{min-height:30px;padding:0 8px;border:1px solid #cbd6e5;border-radius:8px;color:#0b3b89;background:#fff;cursor:pointer;font-size:11px;font-weight:750}.source-severity-details{margin-top:8px}.source-severity-details summary{color:#0b3b89;font-size:11px;font-weight:800;cursor:pointer}.source-severity-locations{margin-top:7px;color:#60708a;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}.column-resizer{position:absolute;top:0;right:-5px;z-index:3;width:10px;height:100%;cursor:col-resize;touch-action:none;user-select:none}.column-resizer::after{content:"";position:absolute;top:24%;bottom:24%;left:4px;width:2px;border-radius:2px;background:transparent}.column-resizer:hover::after,.column-resizer:focus-visible::after{background:#1368e8}
+.source-sw49-panel{overflow:hidden;margin-top:18px;border:1px solid #dce4ee;border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}.source-sw49-wrap{overflow:auto;padding:0 20px 20px}.source-sw49-table{width:100%;min-width:1060px;border-collapse:separate;border-spacing:0;border:1px solid #dce4ee}.source-sw49-table th{padding:10px 12px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px}.source-sw49-table td{padding:11px 12px;border-top:1px solid #e7edf4;vertical-align:top}.source-sw49-table th:not(:last-child),.source-sw49-table td:not(:last-child){border-right:1px solid #e7edf4}.source-sw49-table tr[data-sw49-status="VULNERABLE"] td{background:#fff5f4}.sw49-summary{color:#0b3b89!important;font-weight:750}.sw49-zero-note{margin:0 20px 20px;padding:12px 14px;border-radius:10px;background:#fff8d8;color:#6c5200}
 """
 
 
@@ -2437,7 +2564,7 @@ def _render_html_detail(payload: dict[str, object], language: str) -> str:
     guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-detail-guide", str(scan.get("standard") or DEFAULT_STANDARD))
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 main{{max-width:1560px!important;padding:28px!important}}.language-buttons{{display:none!important}}
-:root{{--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f7fb;color:var(--ink);font:15px/1.6 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:auto;padding:32px 22px 64px}}.report-head{{display:flex;align-items:center;gap:12px;margin-bottom:20px}}.report-head h1{{margin:0;font-size:clamp(28px,5vw,46px)}}.external-classification-badge{{margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius: 0;color:#b42318;background: none;font-weight:900}}.toolbar{{display:grid;grid-template-columns:1fr 170px 220px auto;gap:10px;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fff}}input,select{{min-height:40px;border:1px solid #cbd6e5;border-radius:9px;padding:0 11px;background:#fff}}.finding{{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(15,35,64,.05)}}.finding[hidden]{{display:none}}.finding header{{display:flex;justify-content:space-between;gap:14px}}.finding h2{{margin:14px 0 4px;font-size:22px}}.finding h3{{margin:18px 0 6px;font-size:14px}}.location,.unavailable,.standards{{color:var(--muted)}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}pre,.source-context{{overflow:auto;padding:14px;border-radius:10px;background:#0d1b2e;color:#dce8f8}}pre{{white-space:pre-wrap}}.source-code-line{{display:grid;grid-template-columns:48px 1fr;gap:12px;padding:2px 8px}}.source-code-line span{{color:#7890ad;text-align:right}}.source-code-line code{{color:inherit;white-space:pre}}.source-code-line--focus{{background:#46350e;outline:1px solid #d6a514}}@media(max-width:760px){{.toolbar{{grid-template-columns:1fr}}.report-head{{align-items:flex-start;flex-wrap:wrap}}.external-classification-badge{{margin-left:0}}}}
+:root{{--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f7fb;color:var(--ink);font:15px/1.6 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:auto;padding:32px 22px 64px}}.report-head{{display:flex;align-items:center;gap:12px;margin-bottom:20px}}.report-head h1{{margin:0;font-size:clamp(28px,5vw,46px)}}.external-classification-badge{{margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius: 0;color:#b42318;background: none;font-weight:900}}.toolbar{{display:grid;grid-template-columns:1fr 170px 220px auto;gap:10px;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fff}}input,select{{min-height:40px;border:1px solid #cbd6e5;border-radius:9px;padding:0 11px;background:#fff}}.finding{{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(15,35,64,.05)}}.finding[hidden]{{display:none}}.finding header{{display:flex;justify-content:space-between;gap:14px}}.finding h2{{margin:14px 0 4px;font-size:22px}}.finding h3{{margin:18px 0 6px;font-size:14px}}.location,.unavailable,.standards{{color:var(--muted)}}.standards{{white-space:pre-line}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}pre,.source-context{{overflow:auto;padding:14px;border-radius:10px;background:#0d1b2e;color:#dce8f8}}pre{{white-space:pre-wrap}}.source-code-line{{display:grid;grid-template-columns:48px 1fr;gap:12px;padding:2px 8px}}.source-code-line span{{color:#7890ad;text-align:right}}.source-code-line code{{color:inherit;white-space:pre}}.source-code-line--focus{{background:#46350e;outline:1px solid #d6a514}}@media(max-width:760px){{.toolbar{{grid-template-columns:1fr}}.report-head{{align-items:flex-start;flex-wrap:wrap}}.external-classification-badge{{margin-left:0}}}}
 </style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>KODA · STATIC ANALYSIS · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비인가</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select>{guide_button}</div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section>{guide_dialog}</main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script>{guide_script}</body></html>'''
 
 
@@ -2474,6 +2601,7 @@ def build_dashboard_payload(
         if standard == "sw-dev-security-49"
         else None
     )
+    rule_mappings = _rule_mappings_for_findings(findings, standard, standard_category)
     return {
         "sw49": sw49,
         "generated_at": generated,
@@ -2481,7 +2609,7 @@ def build_dashboard_payload(
         "language": labels["html_lang"],
         "labels_by_language": TRANSLATIONS,
         "standards": standards_payload(),
-        "rule_mappings": _rule_mappings_for_findings(findings),
+        "rule_mappings": rule_mappings,
         "components": [component_payload(component) for component in components],
         "sbom": cyclonedx_payload(components),
         "scanner": {"name": "local-security-scanner", "version": __version__},
@@ -2497,8 +2625,18 @@ def build_dashboard_payload(
             "coverage_message": "현재 활성화된 점검 범위에서 탐지된 항목입니다." if kind == "web" else "",
         },
         "findings_by_language": {
-            "en": [_finding_payload(finding) for finding in findings],
-            "ko": [_localized_finding_payload(finding, "ko") for finding in findings],
+            "en": [
+                _finding_payload(finding, rule_mappings.get(finding.rule_id, ()))
+                for finding in findings
+            ],
+            "ko": [
+                _localized_finding_payload(
+                    finding,
+                    "ko",
+                    rule_mappings.get(finding.rule_id, ()),
+                )
+                for finding in findings
+            ],
         },
     }
 
@@ -2548,12 +2686,63 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
     }
 
 
-def _rule_mappings_for_findings(findings: list[Finding]) -> dict[str, list[dict[str, object]]]:
+def _localized_mapping_value(value: object, language: str) -> str:
+    if isinstance(value, dict):
+        return str(value.get(language) or value.get("ko") or value.get("en") or "")
+    return str(value or "")
+
+
+def _standard_mapping_text(mapping: dict[str, object], language: str) -> str:
+    """Human-readable standard reference, including official SW49 item and CWE."""
+    standard_id = str(mapping.get("standard_id") or mapping.get("standard") or "")
+    standard = _localized_mapping_value(
+        mapping.get("standard_labels") or mapping.get("standard_label") or standard_id,
+        language,
+    )
+    guide_id = str(mapping.get("guide_id") or "").strip()
+    koda_id = str(mapping.get("official_id") or "").strip()
+    title = _localized_mapping_value(
+        mapping.get("control_title") or mapping.get("title"),
+        language,
+    )
+    cwe_ids = mapping.get("cwe_ids")
+    cwe = ", ".join(str(item) for item in cwe_ids) if isinstance(cwe_ids, (list, tuple)) else ""
+    if guide_id or koda_id or title:
+        item_id = f"{guide_id} ({koda_id})" if guide_id and koda_id else guide_id or koda_id
+        item = " ".join(part for part in (item_id, title) if part)
+        return " · ".join(part for part in (standard, item, cwe) if part)
+
+    category = _localized_mapping_value(
+        mapping.get("category_labels") or mapping.get("category_label") or mapping.get("category_id"),
+        language,
+    )
+    return "\n".join(part for part in (standard, category) if part)
+
+
+def _rule_mappings_for_findings(
+    findings: list[Finding],
+    standard_id: str = "",
+    category_id: str = DEFAULT_STANDARD_CATEGORY,
+) -> dict[str, list[dict[str, object]]]:
     rule_ids = {finding.rule_id for finding in findings}
     if not rule_ids:
         return {}
     all_mappings = rule_standard_mappings_payload()
-    return {rule_id: all_mappings.get(rule_id, []) for rule_id in sorted(rule_ids)}
+    resolved: dict[str, list[dict[str, object]]] = {}
+    for rule_id in sorted(rule_ids):
+        values = all_mappings.get(rule_id, [])
+        selected = [
+            mapping
+            for mapping in values
+            if (not standard_id or str(mapping.get("standard_id") or "") == standard_id)
+            and (
+                not category_id
+                or category_id == DEFAULT_STANDARD_CATEGORY
+                or str(mapping.get("category_id") or "") == category_id
+            )
+        ]
+        resolved[rule_id] = selected if standard_id else values
+    return resolved
 
 
 def write_report(content: str, output: Path | None) -> None:
@@ -2633,7 +2822,10 @@ def _source_context_payload(finding: Finding) -> dict[str, object]:
     }
 
 
-def _finding_payload(finding: Finding) -> dict[str, object]:
+def _finding_payload(
+    finding: Finding,
+    standard_mappings: tuple[dict[str, object], ...] | list[dict[str, object]] = (),
+) -> dict[str, object]:
     payload = {
         "rule_id": finding.rule_id,
         "category": finding.category,
@@ -2652,14 +2844,19 @@ def _finding_payload(finding: Finding) -> dict[str, object]:
         "triage_verdict": finding.triage_verdict,
         "triage_confidence": finding.triage_confidence,
         "triage_note": finding.triage_note,
+        "standard_mappings": [dict(mapping) for mapping in standard_mappings],
     }
     if finding.line is not None and not finding.resource:
         payload["source_context"] = _source_context_payload(finding)
     return payload
 
 
-def _localized_finding_payload(finding: Finding, language: str) -> dict[str, object]:
-    payload = _finding_payload(finding)
+def _localized_finding_payload(
+    finding: Finding,
+    language: str,
+    standard_mappings: tuple[dict[str, object], ...] | list[dict[str, object]] = (),
+) -> dict[str, object]:
+    payload = _finding_payload(finding, standard_mappings)
     if language != "ko":
         return payload
 
@@ -4568,9 +4765,17 @@ HTML_TEMPLATE = """<!doctype html>
       if (!mappings.length) {
         return `<span>${escapeText(activeLabels.no_related_standards)}</span>`;
       }
-      return `<div class="rule-related">${mappings.slice(0, 12).map((mapping) => `
-        <span class="category-chip">${escapeText(labelFor({ labels: mapping.standard_labels }))} · ${escapeText(labelFor({ labels: mapping.category_labels }))}</span>
-      `).join("")}</div>`;
+      return `<div class="rule-related">${mappings.map((mapping) => {
+        const standard = labelFor({ labels: mapping.standard_labels });
+        const title = mapping.control_title ? labelFor({ labels: mapping.control_title }) : "";
+        const guideId = mapping.guide_id || "";
+        const kodaId = mapping.official_id || "";
+        const itemId = guideId && kodaId ? `${guideId} (${kodaId})` : (guideId || kodaId);
+        const cwe = (mapping.cwe_ids || []).join(", ");
+        const fallback = labelFor({ labels: mapping.category_labels });
+        const details = [itemId && title ? `${itemId} ${title}` : (itemId || title || fallback), cwe].filter(Boolean).join(" · ");
+        return `<span class="category-chip">${escapeText([standard, details].filter(Boolean).join(" · "))}</span>`;
+      }).join("")}</div>`;
     }
 
     function sourceContextHtml(finding) {
@@ -4914,8 +5119,10 @@ HTML_TEMPLATE = """<!doctype html>
         const title = entry.title ? (entry.title[language] || entry.title.en || "") : "";
         const category = entry.category_labels ? (entry.category_labels[language] || entry.category_labels.en || entry.category_id) : entry.category_id;
         const notes = entry.notes ? (entry.notes[language] || entry.notes.en || "") : "";
+        const guideId = entry.guide_id || "";
+        const kodaId = entry.official_id || "";
         const row = {
-          official_id: entry.official_id || "",
+          official_id: guideId && kodaId ? `${guideId} (${kodaId})` : (guideId || kodaId),
           category,
           title,
           cwe: (entry.cwe_ids || []).join(", "),

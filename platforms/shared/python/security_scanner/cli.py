@@ -652,6 +652,9 @@ def main(argv: list[str] | None = None) -> int:
                         language=config.report.language,
                         components=scanner.components,
                         warnings=tuple(scanner.warnings),
+                        standard=standard_selection.standard,
+                        standard_category=standard_selection.category,
+                        scanned_categories=standard_selection.scanner_categories,
                     )
                     write_report(content, config.report.output)
 

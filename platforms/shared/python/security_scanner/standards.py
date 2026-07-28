@@ -659,6 +659,16 @@ SW49_CATEGORY_LABELS = {
     "api-misuse": {"en": "API Misuse", "ko": "API 오용"},
 }
 
+SW49_GUIDE_SECTION_BY_PREFIX = {
+    "I": "1",
+    "S": "2",
+    "T": "3",
+    "E": "4",
+    "C": "5",
+    "P": "6",
+    "A": "7",
+}
+
 # Active web-probe rules that can add verified evidence to a control when a web
 # scan has been run. They are not part of the local file-scan rule catalog.
 WEB_VERIFIED_RULE_IDS = (
@@ -672,6 +682,7 @@ WEB_VERIFIED_RULE_IDS = (
 class SecurityControl:
     control_id: str
     official_id: str
+    guide_id: str
     category_id: str
     title: dict[str, str]
     cwe_ids: tuple[str, ...] = ()
@@ -694,9 +705,11 @@ def _control(
     note_en: str = "",
 ) -> SecurityControl:
     prefix, number = official_id.split("-", 1)
+    guide_id = f"{SW49_GUIDE_SECTION_BY_PREFIX[prefix]}.{int(number)}"
     return SecurityControl(
         control_id=f"sw49.{prefix.lower()}{number}",
         official_id=official_id,
+        guide_id=guide_id,
         category_id=category_id,
         title={"en": en, "ko": ko},
         cwe_ids=cwe_ids,
@@ -877,7 +890,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
         note_en="Detects credential assignments inside comments; evidence is redacted.",
     ),
     _control(
-        "S-14", "security-features", "솔트 없이 일방향 해시 함수 사용", "One-way Hash Without Salt", ("CWE-759",),
+        "S-14", "security-features", "솔트 없이 일방향 해쉬 함수 사용", "One-way Hash Without Salt", ("CWE-759",),
         ("code.password-hash-without-salt",), "partial", ("Python", "Java", "Kotlin", "JavaScript", "TypeScript", "PHP", "Ruby", "C#"),
         note_ko="비밀번호 문맥에서 해시를 직접 호출하는 패턴만 탐지합니다.",
         note_en="Detects direct hash calls in password contexts only.",
@@ -902,7 +915,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     # 시간 및 상태 (2)
     _control(
-        "T-01", "time-state", "경쟁조건: 검사시점과 사용시점(TOCTOU)", "Race Condition: TOCTOU", ("CWE-367",),
+        "T-01", "time-state", "경쟁조건: 검사 시점과 사용 시점(TOCTOU)", "Race Condition: TOCTOU", ("CWE-367",),
         ("code.insecure-temp-file",), "partial",
         note_ko="예측 가능한 임시파일 사용만 탐지합니다. 일반 TOCTOU는 수동 검토가 필요합니다.",
         note_en="Detects predictable temp-file use only; general TOCTOU needs manual review.",
@@ -963,7 +976,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
         note_en="Detects enabled debug configuration only; leftover debug prints need manual review.",
     ),
     _control(
-        "P-03", "encapsulation", "Public 메소드로부터 반환된 Private 배열", "Private Array Returned From Public Method", ("CWE-495",),
+        "P-03", "encapsulation", "Public 메소드부터 반환된 Private 배열", "Private Array Returned From Public Method", ("CWE-495",),
         (), "manual-review",
     ),
     _control(
@@ -972,7 +985,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     # API 오용 (2)
     _control(
-        "A-01", "api-misuse", "DNS lookup에 의존한 보안 결정", "Security Decision Based on DNS Lookup", ("CWE-350", "CWE-247"),
+        "A-01", "api-misuse", "DNS lookup에 의존한 보안결정", "Security Decision Based on DNS Lookup", ("CWE-350", "CWE-247"),
         (), "unsupported",
         note_ko="DNS 결과가 보안 결정에 쓰이는지는 의미 분석이 필요해 점검하지 못합니다.",
         note_en="Whether DNS results drive security decisions needs semantic analysis; not checkable.",
@@ -1031,6 +1044,7 @@ def evaluate_sw49_controls(
     findings: list[Finding],
     scanned_categories: tuple[str, ...] = (),
     executed_rule_ids: frozenset[str] | None = None,
+    selected_category_id: str | None = None,
 ) -> list[dict[str, object]]:
     """Judge each of the 49 controls against scan results.
 
@@ -1046,20 +1060,29 @@ def evaluate_sw49_controls(
     scanned = set(scanned_categories)
     results: list[dict[str, object]] = []
     for control in SW49_CONTROLS:
-        matched = [f for rule_id in control.rule_ids for f in findings_by_rule.get(rule_id, [])]
+        selected = selected_category_id is None or control.category_id == selected_category_id
+        eligible_rule_ids = (
+            control.rule_ids
+            if executed_rule_ids is None
+            else tuple(rule_id for rule_id in control.rule_ids if rule_id in executed_rule_ids)
+        )
+        matched = [f for rule_id in eligible_rule_ids for f in findings_by_rule.get(rule_id, [])] if selected else []
         confirmed = [f for f in matched if f.verification_status == "confirmed"]
         review_candidates = [f for f in matched if f.verification_status == "needs_review"]
         executed = False
-        for rule_id in control.rule_ids:
-            scanner_category = _rule_scanner_category(rule_id)
-            if scanner_category is None or scanner_category not in scanned:
-                continue
-            if executed_rule_ids is not None and rule_id not in executed_rule_ids:
-                continue
-            executed = True
-            break
+        if selected:
+            for rule_id in eligible_rule_ids:
+                scanner_category = _rule_scanner_category(rule_id)
+                if scanner_category is None or scanner_category not in scanned:
+                    continue
+                if executed_rule_ids is not None and rule_id not in executed_rule_ids:
+                    continue
+                executed = True
+                break
 
-        if confirmed:
+        if not selected:
+            status = "NOT_SCANNED"
+        elif confirmed:
             status = "VULNERABLE"
             executed = True
         elif review_candidates:
@@ -1087,6 +1110,7 @@ def evaluate_sw49_controls(
             {
                 "control_id": control.control_id,
                 "official_id": control.official_id,
+                "guide_id": control.guide_id,
                 "category_id": control.category_id,
                 "category_labels": SW49_CATEGORY_LABELS[control.category_id],
                 "title": dict(control.title),
@@ -1113,10 +1137,17 @@ def sw49_payload(
 ) -> dict[str, object]:
     """Dashboard/report payload: all 49 control judgements plus a status summary."""
     executed_rule_ids: frozenset[str] | None = None
+    selected_category_id: str | None = None
     if standard_category not in ("", DEFAULT_STANDARD_CATEGORY):
         category = _find_category(SW_DEV_SECURITY_49, standard_category)
         executed_rule_ids = frozenset(category.rule_ids)
-    controls = evaluate_sw49_controls(findings, scanned_categories, executed_rule_ids)
+        selected_category_id = category.id
+    controls = evaluate_sw49_controls(
+        findings,
+        scanned_categories,
+        executed_rule_ids,
+        selected_category_id,
+    )
     status_counts = {status: 0 for status in SW49_STATUSES}
     support_counts = {level: 0 for level in SW49_SUPPORT_LEVELS}
     for entry in controls:
@@ -2785,6 +2816,24 @@ def source_standard_help(language: str = "en") -> str:
 def rule_standard_mappings_payload() -> dict[str, list[dict[str, object]]]:
     mappings: dict[str, list[dict[str, object]]] = {}
     for standard in SECURITY_STANDARDS:
+        if standard.id == "sw-dev-security-49":
+            for control in SW49_CONTROLS:
+                for rule_id in control.rule_ids:
+                    mappings.setdefault(rule_id, []).append(
+                        {
+                            "standard_id": standard.id,
+                            "standard_labels": standard.labels,
+                            "category_id": control.category_id,
+                            "category_labels": SW49_CATEGORY_LABELS[control.category_id],
+                            "control_id": control.control_id,
+                            "official_id": control.official_id,
+                            "guide_id": control.guide_id,
+                            "control_title": dict(control.title),
+                            "cwe_ids": list(control.cwe_ids),
+                            "support_level": control.support_level,
+                        }
+                    )
+            continue
         for category in standard.categories:
             if category.id == DEFAULT_STANDARD_CATEGORY:
                 continue

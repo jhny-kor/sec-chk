@@ -4,6 +4,8 @@
 
 공식 기준 원문: [행정안전부 소프트웨어 개발보안 가이드(2021.11.30 개정)](https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000015&nttId=88956)
 
+표의 번호는 공식 가이드의 유형·항목 번호이며, 괄호 안의 `I-01`~`A-02`는 KODA에서 유지하는 안정 식별자입니다. CWE는 각 보안약점을 설명하고 교차참조하기 위한 참조 분류이며, 공식 가이드의 항목 번호를 대체하지 않습니다.
+
 ## 동작 원칙
 
 - 공식 기준 49개가 각각 독립된 `SecurityControl`로 등록됩니다 (`security_scanner/standards.py`의 `SW49_CONTROLS`).
@@ -39,85 +41,85 @@
 
 | 기준 | CWE | 지원 수준 | KODA 룰 | 지원 언어 | 비고 |
 | --- | --- | --- | --- | --- | --- |
-| I-01 SQL 삽입 | 89 | 부분 자동 | code.sql-dynamic-query, web.sql-injection-error-verified | 웹 언어 전반 | web.* 룰은 웹 점검 실행 시에만 |
-| I-02 코드 삽입 | 94, 95 | 부분 자동 | code.eval-user-input | JS/TS/Python/PHP/Ruby | |
-| I-03 경로 조작 및 자원 삽입 | 22, 99 | 부분 자동 | code.path-traversal | 웹 언어 전반 | |
-| I-04 크로스사이트 스크립트 | 79, 80 | 부분 자동 | code.xss-dom-sink, web.reflected-xss-verified | HTML/JS/TS | 서버측 템플릿 XSS는 부분 탐지 |
-| I-05 운영체제 명령어 삽입 | 78 | 부분 자동 | code.command-injection | 웹 언어 전반 | |
-| I-06 위험한 형식 파일 업로드 | 434 | 부분 | code.unrestricted-file-upload | JS/TS/PHP/Python | 검증 로직 완전성은 수동 |
-| I-07 신뢰되지 않는 URL 자동접속 | 601 | 부분 자동 | code.open-redirect-user-input, web.open-redirect-verified | 웹 언어 전반 | 신규 룰 |
-| I-08 부적절한 XML 외부 개체 참조 | 611 | 부분 자동 | code.xml-external-entity | Java/Kotlin/C#/Python | |
-| I-09 XML 삽입 | 91 | 부분 | code.xml-injection | Java/Kotlin/JS/TS/Python/PHP | 신규 룰, XXE와 별도 |
-| I-10 LDAP 삽입 | 90 | 부분 | code.ldap-injection | Java/Kotlin/Python | 신규 룰 |
-| I-11 크로스사이트 요청 위조 | 352 | 부분 | code.csrf-disabled | 웹 언어 전반 | 명시적 비활성화만 탐지 |
-| I-12 서버사이드 요청 위조 | 918 | 부분 자동 | code.ssrf-user-url | 웹 언어 전반 | |
-| I-13 HTTP 응답분할 | 113 | 부분 | code.http-response-splitting | 웹 언어 전반 | 신규 룰 |
-| I-14 정수형 오버플로우 | 190 | 수동 검토 | — | — | 데이터 흐름 분석 필요 |
-| I-15 보안기능 결정에 사용되는 부적절한 입력값 | 807, 20 | 수동 검토 | — | — | |
-| I-16 메모리 버퍼 오버플로우 | 119–122 | 부분 | code.dangerous-c-buffer-api | C/C++ | |
-| I-17 포맷 스트링 삽입 | 134 | 부분 | code.format-string-user-input | C/C++/Java/Kotlin | 신규 룰 (버퍼 API 룰에서 분리) |
+| 1.1 (I-01) SQL 삽입 | 89 | 부분 자동 | code.sql-dynamic-query, web.sql-injection-error-verified | 웹 언어 전반 | web.* 룰은 웹 점검 실행 시에만 |
+| 1.2 (I-02) 코드 삽입 | 94, 95 | 부분 자동 | code.eval-user-input | JS/TS/Python/PHP/Ruby | |
+| 1.3 (I-03) 경로 조작 및 자원 삽입 | 22, 99 | 부분 자동 | code.path-traversal | 웹 언어 전반 | |
+| 1.4 (I-04) 크로스사이트 스크립트 | 79, 80 | 부분 자동 | code.xss-dom-sink, web.reflected-xss-verified | HTML/JS/TS | 서버측 템플릿 XSS는 부분 탐지 |
+| 1.5 (I-05) 운영체제 명령어 삽입 | 78 | 부분 자동 | code.command-injection | 웹 언어 전반 | |
+| 1.6 (I-06) 위험한 형식 파일 업로드 | 434 | 부분 | code.unrestricted-file-upload | JS/TS/PHP/Python | 검증 로직 완전성은 수동 |
+| 1.7 (I-07) 신뢰되지 않는 URL 주소로 자동접속 연결 | 601 | 부분 자동 | code.open-redirect-user-input, web.open-redirect-verified | 웹 언어 전반 | 신규 룰 |
+| 1.8 (I-08) 부적절한 XML 외부 개체 참조 | 611 | 부분 자동 | code.xml-external-entity | Java/Kotlin/C#/Python | |
+| 1.9 (I-09) XML 삽입 | 91 | 부분 | code.xml-injection | Java/Kotlin/JS/TS/Python/PHP | 신규 룰, XXE와 별도 |
+| 1.10 (I-10) LDAP 삽입 | 90 | 부분 | code.ldap-injection | Java/Kotlin/Python | 신규 룰 |
+| 1.11 (I-11) 크로스사이트 요청 위조 | 352 | 부분 | code.csrf-disabled | 웹 언어 전반 | 명시적 비활성화만 탐지 |
+| 1.12 (I-12) 서버사이드 요청 위조 | 918 | 부분 자동 | code.ssrf-user-url | 웹 언어 전반 | |
+| 1.13 (I-13) HTTP 응답분할 | 113 | 부분 | code.http-response-splitting | 웹 언어 전반 | 신규 룰 |
+| 1.14 (I-14) 정수형 오버플로우 | 190 | 수동 검토 | — | — | 데이터 흐름 분석 필요 |
+| 1.15 (I-15) 보안기능 결정에 사용되는 부적절한 입력값 | 807, 20 | 수동 검토 | — | — | |
+| 1.16 (I-16) 메모리 버퍼 오버플로우 | 119–122 | 부분 | code.dangerous-c-buffer-api | C/C++ | |
+| 1.17 (I-17) 포맷 스트링 삽입 | 134 | 부분 | code.format-string-user-input | C/C++/Java/Kotlin | 신규 룰 (버퍼 API 룰에서 분리) |
 
 ### 보안기능 (16)
 
 | 기준 | CWE | 지원 수준 | KODA 룰 | 비고 |
 | --- | --- | --- | --- | --- |
-| S-01 적절한 인증 없는 중요기능 허용 | 306 | 부분 | code.auth-disabled-endpoint, code.api-route-missing-auth | 기능 중요도 판단은 수동 |
-| S-02 부적절한 인가 | 862, 863 | 수동 검토 | — | 설계·데이터 흐름 검토 필요 |
-| S-03 중요한 자원에 대한 잘못된 권한 설정 | 732 | 수동 검토 | — | |
-| S-04 취약한 암호화 알고리즘 사용 | 327 | 부분 | code.weak-hash | 대칭키 설정은 수동 |
-| S-05 암호화되지 않은 중요정보 | 311, 319 | 부분 | config.env-file-present, config.private-key-like-file, dependency.node-insecure-url, dependency.python-insecure-url, config.docker-add-http | 저장 암호화는 수동 |
-| S-06 하드코드된 중요정보 | 798 | 부분 자동 | secret.* 6종 | |
-| S-07 충분하지 않은 키 길이 사용 | 326 | 부분 | code.insufficient-key-length | 신규 룰, RSA/DSA/DH ≤1024 |
-| S-08 적절하지 않은 난수 값 사용 | 330, 338 | 부분 | code.insecure-random-security-use | 신규 룰, 보안 문맥 결합 탐지 |
-| S-09 취약한 비밀번호 허용 | 521 | 수동 검토 | — | |
-| S-10 부적절한 전자서명 확인 | 347 | 부분 | code.jwt-verification-disabled, code.jwt-none-algorithm | JWT 외 영역은 수동 |
-| S-11 부적절한 인증서 유효성 검증 | 295 | 부분 자동 | code.tls-certificate-verification-disabled | 신규 룰 |
-| S-12 저장 쿠키를 통한 정보 노출 | 539 | 부분 | code.insecure-cookie-settings | 실제 민감정보 저장 여부는 수동 |
-| S-13 주석문 안에 포함된 시스템 주요정보 | 615 | 부분 | secret.sensitive-comment | 신규 룰, 증거 마스킹 |
-| S-14 솔트 없이 일방향 해시 함수 사용 | 759 | 부분 | code.password-hash-without-salt | 신규 룰, 비밀번호 문맥 결합 |
-| S-15 무결성 검사 없는 코드 다운로드 | 494 | 부분 | dependency.remote-shell-script, dependency.docker-remote-shell, config.docker-add-http, prevention.github-actions-unpinned | 기존 공급망 룰 재사용 |
-| S-16 반복된 인증시도 제한 기능 부재 | 307 | 부분 | code.api-missing-rate-limit | 로그인 경로 확인 없음 → 부분 |
+| 2.1 (S-01) 적절한 인증 없는 중요기능 허용 | 306 | 부분 | code.auth-disabled-endpoint, code.api-route-missing-auth | 기능 중요도 판단은 수동 |
+| 2.2 (S-02) 부적절한 인가 | 862, 863 | 수동 검토 | — | 설계·데이터 흐름 검토 필요 |
+| 2.3 (S-03) 중요한 자원에 대한 잘못된 권한 설정 | 732 | 수동 검토 | — | |
+| 2.4 (S-04) 취약한 암호화 알고리즘 사용 | 327 | 부분 | code.weak-hash | 대칭키 설정은 수동 |
+| 2.5 (S-05) 암호화되지 않은 중요정보 | 311, 319 | 부분 | config.env-file-present, config.private-key-like-file, dependency.node-insecure-url, dependency.python-insecure-url, config.docker-add-http | 저장 암호화는 수동 |
+| 2.6 (S-06) 하드코드된 중요정보 | 259, 321, 798 | 부분 자동 | secret.* 6종 | |
+| 2.7 (S-07) 충분하지 않은 키 길이 사용 | 326 | 부분 | code.insufficient-key-length | 신규 룰, RSA/DSA/DH ≤1024 |
+| 2.8 (S-08) 적절하지 않은 난수 값 사용 | 330, 338 | 부분 | code.insecure-random-security-use | 신규 룰, 보안 문맥 결합 탐지 |
+| 2.9 (S-09) 취약한 비밀번호 허용 | 521 | 수동 검토 | — | |
+| 2.10 (S-10) 부적절한 전자서명 확인 | 347 | 부분 | code.jwt-verification-disabled, code.jwt-none-algorithm | JWT 외 영역은 수동 |
+| 2.11 (S-11) 부적절한 인증서 유효성 검증 | 295 | 부분 자동 | code.tls-certificate-verification-disabled | 신규 룰 |
+| 2.12 (S-12) 사용자 하드디스크에 저장되는 쿠키를 통한 정보 노출 | 539 | 부분 | code.insecure-cookie-settings | 실제 민감정보 저장 여부는 수동 |
+| 2.13 (S-13) 주석문 안에 포함된 시스템 주요정보 | 615 | 부분 | secret.sensitive-comment | 신규 룰, 증거 마스킹 |
+| 2.14 (S-14) 솔트 없이 일방향 해쉬 함수 사용 | 759 | 부분 | code.password-hash-without-salt | 신규 룰, 비밀번호 문맥 결합 |
+| 2.15 (S-15) 무결성 검사 없는 코드 다운로드 | 494 | 부분 | dependency.remote-shell-script, dependency.docker-remote-shell, config.docker-add-http, prevention.github-actions-unpinned | 기존 공급망 룰 재사용 |
+| 2.16 (S-16) 반복된 인증시도 제한 기능 부재 | 307 | 부분 | code.api-missing-rate-limit | 로그인 경로 확인 없음 → 부분 |
 
 ### 시간 및 상태 (2)
 
 | 기준 | CWE | 지원 수준 | KODA 룰 | 비고 |
 | --- | --- | --- | --- | --- |
-| T-01 경쟁조건(TOCTOU) | 367 | 부분 | code.insecure-temp-file | 임시파일 사례만, 일반 TOCTOU는 수동 |
-| T-02 종료되지 않는 반복문/재귀 | 835, 674 | 수동 검토 | — | 제어 흐름 분석 필요 |
+| 3.1 (T-01) 경쟁조건: 검사 시점과 사용 시점(TOCTOU) | 367 | 부분 | code.insecure-temp-file | 임시파일 사례만, 일반 TOCTOU는 수동 |
+| 3.2 (T-02) 종료되지 않는 반복문 또는 재귀 함수 | 835, 674 | 수동 검토 | — | 제어 흐름 분석 필요 |
 
 ### 에러처리 (3)
 
 | 기준 | CWE | 지원 수준 | KODA 룰 |
 | --- | --- | --- | --- |
-| E-01 오류 메시지 정보노출 | 209 | 부분 자동 | config.debug-enabled, code.stack-trace-exposure |
-| E-02 오류 상황 대응 부재 | 390, 755 | 부분 | code.empty-exception-handler |
-| E-03 부적절한 예외 처리 | 755, 396, 397 | 부분 | code.empty-exception-handler, code.stack-trace-exposure |
+| 4.1 (E-01) 오류 메시지 정보노출 | 209 | 부분 자동 | config.debug-enabled, code.stack-trace-exposure |
+| 4.2 (E-02) 오류 상황 대응 부재 | 390, 755 | 부분 | code.empty-exception-handler |
+| 4.3 (E-03) 부적절한 예외 처리 | 754, 755, 396, 397 | 부분 | code.empty-exception-handler, code.stack-trace-exposure |
 
 ### 코드오류 (5)
 
 | 기준 | CWE | 지원 수준 | KODA 룰 | 비고 |
 | --- | --- | --- | --- | --- |
-| C-01 Null Pointer 역참조 | 476 | 부분 | code.null-pointer-dereference | Java/Kotlin 동일 파일의 명시적 null 및 알려진 nullable 조회 API만 탐지; 함수 간 흐름은 외부 SAST 필요 |
-| C-02 부적절한 자원 해제 | 404, 772 | 미지원 | — | 외부 SAST 필요 |
-| C-03 해제된 자원 사용 | 416 | 미지원 | — | 외부 SAST 필요 |
-| C-04 초기화되지 않은 변수 사용 | 457 | 미지원 | — | 외부 SAST 필요 |
-| C-05 신뢰할 수 없는 데이터의 역직렬화 | 502 | 부분 자동 | code.unsafe-deserialization | API 오용에서 이동됨 |
+| 5.1 (C-01) Null Pointer 역참조 | 476 | 부분 | code.null-pointer-dereference | Java/Kotlin 동일 파일의 명시적 null 및 알려진 nullable 조회 API만 탐지; 함수 간 흐름은 외부 SAST 필요 |
+| 5.2 (C-02) 부적절한 자원 해제 | 404, 772 | 미지원 | — | 외부 SAST 필요 |
+| 5.3 (C-03) 해제된 자원 사용 | 416 | 미지원 | — | 외부 SAST 필요 |
+| 5.4 (C-04) 초기화되지 않은 변수 사용 | 457 | 미지원 | — | 외부 SAST 필요 |
+| 5.5 (C-05) 신뢰할 수 없는 데이터의 역직렬화 | 502 | 부분 자동 | code.unsafe-deserialization | API 오용에서 이동됨 |
 
 ### 캡슐화 (4)
 
 | 기준 | CWE | 지원 수준 | KODA 룰 | 비고 |
 | --- | --- | --- | --- | --- |
-| P-01 잘못된 세션에 의한 데이터 정보 노출 | 488 | 수동 검토 | — | |
-| P-02 제거되지 않고 남은 디버그 코드 | 489 | 부분 | config.debug-enabled, config.development-environment | 코드 내 디버그 출력은 수동 |
-| P-03 Public 메소드로부터 반환된 Private 배열 | 495 | 수동 검토 | — | |
-| P-04 Private 배열에 Public 데이터 할당 | 496 | 수동 검토 | — | |
+| 6.1 (P-01) 잘못된 세션에 의한 데이터 정보 노출 | 488 | 수동 검토 | — | |
+| 6.2 (P-02) 제거되지 않고 남은 디버그 코드 | 489 | 부분 | config.debug-enabled, config.development-environment | 코드 내 디버그 출력은 수동 |
+| 6.3 (P-03) Public 메소드부터 반환된 Private 배열 | 495 | 수동 검토 | — | |
+| 6.4 (P-04) Private 배열에 Public 데이터 할당 | 496 | 수동 검토 | — | |
 
 ### API 오용 (2)
 
 | 기준 | CWE | 지원 수준 | KODA 룰 | 비고 |
 | --- | --- | --- | --- | --- |
-| A-01 DNS lookup에 의존한 보안 결정 | 350, 247 | 미지원 | — | 의미 분석 필요 |
-| A-02 취약한 API 사용 | 676 | 부분 | code.dangerous-c-buffer-api | C/C++ 금지 API 목록 |
+| 7.1 (A-01) DNS lookup에 의존한 보안결정 | 350, 247 | 미지원 | — | 의미 분석 필요 |
+| 7.2 (A-02) 취약한 API 사용 | 676 | 부분 | code.dangerous-c-buffer-api | C/C++ 금지 API 목록 |
 
 ## 제거·재분류된 기존 매핑
 
@@ -145,7 +147,7 @@
 - **C-01 (Null Pointer 역참조)**: KODA의 동일 파일 후보를 우선 검토하고, 함수 간 흐름은 Semgrep/CodeQL/Sparrow 등 데이터 흐름 기반 SAST 결과로 보완합니다.
 - **C-02~C-04 (코드오류)**: Semgrep/CodeQL/Sparrow 등 데이터 흐름 기반 SAST 결과를 사용합니다.
 - **P-01/P-03/P-04 (캡슐화)**: 세션 저장소 사용과 배열 반환 패턴을 코드 리뷰로 확인합니다.
-- **A-01 (DNS 기반 보안 결정)**: 역방향 DNS 결과가 인증·인가에 쓰이는지 확인합니다.
+- **A-01 (DNS lookup에 의존한 보안결정)**: 역방향 DNS 결과가 인증·인가에 쓰이는지 확인합니다.
 
 ## 외부 SAST·DAST가 필요한 항목
 

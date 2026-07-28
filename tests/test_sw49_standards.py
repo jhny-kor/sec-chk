@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import sys
 import tempfile
@@ -20,7 +21,9 @@ from security_scanner.models import DEFAULT_CATEGORIES, Finding, TargetConfig  #
 from security_scanner.reporting import (  # noqa: E402
     build_dashboard_payload,
     render_hwpx,
+    render_html_pair_zip_from_payload,
     render_markdown_from_payload,
+    render_report,
     render_xlsx,
 )
 from security_scanner.standards import (  # noqa: E402
@@ -39,6 +42,7 @@ from security_scanner.standards import (  # noqa: E402
     SW_DEV_SECURITY_49,
     WEB_VERIFIED_RULE_IDS,
     evaluate_sw49_controls,
+    rule_standard_mappings_payload,
     sw49_payload,
 )
 
@@ -55,6 +59,64 @@ ALL_KNOWN_RULE_IDS = frozenset(
 ALL_SCAN_CATEGORIES = DEFAULT_CATEGORIES
 
 OFFICIAL_ID_RE = re.compile(r"^[ISTECPA]-\d{2}$")
+
+
+# Immutable acceptance fixture for the 2021 MOIS/KISA implementation-stage
+# guide.  Keep this independent from SW49_CONTROLS: structural tests alone can
+# pass while an official number, Korean title, or CWE mapping is wrong.
+SW49_CANONICAL_CONTROLS = (
+    ("1.1", "sw49.i01", "I-01", "SQL 삽입", ("CWE-89",)),
+    ("1.2", "sw49.i02", "I-02", "코드 삽입", ("CWE-94", "CWE-95")),
+    ("1.3", "sw49.i03", "I-03", "경로 조작 및 자원 삽입", ("CWE-22", "CWE-99")),
+    ("1.4", "sw49.i04", "I-04", "크로스사이트 스크립트", ("CWE-79", "CWE-80")),
+    ("1.5", "sw49.i05", "I-05", "운영체제 명령어 삽입", ("CWE-78",)),
+    ("1.6", "sw49.i06", "I-06", "위험한 형식 파일 업로드", ("CWE-434",)),
+    ("1.7", "sw49.i07", "I-07", "신뢰되지 않는 URL 주소로 자동접속 연결", ("CWE-601",)),
+    ("1.8", "sw49.i08", "I-08", "부적절한 XML 외부 개체 참조", ("CWE-611",)),
+    ("1.9", "sw49.i09", "I-09", "XML 삽입", ("CWE-91",)),
+    ("1.10", "sw49.i10", "I-10", "LDAP 삽입", ("CWE-90",)),
+    ("1.11", "sw49.i11", "I-11", "크로스사이트 요청 위조", ("CWE-352",)),
+    ("1.12", "sw49.i12", "I-12", "서버사이드 요청 위조", ("CWE-918",)),
+    ("1.13", "sw49.i13", "I-13", "HTTP 응답분할", ("CWE-113",)),
+    ("1.14", "sw49.i14", "I-14", "정수형 오버플로우", ("CWE-190",)),
+    ("1.15", "sw49.i15", "I-15", "보안기능 결정에 사용되는 부적절한 입력값", ("CWE-807", "CWE-20")),
+    ("1.16", "sw49.i16", "I-16", "메모리 버퍼 오버플로우", ("CWE-119", "CWE-120", "CWE-121", "CWE-122")),
+    ("1.17", "sw49.i17", "I-17", "포맷 스트링 삽입", ("CWE-134",)),
+    ("2.1", "sw49.s01", "S-01", "적절한 인증 없는 중요기능 허용", ("CWE-306",)),
+    ("2.2", "sw49.s02", "S-02", "부적절한 인가", ("CWE-862", "CWE-863")),
+    ("2.3", "sw49.s03", "S-03", "중요한 자원에 대한 잘못된 권한 설정", ("CWE-732",)),
+    ("2.4", "sw49.s04", "S-04", "취약한 암호화 알고리즘 사용", ("CWE-327",)),
+    ("2.5", "sw49.s05", "S-05", "암호화되지 않은 중요정보", ("CWE-311", "CWE-319")),
+    ("2.6", "sw49.s06", "S-06", "하드코드된 중요정보", ("CWE-259", "CWE-321", "CWE-798")),
+    ("2.7", "sw49.s07", "S-07", "충분하지 않은 키 길이 사용", ("CWE-326",)),
+    ("2.8", "sw49.s08", "S-08", "적절하지 않은 난수 값 사용", ("CWE-330", "CWE-338")),
+    ("2.9", "sw49.s09", "S-09", "취약한 비밀번호 허용", ("CWE-521",)),
+    ("2.10", "sw49.s10", "S-10", "부적절한 전자서명 확인", ("CWE-347",)),
+    ("2.11", "sw49.s11", "S-11", "부적절한 인증서 유효성 검증", ("CWE-295",)),
+    ("2.12", "sw49.s12", "S-12", "사용자 하드디스크에 저장되는 쿠키를 통한 정보 노출", ("CWE-539",)),
+    ("2.13", "sw49.s13", "S-13", "주석문 안에 포함된 시스템 주요정보", ("CWE-615",)),
+    ("2.14", "sw49.s14", "S-14", "솔트 없이 일방향 해쉬 함수 사용", ("CWE-759",)),
+    ("2.15", "sw49.s15", "S-15", "무결성 검사 없는 코드 다운로드", ("CWE-494",)),
+    ("2.16", "sw49.s16", "S-16", "반복된 인증시도 제한 기능 부재", ("CWE-307",)),
+    ("3.1", "sw49.t01", "T-01", "경쟁조건: 검사 시점과 사용 시점(TOCTOU)", ("CWE-367",)),
+    ("3.2", "sw49.t02", "T-02", "종료되지 않는 반복문 또는 재귀 함수", ("CWE-835", "CWE-674")),
+    ("4.1", "sw49.e01", "E-01", "오류 메시지 정보노출", ("CWE-209",)),
+    ("4.2", "sw49.e02", "E-02", "오류 상황 대응 부재", ("CWE-390", "CWE-755")),
+    ("4.3", "sw49.e03", "E-03", "부적절한 예외 처리", ("CWE-754", "CWE-755", "CWE-396", "CWE-397")),
+    ("5.1", "sw49.c01", "C-01", "Null Pointer 역참조", ("CWE-476",)),
+    ("5.2", "sw49.c02", "C-02", "부적절한 자원 해제", ("CWE-404", "CWE-772")),
+    ("5.3", "sw49.c03", "C-03", "해제된 자원 사용", ("CWE-416",)),
+    ("5.4", "sw49.c04", "C-04", "초기화되지 않은 변수 사용", ("CWE-457",)),
+    ("5.5", "sw49.c05", "C-05", "신뢰할 수 없는 데이터의 역직렬화", ("CWE-502",)),
+    ("6.1", "sw49.p01", "P-01", "잘못된 세션에 의한 데이터 정보 노출", ("CWE-488",)),
+    ("6.2", "sw49.p02", "P-02", "제거되지 않고 남은 디버그 코드", ("CWE-489",)),
+    ("6.3", "sw49.p03", "P-03", "Public 메소드부터 반환된 Private 배열", ("CWE-495",)),
+    ("6.4", "sw49.p04", "P-04", "Private 배열에 Public 데이터 할당", ("CWE-496",)),
+    ("7.1", "sw49.a01", "A-01", "DNS lookup에 의존한 보안결정", ("CWE-350", "CWE-247")),
+    ("7.2", "sw49.a02", "A-02", "취약한 API 사용", ("CWE-676",)),
+)
+
+SW49_CANONICAL_BY_OFFICIAL_ID = {item[2]: item for item in SW49_CANONICAL_CONTROLS}
 
 
 def _finding(rule_id: str, category: str = "code") -> Finding:
@@ -111,6 +173,18 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
         }
         self.assertEqual({control.official_id for control in SW49_CONTROLS}, expected)
 
+    def test_canonical_guide_ids_aliases_titles_and_cwes_match(self) -> None:
+        self.assertEqual(len(SW49_CANONICAL_CONTROLS), 49)
+        self.assertEqual(len(SW49_CANONICAL_BY_OFFICIAL_ID), 49)
+        controls = {control.official_id: control for control in SW49_CONTROLS}
+        self.assertEqual(set(controls), set(SW49_CANONICAL_BY_OFFICIAL_ID))
+        for guide_id, alias, official_id, korean_title, cwe_ids in SW49_CANONICAL_CONTROLS:
+            control = controls[official_id]
+            self.assertEqual(control.guide_id, guide_id, official_id)
+            self.assertEqual(control.control_id, alias, official_id)
+            self.assertEqual(control.title["ko"], korean_title, official_id)
+            self.assertEqual(control.cwe_ids, cwe_ids, official_id)
+
     def test_all_mapped_rule_ids_exist(self) -> None:
         for control in SW49_CONTROLS:
             for rule_id in control.rule_ids:
@@ -151,6 +225,49 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
 
 
 class Sw49MappingCorrectionTests(unittest.TestCase):
+    def test_sw49_rule_mapping_payload_has_complete_control_metadata(self) -> None:
+        mappings = rule_standard_mappings_payload()
+        expected_fields = {
+            "standard_id",
+            "category_id",
+            "control_id",
+            "guide_id",
+            "official_id",
+            "control_title",
+            "cwe_ids",
+            "support_level",
+        }
+        sw49_mappings = [
+            mapping
+            for entries in mappings.values()
+            for mapping in entries
+            if mapping.get("standard_id") == "sw-dev-security-49"
+        ]
+        self.assertTrue(sw49_mappings)
+        for mapping in sw49_mappings:
+            self.assertTrue(expected_fields.issubset(mapping), mapping)
+            expected = SW49_CANONICAL_BY_OFFICIAL_ID[mapping["official_id"]]
+            self.assertEqual(mapping["guide_id"], expected[0])
+            self.assertEqual(mapping["control_id"], expected[1])
+            self.assertEqual(mapping["control_title"]["ko"], expected[3])
+            self.assertEqual(tuple(mapping["cwe_ids"]), expected[4])
+
+    def test_multi_control_rules_preserve_each_sw49_mapping(self) -> None:
+        mappings = rule_standard_mappings_payload()
+        expected_controls = {
+            "code.dangerous-c-buffer-api": {"I-16", "A-02"},
+            "code.empty-exception-handler": {"E-02", "E-03"},
+            "code.stack-trace-exposure": {"E-01", "E-03"},
+            "config.docker-add-http": {"S-05", "S-15"},
+        }
+        for rule_id, official_ids in expected_controls.items():
+            actual = {
+                entry["official_id"]
+                for entry in mappings.get(rule_id, ())
+                if entry.get("standard_id") == "sw-dev-security-49"
+            }
+            self.assertEqual(actual, official_ids, rule_id)
+
     def test_official_guide_cwe_cross_references_are_preserved(self) -> None:
         by_id = {control.official_id: control for control in SW49_CONTROLS}
         self.assertTrue({"CWE-259", "CWE-321"}.issubset(by_id["S-06"].cwe_ids))
@@ -236,6 +353,24 @@ class Sw49EvaluationTests(unittest.TestCase):
         self.assertEqual(by_id["I-01"]["status"], "NOT_SCANNED")
         self.assertEqual(by_id["C-02"]["status"], "UNSUPPORTED")
         self.assertFalse(by_id["I-01"]["executed"])
+
+    def test_selected_category_does_not_leak_findings_to_other_controls(self) -> None:
+        finding = _finding("code.null-pointer-dereference")
+        payload = sw49_payload([finding], ALL_SCAN_CATEGORIES, "input-validation-expression")
+        c01 = next(entry for entry in payload["controls"] if entry["official_id"] == "C-01")
+        self.assertEqual(c01["status"], "NOT_SCANNED")
+        self.assertEqual(c01["finding_count"], 0)
+        self.assertFalse(c01["executed"])
+
+    def test_selected_category_marks_unselected_shared_rule_control_not_executed(self) -> None:
+        finding = _finding("code.dangerous-c-buffer-api")
+        payload = sw49_payload([finding], ALL_SCAN_CATEGORIES, "input-validation-expression")
+        by_id = {entry["official_id"]: entry for entry in payload["controls"]}
+        self.assertEqual(by_id["I-16"]["status"], "VULNERABLE")
+        self.assertTrue(by_id["I-16"]["executed"])
+        self.assertEqual(by_id["A-02"]["status"], "NOT_SCANNED")
+        self.assertEqual(by_id["A-02"]["finding_count"], 0)
+        self.assertFalse(by_id["A-02"]["executed"])
 
     def test_vulnerable_when_mapped_rule_fires(self) -> None:
         findings = [_finding("code.unsafe-deserialization")]
@@ -722,30 +857,140 @@ selected.getName();
 
 
 class Sw49ReportTests(unittest.TestCase):
-    def _payload(self, findings: list[Finding]) -> dict[str, object]:
+    def _payload(
+        self,
+        findings: list[Finding],
+        standard_category: str = "all",
+    ) -> dict[str, object]:
         return build_dashboard_payload(
             findings,
             ("t",),
             "ko",
             standard="sw-dev-security-49",
+            standard_category=standard_category,
             scanned_categories=ALL_SCAN_CATEGORIES,
         )
+
+    def test_dashboard_findings_include_sw49_standard_mappings(self) -> None:
+        payload = self._payload([_finding("code.dangerous-c-buffer-api")])
+        for language in ("en", "ko"):
+            finding = payload["findings_by_language"][language][0]
+            self.assertIn("standard_mappings", finding)
+            mappings = [
+                mapping
+                for mapping in finding["standard_mappings"]
+                if mapping.get("standard_id") == "sw-dev-security-49"
+            ]
+            self.assertEqual({mapping["official_id"] for mapping in mappings}, {"I-16", "A-02"})
+            for mapping in mappings:
+                expected = SW49_CANONICAL_BY_OFFICIAL_ID[mapping["official_id"]]
+                self.assertEqual(mapping["guide_id"], expected[0])
+                self.assertEqual(mapping["control_id"], expected[1])
+                self.assertEqual(mapping["cwe_ids"], list(expected[4]))
+                self.assertEqual(mapping["control_title"]["ko"], expected[3])
+
+    def test_selected_category_filters_finding_mappings_and_round_trip_exports(self) -> None:
+        payload = self._payload(
+            [_finding("code.dangerous-c-buffer-api")],
+            "input-validation-expression",
+        )
+        for language in ("en", "ko"):
+            mappings = payload["findings_by_language"][language][0]["standard_mappings"]
+            self.assertEqual({mapping["official_id"] for mapping in mappings}, {"I-16"})
+
+        markdown = render_markdown_from_payload(payload, "ko")
+        self.assertIn("전체 발견 항목: 1", markdown)
+        criteria_line = next(line for line in markdown.splitlines() if line.startswith("- 공식 점검 기준:"))
+        self.assertIn("1.16 (I-16)", criteria_line)
+        self.assertNotIn("7.2 (A-02)", criteria_line)
+
+        xlsx_bytes = render_xlsx(payload, "ko")
+        with zipfile.ZipFile(io.BytesIO(xlsx_bytes)) as archive:
+            findings_sheet = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        self.assertIn("code.dangerous-c-buffer-api", findings_sheet)
+        self.assertIn("1.16 (I-16)", findings_sheet)
+        self.assertNotIn("7.2 (A-02)", findings_sheet)
+
+        hwpx_bytes = render_hwpx(payload, "ko")
+        with zipfile.ZipFile(io.BytesIO(hwpx_bytes)) as archive:
+            hwpx_section = archive.read("Contents/section0.xml").decode("utf-8")
+        finding_section = hwpx_section.split("소프트웨어 개발보안 49 기준 현황", 1)[0]
+        self.assertIn("1.16 (I-16)", finding_section)
+        self.assertNotIn("7.2 (A-02)", finding_section)
+
+        html_zip = render_html_pair_zip_from_payload(payload, "ko")
+        with zipfile.ZipFile(io.BytesIO(html_zip)) as archive:
+            main_html = archive.read("report.html").decode("utf-8")
+            detail_html = archive.read("report-detail.html").decode("utf-8")
+        self.assertIn("code.dangerous-c-buffer-api", main_html)
+        self.assertIn("code.dangerous-c-buffer-api", detail_html)
+        self.assertIn("1.16 (I-16)", detail_html)
+        self.assertNotIn("7.2 (A-02)", detail_html)
+        i16_row = re.search(r'<tr data-sw49-control="sw49\.i16"[^>]*>(.*?)</tr>', main_html)
+        a02_row = re.search(r'<tr data-sw49-control="sw49\.a02"[^>]*>(.*?)</tr>', main_html)
+        self.assertIsNotNone(i16_row)
+        self.assertIsNotNone(a02_row)
+        self.assertRegex(i16_row.group(1), r"<td>1</td>$")
+        self.assertIn("<td>미실행</td>", a02_row.group(1))
+        self.assertRegex(a02_row.group(1), r"<td>0</td>$")
+
+    def test_selected_category_does_not_fallback_to_unrelated_mappings(self) -> None:
+        payload = self._payload([_finding("secret.private-key", "secrets")], "input-validation-expression")
+        for language in ("en", "ko"):
+            self.assertEqual(payload["findings_by_language"][language][0]["standard_mappings"], [])
+
+    def test_direct_cli_style_markdown_and_json_include_all_49_controls(self) -> None:
+        finding = _finding("code.sql-dynamic-query")
+        kwargs = {
+            "standard": "sw-dev-security-49",
+            "standard_category": "all",
+            "scanned_categories": ALL_SCAN_CATEGORIES,
+        }
+        markdown = render_report([finding], "markdown", ("t",), "ko", **kwargs)
+        rows = [line for line in markdown.splitlines() if re.match(r"^\| \d+\.\d+ \([ISTECPA]-\d{2}\) ", line)]
+        self.assertEqual(len(rows), 49)
+        self.assertIn("전체 발견 항목: 1", markdown)
+        self.assertIn("1.1 (I-01)", markdown)
+        self.assertIn("CWE-89", markdown)
+
+        json_payload = json.loads(render_report([finding], "json", ("t",), "ko", **kwargs))
+        self.assertEqual(len(json_payload["sw49"]["controls"]), 49)
+        self.assertEqual(json_payload["findings"][0]["standard_mappings"][0]["official_id"], "I-01")
+
+    def test_sw49_payload_has_complete_honest_rows(self) -> None:
+        payload = self._payload([])
+        controls = payload["sw49"]["controls"]
+        self.assertEqual(len(controls), 49)
+        for entry in controls:
+            expected = SW49_CANONICAL_BY_OFFICIAL_ID[entry["official_id"]]
+            self.assertEqual(entry["guide_id"], expected[0])
+            self.assertEqual(entry["title"]["ko"], expected[3])
+            self.assertEqual(tuple(entry["cwe_ids"]), expected[4])
+            self.assertIn(entry["support_level"], SW49_SUPPORT_LEVELS)
+            self.assertIn(entry["status"], SW49_STATUSES)
+            if entry["support_level"] in {"partial", "manual-review", "unsupported"}:
+                self.assertNotEqual(entry["status"], "PASS")
+            if entry["support_level"] == "unsupported":
+                self.assertEqual(entry["status"], "UNSUPPORTED")
+            if entry["support_level"] == "manual-review":
+                self.assertEqual(entry["status"], "NEEDS_REVIEW")
 
     def test_markdown_includes_all_49_rows_even_with_zero_findings(self) -> None:
         report = render_markdown_from_payload(self._payload([]), "ko")
         self.assertIn("소프트웨어 개발보안 49 기준 현황", report)
         for prefix, count in (("I-", 17), ("S-", 16), ("T-", 2), ("E-", 3), ("C-", 5), ("P-", 4), ("A-", 2)):
-            self.assertEqual(report.count(f"| {prefix}"), count, prefix)
+            rows = [line for line in report.splitlines() if line.startswith("| ") and f"({prefix}" in line]
+            self.assertEqual(len(rows), count, prefix)
         self.assertIn("전체 49개 기준의 준수를 의미하지 않습니다", report)
         self.assertIn("미지원", report)
         self.assertIn("CWE-89", report)
 
     def test_markdown_partial_and_unsupported_controls_are_not_shown_as_pass(self) -> None:
         report = render_markdown_from_payload(self._payload([]), "ko")
-        c01_row = next(line for line in report.splitlines() if line.startswith("| C-01"))
+        c01_row = next(line for line in report.splitlines() if "(C-01)" in line)
         self.assertIn("부분 자동", c01_row)
         self.assertNotIn("통과", c01_row)
-        c02_row = next(line for line in report.splitlines() if line.startswith("| C-02"))
+        c02_row = next(line for line in report.splitlines() if "(C-02)" in line)
         self.assertIn("미지원", c02_row)
         self.assertNotIn("통과", c02_row)
 
@@ -764,10 +1009,50 @@ class Sw49ReportTests(unittest.TestCase):
         for official_id in ("I-01", "S-16", "T-02", "E-03", "C-05", "P-04", "A-01"):
             self.assertIn(official_id, section)
 
+    def test_all_exports_include_every_official_item_and_cwe(self) -> None:
+        payload = self._payload([])
+        expected_display_ids = {
+            f"{guide_id} ({official_id})"
+            for guide_id, _alias, official_id, _title, _cwes in SW49_CANONICAL_CONTROLS
+        }
+
+        for language in ("ko", "en"):
+            markdown = render_markdown_from_payload(payload, language)
+            for guide_id, _alias, official_id, _title, cwe_ids in SW49_CANONICAL_CONTROLS:
+                self.assertIn(f"{guide_id} ({official_id})", markdown)
+                for cwe_id in cwe_ids:
+                    self.assertIn(cwe_id, markdown)
+
+        xlsx_bytes = render_xlsx(payload, "ko")
+        with zipfile.ZipFile(io.BytesIO(xlsx_bytes)) as archive:
+            sheet2 = archive.read("xl/worksheets/sheet2.xml").decode("utf-8")
+        self.assertEqual(sheet2.count("<row "), 50)
+        for display_id in expected_display_ids:
+            self.assertIn(display_id, sheet2)
+        for _guide_id, _alias, _official_id, _title, cwe_ids in SW49_CANONICAL_CONTROLS:
+            for cwe_id in cwe_ids:
+                self.assertIn(cwe_id, sheet2)
+
+        hwpx_bytes = render_hwpx(payload, "ko")
+        with zipfile.ZipFile(io.BytesIO(hwpx_bytes)) as archive:
+            section = archive.read("Contents/section0.xml").decode("utf-8")
+        for display_id in expected_display_ids:
+            self.assertIn(display_id, section)
+        for _guide_id, _alias, _official_id, _title, cwe_ids in SW49_CANONICAL_CONTROLS:
+            for cwe_id in cwe_ids:
+                self.assertIn(cwe_id, section)
+
+        html_zip = render_html_pair_zip_from_payload(payload, "ko")
+        with zipfile.ZipFile(io.BytesIO(html_zip)) as archive:
+            main_html = archive.read("report.html").decode("utf-8")
+        self.assertEqual(main_html.count("data-sw49-control="), 49)
+        for display_id in expected_display_ids:
+            self.assertIn(display_id, main_html)
+
     def test_report_formats_use_same_control_count(self) -> None:
         payload = self._payload([_finding("code.sql-dynamic-query")])
         markdown = render_markdown_from_payload(payload, "ko")
-        markdown_rows = sum(1 for line in markdown.splitlines() if re.match(r"^\| [ISTECPA]-\d{2} ", line))
+        markdown_rows = sum(1 for line in markdown.splitlines() if re.match(r"^\| \d+\.\d+ \([ISTECPA]-\d{2}\) ", line))
         xlsx_bytes = render_xlsx(payload, "ko")
         with zipfile.ZipFile(io.BytesIO(xlsx_bytes)) as archive:
             sheet2 = archive.read("xl/worksheets/sheet2.xml").decode("utf-8")
