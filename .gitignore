@@ -26,6 +26,7 @@ KODA-release-security-package-*/
 store-assets/
 icon/
 archive/
+/samples/report-designs/
 docs/store-release.md
 docs/windows-host-verification.md
 docs/windows-install-verification.md
