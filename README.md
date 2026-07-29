@@ -45,8 +45,8 @@ The Python engine can run from source on any OS. The macOS column above refers o
 Requires Python 3.10 or later — the engine uses only the standard library, so there is no `pip install` step.
 
 ```bash
-git clone https://github.com/jhny-kor/sec-chk.git
-cd sec-chk
+git clone https://gitlab.aigov.go.kr/y2kthr/koda.git
+cd koda
 export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner app
 ```

@@ -32,6 +32,6 @@ KODA does not use third-party advertising SDKs, does not track users across apps
 
 For privacy questions or support requests, use the project support page:
 
-https://github.com/jhny-kor/sec-chk
+https://gitlab.aigov.go.kr/y2kthr/koda
 
 For the Korean version, see [PRIVACY.ko.md](PRIVACY.ko.md).
