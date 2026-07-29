@@ -9,7 +9,6 @@
 </p>
 
 <p align="center">
-  <a href="https://apps.apple.com/kr/app/koda/id6770264012?mt=12">Download KODA on the Mac App Store</a> ·
   <a href="docs/README.en.md">🇬🇧 English documentation</a> ·
   <a href="docs/README.md">🇰🇷 한국어 문서</a>
 </p>
@@ -20,7 +19,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 
 | I want to… | Start here |
 | --- | --- |
-| Install the native macOS app | [Mac App Store](https://apps.apple.com/kr/app/koda/id6770264012?mt=12) or [macOS install guide](docs/install/macos.md) |
+| Install the native macOS app | [macOS install guide](docs/install/macos.md) |
 | Run KODA on Linux | [Linux install and operation guide](docs/install/linux.md) |
 | Build or install the Windows desktop app | [Windows install guide](docs/install/windows.md) |
 | Scan JAR/WAR/EAR files on an offline server | [Offline Java SBOM and vulnerability runbook](docs/security/java-sbom-vulnerability-scan.en.md) |
