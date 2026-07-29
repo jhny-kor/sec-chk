@@ -1,0 +1,35 @@
+name: KODA Release Provenance
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build source release artifact
+        run: |
+          mkdir -p dist
+          tar --exclude .git --exclude dist -czf dist/koda-source-release.tar.gz .
+      - name: Generate checksums
+        run: sha256sum dist/* > dist/checksums.txt
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign artifacts with Sigstore
+        run: |
+          for artifact in dist/*; do
+            [ -f "$artifact" ] || continue
+            cosign sign-blob "$artifact" --bundle "$artifact.sigstore.json" --yes
+          done
+      - name: Upload provenance material
+        uses: actions/upload-artifact@v7
+        with:
+          name: koda-release-provenance
+          path: dist/

@@ -1,0 +1,37 @@
+stages:
+  - security
+
+koda_security:
+  stage: security
+  image: python:3.12-slim
+  variables:
+    KODA_FAIL_ON: "high"
+    KODA_TARGET: "$CI_PROJECT_DIR"
+  before_script:
+    - python --version
+    - bash platforms/linux/install.sh --prefix "$CI_PROJECT_DIR/.koda-linux" --bin-dir "$CI_PROJECT_DIR/.bin"
+    - export PATH="$CI_PROJECT_DIR/.bin:$PATH"
+    - mkdir -p reports
+  script:
+    - |
+      if [ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" ]; then
+        base="origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+        git fetch origin "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" || true
+        koda scan --target "$KODA_TARGET" --changed-only --base "$base" --format json --output reports/koda-security.json --fail-on "$KODA_FAIL_ON"
+      else
+        koda scan --target "$KODA_TARGET" --format json --output reports/koda-security.json --fail-on "$KODA_FAIL_ON"
+      fi
+    - koda scan --target "$KODA_TARGET" --format html --output reports/koda-security.html --min-severity low
+    - koda host-scan --format json --output reports/koda-host.json --min-severity info
+    - |
+      if [ -n "${KODA_DEPLOY_DIR:-}" ]; then
+        koda deploy-check --target "$KODA_DEPLOY_DIR" --output-dir reports/koda-deploy --fail-on "$KODA_FAIL_ON"
+      fi
+  artifacts:
+    when: always
+    paths:
+      - reports/koda-security.json
+      - reports/koda-security.html
+      - reports/koda-host.json
+      - reports/koda-deploy/
+    expire_in: 14 days

@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1697" viewBox="0 0 1200 1697" role="img" aria-labelledby="title desc">
+<title id="title">KODA Offline-First Security and Quality Scanner</title>
+<desc id="desc">KODA scans project folders, web URLs, and host systems locally and produces trusted security and quality results.</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset=".72" stop-color="#fbfdff"/><stop offset="1" stop-color="#f5faff"/></linearGradient>
+  <linearGradient id="shield" x1="0" y1="0" x2="1" y2=".25"><stop offset="0" stop-color="#082f72"/><stop offset=".49" stop-color="#063b83"/><stop offset=".51" stop-color="#08749c"/><stop offset="1" stop-color="#16c3cd"/></linearGradient>
+  <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eaf4ff"/><stop offset=".48" stop-color="#fff"/><stop offset="1" stop-color="#b8d2eb"/></linearGradient>
+  <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#168ee6"/><stop offset="1" stop-color="#13c7cc"/></linearGradient>
+  <radialGradient id="halo"><stop offset="0" stop-color="#58c8e9" stop-opacity=".22"/><stop offset="1" stop-color="#58c8e9" stop-opacity="0"/></radialGradient>
+  <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10"/></filter>
+</defs>
+<rect width="1200" height="1697" fill="url(#bg)"/>
+
+<!-- Custom geometric KODA wordmark, matching the selected logo style -->
+<g fill="#07398a">
+  <path d="M145 110H190V198L315 110H374L226 215L380 320H319L190 232V320H145Z"/>
+  <path fill-rule="evenodd" d="M500 105C430 105 382 150 382 215C382 280 430 325 500 325C570 325 618 280 618 215C618 150 570 105 500 105ZM500 148C545 148 574 173 574 215C574 257 545 282 500 282C455 282 426 257 426 215C426 173 455 148 500 148Z"/>
+  <path fill-rule="evenodd" d="M650 110H770C857 110 908 150 908 215C908 280 857 320 770 320H650ZM695 151V279H767C827 279 863 257 863 215C863 173 827 151 767 151Z"/>
+  <path d="M922 320L1018 110H1064L1160 320H1110L1041 160L972 320Z"/>
+</g>
+<text x="600" y="410" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="42" font-weight="650" fill="#102d55">Offline-First Security &amp; Quality Scanner</text>
+<rect x="555" y="448" width="90" height="5" rx="2.5" fill="url(#accent)"/>
+<g font-family="Inter,Arial,sans-serif" font-size="27" font-weight="600" letter-spacing="4" fill="#083a86" text-anchor="middle">
+  <text x="270" y="515">SCAN</text><circle cx="375" cy="506" r="4" fill="#16bfc9"/>
+  <text x="485" y="515">ANALYZE</text><circle cx="600" cy="506" r="4" fill="#16bfc9"/>
+  <text x="710" y="515">REPORT</text><circle cx="820" cy="506" r="4" fill="#16bfc9"/>
+  <text x="950" y="515">PREVENT</text>
+</g>
+
+<!-- subtle data wave -->
+<g fill="none" stroke="#65b7ef" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 10" opacity=".42">
+  <path d="M-30 735 C110 670 205 700 315 770 S505 880 630 805"/>
+  <path d="M-30 765 C110 700 210 735 320 800 S510 905 640 830"/>
+  <path d="M-30 795 C115 735 215 770 325 830 S515 930 650 855"/>
+  <path d="M-30 825 C120 770 220 805 330 860 S520 955 660 880"/>
+  <path d="M-30 855 C125 805 225 840 335 890 S525 980 670 905"/>
+  <path d="M-30 885 C130 840 230 875 340 920 S530 1005 680 930"/>
+</g>
+
+<!-- subtle network -->
+<g stroke="#82bde9" stroke-width="1.4" opacity=".31" fill="#409fe4">
+  <path d="M875 650L1000 585L1120 660L1050 770L1165 840L1100 970L950 920L875 1010L820 865L900 770L875 650M900 770L1050 770M1050 770L1100 970M950 920L1050 770M820 865L950 920M1000 585L1050 770M1120 660L1050 770" fill="none"/>
+  <circle cx="875" cy="650" r="6"/><circle cx="1000" cy="585" r="7"/><circle cx="1120" cy="660" r="6"/><circle cx="1050" cy="770" r="6"/><circle cx="1165" cy="840" r="7"/><circle cx="1100" cy="970" r="7"/><circle cx="950" cy="920" r="6"/><circle cx="875" cy="1010" r="6"/><circle cx="820" cy="865" r="5"/><circle cx="900" cy="770" r="5"/>
+</g>
+
+<!-- scan platform -->
+<ellipse cx="600" cy="1115" rx="410" ry="190" fill="url(#halo)"/>
+<g fill="none" opacity=".65">
+  <ellipse cx="600" cy="1110" rx="400" ry="108" stroke="#a8d5f5" stroke-width="2"/>
+  <ellipse cx="600" cy="1110" rx="340" ry="88" stroke="#c0e0f7" stroke-width="2"/>
+  <ellipse cx="600" cy="1110" rx="270" ry="68" stroke="#b5dcf5" stroke-width="2"/>
+  <path d="M260 1115A350 95 0 0 0 430 1180M460 1191A350 95 0 0 0 630 1204M675 1202A350 95 0 0 0 790 1178M815 1166A350 95 0 0 0 930 1110" stroke="url(#accent)" stroke-width="9"/>
+</g>
+<ellipse cx="600" cy="1110" rx="170" ry="30" fill="#2a75bd" opacity=".16" filter="url(#soft)"/>
+
+<!-- shield -->
+<g>
+  <path d="M600 570C690 620 760 635 815 650V860C815 1015 720 1110 600 1175C480 1110 385 1015 385 860V650C440 635 510 620 600 570Z" fill="url(#edge)" stroke="#d9e8f7" stroke-width="6"/>
+  <path d="M600 607C676 647 737 661 782 674V855C782 984 707 1064 600 1125C493 1064 418 984 418 855V674C463 661 524 647 600 607Z" fill="url(#shield)" stroke="#092f72" stroke-width="8"/>
+  <path d="M600 625C670 661 724 674 763 685V852C763 969 697 1040 600 1096C503 1040 437 969 437 852V685C476 674 530 661 600 625Z" fill="none" stroke="#e9f9ff" stroke-width="4"/>
+  <path d="M500 846L570 918L710 760" fill="none" stroke="#fff" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M500 846L570 918L710 760" fill="none" stroke="#d7e5f3" stroke-opacity=".5" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 7)"/>
+  <path d="M500 846L570 918L710 760" fill="none" stroke="#fff" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+
+<!-- feature cards -->
+<g font-family="Inter,Arial,sans-serif" text-anchor="middle" fill="#083a86">
+  <line x1="430" y1="1308" x2="430" y2="1475" stroke="#c9dff2" stroke-width="2"/><line x1="770" y1="1308" x2="770" y2="1475" stroke="#c9dff2" stroke-width="2"/>
+  <g transform="translate(245 1370)"><circle r="82" fill="#eef6fd"/>
+    <path d="M-42-22H-9L5-8H43V35H-42Z" fill="none" stroke="#083a86" stroke-width="6" stroke-linejoin="round"/>
+  </g>
+  <text x="245" y="1505" font-size="25" font-weight="650">PROJECT FOLDER</text>
+  <g transform="translate(600 1370)"><circle r="82" fill="#eef6fd"/>
+    <circle r="44" fill="none" stroke="#083a86" stroke-width="5"/><path d="M-44 0H44M0-44C-18-22-18 22 0 44M0-44C18-22 18 22 0 44" fill="none" stroke="#083a86" stroke-width="4"/>
+    <path d="M18 18L56 35L39 43L30 61Z" fill="#16bdc8" stroke="#fff" stroke-width="4"/>
+  </g>
+  <text x="600" y="1505" font-size="25" font-weight="650">WEB URL</text>
+  <g transform="translate(955 1370)"><circle r="82" fill="#eef6fd"/>
+    <rect x="-42" y="-38" width="84" height="34" rx="5" fill="none" stroke="#083a86" stroke-width="5"/><rect x="-42" y="8" width="84" height="34" rx="5" fill="none" stroke="#083a86" stroke-width="5"/><circle cx="-25" cy="-21" r="4" fill="#16bdc8"/><circle cx="-12" cy="-21" r="4" fill="#16bdc8"/><circle cx="-25" cy="25" r="4" fill="#16bdc8"/><circle cx="-12" cy="25" r="4" fill="#16bdc8"/>
+  </g>
+  <text x="955" y="1505" font-size="25" font-weight="650">HOST SYSTEM</text>
+</g>
+
+<!-- trust footer -->
+<g font-family="Inter,Arial,sans-serif" fill="#083a86" font-size="20" font-weight="650" letter-spacing="4" text-anchor="middle">
+  <line x1="90" y1="1607" x2="205" y2="1607" stroke="#bfd8ed" stroke-width="2"/>
+  <text x="360" y="1615">LOCAL BY DEFAULT</text>
+  <path d="M600 1570C620 1581 635 1584 647 1588V1625C647 1654 626 1670 600 1681C574 1670 553 1654 553 1625V1588C565 1584 580 1581 600 1570Z" fill="#fff" stroke="#083a86" stroke-width="4"/>
+  <path d="M580 1622L594 1636L620 1607" fill="none" stroke="#16bdc8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="840" y="1615">TRUSTED RESULTS</text>
+  <line x1="995" y1="1607" x2="1110" y2="1607" stroke="#bfd8ed" stroke-width="2"/>
+</g>
+</svg>

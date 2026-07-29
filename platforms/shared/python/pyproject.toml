@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-security-scanner"
+version = "0.1.0"
+description = "Read-only local project security scanner with configurable targets and vulnerability categories."
+requires-python = ">=3.10"
+authors = [{ name = "Local" }]
+license = "Apache-2.0"
+
+# The scanner core is standard-library only. Optional extras add heavier,
+# explicitly pinned third-party tools that stay out of the default install.
+[project.optional-dependencies]
+# Headless-browser rendering so the web crawler can follow JavaScript-rendered
+# (SPA) links. Install with:  pip install "local-security-scanner[render]"
+# then download the browser once:  python -m playwright install chromium
+# Pinned version (verified current as of 2026-07): playwright 1.61.0.
+render = ["playwright==1.61.0"]
+
+[project.scripts]
+koda = "security_scanner.cli:main"
+local-security-scan = "security_scanner.cli:main"
+sec-chk = "security_scanner.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["security_scanner", "security_scanner.*"]
+exclude = ["packaging", "platforms", "tests"]
+
+[tool.setuptools.package-data]
+security_scanner = ["assets/*.hwpx"]
+
+[tool.unittest]
+testpaths = ["tests"]

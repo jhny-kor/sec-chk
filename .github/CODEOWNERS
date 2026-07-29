@@ -1,0 +1,9 @@
+# KODA repository ownership.
+* @jhny-kor
+/.github/ @jhny-kor
+/platforms/shared/python/security_scanner/ @jhny-kor
+/platforms/linux/ @jhny-kor
+/platforms/macos/ @jhny-kor
+/platforms/windows/ @jhny-kor
+/docs/security/ @jhny-kor
+/SECURITY.md @jhny-kor
