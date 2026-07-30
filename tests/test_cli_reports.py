@@ -203,6 +203,14 @@ class WindowsAliasPackagingTests(unittest.TestCase):
         self.assertIn("ChangesEnvironment=yes", iss)
         self.assertIn('ValueName: "Path"', iss)
 
+    def test_windows_installer_bundles_and_smoke_tests_sw49_contracts(self) -> None:
+        script = (ROOT / "platforms/windows/scripts/build-koda-windows-installer.ps1").read_text(encoding="utf-8")
+        pyproject = (ROOT / "platforms/shared/python/pyproject.toml").read_text(encoding="utf-8")
+        self.assertGreaterEqual(script.count('"--add-data", $Sw49ResourcesData'), 2)
+        self.assertIn('"_internal\\security_scanner\\resources\\sw49\\contracts.json"', script)
+        self.assertIn('& $CliExecutable --help', script)
+        self.assertIn('"resources/sw49/*.json"', pyproject)
+
 
 class MacAppStorePackagingTests(unittest.TestCase):
     def test_java_helper_excludes_unused_dashboard_tk_modules(self) -> None:
