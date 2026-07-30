@@ -44,6 +44,18 @@ def config_from_dict(raw: dict[str, Any], base_dir: Path | None = None) -> Scann
     diff_base = str(diff_base_raw) if isinstance(diff_base_raw, str) and diff_base_raw.strip() else None
     standard = str(raw.get("standard", "local")).strip().lower()
     standard_category = str(raw.get("standard_category", "all")).strip().lower()
+    analyzer = str(raw.get("source_analyzer", "")).strip().lower()
+    if analyzer not in {"", "codeql"}:
+        raise ConfigError("source_analyzer must be empty or 'codeql'.")
+    binary = expand_path(raw["source_analyzer_binary"], base) if isinstance(raw.get("source_analyzer_binary"), str) else None
+    sarif = expand_path(raw["source_analyzer_sarif"], base) if isinstance(raw.get("source_analyzer_sarif"), str) else None
+    if analyzer and sarif is not None:
+        raise ConfigError("source_analyzer and source_analyzer_sarif are mutually exclusive.")
+    wrapper = expand_path(raw["source_analyzer_sandbox_wrapper"], base) if isinstance(raw.get("source_analyzer_sandbox_wrapper"), str) else None
+    sandbox_config = expand_path(raw["source_analyzer_sandbox_config"], base) if isinstance(raw.get("source_analyzer_sandbox_config"), str) else None
+    timeout = float(raw.get("source_analyzer_timeout", 120.0))
+    if timeout <= 0:
+        raise ConfigError("source_analyzer_timeout must be positive.")
     return ScannerConfig(
         targets=targets,
         report=report,
@@ -56,6 +68,13 @@ def config_from_dict(raw: dict[str, Any], base_dir: Path | None = None) -> Scann
         diff_base=diff_base,
         standard=standard,
         standard_category=standard_category,
+        source_analyzer=analyzer,
+        source_analyzer_binary=binary,
+        source_analyzer_timeout=timeout,
+        source_analyzer_sarif=sarif,
+        source_analyzer_license_attested=bool(raw.get("source_analyzer_license_attested", False)),
+        source_analyzer_sandbox_wrapper=wrapper,
+        source_analyzer_sandbox_config=sandbox_config,
     )
 
 

@@ -75,6 +75,7 @@ python3 -m security_scanner discover --target /path/to/projects
 python3 -m security_scanner scan --target /path/to/project --category secrets --format json
 python3 -m security_scanner scan --target . --standard owasp-proactive-controls --format html --output reports/source.html
 python3 -m security_scanner scan --target . --standard sw-dev-security-49 --standard-category input-validation-expression --format html --output reports/sw49-input.html
+python3 -m security_scanner scan --target . --standard sw-dev-security-49 --format json --output reports/sw49-source.json
 python3 -m security_scanner scan --config scanner_config.example.json --fail-on high
 python3 -m security_scanner scan --target . --format sarif --output reports/results.sarif
 python3 -m security_scanner scan --target . --format cyclonedx --output reports/sbom.cdx.json
@@ -98,9 +99,31 @@ table and filters. `--standard` accepts only profiles registered by KODA and
 `--standard-category` selects one supported category. The profiles are mappings to
 the local static rules, not a claim of full SAST or formal compliance.
 
-For Java reports, add `--language ko` or `--language en` to generate a fixed-language
-HTML/Markdown pair. If omitted, HTML opens in Korean with a Korean/English toggle and
-Markdown is Korean. `server-library-report.html` is the landing page and
+### Offline source-only SW49 analysis
+
+The SW49 path inventories the complete project and runs local rules. It does not run
+web, host, OSV/CVE,
+SBOM, JAR, binary, build, test, package-manager, or project scripts. Changed-only
+reports retain unchanged files as analysis context.
+
+The first external mapping accepts administrator-generated CodeQL `2.26.1` Java
+SARIF. KODA never downloads or executes CodeQL and does not fall back to an
+unsandboxed invocation. Runtime analyzer requests are explicitly `SKIPPED`/
+`NOT_SCANNED`; use `source_analyzer_sarif` for positive-only import.
+
+SARIF imports are positive-only and fail closed: only SARIF 2.1.0 results inside the
+target with an allowlisted analyzer/rule pair are accepted. Unknown rules warn and
+are ignored; malformed, oversized, wrong-version, or path-escaping documents fail.
+A clean or digest-matched SARIF file cannot certify negative coverage or `PASS`.
+
+Every SW49 scan emits all 49 controls. `VULNERABLE` requires confirmed source
+evidence, `NEEDS_REVIEW` marks heuristic/business-context candidates, and `PASS`
+requires a benchmark-certified profile with every required strategy complete. The
+fixture index at [`tests/fixtures/sw49/manifest.json`](../tests/fixtures/sw49/manifest.json)
+tracks all controls; manual/unsupported pairs are bounded review placeholders, not
+measured accuracy evidence.
+
+Java reports are generated in Korean (`--language ko`). `server-library-report.html` is the landing page and
 `server-library-report-detail.html` contains the complete table. Java findings are grouped by library and installed version;
 `Fixed` lists advisory candidates and `Final` is the lowest candidate verified against
 the same Grype database with no matching vulnerability. Repeat `--target` to scan

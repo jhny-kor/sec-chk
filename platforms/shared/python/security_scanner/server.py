@@ -88,7 +88,7 @@ def scan_directory_payload(
         raise ValueError(f"Unsupported categories: {', '.join(unknown_categories)}")
     standard_selection = resolve_standard_selection(standard, standard_category, categories)
     scanner_categories = standard_selection.scanner_categories
-    if include_host and "host" not in scanner_categories:
+    if include_host and standard_selection.standard != "sw-dev-security-49" and "host" not in scanner_categories:
         scanner_categories = scanner_categories + ("host",)
     if discovery_depth is not None and discovery_depth < 0:
         raise ValueError("discovery_depth must be zero or greater")
@@ -109,9 +109,17 @@ def scan_directory_payload(
         discover_projects=discover_projects,
         discovery_depth=discovery_depth,
     )
-    config = ScannerConfig(targets=(target,), enable_osv=enable_osv, enable_vuln_intel=enable_osv)
+    source_only = standard_selection.standard == "sw-dev-security-49"
+    config = ScannerConfig(
+        targets=(target,),
+        enable_osv=enable_osv and not source_only,
+        enable_vuln_intel=enable_osv and not source_only,
+        standard=standard_selection.standard,
+        standard_category=standard_selection.category,
+    )
     scanner = SecurityScanner(config)
-    raw_findings = scanner.scan()
+    scan_result = scanner.scan()
+    raw_findings = list(scan_result.findings)
     findings = filter_findings_by_standard(raw_findings, standard_selection)
     if include_host:
         # Host posture is opt-in and orthogonal to the selected standard's rule_id
@@ -135,6 +143,7 @@ def scan_directory_payload(
         components=scanner.components,
         enable_osv=enable_osv,
         scanned_categories=scanner_categories,
+        source_analysis=scan_result.source_analysis,
     )
 
 

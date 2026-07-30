@@ -1,0 +1,1 @@
+{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"codeql","version":"2.26.1","rules":[{"id":"java/not-allowlisted"}]}},"results":[{"ruleId":"java/not-allowlisted","level":"warning","message":{"text":"ignored"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"Unknown.java"},"region":{"startLine":1}}}]}]}]}

@@ -1,0 +1,17 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [{
+    "tool": {"driver": {"name": "codeql", "version": "2.26.1", "rules": [{"id": "java/null-dereference"}]}},
+    "results": [{
+      "ruleId": "java/null-dereference",
+      "level": "error",
+      "message": {"text": "Nullable value is dereferenced"},
+      "locations": [{"physicalLocation": {"artifactLocation": {"uri": "c01_cross_file/Consumer.java"}, "region": {"startLine": 4, "startColumn": 12}}}],
+      "codeFlows": [{"threadFlows": [{"locations": [
+        {"location": {"physicalLocation": {"artifactLocation": {"uri": "c01_cross_file/Provider.java"}, "region": {"startLine": 3}}}},
+        {"location": {"physicalLocation": {"artifactLocation": {"uri": "c01_cross_file/Consumer.java"}, "region": {"startLine": 4}}}}
+      ]}]}]
+    }]
+  }]
+}

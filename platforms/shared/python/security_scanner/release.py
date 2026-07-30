@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,13 +31,14 @@ def build_release_security_package(
             enable_vuln_intel=enable_vuln_intel,
         )
     )
-    findings = scanner.scan()
+    scan_result = scanner.scan()
+    findings = list(scan_result.findings)
 
     files: list[Path] = []
     files.append(_write(output_dir / "koda-sbom.cdx.json", render_cyclonedx(scanner.components)))
     files.append(_write(output_dir / "koda-vex.cdx.json", render_cyclonedx_vex(findings)))
     files.append(_write(output_dir / "manual-evidence-checklist.md", render_evidence_checklist(project_name=project_name or target.name, language=language)))
-    files.append(_write(output_dir / "scan-findings.json", _findings_json(findings)))
+    files.append(_write(output_dir / "scan-findings.json", _findings_json(findings, scan_result.source_analysis)))
     files.append(_write(output_dir / "README.md", _readme(project_name or target.name, language=language)))
     checksums = _checksums(files)
     files.append(_write(output_dir / "checksums.txt", checksums))
@@ -58,9 +60,16 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
-def _findings_json(findings) -> str:
-    return json.dumps(
-        [
+def _findings_json(findings, source_analysis=None) -> str:
+    analysis = _source_analysis_json(source_analysis)
+    if isinstance(analysis, dict):
+        all_findings = analysis.pop("all_findings", ())
+        report_findings = analysis.pop("report_findings", ())
+        analysis["all_finding_count"] = len(all_findings) if isinstance(all_findings, list) else 0
+        analysis["report_finding_count"] = len(report_findings) if isinstance(report_findings, list) else 0
+    payload = {
+        "source_analysis": analysis,
+        "findings": [
             {
                 "rule_id": finding.rule_id,
                 "category": finding.category,
@@ -71,12 +80,41 @@ def _findings_json(findings) -> str:
                 "evidence": finding.evidence,
                 "description": finding.description,
                 "recommendation": finding.recommendation,
+                "verification_status": finding.verification_status,
+                "verification_note": finding.verification_note,
+                "analyzer": finding.analyzer,
+                "analyzer_version": finding.analyzer_version,
+                "analyzer_rule_id": finding.analyzer_rule_id,
+                "cwe_ids": list(finding.cwe_ids),
+                "evidence_kind": finding.evidence_kind,
+                "trace": list(finding.trace),
+                "evidence_id": finding.evidence_id,
+                "issue_key": finding.issue_key,
             }
             for finding in findings
         ],
-        indent=2,
-        ensure_ascii=False,
-    )
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def _source_analysis_json(value):
+    if value is None:
+        return None
+    if hasattr(value, "to_dict"):
+        value = value.to_dict()
+    elif is_dataclass(value):
+        value = asdict(value)
+    elif hasattr(value, "__dict__"):
+        value = vars(value)
+    if isinstance(value, dict):
+        return {str(key): _source_analysis_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_source_analysis_json(item) for item in value]
+    if hasattr(value, "value") and not isinstance(value, (str, int, float, bool)):
+        return str(value.value)
+    if isinstance(value, Path):
+        return str(value)
+    return value
 
 
 def _readme(project_name: str, *, language: str) -> str:

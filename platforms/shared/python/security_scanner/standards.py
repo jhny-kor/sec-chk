@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+from pathlib import Path
+from typing import Any, Mapping
 
 from .models import DEFAULT_CATEGORIES, Finding
 
@@ -942,7 +945,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     # 코드오류 (5)
     _control(
         "C-01", "code-error", "Null Pointer 역참조", "Null Pointer Dereference", ("CWE-476",),
-        ("code.null-pointer-dereference",), "partial",
+        ("code.null-pointer-dereference",), "partial", ("Java", "Kotlin"),
         note_ko="Java/Kotlin의 명시적 null 대입과 알려진 nullable 조회 API의 동일 파일 역참조만 점검합니다. 함수 간 흐름은 외부 SAST 검토가 필요합니다.",
         note_en="Checks explicit null assignments and known nullable lookup dereferences in the same Java/Kotlin file. Interprocedural flows still require external SAST.",
     ),
@@ -1040,11 +1043,235 @@ def _sw49_category(category_id: str) -> StandardCategory:
 _SW_DEV_SECURITY_CATEGORIES = tuple(_sw49_category(category_id) for category_id in SW49_CATEGORY_EXPECTED_COUNTS)
 
 
+SW49_PREDICATE_FIELDS = {
+    "evidence_kind": ("direct", "dataflow", "control_flow", "lifetime", "candidate"),
+    "verification_state": ("confirmed", "needs_review"),
+    "trace_complete": bool, "trace_step_count": int,
+    "has_source": bool, "has_sink": bool, "has_guard": bool, "has_sanitizer": bool,
+    "analyzer_rule_id": str,
+}
+SW49_PREDICATE_OPERATORS = {"eq", "in", "gte"}
+
+
+def validate_sw49_predicate(predicate: Mapping[str, Any], *, depth: int = 0) -> None:
+    if not isinstance(predicate, Mapping) or depth > 8:
+        raise ValueError("invalid SW49 predicate")
+    keys = set(predicate)
+    if keys & {"all", "any", "not"}:
+        if len(keys) != 1:
+            raise ValueError("predicate has mixed operators")
+        op = next(iter(keys)); value = predicate[op]
+        if op in {"all", "any"}:
+            if not isinstance(value, list) or not value:
+                raise ValueError(f"{op} must be non-empty")
+            for child in value: validate_sw49_predicate(child, depth=depth + 1)
+        else: validate_sw49_predicate(value, depth=depth + 1)
+        return
+    if keys != {"field", "op", "value"}:
+        raise ValueError("predicate fields are not allowed")
+    name, op, value = predicate["field"], predicate["op"], predicate["value"]
+    if name not in SW49_PREDICATE_FIELDS or op not in SW49_PREDICATE_OPERATORS:
+        raise ValueError("unknown predicate field/operator")
+    if name in {"trace_complete", "has_source", "has_sink", "has_guard", "has_sanitizer"}:
+        if op != "eq" or type(value) is not bool: raise ValueError("invalid boolean predicate")
+    elif name == "trace_step_count":
+        values = value if op == "in" else [value]
+        if op not in {"eq", "in", "gte"} or (op == "in" and (not isinstance(value, list) or not value)):
+            raise ValueError("invalid integer predicate")
+        if any(type(item) is not int or item < 0 for item in values): raise ValueError("invalid integer")
+        if op == "in" and (len(value) > 128 or len(set(value)) != len(value)): raise ValueError("invalid in-list")
+    else:
+        values = value if op == "in" else [value]
+        if op == "gte" or (op == "in" and (not isinstance(value, list) or not value)): raise ValueError("invalid scalar predicate")
+        if name == "analyzer_rule_id" and any(not isinstance(item, str) or not item or len(item) > 256 for item in values): raise ValueError("invalid rule id")
+        domain = SW49_PREDICATE_FIELDS[name]
+        if isinstance(domain, tuple) and any(item not in domain for item in values): raise ValueError("invalid enum")
+        if op == "in" and (len(value) > 128 or len(set(value)) != len(value)): raise ValueError("invalid in-list")
+
+
+def evaluate_sw49_predicate(predicate: Mapping[str, Any], evidence: Mapping[str, Any]) -> bool:
+    try:
+        validate_sw49_predicate(predicate)
+        if "all" in predicate: return all(evaluate_sw49_predicate(p, evidence) for p in predicate["all"])
+        if "any" in predicate: return any(evaluate_sw49_predicate(p, evidence) for p in predicate["any"])
+        if "not" in predicate: return not evaluate_sw49_predicate(predicate["not"], evidence)
+        name, op, expected = predicate["field"], predicate["op"], predicate["value"]
+        actual = evidence.get(name)
+        if actual is None or (name == "trace_step_count" and type(actual) is not int): return False
+        if op == "eq": return type(actual) is type(expected) and actual == expected
+        if op == "in": return any(type(actual) is type(item) and actual == item for item in expected)
+        return type(actual) is int and actual >= expected
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def sw49_contracts_payload() -> dict[str, Any]:
+    path = Path(__file__).with_name("resources") / "sw49" / "contracts.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    validate_sw49_contracts(raw)
+    return raw
+
+
+def validate_sw49_contracts(document: Mapping[str, Any]) -> None:
+    """Validate an untrusted contract document against canonical SW49 metadata."""
+    if set(document) != {"schema", "mapping_version", "controls"} or document.get("schema") != "koda.sw49-contracts.v1":
+        raise ValueError("invalid SW49 contract root")
+    rows = document["controls"]
+    if not isinstance(rows, list) or len(rows) != 49:
+        raise ValueError("SW49 contracts must contain exactly 49 rows")
+    seen = set()
+    required_keys = {
+        "official_id", "guide_id", "title_ko", "category_id", "cwe_ids", "applicability",
+        "local_rule_ids", "external_mappings", "sources", "sinks", "propagators", "sanitizers",
+        "evidence_requirements", "confirmation_predicate", "review_predicate", "required_strategies",
+        "negative_coverage_strategy", "pass_certified_profiles",
+    }
+    for row in rows:
+        if not isinstance(row, Mapping) or set(row) != required_keys or row.get("official_id") in seen:
+            raise ValueError("duplicate or malformed SW49 contract")
+        official_id = row["official_id"]; seen.add(official_id)
+        control = SW49_CONTROLS_BY_OFFICIAL_ID.get(official_id)
+        if control is None or row.get("guide_id") != control.guide_id or row.get("category_id") != control.category_id or tuple(row.get("cwe_ids", ())) != control.cwe_ids or row.get("title_ko") != control.title["ko"]:
+            raise ValueError(f"non-canonical SW49 metadata: {official_id}")
+        for key in ("confirmation_predicate", "review_predicate"):
+            validate_sw49_predicate(row.get(key, {}))
+        if not isinstance(row.get("required_strategies"), list) or not row["required_strategies"]:
+            raise ValueError(f"missing strategies: {official_id}")
+        if any(not isinstance(row.get(key), list) for key in ("local_rule_ids", "external_mappings", "sources", "sinks", "propagators", "sanitizers", "pass_certified_profiles")):
+            raise ValueError(f"invalid SW49 contract list: {official_id}")
+        expected_local = sorted(rule_id for rule_id in control.rule_ids if not rule_id.startswith("web."))
+        if row["local_rule_ids"] != expected_local:
+            raise ValueError(f"non-canonical local rules: {official_id}")
+        applicability = row.get("applicability")
+        if not isinstance(applicability, Mapping) or applicability.get("languages") != sorted(control.supported_languages) or applicability.get("extensions") != []:
+            raise ValueError(f"non-canonical applicability: {official_id}")
+        evidence = row.get("evidence_requirements")
+        negative = row.get("negative_coverage_strategy")
+        if not isinstance(evidence, Mapping) or not isinstance(evidence.get("required_fields"), list) or type(evidence.get("trace_required")) is not bool:
+            raise ValueError(f"invalid evidence requirements: {official_id}")
+        if not isinstance(negative, Mapping) or type(negative.get("clean_result_supports_pass")) is not bool:
+            raise ValueError(f"invalid negative coverage strategy: {official_id}")
+        external_strategy_ids = set()
+        for external in row["external_mappings"]:
+            if not isinstance(external, Mapping) or set(external) != {"analyzer", "rule_ids", "profile_id", "strategy_id"}:
+                raise ValueError(f"invalid external mapping: {official_id}")
+            if not external["analyzer"] or not external["profile_id"] or not external["rule_ids"]:
+                raise ValueError(f"incomplete external mapping: {official_id}")
+            external_strategy_ids.add(external["strategy_id"])
+        if not external_strategy_ids.issubset(set(row["required_strategies"])):
+            raise ValueError(f"unrequired external strategy: {official_id}")
+        local_strategy = f"sw49.{official_id.lower().replace('-', '')}.local"
+        expected_strategies = [local_strategy] + (["sw49.c01.codeql"] if official_id == "C-01" else [])
+        if row["required_strategies"] != expected_strategies:
+            raise ValueError(f"non-canonical strategies: {official_id}")
+        if official_id == "C-01":
+            expected_external_rules = {
+                "java/dereferenced-value-is-always-null",
+                "java/dereferenced-value-may-be-null",
+                "java/dereferenced-expr-may-be-null",
+                "java/null-dereference",
+            }
+            if len(row["external_mappings"]) != 1 or set(row["external_mappings"][0]["rule_ids"]) != expected_external_rules:
+                raise ValueError("non-canonical C-01 external rules")
+        elif row["external_mappings"]:
+            raise ValueError(f"unexpected external mapping: {official_id}")
+        if row["pass_certified_profiles"]:
+            raise ValueError(f"uncertified PASS profile: {official_id}")
+    if seen != set(SW49_CONTROLS_BY_OFFICIAL_ID):
+        raise ValueError("missing or extra SW49 controls")
+
+
+SW49_CONTRACTS = sw49_contracts_payload()["controls"]
+SW49_STRATEGY_REGISTRY = {}
+for _row in SW49_CONTRACTS:
+    _control = SW49_CONTROLS_BY_OFFICIAL_ID[_row["official_id"]]
+    for _strategy_id in _row["required_strategies"]:
+        _external = next(
+            (item for item in _row["external_mappings"] if item["strategy_id"] == _strategy_id),
+            None,
+        )
+        SW49_STRATEGY_REGISTRY[_strategy_id] = {
+            "kind": "external_rule" if _external else ("local_rule" if _row["local_rule_ids"] else ("manual_context" if _control.support_level == "manual-review" else "source_unsupported")),
+            "profile_id": _external["profile_id"] if _external else None,
+            "required_rule_ids": tuple(_external["rule_ids"] if _external else _row["local_rule_ids"]),
+            "evidence_shape": ("evidence_kind", "verification_state"),
+        }
+
+
+def sw49_sarif_allowlist() -> dict[tuple[str, str], dict[str, object]]:
+    """Return the curated analyzer/rule mapping used by the SARIF trust boundary."""
+    mapping: dict[tuple[str, str], dict[str, object]] = {}
+    for row in SW49_CONTRACTS:
+        control = SW49_CONTROLS_BY_OFFICIAL_ID[row["official_id"]]
+        for external in row["external_mappings"]:
+            for rule_id in external["rule_ids"]:
+                mapping[(str(external["analyzer"]).lower(), str(rule_id))] = {
+                    "rule_id": control.rule_ids[0],
+                    "category": "code",
+                    "title": control.title["ko"],
+                    "description": control.notes["ko"],
+                    "cwe_ids": control.cwe_ids,
+                    "verification_status": "confirmed",
+                    "evidence_kind": "dataflow",
+                    "trace_required": bool(row["evidence_requirements"]["trace_required"]),
+                    "analyzer_versions": ("2.26.1",),
+                    "official_id": control.official_id,
+                }
+    return mapping
+
+
+def build_sw49_strategy_executions(
+    manifest: object | None,
+    scanned_categories: tuple[str, ...],
+    analyzer_runs: tuple[object, ...] = (),
+    sarif_warnings: tuple[str, ...] = (),
+) -> tuple[object, ...]:
+    """Build the fail-closed coverage ledger for all 49 controls.
+
+    Local regex/context rules remain PARTIAL in this release. Imported SARIF is
+    positive-only, so even a successful import cannot certify clean coverage.
+    """
+    from .source_analysis import StrategyExecution
+
+    files = tuple(entry[0] for entry in getattr(manifest, "files", ()))
+    selected_categories = set(scanned_categories)
+    analyzer_by_name = {str(getattr(run, "analyzer", "")).lower(): run for run in analyzer_runs}
+    strategies = []
+    for row in SW49_CONTRACTS:
+        official_id = row["official_id"]
+        for strategy_id in row["required_strategies"]:
+            definition = SW49_STRATEGY_REGISTRY[strategy_id]
+            kind = definition["kind"]
+            required_rules = tuple(definition["required_rule_ids"])
+            if kind == "external_rule":
+                run = analyzer_by_name.get("codeql") or analyzer_by_name.get("sarif")
+                if run is None or getattr(run, "status", "") != "SUCCESS":
+                    status = "NOT_RUN"
+                    reason = getattr(run, "failure_reason", "analyzer_not_run") if run else "analyzer_not_run"
+                else:
+                    status = "PARTIAL"
+                    reason = "pre_generated_sarif_positive_only" if getattr(run, "output_origin", "") == "pre_generated" else "negative_rule_coverage_not_certified"
+                    if sarif_warnings:
+                        reason = "sarif_rule_coverage_incomplete"
+                strategies.append(StrategyExecution(official_id, language="Java", profile_id=str(definition["profile_id"] or ""), strategy=strategy_id, status=status, analyzer_run_id=str(getattr(run, "run_id", "")) if run else "", required_rule_ids=required_rules, expected_files=files, analyzed_files=files if status == "PARTIAL" else (), reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
+                continue
+            if not required_rules:
+                reason = "manual_context_required" if kind == "manual_context" else "no_source_static_strategy"
+                strategies.append(StrategyExecution(official_id, strategy=strategy_id, status="NOT_RUN", expected_files=files, reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
+                continue
+            rules_selected = all(_rule_scanner_category(rule_id) in selected_categories for rule_id in required_rules)
+            status = "PARTIAL" if rules_selected else "NOT_RUN"
+            reason = "local_source_rules_are_partial" if rules_selected else "required_scanner_category_not_selected"
+            strategies.append(StrategyExecution(official_id, strategy=strategy_id, status=status, required_rule_ids=required_rules, present_rule_ids=required_rules if rules_selected else (), requested_rule_ids=required_rules if rules_selected else (), executed_rule_ids=required_rules if rules_selected else (), expected_files=files, analyzed_files=files if rules_selected else (), reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
+    return tuple(strategies)
+
+
 def evaluate_sw49_controls(
     findings: list[Finding],
     scanned_categories: tuple[str, ...] = (),
     executed_rule_ids: frozenset[str] | None = None,
     selected_category_id: str | None = None,
+    source_analysis: object | None = None,
 ) -> list[dict[str, object]]:
     """Judge each of the 49 controls against scan results.
 
@@ -1058,6 +1285,10 @@ def evaluate_sw49_controls(
         findings_by_rule.setdefault(finding.rule_id, []).append(finding)
 
     scanned = set(scanned_categories)
+    strategy_by_control: dict[str, list[object]] = {}
+    if source_analysis is not None:
+        for strategy in getattr(source_analysis, "strategies", ()):
+            strategy_by_control.setdefault(str(getattr(strategy, "official_control", "")), []).append(strategy)
     results: list[dict[str, object]] = []
     for control in SW49_CONTROLS:
         selected = selected_category_id is None or control.category_id == selected_category_id
@@ -1080,14 +1311,32 @@ def evaluate_sw49_controls(
                 executed = True
                 break
 
+        contract = next(row for row in SW49_CONTRACTS if row["official_id"] == control.official_id)
+        required_strategy_ids = tuple(contract["required_strategies"])
+        control_strategies = strategy_by_control.get(control.official_id, [])
+        successful_strategies = tuple(sorted(str(getattr(item, "strategy", "")) for item in control_strategies if getattr(item, "status", "") == "COMPLETE" and bool(getattr(item, "negative_coverage_certified", False))))
+        missing_strategies = tuple(sorted(strategy_id for strategy_id in required_strategy_ids if strategy_id not in successful_strategies))
+        coverage_complete = bool(required_strategy_ids) and not missing_strategies
+
         if not selected:
             status = "NOT_SCANNED"
         elif confirmed:
             status = "VULNERABLE"
             executed = True
-        elif review_candidates:
+        elif source_analysis is not None and review_candidates:
             status = "NEEDS_REVIEW"
             executed = True
+        elif source_analysis is not None and not coverage_complete:
+            executed = any(getattr(item, "status", "") not in {"NOT_RUN", "NOT_APPLICABLE"} for item in control_strategies)
+            if control.support_level == "unsupported":
+                status = "UNSUPPORTED"
+            elif control.support_level == "manual-review" or executed:
+                status = "NEEDS_REVIEW"
+            else:
+                status = "NOT_SCANNED"
+        elif source_analysis is not None:
+            # No profile is benchmark-certified for PASS in this release.
+            status = "PASS" if contract["pass_certified_profiles"] else "NOT_SCANNED"
         elif control.support_level == "unsupported":
             status = "UNSUPPORTED"
         elif control.support_level == "manual-review":
@@ -1118,6 +1367,10 @@ def evaluate_sw49_controls(
                 "rule_ids": list(control.rule_ids),
                 "support_level": control.support_level,
                 "supported_languages": list(control.supported_languages),
+                "required_strategies": list(required_strategy_ids),
+                "successful_strategies": list(successful_strategies),
+                "missing_strategies": list(missing_strategies),
+                "coverage_complete": coverage_complete,
                 "executed": executed,
                 "status": status,
                 "finding_count": len(matched),
@@ -1134,6 +1387,7 @@ def sw49_payload(
     findings: list[Finding],
     scanned_categories: tuple[str, ...] = (),
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
+    source_analysis: object | None = None,
 ) -> dict[str, object]:
     """Dashboard/report payload: all 49 control judgements plus a status summary."""
     executed_rule_ids: frozenset[str] | None = None
@@ -1142,12 +1396,26 @@ def sw49_payload(
         category = _find_category(SW_DEV_SECURITY_49, standard_category)
         executed_rule_ids = frozenset(category.rule_ids)
         selected_category_id = category.id
+    evaluation_findings = list(getattr(source_analysis, "all_findings", findings)) if source_analysis is not None else findings
     controls = evaluate_sw49_controls(
-        findings,
+        evaluation_findings,
         scanned_categories,
         executed_rule_ids,
         selected_category_id,
+        source_analysis,
     )
+    if source_analysis is not None:
+        visible_controls = evaluate_sw49_controls(
+            list(getattr(source_analysis, "report_findings", findings)),
+            scanned_categories,
+            executed_rule_ids,
+            selected_category_id,
+            None,
+        )
+        for control, visible in zip(controls, visible_controls):
+            control["analysis_finding_count"] = control["finding_count"]
+            for key in ("finding_count", "confirmed_finding_count", "review_finding_count", "evidence"):
+                control[key] = visible[key]
     status_counts = {status: 0 for status in SW49_STATUSES}
     support_counts = {level: 0 for level in SW49_SUPPORT_LEVELS}
     for entry in controls:

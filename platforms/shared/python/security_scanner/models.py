@@ -41,6 +41,14 @@ class Finding:
     triage_verdict: str = ""
     triage_confidence: float | None = None
     triage_note: str = ""
+    analyzer: str = "koda-local"
+    analyzer_version: str = ""
+    analyzer_rule_id: str = ""
+    cwe_ids: tuple[str, ...] = ()
+    evidence_kind: str = "direct"
+    trace: tuple[dict[str, object], ...] = ()
+    evidence_id: str = ""
+    issue_key: str = ""
 
     def __post_init__(self) -> None:
         # Imported/merged reports are untrusted input. Unknown states must not
@@ -125,3 +133,26 @@ class ScannerConfig:
     # scanner to the rules that belong to that standard/category.
     standard: str = "local"
     standard_category: str = "all"
+    source_analyzer: str = ""
+    source_analyzer_binary: Path | None = None
+    source_analyzer_timeout: float = 120.0
+    source_analyzer_sarif: Path | None = None
+    source_analyzer_license_attested: bool = False
+    source_analyzer_sandbox_wrapper: Path | None = None
+    source_analyzer_sandbox_config: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScanResult:
+    """Immutable scan result; findings are scoped to the requested output."""
+
+    findings: tuple[Finding, ...]
+    source_analysis: object | None = None
+    components: tuple[DependencyComponent, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def __iter__(self):
+        return iter(self.findings)
+
+    def __len__(self) -> int:
+        return len(self.findings)
