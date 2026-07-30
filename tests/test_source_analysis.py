@@ -56,17 +56,23 @@ class SourceAnalysisTests(unittest.TestCase):
         self.assertFalse(result.source_analysis.manifest.files)
         self.assertTrue(any("Refused symlink scan target" in warning for warning in result.warnings))
 
-    def test_sw49_source_profile_excludes_project_prevention_and_non_source_files(self):
+    def test_sw49_source_profile_only_scans_supported_extensions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "Main.java").write_text("class Main {}", encoding="utf-8")
+            for name in ("Main.java", "config.XML", "app.js", "view.jsp", "index.HTML"):
+                (root / name).write_text("source", encoding="utf-8")
+            for name in ("script.py", "native.c", "settings.properties", "template.ts", "Dockerfile", ".env"):
+                (root / name).write_text("not scanned", encoding="utf-8")
             (root / "artifact.bin").write_bytes(b"not source")
             result = SecurityScanner(ScannerConfig(
                 targets=(TargetConfig("root", root, categories=("code", "secrets", "configuration", "dependencies", "prevention")),),
                 standard="sw-dev-security-49",
             )).scan()
         self.assertFalse(any(finding.category == "prevention" for finding in result.findings))
-        self.assertEqual([entry[0] for entry in result.source_analysis.manifest.files], ["Main.java"])
+        self.assertEqual(
+            [entry[0] for entry in result.source_analysis.manifest.files],
+            ["Main.java", "app.js", "config.XML", "index.HTML", "view.jsp"],
+        )
 
     def test_clean_partial_controls_remain_review_required_not_passed(self):
         with tempfile.TemporaryDirectory() as tmp:

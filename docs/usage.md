@@ -101,10 +101,11 @@ the local static rules, not a claim of full SAST or formal compliance.
 
 ### Offline source-only SW49 analysis
 
-The SW49 path inventories the complete project and runs local rules. It does not run
-web, host, OSV/CVE,
-SBOM, JAR, binary, build, test, package-manager, or project scripts. Changed-only
-reports retain unchanged files as analysis context.
+The SW49 path inventories and scans only `.java`, `.xml`, `.js`, `.jsp`, and `.html`
+files (case-insensitive). All other extensions and extensionless files are excluded.
+It does not run web, host, OSV/CVE, SBOM, JAR, binary, build, test, package-manager,
+or project scripts. Changed-only reports retain unchanged supported files as analysis
+context.
 
 The first external mapping accepts administrator-generated CodeQL `2.26.1` Java
 SARIF. KODA never downloads or executes CodeQL and does not fall back to an

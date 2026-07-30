@@ -12,12 +12,7 @@ from .models import Finding
 
 ANALYZER_STATES = ("SUCCESS", "MISSING", "FAILED", "SKIPPED")
 STRATEGY_STATES = ("COMPLETE", "PARTIAL", "NOT_RUN", "NOT_APPLICABLE")
-SOURCE_SUFFIXES = frozenset({
-    ".c", ".cc", ".conf", ".config", ".cpp", ".cs", ".cxx", ".go", ".h", ".hpp",
-    ".html", ".java", ".js", ".jsx", ".jsp", ".kt", ".php", ".properties", ".py",
-    ".rb", ".rs", ".swift", ".ts", ".tsx", ".vue", ".xml", ".yaml", ".yml",
-})
-SOURCE_FILENAMES = frozenset({"Dockerfile", ".env", ".env.example"})
+SOURCE_SUFFIXES = frozenset({".html", ".java", ".js", ".jsp", ".xml"})
 
 
 def _digest(payload: object) -> str:
@@ -137,4 +132,4 @@ def enumerate_source_files(root: Path, *, exclude: Iterable[str] = ()) -> tuple[
 
 
 def is_source_file(path: Path) -> bool:
-    return path.name in SOURCE_FILENAMES or path.suffix.lower() in SOURCE_SUFFIXES
+    return path.suffix.lower() in SOURCE_SUFFIXES
