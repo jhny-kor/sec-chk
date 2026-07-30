@@ -1,0 +1,1 @@
+{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"codeql","version":"2.26.1","rules":[{"id":"java/null-dereference"}]}},"results":[{"ruleId":"java/null-dereference","message":{"text":"outside"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"../../etc/passwd"},"region":{"startLine":1}}}]}]}]}

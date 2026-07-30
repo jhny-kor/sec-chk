@@ -362,7 +362,9 @@ def main(argv: list[str] | None = None) -> int:
                 report=report,
             )
             scanner = SecurityScanner(config)
-            findings = scanner.scan()
+            scan_result = scanner.scan()
+            findings = list(scan_result.findings)
+            source_analysis = scan_result.source_analysis
             filtered_findings = filter_by_min_severity(findings, config.report.min_severity)
             content = render_report(
                 filtered_findings,
@@ -372,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
                 language=config.report.language,
                 components=scanner.components,
                 warnings=tuple(scanner.warnings),
+                source_analysis=source_analysis,
             )
             write_report(content, config.report.output)
             write_report(render_manifest_json(create_manifest(target_path)), output_dir / "koda-deploy-manifest.json")
@@ -454,7 +457,9 @@ def main(argv: list[str] | None = None) -> int:
             nvd_api_key=os.environ.get(args.nvd_api_key_env) if args.nvd_api_key_env else None,
         )
         scanner = SecurityScanner(config)
-        findings = scanner.scan()
+        scan_result = scanner.scan()
+        findings = list(scan_result.findings)
+        source_analysis = scan_result.source_analysis
         filtered_findings = filter_by_min_severity(findings, config.report.min_severity)
         content = render_report(
             filtered_findings,
@@ -462,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
             target_names=("host",),
             language=config.report.language,
             warnings=tuple(scanner.warnings),
+            source_analysis=source_analysis,
         )
         write_report(content, config.report.output)
         for warning in scanner.warnings:
@@ -576,7 +582,9 @@ def main(argv: list[str] | None = None) -> int:
             targets=(TargetConfig(name=target_path.name or "target", path=target_path, categories=categories),),
         )
         scanner = SecurityScanner(config)
-        findings = scanner.scan()
+        scan_result = scanner.scan()
+        findings = list(scan_result.findings)
+        source_analysis = scan_result.source_analysis
         plans, warnings = fixes_apply.plan_fixes(findings, rule=args.rule)
         for warning in (*scanner.warnings, *warnings):
             print(f"warning: {warning}", file=sys.stderr)
@@ -606,7 +614,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             with _build_scan_config_context(args) as config:
                 scanner = SecurityScanner(config)
-                findings = scanner.scan()
+                scan_result = scanner.scan()
+                findings = list(scan_result.findings)
+                source_analysis = scan_result.source_analysis
                 standard_selection = resolve_standard_selection(
                     config.standard,
                     config.standard_category,
@@ -639,6 +649,7 @@ def main(argv: list[str] | None = None) -> int:
                         standard=standard_selection.standard,
                         standard_category=standard_selection.category,
                         scanned_categories=standard_selection.scanner_categories,
+                        source_analysis=source_analysis,
                     )
                     write_report(main_html, output)
                     write_report(detail_html, detail_path)
@@ -655,6 +666,7 @@ def main(argv: list[str] | None = None) -> int:
                         standard=standard_selection.standard,
                         standard_category=standard_selection.category,
                         scanned_categories=standard_selection.scanner_categories,
+                        source_analysis=source_analysis,
                     )
                     write_report(content, config.report.output)
 
@@ -1211,6 +1223,13 @@ def _apply_overrides(
         diff_base=getattr(args, "base", None) or config.diff_base,
         standard=selected_standard,
         standard_category=selected_category,
+        source_analyzer=config.source_analyzer,
+        source_analyzer_binary=config.source_analyzer_binary,
+        source_analyzer_timeout=config.source_analyzer_timeout,
+        source_analyzer_sarif=config.source_analyzer_sarif,
+        source_analyzer_license_attested=config.source_analyzer_license_attested,
+        source_analyzer_sandbox_wrapper=config.source_analyzer_sandbox_wrapper,
+        source_analyzer_sandbox_config=config.source_analyzer_sandbox_config,
     )
 
 

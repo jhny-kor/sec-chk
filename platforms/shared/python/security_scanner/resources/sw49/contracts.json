@@ -1,0 +1,2803 @@
+{
+  "schema": "koda.sw49-contracts.v1",
+  "mapping_version": "2026-07-30",
+  "controls": [
+    {
+      "official_id": "I-01",
+      "guide_id": "1.1",
+      "title_ko": "SQL 삽입",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-89"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.sql-dynamic-query"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i01.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-02",
+      "guide_id": "1.2",
+      "title_ko": "코드 삽입",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-94",
+        "CWE-95"
+      ],
+      "applicability": {
+        "languages": [
+          "HTML",
+          "JavaScript",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.eval-user-input"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i02.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-03",
+      "guide_id": "1.3",
+      "title_ko": "경로 조작 및 자원 삽입",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-22",
+        "CWE-99"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.path-traversal"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i03.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-04",
+      "guide_id": "1.4",
+      "title_ko": "크로스사이트 스크립트",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-79",
+        "CWE-80"
+      ],
+      "applicability": {
+        "languages": [
+          "HTML",
+          "JavaScript",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.xss-dom-sink"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i04.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-05",
+      "guide_id": "1.5",
+      "title_ko": "운영체제 명령어 삽입",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-78"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.command-injection"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i05.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-06",
+      "guide_id": "1.6",
+      "title_ko": "위험한 형식 파일 업로드",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-434"
+      ],
+      "applicability": {
+        "languages": [
+          "JavaScript",
+          "PHP",
+          "Python",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.unrestricted-file-upload"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i06.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-07",
+      "guide_id": "1.7",
+      "title_ko": "신뢰되지 않는 URL 주소로 자동접속 연결",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-601"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.open-redirect-user-input"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i07.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-08",
+      "guide_id": "1.8",
+      "title_ko": "부적절한 XML 외부 개체 참조",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-611"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Java",
+          "Kotlin",
+          "Python"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.xml-external-entity"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i08.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-09",
+      "guide_id": "1.9",
+      "title_ko": "XML 삽입",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-91"
+      ],
+      "applicability": {
+        "languages": [
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.xml-injection"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i09.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-10",
+      "guide_id": "1.10",
+      "title_ko": "LDAP 삽입",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-90"
+      ],
+      "applicability": {
+        "languages": [
+          "Java",
+          "Kotlin",
+          "Python"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.ldap-injection"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i10.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-11",
+      "guide_id": "1.11",
+      "title_ko": "크로스사이트 요청 위조",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-352"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.csrf-disabled"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i11.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-12",
+      "guide_id": "1.12",
+      "title_ko": "서버사이드 요청 위조",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-918"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.ssrf-user-url"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i12.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-13",
+      "guide_id": "1.13",
+      "title_ko": "HTTP 응답분할",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-113"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.http-response-splitting"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i13.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-14",
+      "guide_id": "1.14",
+      "title_ko": "정수형 오버플로우",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-190"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i14.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-15",
+      "guide_id": "1.15",
+      "title_ko": "보안기능 결정에 사용되는 부적절한 입력값",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-807",
+        "CWE-20"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i15.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-16",
+      "guide_id": "1.16",
+      "title_ko": "메모리 버퍼 오버플로우",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-119",
+        "CWE-120",
+        "CWE-121",
+        "CWE-122"
+      ],
+      "applicability": {
+        "languages": [
+          "C",
+          "C++"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.dangerous-c-buffer-api"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i16.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "I-17",
+      "guide_id": "1.17",
+      "title_ko": "포맷 스트링 삽입",
+      "category_id": "input-validation-expression",
+      "cwe_ids": [
+        "CWE-134"
+      ],
+      "applicability": {
+        "languages": [
+          "C",
+          "C++",
+          "Java",
+          "Kotlin"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.format-string-user-input"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.i17.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-01",
+      "guide_id": "2.1",
+      "title_ko": "적절한 인증 없는 중요기능 허용",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-306"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.api-route-missing-auth",
+        "code.auth-disabled-endpoint"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s01.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-02",
+      "guide_id": "2.2",
+      "title_ko": "부적절한 인가",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-862",
+        "CWE-863"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s02.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-03",
+      "guide_id": "2.3",
+      "title_ko": "중요한 자원에 대한 잘못된 권한 설정",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-732"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s03.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-04",
+      "guide_id": "2.4",
+      "title_ko": "취약한 암호화 알고리즘 사용",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-327"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.weak-hash"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s04.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-05",
+      "guide_id": "2.5",
+      "title_ko": "암호화되지 않은 중요정보",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-311",
+        "CWE-319"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "config.docker-add-http",
+        "config.env-file-present",
+        "config.private-key-like-file",
+        "dependency.node-insecure-url",
+        "dependency.python-insecure-url"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s05.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-06",
+      "guide_id": "2.6",
+      "title_ko": "하드코드된 중요정보",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-259",
+        "CWE-321",
+        "CWE-798"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "secret.aws-access-key",
+        "secret.generic-assignment",
+        "secret.github-token",
+        "secret.openai-key",
+        "secret.private-key",
+        "secret.slack-token"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s06.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-07",
+      "guide_id": "2.7",
+      "title_ko": "충분하지 않은 키 길이 사용",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-326"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "Python",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.insufficient-key-length"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s07.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-08",
+      "guide_id": "2.8",
+      "title_ko": "적절하지 않은 난수 값 사용",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-330",
+        "CWE-338"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.insecure-random-security-use"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s08.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-09",
+      "guide_id": "2.9",
+      "title_ko": "취약한 비밀번호 허용",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-521"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s09.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-10",
+      "guide_id": "2.10",
+      "title_ko": "부적절한 전자서명 확인",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-347"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.jwt-none-algorithm",
+        "code.jwt-verification-disabled"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s10.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-11",
+      "guide_id": "2.11",
+      "title_ko": "부적절한 인증서 유효성 검증",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-295"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.tls-certificate-verification-disabled"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s11.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-12",
+      "guide_id": "2.12",
+      "title_ko": "사용자 하드디스크에 저장되는 쿠키를 통한 정보 노출",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-539"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Go",
+          "JSP",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "Rust",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.insecure-cookie-settings"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s12.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-13",
+      "guide_id": "2.13",
+      "title_ko": "주석문 안에 포함된 시스템 주요정보",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-615"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "secret.sensitive-comment"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s13.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-14",
+      "guide_id": "2.14",
+      "title_ko": "솔트 없이 일방향 해쉬 함수 사용",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-759"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.password-hash-without-salt"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s14.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-15",
+      "guide_id": "2.15",
+      "title_ko": "무결성 검사 없는 코드 다운로드",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-494"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "config.docker-add-http",
+        "dependency.docker-remote-shell",
+        "dependency.remote-shell-script",
+        "prevention.github-actions-unpinned"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s15.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "S-16",
+      "guide_id": "2.16",
+      "title_ko": "반복된 인증시도 제한 기능 부재",
+      "category_id": "security-features",
+      "cwe_ids": [
+        "CWE-307"
+      ],
+      "applicability": {
+        "languages": [
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "Python",
+          "TypeScript"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.api-missing-rate-limit"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.s16.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "T-01",
+      "guide_id": "3.1",
+      "title_ko": "경쟁조건: 검사 시점과 사용 시점(TOCTOU)",
+      "category_id": "time-state",
+      "cwe_ids": [
+        "CWE-367"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.insecure-temp-file"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.t01.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "T-02",
+      "guide_id": "3.2",
+      "title_ko": "종료되지 않는 반복문 또는 재귀 함수",
+      "category_id": "time-state",
+      "cwe_ids": [
+        "CWE-835",
+        "CWE-674"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.t02.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "E-01",
+      "guide_id": "4.1",
+      "title_ko": "오류 메시지 정보노출",
+      "category_id": "error-handling",
+      "cwe_ids": [
+        "CWE-209"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.stack-trace-exposure",
+        "config.debug-enabled"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.e01.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "E-02",
+      "guide_id": "4.2",
+      "title_ko": "오류 상황 대응 부재",
+      "category_id": "error-handling",
+      "cwe_ids": [
+        "CWE-390",
+        "CWE-755"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.empty-exception-handler"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.e02.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "E-03",
+      "guide_id": "4.3",
+      "title_ko": "부적절한 예외 처리",
+      "category_id": "error-handling",
+      "cwe_ids": [
+        "CWE-754",
+        "CWE-755",
+        "CWE-396",
+        "CWE-397"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.empty-exception-handler",
+        "code.stack-trace-exposure"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.e03.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "C-01",
+      "guide_id": "5.1",
+      "title_ko": "Null Pointer 역참조",
+      "category_id": "code-error",
+      "cwe_ids": [
+        "CWE-476"
+      ],
+      "applicability": {
+        "languages": [
+          "Java",
+          "Kotlin"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.null-pointer-dereference"
+      ],
+      "external_mappings": [
+        {
+          "analyzer": "codeql",
+          "rule_ids": [
+            "java/dereferenced-value-is-always-null",
+            "java/dereferenced-value-may-be-null",
+            "java/dereferenced-expr-may-be-null",
+            "java/null-dereference"
+          ],
+          "profile_id": "codeql-java-none-2.26.1",
+          "strategy_id": "sw49.c01.codeql"
+        }
+      ],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": true
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.c01.local",
+        "sw49.c01.codeql"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "C-02",
+      "guide_id": "5.2",
+      "title_ko": "부적절한 자원 해제",
+      "category_id": "code-error",
+      "cwe_ids": [
+        "CWE-404",
+        "CWE-772"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.c02.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "C-03",
+      "guide_id": "5.3",
+      "title_ko": "해제된 자원 사용",
+      "category_id": "code-error",
+      "cwe_ids": [
+        "CWE-416"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.c03.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "C-04",
+      "guide_id": "5.4",
+      "title_ko": "초기화되지 않은 변수 사용",
+      "category_id": "code-error",
+      "cwe_ids": [
+        "CWE-457"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.c04.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "C-05",
+      "guide_id": "5.5",
+      "title_ko": "신뢰할 수 없는 데이터의 역직렬화",
+      "category_id": "code-error",
+      "cwe_ids": [
+        "CWE-502"
+      ],
+      "applicability": {
+        "languages": [
+          "C#",
+          "Java",
+          "PHP",
+          "Python",
+          "Ruby"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.unsafe-deserialization"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.c05.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "P-01",
+      "guide_id": "6.1",
+      "title_ko": "잘못된 세션에 의한 데이터 정보 노출",
+      "category_id": "encapsulation",
+      "cwe_ids": [
+        "CWE-488"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.p01.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "P-02",
+      "guide_id": "6.2",
+      "title_ko": "제거되지 않고 남은 디버그 코드",
+      "category_id": "encapsulation",
+      "cwe_ids": [
+        "CWE-489"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "config.debug-enabled",
+        "config.development-environment"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.p02.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "P-03",
+      "guide_id": "6.3",
+      "title_ko": "Public 메소드부터 반환된 Private 배열",
+      "category_id": "encapsulation",
+      "cwe_ids": [
+        "CWE-495"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.p03.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "P-04",
+      "guide_id": "6.4",
+      "title_ko": "Private 배열에 Public 데이터 할당",
+      "category_id": "encapsulation",
+      "cwe_ids": [
+        "CWE-496"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.p04.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "A-01",
+      "guide_id": "7.1",
+      "title_ko": "DNS lookup에 의존한 보안결정",
+      "category_id": "api-misuse",
+      "cwe_ids": [
+        "CWE-350",
+        "CWE-247"
+      ],
+      "applicability": {
+        "languages": [],
+        "extensions": []
+      },
+      "local_rule_ids": [],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.a01.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    },
+    {
+      "official_id": "A-02",
+      "guide_id": "7.2",
+      "title_ko": "취약한 API 사용",
+      "category_id": "api-misuse",
+      "cwe_ids": [
+        "CWE-676"
+      ],
+      "applicability": {
+        "languages": [
+          "C",
+          "C++"
+        ],
+        "extensions": []
+      },
+      "local_rule_ids": [
+        "code.dangerous-c-buffer-api"
+      ],
+      "external_mappings": [],
+      "sources": [],
+      "sinks": [],
+      "propagators": [],
+      "sanitizers": [],
+      "evidence_requirements": {
+        "required_fields": [
+          "evidence_kind",
+          "verification_state"
+        ],
+        "trace_required": false
+      },
+      "confirmation_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "confirmed"
+      },
+      "review_predicate": {
+        "field": "verification_state",
+        "op": "eq",
+        "value": "needs_review"
+      },
+      "required_strategies": [
+        "sw49.a02.local"
+      ],
+      "negative_coverage_strategy": {
+        "expected_files": "applicable",
+        "complete_criteria": [
+          "all_required_rules_executed"
+        ],
+        "partial_criteria": [
+          "incomplete_files"
+        ],
+        "clean_result_supports_pass": false
+      },
+      "pass_certified_profiles": []
+    }
+  ]
+}

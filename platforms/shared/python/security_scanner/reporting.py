@@ -6,6 +6,7 @@ import json
 import os
 import re
 import zipfile
+from dataclasses import asdict, is_dataclass
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -52,6 +53,50 @@ SEVERITY_SECURITY_SCORES = {
     "low": "2.0",
     "info": "0.0",
 }
+
+
+def _source_analysis_payload(value: object) -> dict[str, object]:
+    """Serialize the immutable source-analysis summary without rebuilding it.
+
+    The core summary may be a dataclass, a mapping, or expose ``to_dict`` across
+    package versions.  Unknown values are represented conservatively so legacy
+    callers still produce a valid report without claiming coverage.
+    """
+    if value is None:
+        return {}
+    try:
+        if hasattr(value, "to_dict"):
+            raw = value.to_dict()
+        elif is_dataclass(value):
+            raw = asdict(value)
+        elif isinstance(value, dict):
+            raw = dict(value)
+        elif hasattr(value, "__dict__"):
+            raw = vars(value)
+        else:
+            raw = {"value": str(value)}
+    except Exception:
+        raw = {"status": "NOT_SCANNED", "reason": "source_analysis_serialization_failed"}
+    if isinstance(raw, dict):
+        all_findings = raw.pop("all_findings", ())
+        report_findings = raw.pop("report_findings", ())
+        raw["all_finding_count"] = len(all_findings) if isinstance(all_findings, (list, tuple)) else 0
+        raw["report_finding_count"] = len(report_findings) if isinstance(report_findings, (list, tuple)) else 0
+    return _json_safe(raw) if isinstance(raw, dict) else {"value": str(raw)}
+
+
+def _json_safe(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(item) for item in value]
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+    if hasattr(value, "value") and not isinstance(value, (str, int, float, bool)):
+        return str(value.value)
+    return value
 
 TRANSLATIONS = {
     "en": {
@@ -1243,6 +1288,7 @@ def render_report(
     standard: str = DEFAULT_STANDARD,
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
     scanned_categories: tuple[str, ...] = (),
+    source_analysis: object | None = None,
 ) -> str:
     if report_format == "cyclonedx":
         return render_cyclonedx(components)
@@ -1259,6 +1305,7 @@ def render_report(
             standard=standard,
             standard_category=standard_category,
             scanned_categories=scanned_categories,
+            source_analysis=source_analysis,
         )
     if report_format == "markdown":
         report = render_markdown(
@@ -1267,15 +1314,27 @@ def render_report(
             language,
             target_paths=target_paths,
             standard_mappings=_rule_mappings_for_findings(findings, standard, standard_category),
+            source_analysis=source_analysis,
         )
         if standard == "sw-dev-security-49":
-            sw49 = sw49_payload(findings, scanned_categories, standard_category)
+            sw49 = sw49_payload(findings, scanned_categories, standard_category, source_analysis)
             report = report.rstrip("\n") + "\n" + "\n".join(_sw49_markdown_lines(sw49, language)) + "\n"
         return report
     if report_format == "html":
-        return render_html(findings, target_names, language, target_paths=target_paths, components=components)
+        return render_html(
+            findings,
+            target_names,
+            language,
+            target_paths=target_paths,
+            components=components,
+            warnings=warnings,
+            standard=standard,
+            standard_category=standard_category,
+            scanned_categories=scanned_categories,
+            source_analysis=source_analysis,
+        )
     if report_format == "sarif":
-        return render_sarif(findings)
+        return render_sarif(findings, source_analysis=source_analysis)
     raise ValueError(f"Unsupported report format: {report_format}")
 
 
@@ -1290,6 +1349,7 @@ def render_json(
     standard: str = DEFAULT_STANDARD,
     standard_category: str = DEFAULT_STANDARD_CATEGORY,
     scanned_categories: tuple[str, ...] = (),
+    source_analysis: object | None = None,
 ) -> str:
     all_mappings = _rule_mappings_for_findings(findings, standard, standard_category)
     payload = {
@@ -1304,8 +1364,10 @@ def render_json(
             for finding in findings
         ],
     }
+    if source_analysis is not None:
+        payload["source_analysis"] = _source_analysis_payload(source_analysis)
     if standard == "sw-dev-security-49":
-        payload["sw49"] = sw49_payload(findings, scanned_categories, standard_category)
+        payload["sw49"] = sw49_payload(findings, scanned_categories, standard_category, source_analysis)
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
@@ -1316,6 +1378,7 @@ def render_markdown(
     *,
     target_paths: dict[str, str] | None = None,
     standard_mappings: dict[str, list[dict[str, object]]] | None = None,
+    source_analysis: object | None = None,
 ) -> str:
     labels = _labels(language)
     generated_at, generated_display = _generated_at()
@@ -1340,6 +1403,9 @@ def render_markdown(
     for target, count in sorted(summary["by_target"].items()):
         if target:
             lines.append(f"- {labels['target']} `{_target_display(target, summary)}`: {count}")
+    if source_analysis is not None:
+        analysis = _source_analysis_payload(source_analysis)
+        lines.extend(["", "- Source analysis coverage: " + str(analysis.get("coverage_status") or analysis.get("status") or "recorded")])
 
     if not findings:
         lines.extend(["", str(labels["no_threshold_findings"])])
@@ -1391,7 +1457,7 @@ def render_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_sarif(findings: list[Finding]) -> str:
+def render_sarif(findings: list[Finding], *, source_analysis: object | None = None) -> str:
     rules_by_id: dict[str, Finding] = {}
     for finding in findings:
         rules_by_id.setdefault(finding.rule_id, finding)
@@ -1412,6 +1478,8 @@ def render_sarif(findings: list[Finding]) -> str:
             }
         ],
     }
+    if source_analysis is not None:
+        payload["runs"][0]["properties"] = {"koda.source_analysis": _source_analysis_payload(source_analysis)}
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
@@ -1539,6 +1607,14 @@ def _finding_from_payload(item: dict[str, object]) -> Finding:
         resource=str(item.get("resource", "")),
         verification_status=str(item.get("verification_status", "confirmed")),
         verification_note=str(item.get("verification_note", "")),
+        analyzer=str(item.get("analyzer", "koda-local")),
+        analyzer_version=str(item.get("analyzer_version", "")),
+        analyzer_rule_id=str(item.get("analyzer_rule_id", "")),
+        cwe_ids=tuple(str(value) for value in item.get("cwe_ids", ()) if isinstance(value, str)) if isinstance(item.get("cwe_ids", ()), (list, tuple)) else (),
+        evidence_kind=str(item.get("evidence_kind", "direct")),
+        trace=tuple(value for value in item.get("trace", ()) if isinstance(value, dict)) if isinstance(item.get("trace", ()), (list, tuple)) else (),
+        evidence_id=str(item.get("evidence_id", "")),
+        issue_key=str(item.get("issue_key", "")),
     )
 
 
@@ -1551,6 +1627,7 @@ def render_markdown_from_payload(payload: dict[str, object], language: str = "ko
         target_names,
         language,
         standard_mappings=mappings if isinstance(mappings, dict) else None,
+        source_analysis=payload.get("source_analysis"),
     )
     sw49 = _payload_sw49(payload)
     if sw49:
@@ -1578,6 +1655,7 @@ def render_html_pair_zip_from_payload(payload: dict[str, object], language: str 
         warnings=tuple(str(item) for item in scan.get("warnings", ()) if str(item).strip()),
         enable_osv=bool(scan.get("enable_osv", False)),
         scanned_categories=tuple(str(item) for item in scan.get("scanned_categories", ()) if str(item).strip()),
+        source_analysis=payload.get("source_analysis"),
     )
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -1964,8 +2042,24 @@ def render_html(
     *,
     target_paths: dict[str, str] | None = None,
     components: tuple[DependencyComponent, ...] = (),
+    warnings: tuple[str, ...] = (),
+    standard: str = DEFAULT_STANDARD,
+    standard_category: str = DEFAULT_STANDARD_CATEGORY,
+    scanned_categories: tuple[str, ...] = (),
+    source_analysis: object | None = None,
 ) -> str:
-    payload = build_dashboard_payload(findings, target_names, language, target_paths=target_paths, components=components)
+    payload = build_dashboard_payload(
+        findings,
+        target_names,
+        language,
+        target_paths=target_paths,
+        warnings=warnings,
+        standard=standard,
+        standard_category=standard_category,
+        components=components,
+        scanned_categories=scanned_categories,
+        source_analysis=source_analysis,
+    )
     return _render_html_payload(payload, language)
 
 
@@ -1985,6 +2079,7 @@ def render_html_pair(
     components: tuple[DependencyComponent, ...] = (),
     enable_osv: bool = False,
     scanned_categories: tuple[str, ...] = (),
+    source_analysis: object | None = None,
 ) -> tuple[str, str]:
     """Render a compact landing page and the full source findings page.
 
@@ -2005,6 +2100,7 @@ def render_html_pair(
         components=components,
         enable_osv=enable_osv,
         scanned_categories=scanned_categories,
+        source_analysis=source_analysis,
     )
     # File reports are Korean-only for now. The summary links to the sibling
     # detail artifact, while the detail page remains independently openable.
@@ -2590,6 +2686,7 @@ def build_dashboard_payload(
     components: tuple[DependencyComponent, ...] = (),
     enable_osv: bool = False,
     scanned_categories: tuple[str, ...] = (),
+    source_analysis: object | None = None,
 ) -> dict[str, object]:
     generated, generated_display = _generated_at()
     summary = _summary(findings, target_names, target_paths)
@@ -2597,12 +2694,12 @@ def build_dashboard_payload(
     summary["displayed_finding_count"] = len(findings)
     labels = _labels(language)
     sw49 = (
-        sw49_payload(findings, scanned_categories, standard_category)
+        sw49_payload(findings, scanned_categories, standard_category, source_analysis)
         if standard == "sw-dev-security-49"
         else None
     )
     rule_mappings = _rule_mappings_for_findings(findings, standard, standard_category)
-    return {
+    payload = {
         "sw49": sw49,
         "generated_at": generated,
         "generated_display": generated_display,
@@ -2639,6 +2736,9 @@ def build_dashboard_payload(
             ],
         },
     }
+    if source_analysis is not None:
+        payload["source_analysis"] = _source_analysis_payload(source_analysis)
+    return payload
 
 
 def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str, str]:
@@ -2844,6 +2944,14 @@ def _finding_payload(
         "triage_verdict": finding.triage_verdict,
         "triage_confidence": finding.triage_confidence,
         "triage_note": finding.triage_note,
+        "analyzer": finding.analyzer,
+        "analyzer_version": finding.analyzer_version,
+        "analyzer_rule_id": finding.analyzer_rule_id,
+        "cwe_ids": list(finding.cwe_ids),
+        "evidence_kind": finding.evidence_kind,
+        "trace": [dict(step) for step in finding.trace],
+        "evidence_id": finding.evidence_id,
+        "issue_key": finding.issue_key,
         "standard_mappings": [dict(mapping) for mapping in standard_mappings],
     }
     if finding.line is not None and not finding.resource:
@@ -2934,7 +3042,7 @@ def _sarif_rule(finding: Finding) -> dict[str, object]:
 
 def _sarif_result(finding: Finding) -> dict[str, object]:
     region = {"startLine": finding.line or 1}
-    return {
+    result = {
         "ruleId": finding.rule_id,
         "level": _sarif_level(finding.severity),
         "message": {"text": _sarif_message(finding)},
@@ -2953,8 +3061,18 @@ def _sarif_result(finding: Finding) -> dict[str, object]:
             "evidence": finding.evidence,
             "verification_status": finding.verification_status,
             "verification_note": finding.verification_note,
+            "analyzer": finding.analyzer,
+            "analyzer_version": finding.analyzer_version,
+            "analyzer_rule_id": finding.analyzer_rule_id,
+            "cwe_ids": list(finding.cwe_ids),
+            "evidence_kind": finding.evidence_kind,
+            "evidence_id": finding.evidence_id,
+            "issue_key": finding.issue_key,
         },
     }
+    if finding.trace:
+        result["codeFlows"] = [{"threadFlows": [{"locations": [{"location": {"physicalLocation": {"artifactLocation": {"uri": str(step.get("path", ""))}, "region": {"startLine": int(step.get("line") or 1)}}, "message": {"text": str(step.get("message", ""))}}} for step in finding.trace]}]}]
+    return result
 
 
 def _sarif_level(severity: str) -> str:

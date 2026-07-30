@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "koda.sw49-contracts.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "mapping_version", "controls"],
+  "properties": {
+    "schema": {"const": "koda.sw49-contracts.v1"},
+    "mapping_version": {"type": "string", "minLength": 1},
+    "controls": {
+      "type": "array",
+      "minItems": 49,
+      "maxItems": 49,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["official_id", "guide_id", "title_ko", "category_id", "cwe_ids", "applicability", "local_rule_ids", "external_mappings", "sources", "sinks", "propagators", "sanitizers", "evidence_requirements", "confirmation_predicate", "review_predicate", "required_strategies", "negative_coverage_strategy", "pass_certified_profiles"],
+        "properties": {
+          "official_id": {"type": "string", "pattern": "^[ISTECPA]-[0-9]{2}$"},
+          "guide_id": {"type": "string", "minLength": 1},
+          "title_ko": {"type": "string", "minLength": 1},
+          "category_id": {"type": "string", "minLength": 1},
+          "cwe_ids": {"type": "array", "items": {"type": "string", "pattern": "^CWE-[0-9]+$"}, "uniqueItems": true},
+          "applicability": {"type": "object", "additionalProperties": false, "required": ["languages", "extensions"], "properties": {"languages": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}, "extensions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}}},
+          "local_rule_ids": {"$ref": "#/$defs/stringArray"},
+          "external_mappings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["analyzer", "rule_ids", "profile_id", "strategy_id"], "properties": {"analyzer": {"type": "string", "minLength": 1}, "rule_ids": {"$ref": "#/$defs/stringArray"}, "profile_id": {"type": "string", "minLength": 1}, "strategy_id": {"type": "string", "minLength": 1}}}},
+          "sources": {"$ref": "#/$defs/stringArray"},
+          "sinks": {"$ref": "#/$defs/stringArray"},
+          "propagators": {"$ref": "#/$defs/stringArray"},
+          "sanitizers": {"$ref": "#/$defs/stringArray"},
+          "evidence_requirements": {"type": "object", "required": ["required_fields", "trace_required"], "properties": {"required_fields": {"$ref": "#/$defs/stringArray"}, "trace_required": {"type": "boolean"}}},
+          "confirmation_predicate": {"type": "object"},
+          "review_predicate": {"type": "object"},
+          "required_strategies": {"$ref": "#/$defs/stringArray"},
+          "negative_coverage_strategy": {"type": "object", "required": ["clean_result_supports_pass"], "properties": {"clean_result_supports_pass": {"type": "boolean"}}},
+          "pass_certified_profiles": {"$ref": "#/$defs/stringArray"}
+        }
+      }
+    }
+  },
+  "$defs": {"stringArray": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}}
+}

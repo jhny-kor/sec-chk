@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -13,7 +14,9 @@ from .checks.host import HostScanOptions, check_host
 from .dependency_inventory import components_from_file, queryable_osv_components, unique_components
 from .discovery import discover_projects
 from .ignore import filter_ignored_findings
-from .models import DependencyComponent, Finding, ScannerConfig, TargetConfig
+from .models import DependencyComponent, Finding, ScanResult, ScannerConfig, TargetConfig
+from .source_analysis import AnalyzerRun, SourceAnalysisSummary, SourceManifest, enumerate_source_files, is_source_file
+from .sarif_import import SarifImportError, import_sarif, load_sarif
 from .osv_vulnerabilities import query_osv_findings
 
 
@@ -74,17 +77,23 @@ class SecurityScanner:
         self.components: tuple[DependencyComponent, ...] = ()
         self._python_imports: set[str] = set()
         self._js_imports: set[str] = set()
+        self._changed_scope: set[Path] = set()
+        self._changed_scope_active = False
 
-    def scan(self) -> list[Finding]:
+    def scan(self) -> ScanResult:
         clear_read_text_cache()
+        self._changed_scope.clear()
+        self._changed_scope_active = False
         findings: list[Finding] = []
         components: list[DependencyComponent] = []
+        source_profile = self.config.standard == "sw-dev-security-49"
         self.effective_targets = self._expand_targets()
         for target in self.effective_targets:
             target_findings, target_components = self._scan_target(target)
             components.extend(target_components)
             findings.extend(target_findings)
-        findings.extend(self._scan_host())
+        if not source_profile:
+            findings.extend(self._scan_host())
         self.components = unique_components(components)
         if self.config.enable_reachability:
             index = reachability.ImportIndex(
@@ -101,7 +110,77 @@ class SecurityScanner:
                 language=self.config.report.language,
             )
             self.warnings.extend(triage_warnings)
-        return sorted(findings, key=lambda finding: finding.sort_key())
+        ordered = tuple(sorted(findings, key=lambda finding: finding.sort_key()))
+        # A pre-generated SARIF is positive evidence only; it never certifies coverage.
+        analyzer_runs: list[AnalyzerRun] = []
+        external: list[Finding] = []
+        sarif_warnings: tuple[str, ...] = ()
+        manifest = None
+        manifest_root = self.effective_targets[0].path if self.effective_targets else Path.cwd()
+        manifest_files: tuple[Path, ...] = ()
+        if source_profile or self.config.source_analyzer or self.config.source_analyzer_sarif:
+            manifest_root, manifest_files = self._source_manifest_inputs()
+            manifest = SourceManifest.build(manifest_root, manifest_files)
+        if self.config.source_analyzer or self.config.source_analyzer_sarif:
+            if self.config.source_analyzer_sarif:
+                try:
+                    from .standards import sw49_sarif_allowlist
+
+                    payload = load_sarif(self.config.source_analyzer_sarif)
+                    imported, sarif_warnings = import_sarif(
+                        payload,
+                        manifest_root,
+                        sw49_sarif_allowlist(),
+                        allowed_paths=frozenset(entry[0] for entry in manifest.files) if manifest else frozenset(),
+                    )
+                    external.extend(imported)
+                    self.warnings.extend(sarif_warnings)
+                    analyzer = imported[0].analyzer if imported else "sarif"
+                    version = imported[0].analyzer_version if imported else ""
+                    analyzer_runs.append(AnalyzerRun(
+                        analyzer,
+                        version=version,
+                        profile_id="codeql-java-none-2.26.1" if analyzer.lower() == "codeql" and version == "2.26.1" else "",
+                        output_origin="pre_generated",
+                        status="SUCCESS",
+                        target=str(manifest_root),
+                        manifest_digest=manifest.digest if manifest else "",
+                        sarif_digest=hashlib.sha256(self.config.source_analyzer_sarif.read_bytes()).hexdigest(),
+                    ))
+                except SarifImportError as exc:
+                    analyzer_runs.append(AnalyzerRun("sarif", output_origin="pre_generated", status="FAILED", target=str(manifest_root), manifest_digest=manifest.digest if manifest else "", failure_reason=exc.reason))
+            elif self.config.source_analyzer == "codeql":
+                from .codeql_adapter import preflight, SandboxCapability
+
+                analyzer_runs.append(preflight(
+                    self.config.source_analyzer_binary,
+                    sandbox=SandboxCapability(
+                        wrapper=self.config.source_analyzer_sandbox_wrapper,
+                        config=self.config.source_analyzer_sandbox_config,
+                    ),
+                    license_attested=self.config.source_analyzer_license_attested,
+                    target=manifest_root,
+                ))
+            ordered = self._merge_findings((*ordered, *external))
+        strategies = ()
+        if source_profile:
+            from .standards import build_sw49_strategy_executions
+
+            scanned_categories = tuple(dict.fromkeys(category for target in self.effective_targets for category in target.categories))
+            strategies = build_sw49_strategy_executions(manifest, scanned_categories, tuple(analyzer_runs), sarif_warnings)
+        report_findings = ordered
+        if source_profile and self._changed_scope_active:
+            report_findings = tuple(
+                finding for finding in ordered
+                if self._finding_in_changed_scope(finding, manifest_root, self._changed_scope)
+            )
+        summary = SourceAnalysisSummary(
+            manifest=manifest,
+            analyzer_runs=tuple(analyzer_runs), strategies=strategies,
+            all_findings=ordered, report_findings=report_findings,
+            warnings=tuple(self.warnings),
+        )
+        return ScanResult(report_findings, summary, tuple(self.components), tuple(self.warnings))
 
     def _changed_files(self, target: TargetConfig) -> set[Path] | None:
         if not self.config.changed_only:
@@ -169,14 +248,21 @@ class SecurityScanner:
         return tuple(targets)
 
     def _scan_target(self, target: TargetConfig) -> tuple[list[Finding], list[DependencyComponent]]:
+        if target.path.is_symlink():
+            self.warnings.append(f"Refused symlink scan target: {target.path}")
+            return [], []
         if not target.path.exists():
             self.warnings.append(f"Target does not exist: {target.path}")
             return [], []
         if target.path.is_file():
-            components = self._components_from_file(target.path, target)
+            source_profile = self.config.standard == "sw-dev-security-49"
+            if source_profile and not is_source_file(target.path):
+                return [], []
+            components = [] if source_profile else self._components_from_file(target.path, target)
             findings = self._scan_file(target.path, target)
             self._collect_imports(target.path, target)
-            findings.extend(self._osv_findings(components))
+            if self.config.standard != "sw-dev-security-49":
+                findings.extend(self._osv_findings(components))
             filtered, ignored = filter_ignored_findings(findings, target.path.parent)
             if ignored:
                 self.warnings.append(f"Ignored {ignored} finding(s) using KODA ignore rules for: {target.path.parent}")
@@ -186,27 +272,72 @@ class SecurityScanner:
         components: list[DependencyComponent] = []
         scanned_files: list[Path] = []
         changed = self._changed_files(target)
-        filtering = self.config.changed_only and changed is not None
+        if changed is not None:
+            self._changed_scope_active = True
+            self._changed_scope.update(path.resolve() for path in changed)
+        # SW49 needs whole-project context. Only the user-facing result is
+        # diff-scoped; the evidence ledger and status use the full project.
+        filtering = self.config.changed_only and changed is not None and self.config.standard != "sw-dev-security-49"
         for file_path in self._iter_files(target):
+            if self.config.standard == "sw-dev-security-49" and not is_source_file(file_path):
+                continue
             if filtering and file_path.resolve() not in changed:
                 continue
             scanned_files.append(file_path)
-            file_components = self._components_from_file(file_path, target)
+            file_components = [] if self.config.standard == "sw-dev-security-49" else self._components_from_file(file_path, target)
             components.extend(file_components)
             findings.extend(self._scan_file(file_path, target))
             self._collect_imports(file_path, target)
         # Project-level prevention reasons over the whole project; skip it while diff-scoping
         # so a partial file list does not produce spurious "missing control" findings.
-        if "prevention" in target.categories and not filtering:
+        if self.config.standard != "sw-dev-security-49" and "prevention" in target.categories and not filtering:
             findings.extend(
                 replace(finding, target=target.name) if not finding.target else finding
                 for finding in prevention.check_project(target.path, scanned_files, target)
             )
-        findings.extend(self._osv_findings(components))
+        if self.config.standard != "sw-dev-security-49":
+            findings.extend(self._osv_findings(components))
         filtered, ignored = filter_ignored_findings(findings, target.path)
         if ignored:
             self.warnings.append(f"Ignored {ignored} finding(s) using KODA ignore rules for: {target.path}")
         return filtered, components
+
+    def _source_manifest_inputs(self) -> tuple[Path, tuple[Path, ...]]:
+        paths = tuple(target.path.resolve() for target in self.effective_targets if not target.path.is_symlink())
+        if not paths:
+            root = self.effective_targets[0].path.parent.resolve() if self.effective_targets else Path.cwd()
+            return root, ()
+        if len(paths) == 1 and paths[0].is_file():
+            return paths[0], paths if is_source_file(paths[0]) else ()
+        roots: list[Path] = []
+        files: list[Path] = []
+        for path in paths:
+            if path.is_file():
+                roots.append(path.parent)
+                if is_source_file(path):
+                    files.append(path)
+            else:
+                roots.append(path)
+                files.extend(item for item in enumerate_source_files(path, exclude=DEFAULT_EXCLUDE_DIRS) if is_source_file(item))
+        if not roots:
+            return Path.cwd(), ()
+        common = Path(os.path.commonpath([str(path) for path in roots])).resolve()
+        return common, tuple(dict.fromkeys(files))
+
+    @staticmethod
+    def _merge_findings(findings: tuple[Finding, ...]) -> tuple[Finding, ...]:
+        merged: dict[tuple[str, str, int, str], Finding] = {}
+        for finding in findings:
+            key = (finding.rule_id, str(finding.path.resolve()), finding.line or 0, finding.target)
+            current = merged.get(key)
+            if current is None:
+                merged[key] = finding
+                continue
+            current_score = (current.verification_status == "confirmed", len(current.trace), bool(current.evidence_id))
+            candidate_score = (finding.verification_status == "confirmed", len(finding.trace), bool(finding.evidence_id))
+            if candidate_score > current_score:
+                merged[key] = finding
+        return tuple(sorted(merged.values(), key=lambda finding: finding.sort_key()))
 
     def _scan_file(self, path: Path, target: TargetConfig) -> list[Finding]:
         findings: list[Finding] = []
@@ -251,6 +382,12 @@ class SecurityScanner:
             ]
             for filename in files:
                 file_path = root_path / filename
+                if file_path.is_symlink() or not file_path.is_file():
+                    continue
+                try:
+                    file_path.resolve().relative_to(target.path.resolve())
+                except (OSError, ValueError):
+                    continue
                 if self._matches_exclude(file_path, target.path, exclude_globs):
                     continue
                 yield file_path
@@ -260,3 +397,22 @@ class SecurityScanner:
         rel = normalized_relpath(path, root)
         name = path.name
         return any(fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+    @staticmethod
+    def _finding_in_changed_scope(finding: Finding, root: Path, changed: set[Path]) -> bool:
+        try:
+            if finding.path.resolve() in changed:
+                return True
+        except OSError:
+            pass
+        for step in finding.trace:
+            raw_path = step.get("path") if isinstance(step, dict) else None
+            if not isinstance(raw_path, str) or not raw_path:
+                continue
+            try:
+                candidate = (root / raw_path).resolve()
+            except OSError:
+                continue
+            if candidate in changed:
+                return True
+        return False
