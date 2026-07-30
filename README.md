@@ -46,7 +46,7 @@ Requires Python 3.10 or later — the engine uses only the standard library, so 
 
 ```bash
 git clone https://gitlab.aigov.go.kr/y2kthr/koda.git
-cd sec-chk
+cd koda
 export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner app
 ```
