@@ -12,7 +12,7 @@ from .models import Finding
 
 ANALYZER_STATES = ("SUCCESS", "MISSING", "FAILED", "SKIPPED")
 STRATEGY_STATES = ("COMPLETE", "PARTIAL", "NOT_RUN", "NOT_APPLICABLE")
-SOURCE_SUFFIXES = frozenset({".html", ".java", ".js", ".jsp", ".xml"})
+SOURCE_SUFFIXES = frozenset({".html", ".java", ".js", ".jsp", ".py", ".ts", ".tsx", ".xml"})
 
 
 def _digest(payload: object) -> str:

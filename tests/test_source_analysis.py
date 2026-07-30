@@ -59,9 +59,9 @@ class SourceAnalysisTests(unittest.TestCase):
     def test_sw49_source_profile_only_scans_supported_extensions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in ("Main.java", "config.XML", "app.js", "view.jsp", "index.HTML"):
+            for name in ("Main.java", "config.XML", "app.js", "view.jsp", "index.HTML", "script.py", "template.ts", "component.TSX"):
                 (root / name).write_text("source", encoding="utf-8")
-            for name in ("script.py", "native.c", "settings.properties", "template.ts", "Dockerfile", ".env"):
+            for name in ("native.c", "settings.properties", "component.jsx", "Dockerfile", ".env"):
                 (root / name).write_text("not scanned", encoding="utf-8")
             (root / "artifact.bin").write_bytes(b"not source")
             result = SecurityScanner(ScannerConfig(
@@ -71,7 +71,7 @@ class SourceAnalysisTests(unittest.TestCase):
         self.assertFalse(any(finding.category == "prevention" for finding in result.findings))
         self.assertEqual(
             [entry[0] for entry in result.source_analysis.manifest.files],
-            ["Main.java", "app.js", "config.XML", "index.HTML", "view.jsp"],
+            ["Main.java", "app.js", "component.TSX", "config.XML", "index.HTML", "script.py", "template.ts", "view.jsp"],
         )
 
     def test_clean_partial_controls_remain_review_required_not_passed(self):

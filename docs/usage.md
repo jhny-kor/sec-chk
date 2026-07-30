@@ -101,8 +101,9 @@ the local static rules, not a claim of full SAST or formal compliance.
 
 ### Offline source-only SW49 analysis
 
-The SW49 path inventories and scans only `.java`, `.xml`, `.js`, `.jsp`, and `.html`
-files (case-insensitive). All other extensions and extensionless files are excluded.
+The SW49 path inventories and scans only `.java`, `.xml`, `.js`, `.jsp`, `.html`,
+`.py`, `.ts`, and `.tsx` files (case-insensitive). All other extensions and
+extensionless files are excluded.
 It does not run web, host, OSV/CVE, SBOM, JAR, binary, build, test, package-manager,
 or project scripts. Changed-only reports retain unchanged supported files as analysis
 context.
