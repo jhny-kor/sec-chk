@@ -1,3 +1,1 @@
-// SW49 S-12 positive fixture
-// Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-function fixture(value) { return value; }
+res.cookie("access_token", token, { maxAge: 2592000000, secure: true, httpOnly: true });

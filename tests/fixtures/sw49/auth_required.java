@@ -1,3 +1,1 @@
-// SW49 S-01 negative fixture
-// Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-final class Fixture { static Object value(Object value) { return value; } }
+final class Fixture { @RequireAuth void adminAccount(HttpServletRequest request) {} }

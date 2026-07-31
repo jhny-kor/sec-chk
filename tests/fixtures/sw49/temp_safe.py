@@ -1,3 +1,2 @@
-# SW49 T-01 negative fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+with tempfile.NamedTemporaryFile() as handle:
+    path = handle.name

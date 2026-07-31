@@ -1,3 +1,3 @@
-# SW49 A-01 positive fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+import socket
+host = socket.gethostbyname(request.args["host"])
+is_internal = host == "10.0.0.1"

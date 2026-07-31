@@ -1,3 +1,1 @@
-# SW49 S-11 negative fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+requests.get(url, timeout=5)

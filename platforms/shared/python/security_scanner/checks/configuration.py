@@ -15,7 +15,7 @@ DEBUG_RE = re.compile(
 )
 DEV_ENV_RE = re.compile(r"(?i)\b(NODE_ENV|FLASK_ENV|APP_ENV)\b\s*[:=]\s*['\"]?development['\"]?")
 DEV_ENV_CONFIG_SUFFIXES = {".cfg", ".conf", ".config", ".env", ".ini", ".json", ".properties", ".toml", ".yaml", ".yml"}
-DEV_ENV_CONFIG_NAMES = {"Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
+DEV_ENV_CONFIG_NAMES = {"dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
 K8S_FILE_NAMES = {
     "deployment.yml",
     "deployment.yaml",
@@ -40,7 +40,7 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
         if lines:
             findings.extend(_check_text_config(path, lines))
 
-    if path.name == "Dockerfile" or path.name.startswith("Dockerfile."):
+    if path.name.lower() == "dockerfile" or path.name.lower().startswith("dockerfile."):
         findings.extend(_check_dockerfile(path, target))
     if path.name in {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}:
         findings.extend(_check_compose(path, target))
@@ -129,7 +129,7 @@ def _should_check_development_environment(path: Path) -> bool:
     lower_name = path.name.lower()
     if lower_name.endswith((".example", ".sample", ".template")):
         return False
-    if path.name in DEV_ENV_CONFIG_NAMES:
+    if path.name.lower() in DEV_ENV_CONFIG_NAMES:
         return True
     if lower_name.startswith(".env"):
         return True

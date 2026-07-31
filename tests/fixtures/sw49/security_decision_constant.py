@@ -1,3 +1,3 @@
-# SW49 I-15 negative fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+def total(product_service, item_id, quantity):
+    price = product_service.get_price(item_id)
+    return quantity * price

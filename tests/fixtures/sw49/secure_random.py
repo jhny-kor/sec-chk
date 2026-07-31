@@ -1,3 +1,2 @@
-# SW49 S-08 negative fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+import secrets
+token = secrets.token_hex(32)

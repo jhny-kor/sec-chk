@@ -44,6 +44,9 @@ $SecurityToolLicensesDir = Join-Path $SecurityToolsCacheDir "licenses"
 $GuiEntryPoint = Join-Path $RepoRoot "platforms\windows\scripts\koda-desktop.py"
 $CliEntryPoint = Join-Path $BuildRoot "koda-cli-entry.py"
 $RuntimeHook = Join-Path $BuildRoot "koda-runtime-env.py"
+$Sw49ResourcesDir = Join-Path $SharedPythonRoot "security_scanner\resources\sw49"
+$Sw49ContractsSource = Join-Path $Sw49ResourcesDir "contracts.json"
+$Sw49ResourcesData = $Sw49ResourcesDir + ";security_scanner\resources\sw49"
 
 $DistDir = Join-Path $RepoRoot "dist"
 $AppDistDir = Join-Path $DistDir $AppName
@@ -55,6 +58,10 @@ $InstalledToolsDir = Join-Path $AppDistDir "tools"
 $InstallerOutDir = Join-Path $DistDir "Windows"
 $InnoScript = Join-Path $RepoRoot "platforms\windows\packaging\KODA.iss"
 $IconPath = Join-Path $RepoRoot "platforms\windows\assets\KODA.ico"
+
+if (-not (Test-Path -LiteralPath $Sw49ContractsSource -PathType Leaf)) {
+    throw "Missing SW49 contract resource: $Sw49ContractsSource"
+}
 
 function Find-Python310 {
     $candidates = @(
@@ -644,6 +651,8 @@ $guiPyInstallerArgs = @(
         ) + ";security_scanner\assets"
     ),
 
+    "--add-data", $Sw49ResourcesData,
+
     "--collect-submodules", "security_scanner",
     "--hidden-import", "security_scanner.web",
 
@@ -694,6 +703,11 @@ if (-not (Test-Path -LiteralPath $GuiExecutable -PathType Leaf)) {
     throw "KODA.exe was not created: $GuiExecutable"
 }
 
+$guiSw49Contracts = Join-Path $AppDistDir "_internal\security_scanner\resources\sw49\contracts.json"
+if (-not (Test-Path -LiteralPath $guiSw49Contracts -PathType Leaf)) {
+    throw "KODA.exe bundle is missing SW49 contracts: $guiSw49Contracts"
+}
+
 # ---------------------------------------------------------------------------
 # Build CLI application: dist\KODA\KODA-CLI\KODA-CLI.exe
 # ---------------------------------------------------------------------------
@@ -722,6 +736,8 @@ $cliPyInstallerArgs = @(
         ) + ";security_scanner\assets"
     ),
 
+    "--add-data", $Sw49ResourcesData,
+
     "--collect-submodules", "security_scanner",
     "--hidden-import", "security_scanner.web",
     "--collect-all", "playwright",
@@ -749,6 +765,120 @@ if ($LASTEXITCODE -ne 0) {
 
 if (-not (Test-Path -LiteralPath $CliExecutable -PathType Leaf)) {
     throw "KODA-CLI.exe was not created: $CliExecutable"
+}
+
+$cliSw49Contracts = Join-Path $CliDistDir "_internal\security_scanner\resources\sw49\contracts.json"
+if (-not (Test-Path -LiteralPath $cliSw49Contracts -PathType Leaf)) {
+    throw "KODA-CLI.exe bundle is missing SW49 contracts: $cliSw49Contracts"
+}
+
+& $CliExecutable --help *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "KODA-CLI.exe startup smoke test failed."
+}
+
+# Test the packaged executable itself against Windows false-positive regressions.
+$sw49SmokeDir = Join-Path $BuildRoot "sw49-false-positive-smoke"
+$sw49SmokeReport = Join-Path $BuildRoot "sw49-false-positive-smoke-report.json"
+$sw49SmokeValidator = Join-Path $BuildRoot "validate-sw49-smoke.py"
+
+if (Test-Path -LiteralPath $sw49SmokeDir) {
+    Remove-Item -LiteralPath $sw49SmokeDir -Recurse -Force
+}
+if (Test-Path -LiteralPath $sw49SmokeReport) {
+    Remove-Item -LiteralPath $sw49SmokeReport -Force
+}
+
+New-Item -ItemType Directory -Path (Join-Path $sw49SmokeDir "pdfjs\web") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $sw49SmokeDir "thirdparty") -Force | Out-Null
+
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "DateCase.java") -Content @'
+import devonframe.util.DateUtil;
+class DateCase {
+    String applDate = DateUtil.getDate("yyyyMMdd");
+    void run() {
+        String startDate = DateUtil.getNextMonthDate(applDate, 1);
+        String value = String.format("%s01", String.format(startDate, "yyyyMM"));
+    }
+}
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "ThreadCase.java") -Content @'
+class ThreadCase {
+    void run() throws Exception {
+        Thread thread11 = null;
+        if (thread11 != null) thread11.join();
+    }
+}
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "viewer.html") -Content @'
+<script>new RegExp("x").exec(window.location.href);</script>
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "thirdparty\jsrender.min.js") -Content @'
+/*! JsRender v1.0.5 */
+!function(){try{}catch(e){};target.innerHTML=location.hash}();
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "pdfjs\web\viewer.js") -Content @'
+const layout = pdfDocument.getPageLayout().catch(function () {});
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "unsafe.c") -Content @'
+void log_value(char *user_input) { printf(user_input); }
+'@
+Write-Utf8NoBomFile -Path $sw49SmokeValidator -Content @'
+import json
+import sys
+from pathlib import Path
+
+findings = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")).get("findings", [])
+unexpected = []
+
+for finding in findings:
+    leaf = Path(str(finding.get("path", ""))).name
+    rule_id = str(finding.get("rule_id", ""))
+    if (
+        (leaf == "DateCase.java" and rule_id == "code.format-string-user-input")
+        or (leaf == "ThreadCase.java" and rule_id == "code.null-pointer-dereference")
+        or (leaf == "viewer.html" and rule_id == "code.eval-user-input")
+        or leaf == "jsrender.min.js"
+        or (leaf == "viewer.js" and rule_id == "code.empty-exception-handler")
+    ):
+        unexpected.append(rule_id)
+
+if unexpected:
+    raise SystemExit("known SW49 false positives: " + ", ".join(unexpected))
+
+if not any(
+    str(finding.get("rule_id", "")) == "code.format-string-user-input"
+    and Path(str(finding.get("path", ""))).name == "unsafe.c"
+    for finding in findings
+):
+    raise SystemExit("SW49 positive control was not detected")
+'@
+
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    # Windows PowerShell 5.1 promotes native stderr progress messages to
+    # NativeCommandError when the script-wide preference is Stop.
+    $ErrorActionPreference = "Continue"
+    & $CliExecutable scan `
+        --target $sw49SmokeDir `
+        --standard sw-dev-security-49 `
+        --format json `
+        --output $sw49SmokeReport *> $null
+    $sw49SmokeExitCode = $LASTEXITCODE
+
+    if ($sw49SmokeExitCode -ne 0 -or -not (Test-Path -LiteralPath $sw49SmokeReport -PathType Leaf)) {
+        throw "Packaged KODA CLI failed the SW49 false-positive smoke scan."
+    }
+
+    $sw49SmokeValidationOutput = @(& $VenvPython $sw49SmokeValidator $sw49SmokeReport 2>&1)
+    $sw49SmokeValidationExitCode = $LASTEXITCODE
+
+    if ($sw49SmokeValidationExitCode -ne 0) {
+        throw "Packaged KODA CLI failed SW49 smoke validation: $($sw49SmokeValidationOutput -join ' ')"
+    }
+}
+finally {
+    $ErrorActionPreference = $previousErrorActionPreference
 }
 
 # ---------------------------------------------------------------------------

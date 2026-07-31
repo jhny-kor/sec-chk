@@ -13,11 +13,21 @@ from .models import Finding
 ANALYZER_STATES = ("SUCCESS", "MISSING", "FAILED", "SKIPPED")
 STRATEGY_STATES = ("COMPLETE", "PARTIAL", "NOT_RUN", "NOT_APPLICABLE")
 SOURCE_SUFFIXES = frozenset({
-    ".c", ".cc", ".conf", ".config", ".cpp", ".cs", ".cxx", ".go", ".h", ".hpp",
-    ".html", ".java", ".js", ".jsx", ".jsp", ".kt", ".php", ".properties", ".py",
-    ".rb", ".rs", ".swift", ".ts", ".tsx", ".vue", ".xml", ".yaml", ".yml",
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".cs", ".go", ".htm", ".html", ".java", ".js", ".cjs", ".jsp",
+    ".jsx", ".mjs", ".kt", ".php", ".py", ".rb", ".rs", ".swift", ".ts", ".tsx", ".vue", ".xml",
+    ".env", ".yaml", ".yml", ".properties", ".conf", ".config", ".json", ".toml", ".tf", ".tfvars", ".plist", ".pem", ".key",
 })
-SOURCE_FILENAMES = frozenset({"Dockerfile", ".env", ".env.example"})
+SOURCE_FILENAMES = frozenset({".env", "Dockerfile", "dockerfile", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"})
+
+SOURCE_LANGUAGE_BY_SUFFIX = {
+    ".c": "C", ".h": "C", ".cc": "C++", ".cpp": "C++", ".cxx": "C++", ".hpp": "C++",
+    ".cs": "C#", ".go": "Go", ".java": "Java", ".jsp": "JSP", ".js": "JavaScript",
+    ".cjs": "JavaScript", ".jsx": "JavaScript", ".mjs": "JavaScript", ".vue": "JavaScript",
+    ".kt": "Kotlin", ".php": "PHP", ".py": "Python", ".rb": "Ruby",
+    ".rs": "Rust", ".swift": "Swift", ".ts": "TypeScript", ".tsx": "TypeScript",
+    ".htm": "HTML", ".html": "HTML", ".xml": "XML", ".yaml": "YAML", ".yml": "YAML", ".env": "Configuration",
+    ".properties": "Configuration", ".conf": "Configuration", ".config": "Configuration",
+}
 
 
 def _digest(payload: object) -> str:
@@ -114,6 +124,7 @@ class SourceAnalysisSummary:
     all_findings: tuple[Finding, ...] = ()
     report_findings: tuple[Finding, ...] = ()
     warnings: tuple[str, ...] = ()
+    analyzed_languages: tuple[str, ...] = ()
 
     @property
     def coverage_complete(self) -> bool:
@@ -137,4 +148,17 @@ def enumerate_source_files(root: Path, *, exclude: Iterable[str] = ()) -> tuple[
 
 
 def is_source_file(path: Path) -> bool:
-    return path.name in SOURCE_FILENAMES or path.suffix.lower() in SOURCE_SUFFIXES
+    return (
+        path.name in SOURCE_FILENAMES
+        or path.name.lower() == "dockerfile"
+        or path.name.lower().startswith("dockerfile.")
+        or path.suffix.lower() in SOURCE_SUFFIXES
+    )
+
+
+def source_languages(path: Path) -> frozenset[str]:
+    """Return the language labels used by SW49 applicability matching."""
+    if path.name in SOURCE_FILENAMES or path.name.lower() == "dockerfile" or path.name.lower().startswith("dockerfile."):
+        return frozenset({"Configuration"})
+    language = SOURCE_LANGUAGE_BY_SUFFIX.get(path.suffix.lower())
+    return frozenset({language}) if language else frozenset()

@@ -55,6 +55,9 @@ SEVERITY_SECURITY_SCORES = {
 }
 
 
+_KODA_LOGO_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 5 6v5c0 4.6 2.8 8.2 7 10 4.2-1.8 7-5.4 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-5"/></svg>'
+
+
 def _source_analysis_payload(value: object) -> dict[str, object]:
     """Serialize the immutable source-analysis summary without rebuilding it.
 
@@ -252,7 +255,7 @@ TRANSLATIONS = {
         "no_findings_filter": "No findings match the current filters.",
         "sw49_heading": "SW Development Security 49 Control Status",
         "sw49_intro": "All 49 official implementation-stage weaknesses. Controls without automated coverage are never marked PASS.",
-        "sw49_zero_note": "No vulnerable items were detected within the automated checks that actually ran. Unsupported, manual-review, and not-scanned controls must be confirmed separately; this does not mean all 49 controls are satisfied.",
+        "sw49_zero_note": "No vulnerable items were detected within the checks that actually ran. Partial, not-applicable, and not-scanned controls must be interpreted separately; this does not mean all 49 controls are satisfied.",
         "sw49_columns": {
             "official_id": "Official item (KODA ID)",
             "category": "Type",
@@ -490,7 +493,7 @@ TRANSLATIONS = {
         "no_findings_filter": "현재 필터와 일치하는 발견 항목이 없습니다.",
         "sw49_heading": "소프트웨어 개발보안 49 기준 현황",
         "sw49_intro": "공식 구현단계 보안약점 49개 전체 상태입니다. 자동 점검이 없는 기준은 통과로 표시하지 않습니다.",
-        "sw49_zero_note": "현재 실행된 자동 점검 범위에서는 취약 항목이 탐지되지 않았습니다. 미지원·수동 검토·미실행 기준은 별도로 확인해야 하며, 전체 49개 기준의 준수를 의미하지 않습니다.",
+        "sw49_zero_note": "현재 실행된 점검 범위에서는 취약 항목이 탐지되지 않았습니다. 부분 점검·해당 없음·미실행 기준은 별도로 확인해야 하며, 전체 49개 기준의 준수를 의미하지 않습니다.",
         "sw49_columns": {
             "official_id": "공식 항목 (KODA ID)",
             "category": "분류",
@@ -1083,6 +1086,56 @@ RULE_TRANSLATIONS_KO = {
         "description": "버퍼 오버플로우와 자주 연결되는 오래된 C/C++ API가 사용된 패턴입니다.",
         "recommendation": "경계가 있는 대체 API를 사용하고 대상 버퍼 크기를 검증하세요.",
     },
+    "code.integer-overflow-user-input": {
+        "title": "외부 정수 입력의 범위 검증 누락 의심",
+        "description": "외부 입력에서 파싱한 정수가 범위 확인 없이 배열 인덱스나 할당 크기에 사용되는 패턴입니다.",
+        "recommendation": "인덱스·할당·산술에 사용하기 전에 하한과 상한을 모두 검증하세요.",
+    },
+    "code.security-decision-user-input": {
+        "title": "외부 입력에 의한 보안·업무 결정 의심",
+        "description": "역할, 권한, 가격 등의 결정값이 요청 입력에서 직접 전달되는 패턴입니다.",
+        "recommendation": "결정값은 신뢰할 수 있는 서버측 상태에서 조회하고 외부 입력을 검증하세요.",
+    },
+    "code.authorization-check-missing": {
+        "title": "중요 기능의 인가 검사 누락 의심",
+        "description": "중요 엔드포인트나 메소드 주변에서 역할·소유권·권한 검사가 보이지 않습니다.",
+        "recommendation": "민감 작업 전에 기능 수준과 객체 수준 인가를 모두 강제하세요.",
+    },
+    "code.insecure-resource-permissions": {
+        "title": "중요 자원의 과도한 권한 설정",
+        "description": "모든 사용자 쓰기 또는 전체 제어 권한을 명시적으로 부여하는 패턴입니다.",
+        "recommendation": "필요한 서비스 계정에만 최소 읽기·쓰기 권한을 부여하세요.",
+    },
+    "code.weak-password-policy": {
+        "title": "취약한 비밀번호 길이 정책",
+        "description": "명시된 비밀번호 최소 길이가 8자보다 짧습니다.",
+        "recommendation": "조직 정책에 맞는 최소 길이와 유출 비밀번호 차단 정책을 적용하세요.",
+    },
+    "code.uncontrolled-loop": {
+        "title": "종료 경로 없는 반복문·재귀 의심",
+        "description": "상수 조건 반복문 또는 직접 재귀에서 종료 경로가 보이지 않습니다.",
+        "recommendation": "종료 조건, 제한 횟수, 시간 제한 또는 재귀 기저 조건을 추가하세요.",
+    },
+    "code.session-shared-state": {
+        "title": "세션 데이터의 공유 상태 저장 의심",
+        "description": "요청별 사용자 데이터가 모듈 전역 또는 서블릿·컨트롤러 인스턴스 필드에 저장됩니다.",
+        "recommendation": "사용자 데이터는 요청·세션 범위에 유지하고 공유 가변 필드에 저장하지 마세요.",
+    },
+    "code.private-array-return": {
+        "title": "Private 배열의 직접 반환",
+        "description": "public 메소드가 private 배열 또는 가변 컬렉션 참조를 직접 반환합니다.",
+        "recommendation": "clone, 불변 뷰 또는 방어적 복사본을 반환하세요.",
+    },
+    "code.private-array-assignment": {
+        "title": "Public 데이터의 Private 배열 직접 할당",
+        "description": "호출자가 소유한 배열 또는 가변 컬렉션 참조를 private 필드에 직접 저장합니다.",
+        "recommendation": "저장 전에 입력을 clone하거나 방어적으로 복사하세요.",
+    },
+    "code.dangerous-managed-api": {
+        "title": "위험한 Java/J2EE 또는 C# API 사용",
+        "description": "가이드가 관리형 애플리케이션 문맥에서 취약하다고 제시한 API 사용 패턴입니다.",
+        "recommendation": "직접 소켓·강제 프로세스 종료 대신 관리형 연결 API와 정상 종료 절차를 사용하세요.",
+    },
     "code.unbounded-request-body": {
         "title": "요청 본문 크기 제한이 보이지 않음",
         "description": "명시적 크기 제한 없이 요청 본문 파서가 활성화된 패턴입니다.",
@@ -1356,7 +1409,7 @@ def render_json(
         "generated_at": _generated_at()[0],
         "language": _labels(language)["html_lang"],
         "scanner": {"name": "local-security-scanner", "version": __version__},
-        "summary": _summary(findings, target_names, target_paths),
+        "summary": _summary(findings, target_names, target_paths, source_analysis),
         "warnings": list(warnings),
         "components": [component_payload(component) for component in components],
         "findings": [
@@ -1382,7 +1435,7 @@ def render_markdown(
 ) -> str:
     labels = _labels(language)
     generated_at, generated_display = _generated_at()
-    summary = _summary(findings, target_names, target_paths)
+    summary = _summary(findings, target_names, target_paths, source_analysis)
     lines = [
         f"# {labels['report_heading']}",
         "",
@@ -1683,13 +1736,17 @@ def _sw49_display_row(entry: dict[str, object], language: str) -> dict[str, str]
     guide_id = str(entry.get("guide_id", "")).strip()
     koda_id = str(entry.get("official_id", "")).strip()
     display_id = f"{guide_id} ({koda_id})" if guide_id and koda_id else guide_id or koda_id
+    if status == "NOT_APPLICABLE":
+        executed = str(status_labels.get(status, status)) if isinstance(status_labels, dict) else status
+    else:
+        executed = str(labels.get("sw49_executed_yes", "Run")) if entry.get("executed") else str(labels.get("sw49_executed_no", "Not run"))
     return {
         "official_id": display_id,
         "category": str(category_labels.get(language) or category_labels.get("en") or entry.get("category_id", "")) if isinstance(category_labels, dict) else str(entry.get("category_id", "")),
         "title": str(title.get(language) or title.get("en") or "") if isinstance(title, dict) else str(title),
         "cwe": ", ".join(str(item) for item in entry.get("cwe_ids", [])),
         "support": str(support_labels.get(support, support)) if isinstance(support_labels, dict) else support,
-        "executed": str(labels.get("sw49_executed_yes", "Run")) if entry.get("executed") else str(labels.get("sw49_executed_no", "Not run")),
+        "executed": executed,
         "status": str(status_labels.get(status, status)) if isinstance(status_labels, dict) else status,
         "rules": ", ".join(str(item) for item in entry.get("rule_ids", [])),
         "finding_count": str(entry.get("finding_count", 0)),
@@ -2112,6 +2169,7 @@ def render_html_pair(
         1,
     )
     main_html = main_html.replace('</style>', f'{_SOURCE_MAIN_EXTRA_CSS}</style>', 1)
+    main_html = main_html.replace('</style>', '.koda-main-mark svg{width:24px;height:24px}</style>', 1)
     main_html = main_html.replace('</body>', f'{_SOURCE_MAIN_FILTER_SCRIPT}</body>', 1)
     main_html = main_html.replace(
         'class="koda-main-classification-badge"',
@@ -2121,7 +2179,7 @@ def render_html_pair(
         'class="standards-guide-button" type="button" style="order:1;',
     )
     main_html = re.sub(
-        r'(<div class="koda-main-brand">.*?)(<span class="koda-main-classification-badge"[^>]*>대외 비인가</span>)'
+        r'(<div class="koda-main-brand">.*?)(<span class="koda-main-classification-badge"[^>]*>대외 비공개</span>)'
         r'(<button id="source-main-guide-open"[^>]*>안내</button>)',
         r'\1\3\2',
         main_html,
@@ -2147,8 +2205,8 @@ def render_html_pair(
         "",
     )
     detail_html = re.sub(
-        r'<header class="report-head"><div><small>(.*?)</small><h1>(.*?)</h1></div><span class="external-classification-badge">대외 비인가</span></header>',
-        r'<header class="report-brand"><div class="brand"><span class="source-detail-mark" aria-hidden="true">K</span><span class="brand-copy"><strong>KODA</strong><span>Korean On-Device Auditor</span></span></div><div class="report-header-actions"><span class="external-classification-badge">대외 비인가</span><span class="report-mode">STATIC ANALYSIS REPORT</span></div></header><div class="report-head-title"><small>\1</small><h1>\2</h1></div>',
+        r'<header class="report-head"><div><small>(.*?)</small><h1>(.*?)</h1></div><span class="external-classification-badge">대외 비공개</span></header>',
+        r'<header class="report-brand"><div class="brand"><span class="source-detail-mark" aria-hidden="true">K</span><span class="brand-copy"><strong>KODA</strong><span>Korean On-Device Auditor</span></span></div><div class="report-header-actions"><span class="report-mode">STATIC ANALYSIS REPORT</span><span class="external-classification-badge">대외 비공개</span></div></header><div class="report-head-title"><small>\1</small><h1>\2</h1></div>',
         detail_html,
         count=1,
         flags=re.DOTALL,
@@ -2164,6 +2222,15 @@ def render_html_pair(
             f'<option value="{value}">{value.capitalize() if value != "info" else "Info"}</option>',
             f'<option value="{value}">{label}</option>',
         )
+    main_html = main_html.replace(
+        '<span class="koda-main-mark">K</span>',
+        f'<span class="koda-main-mark" aria-hidden="true">{_KODA_LOGO_SVG}</span>',
+    )
+    detail_html = detail_html.replace(
+        '<span class="source-detail-mark" aria-hidden="true">K</span>',
+        f'<span class="source-detail-mark" aria-hidden="true">{_KODA_LOGO_SVG}</span>',
+    )
+    detail_html = detail_html.replace("</style>", ".source-detail-mark svg{width:24px;height:24px}</style>", 1)
     return main_html, detail_html
 
 
@@ -2382,6 +2449,7 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
     standard_text = "기준" if is_ko else "Standard"
     category_text = "범주" if is_ko else "Category"
     generated_text = "생성" if is_ko else "Generated"
+    languages_text = "분석 언어" if is_ko else "Analyzed languages"
     findings_text = "전체 취약점" if is_ko else "Total findings"
     severity_text = {
         "critical": "치명" if is_ko else "Critical",
@@ -2403,6 +2471,10 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         for key, label, value in cards
     )
     generated_at = str(payload.get("generated_display", payload.get("generated_at", "")))
+    analyzed_languages = summary.get("analyzed_languages", ())
+    if not isinstance(analyzed_languages, (list, tuple)):
+        analyzed_languages = ()
+    analyzed_languages_text = ", ".join(str(item) for item in analyzed_languages if str(item).strip())
     critical_count = by_severity.get("critical", 0)
     high_count = by_severity.get("high", 0)
     if is_ko:
@@ -2465,7 +2537,7 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 :root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1120px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}.source-summary-panel{{overflow:hidden;margin-top:18px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}}.source-summary-head{{padding:20px 22px 14px;border-bottom:1px solid var(--line)}}.source-summary-head h2{{margin:0;font-size:20px}}.source-summary-head p{{margin:5px 0 0;color:var(--muted)}}.source-summary-wrap{{overflow:auto}}.source-summary-table{{width:{table_width}px;min-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}}.source-summary-table th{{position:relative;padding:11px 13px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px;letter-spacing:.04em}}.source-summary-table td{{padding:13px;border-top:1px solid #e7edf4;vertical-align:top;overflow-wrap:anywhere}}.source-summary-table th:not(:last-child),.source-summary-table td:not(:last-child){{border-right:1px solid #e7edf4}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}code{{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#0b3b89}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
 main{{max-width:1560px;padding:28px}}.detail-cta{{display:flex;justify-content:flex-end;margin-top:18px}}.detail-cta a{{display:inline-flex;align-items:center;gap:10px;min-height:48px;padding:0 20px;border:1px solid #0b3b89;border-radius:13px;color:#fff;background:linear-gradient(135deg,#1368e8,#0b3b89);box-shadow:0 12px 24px rgba(19,104,232,.24);text-decoration:none;font-weight:850;transition:transform .16s ease,box-shadow .16s ease}}.detail-cta a:hover{{transform:translateY(-2px);box-shadow:0 16px 30px rgba(19,104,232,.3)}}.detail-cta a:focus-visible{{outline:3px solid #8ec5ff;outline-offset:3px}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{sw49_table}<div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비공개">대외 비공개</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(languages_text)}</b> {html.escape(analyzed_languages_text) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{sw49_table}<div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
 
 
 def _source_report_findings(payload: dict[str, object], language: str) -> list[dict[str, object]]:
@@ -2661,7 +2733,7 @@ def _render_html_detail(payload: dict[str, object], language: str) -> str:
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 main{{max-width:1560px!important;padding:28px!important}}.language-buttons{{display:none!important}}
 :root{{--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f7fb;color:var(--ink);font:15px/1.6 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:auto;padding:32px 22px 64px}}.report-head{{display:flex;align-items:center;gap:12px;margin-bottom:20px}}.report-head h1{{margin:0;font-size:clamp(28px,5vw,46px)}}.external-classification-badge{{margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius: 0;color:#b42318;background: none;font-weight:900}}.toolbar{{display:grid;grid-template-columns:1fr 170px 220px auto;gap:10px;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fff}}input,select{{min-height:40px;border:1px solid #cbd6e5;border-radius:9px;padding:0 11px;background:#fff}}.finding{{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(15,35,64,.05)}}.finding[hidden]{{display:none}}.finding header{{display:flex;justify-content:space-between;gap:14px}}.finding h2{{margin:14px 0 4px;font-size:22px}}.finding h3{{margin:18px 0 6px;font-size:14px}}.location,.unavailable,.standards{{color:var(--muted)}}.standards{{white-space:pre-line}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}pre,.source-context{{overflow:auto;padding:14px;border-radius:10px;background:#0d1b2e;color:#dce8f8}}pre{{white-space:pre-wrap}}.source-code-line{{display:grid;grid-template-columns:48px 1fr;gap:12px;padding:2px 8px}}.source-code-line span{{color:#7890ad;text-align:right}}.source-code-line code{{color:inherit;white-space:pre}}.source-code-line--focus{{background:#46350e;outline:1px solid #d6a514}}@media(max-width:760px){{.toolbar{{grid-template-columns:1fr}}.report-head{{align-items:flex-start;flex-wrap:wrap}}.external-classification-badge{{margin-left:0}}}}
-</style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>KODA · STATIC ANALYSIS · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비인가</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select>{guide_button}</div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section>{guide_dialog}</main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script>{guide_script}</body></html>'''
+</style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>KODA · STATIC ANALYSIS · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비공개</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select>{guide_button}</div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section>{guide_dialog}</main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script>{guide_script}</body></html>'''
 
 
 def _format_main_count(value: object) -> str:
@@ -2689,7 +2761,7 @@ def build_dashboard_payload(
     source_analysis: object | None = None,
 ) -> dict[str, object]:
     generated, generated_display = _generated_at()
-    summary = _summary(findings, target_names, target_paths)
+    summary = _summary(findings, target_names, target_paths, source_analysis)
     summary["raw_finding_count"] = len(findings)
     summary["displayed_finding_count"] = len(findings)
     labels = _labels(language)
@@ -2810,7 +2882,7 @@ def _standard_mapping_text(mapping: dict[str, object], language: str) -> str:
     if guide_id or koda_id or title:
         item_id = f"{guide_id} ({koda_id})" if guide_id and koda_id else guide_id or koda_id
         item = " ".join(part for part in (item_id, title) if part)
-        return " · ".join(part for part in (standard, item, cwe) if part)
+        return "\n".join(part for part in (standard, item, cwe) if part)
 
     category = _localized_mapping_value(
         mapping.get("category_labels") or mapping.get("category_label") or mapping.get("category_id"),
@@ -2980,6 +3052,7 @@ def _summary(
     findings: list[Finding],
     target_names: tuple[str, ...] = (),
     target_paths: dict[str, str] | None = None,
+    source_analysis: object | None = None,
 ) -> dict[str, object]:
     by_target = Counter({target: 0 for target in target_names})
     by_target.update(finding.target for finding in findings)
@@ -2997,7 +3070,18 @@ def _summary(
         "by_category": dict(Counter(finding.category for finding in findings)),
         "by_target": dict(by_target),
         "target_paths": resolved_target_paths,
+        "analyzed_languages": _source_analysis_languages(source_analysis),
     }
+
+
+def _source_analysis_languages(source_analysis: object | None) -> list[str]:
+    if isinstance(source_analysis, dict):
+        values = source_analysis.get("analyzed_languages", ())
+    else:
+        values = getattr(source_analysis, "analyzed_languages", ())
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return []
+    return sorted({str(value) for value in values if str(value).strip()})
 
 
 def _labels(language: str) -> dict[str, object]:
@@ -4137,7 +4221,7 @@ HTML_TEMPLATE = """<!doctype html>
       </div>
       <div class="header-side">
         <div class="topbar-actions">
-          <span class="external-classification-badge" title="대외 비인가">대외 비인가</span>
+          <span class="external-classification-badge" title="대외 비공개">대외 비공개</span>
           <div class="language-toggle" role="group" aria-label="Language">
             <button id="lang-ko" type="button">KO</button>
             <button id="lang-en" type="button">EN</button>
@@ -5245,7 +5329,9 @@ HTML_TEMPLATE = """<!doctype html>
           title,
           cwe: (entry.cwe_ids || []).join(", "),
           support: supportLabels[entry.support_level] || entry.support_level || "",
-          executed: entry.executed ? (activeLabels.sw49_executed_yes || "Run") : (activeLabels.sw49_executed_no || "Not run"),
+          executed: entry.status === "NOT_APPLICABLE"
+            ? (statusLabels.NOT_APPLICABLE || "Not applicable")
+            : (entry.executed ? (activeLabels.sw49_executed_yes || "Run") : (activeLabels.sw49_executed_no || "Not run")),
           status: statusLabels[entry.status] || entry.status || "",
           rules: (entry.rule_ids || []).join(", "),
           finding_count: String(entry.finding_count || 0),

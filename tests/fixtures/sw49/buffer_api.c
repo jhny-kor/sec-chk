@@ -1,3 +1,2 @@
-/* SW49 I-16 positive fixture */
-/* Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture. */
-int fixture(int value) { return value; }
+#include <string.h>
+void copy(const char *input) { char dst[8]; strcpy(dst, input); }

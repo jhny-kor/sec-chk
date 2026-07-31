@@ -56,17 +56,93 @@ class SourceAnalysisTests(unittest.TestCase):
         self.assertFalse(result.source_analysis.manifest.files)
         self.assertTrue(any("Refused symlink scan target" in warning for warning in result.warnings))
 
-    def test_sw49_source_profile_excludes_project_prevention_and_non_source_files(self):
+    def test_sw49_source_profile_only_scans_supported_extensions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "Main.java").write_text("class Main {}", encoding="utf-8")
+            for name in ("Main.java", "config.XML", "app.js", "view.jsp", "index.HTML", "script.py", "template.ts", "component.TSX"):
+                (root / name).write_text("source", encoding="utf-8")
+            for name in ("native.c", "settings.properties", "component.jsx", "Dockerfile", ".env"):
+                (root / name).write_text("not scanned", encoding="utf-8")
             (root / "artifact.bin").write_bytes(b"not source")
             result = SecurityScanner(ScannerConfig(
                 targets=(TargetConfig("root", root, categories=("code", "secrets", "configuration", "dependencies", "prevention")),),
                 standard="sw-dev-security-49",
             )).scan()
-        self.assertFalse(any(finding.category == "prevention" for finding in result.findings))
-        self.assertEqual([entry[0] for entry in result.source_analysis.manifest.files], ["Main.java"])
+        self.assertTrue(any(finding.category == "prevention" for finding in result.findings))
+        self.assertEqual(
+            [entry[0] for entry in result.source_analysis.manifest.files],
+            [".env", "Dockerfile", "Main.java", "app.js", "component.TSX", "component.jsx", "config.XML", "index.HTML", "native.c", "script.py", "settings.properties", "template.ts", "view.jsp"],
+        )
+
+    def test_strategy_expected_files_are_language_applicable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Main.java").write_text("class Main {}", encoding="utf-8")
+            (root / "native.c").write_text("int main(void) {}", encoding="utf-8")
+            result = SecurityScanner(ScannerConfig(
+                targets=(TargetConfig("root", root, categories=("code",)),),
+                standard="sw-dev-security-49",
+            )).scan()
+        java = next(s for s in result.source_analysis.strategies if s.official_control == "C-01")
+        self.assertEqual(java.expected_files, ("Main.java",))
+        self.assertEqual(java.analyzed_files, ("Main.java",))
+
+    def test_javascript_modules_vue_and_jsp_are_scanned_and_applicable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("app.mjs", "legacy.cjs", "component.vue", "view.jsp"):
+                (root / name).write_text("target.innerHTML = location.hash;", encoding="utf-8")
+            result = SecurityScanner(ScannerConfig(
+                targets=(TargetConfig("root", root, categories=("code",)),),
+                standard="sw-dev-security-49",
+            )).scan()
+        finding_paths = {finding.path.name for finding in result.findings if finding.rule_id == "code.xss-dom-sink"}
+        self.assertEqual(finding_paths, {"app.mjs", "legacy.cjs", "component.vue", "view.jsp"})
+        xss = next(strategy for strategy in result.source_analysis.strategies if strategy.official_control == "I-04" and "code.xss-dom-sink" in strategy.required_rule_ids)
+        self.assertEqual(set(xss.expected_files), {"app.mjs", "component.vue", "legacy.cjs", "view.jsp"})
+
+    def test_controls_without_applicable_language_are_not_misreported_as_unscanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Main.java").write_text("class Main {}", encoding="utf-8")
+            result = SecurityScanner(ScannerConfig(
+                targets=(TargetConfig("root", root, categories=("code",)),),
+                standard="sw-dev-security-49",
+            )).scan()
+            payload = build_dashboard_payload(
+                list(result.findings),
+                standard="sw-dev-security-49",
+                scanned_categories=("code",),
+                source_analysis=result.source_analysis,
+            )
+        by_id = {row["official_id"]: row for row in payload["sw49"]["controls"]}
+        self.assertEqual(by_id["C-03"]["status"], "NOT_APPLICABLE")
+        self.assertEqual(by_id["C-04"]["status"], "NOT_APPLICABLE")
+
+    def test_sw49_inventory_includes_manifests_keys_and_workflows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text('{"dependencies":{"demo":"http://example.invalid/demo.tgz"}}', encoding="utf-8")
+            (root / "id_dsa").write_text("-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----", encoding="utf-8")
+            (root / "Dockerfile.prod").write_text("FROM ubuntu:latest\n", encoding="utf-8")
+            workflow = root / ".github" / "workflows"
+            workflow.mkdir(parents=True)
+            (workflow / "ci.yml").write_text("uses: actions/checkout@main\n", encoding="utf-8")
+            result = SecurityScanner(ScannerConfig(
+                targets=(TargetConfig("root", root, categories=("code", "secrets", "configuration", "dependencies", "prevention")),),
+                standard="sw-dev-security-49",
+            )).scan()
+        paths = {entry[0] for entry in result.source_analysis.manifest.files}
+        self.assertIn("package.json", paths)
+        self.assertIn("id_dsa", paths)
+        self.assertIn("Dockerfile.prod", paths)
+        self.assertIn(".github/workflows/ci.yml", paths)
+        rule_ids = {finding.rule_id for finding in result.findings}
+        self.assertIn("config.private-key-like-file", rule_ids)
+        self.assertIn("secret.private-key", rule_ids)
+        self.assertIn("dependency.node-insecure-url", rule_ids)
+        self.assertIn("dependency.docker-unpinned-base", rule_ids)
+        self.assertIn("prevention.github-actions-unpinned", rule_ids)
 
     def test_clean_partial_controls_remain_review_required_not_passed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,7 +158,7 @@ class SourceAnalysisTests(unittest.TestCase):
         counts = payload["sw49"]["status_counts"]
         self.assertEqual(counts["PASS"], 0)
         self.assertGreater(counts["NEEDS_REVIEW"], 0)
-        self.assertEqual(counts["UNSUPPORTED"], 4)
+        self.assertEqual(counts.get("UNSUPPORTED", 0), 0)
 
     def test_cross_file_sarif_import_preserves_source_trace(self):
         document = load_sarif(SARIF / "c01_cross_file_positive.sarif")

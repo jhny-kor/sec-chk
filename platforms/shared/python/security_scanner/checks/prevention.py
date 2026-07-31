@@ -151,7 +151,7 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
     has_api_code = _project_text_contains(file_list, target, API_KEYWORDS)
     has_mobile_project = _looks_like_mobile_project(file_list, basenames, lower_rel_paths, target)
     has_cloud_iac = _looks_like_cloud_iac(file_list, basenames, lower_rel_paths)
-    dockerfiles = [path for path in file_list if path.name == "Dockerfile" or path.name.startswith("Dockerfile.")]
+    dockerfiles = [path for path in file_list if path.name.lower() == "dockerfile" or path.name.lower().startswith("dockerfile.")]
     k8s_files = [path for path in file_list if _looks_like_kubernetes_manifest(path)]
     env_files = [
         path
@@ -732,7 +732,7 @@ def _looks_like_mobile_project(files: Iterable[Path], basenames: set[str], lower
 def _looks_like_cloud_iac(files: Iterable[Path], basenames: set[str], lower_rel_paths: set[str]) -> bool:
     if {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"} & basenames:
         return True
-    if any(path.name == "Dockerfile" or path.name.startswith("Dockerfile.") or path.suffix.lower() in {".tf", ".tfvars"} for path in files):
+    if any(path.name.lower() == "dockerfile" or path.name.lower().startswith("dockerfile.") or path.suffix.lower() in {".tf", ".tfvars"} for path in files):
         return True
     return any(any(part in rel_path for part in ("/k8s/", "/kubernetes/", "/helm/", "/terraform/", "/infra/")) for rel_path in lower_rel_paths)
 

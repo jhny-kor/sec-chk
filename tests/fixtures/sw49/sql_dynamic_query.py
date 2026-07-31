@@ -1,3 +1,2 @@
-# SW49 I-01 positive fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+def find_user(request):
+    return db.execute("SELECT * FROM users WHERE id = " + request.args["id"])

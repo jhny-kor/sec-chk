@@ -2063,6 +2063,35 @@ final class NativeSecurityScanner {
         return joined
     }
 
+    private func startsFunctionScope(_ line: String, suffix: String) -> Bool {
+        let source = line.trimmingCharacters(in: .whitespaces)
+        guard !source.isEmpty else { return false }
+        switch suffix {
+        case "py":
+            return matches(#"^(?:async\s+)?def\s+[A-Za-z_]\w*\s*\("#, source)
+        case "rb":
+            return matches(#"^def\s+(?:self\.)?[A-Za-z_]\w*[!?=]?"#, source)
+        case "go":
+            return matches(#"^func\s+(?:\([^)]*\)\s*)?[A-Za-z_]\w*\s*\("#, source)
+        case "swift":
+            return matches(#"^(?:[\w@]+\s+)*func\s+[A-Za-z_]\w*\s*\("#, source)
+        case "js", "jsx", "ts", "tsx":
+            return matches(#"^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+[A-Za-z_$][\w$]*\s*\("#, source)
+                || matches(#"^(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=.*=>\s*\{"#, source)
+                || matches(#"^(?:async\s+)?[A-Za-z_$][\w$]*\s*\([^;{}]*\)\s*\{"#, source)
+        case "php":
+            return matches(#"(?i)^(?:public\s+|protected\s+|private\s+|static\s+)*function\s+\w+\s*\("#, source)
+        case "java", "kt", "cs", "c", "cc", "cpp", "cxx", "h", "hpp":
+            guard let name = firstCapture(
+                #"^(?:(?:public|private|protected|internal|static|final|abstract|synchronized|native|default|open|override|virtual|inline|constexpr|extern|friend)\s+)*(?:<[^>]+>\s+)?(?:[\w$:.<>,?\[\]*&]+\s+)?([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws\s+[^\{]+)?\{"#,
+                in: source
+            ) else { return false }
+            return !["if", "for", "while", "switch", "catch", "try", "synchronized"].contains(name)
+        default:
+            return false
+        }
+    }
+
     /// Returns the argument text of a call whose name ends at `callEnd`, or nil
     /// when the sink is not a call (an `innerHTML` assignment, say) so the
     /// caller can fall back to line scope.
@@ -2263,8 +2292,8 @@ final class NativeSecurityScanner {
                 || normalizedPath.contains("/third_party/")
                 || normalizedPath.contains("/node_modules/")
             let hasLibraryBanner = matches(#"(?i)\b(jquery|lodash|bootstrap|angular|react|vue|moment)\b[^\n]{0,100}\bv?\d+(?:\.\d+)+"#, banner)
-            let isVersionedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
-            let isNamedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
+            let isVersionedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment|jsrender)[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
+            let isNamedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment|jsrender)(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
             if isVersionedLibraryFile || (isNamedLibraryFile && (isVendoredPath || hasLibraryBanner)) || (isVendoredPath && hasLibraryBanner) {
                 return []
             }
@@ -2277,6 +2306,116 @@ final class NativeSecurityScanner {
         findings += checkJavaNullPointerDereference(lines: lines, codeLines: codeLines, file: file, displayPath: displayPath)
         findings += checkContextualSourceFlows(lines: lines, codeLines: statements, displayPath: displayPath)
         let document = codeLines.joined(separator: "\n")
+        let suffix = file.pathExtension.lowercased()
+        var safeDateFormatValuesBeforeLine = Array(repeating: Set<String>(), count: statements.count)
+        if ["java", "kt"].contains(suffix)
+            && matches(#"\bimport\s+devonframe\.util\.DateUtil\s*;?"#, document) {
+            var safeDateFormatValues = Set<String>()
+            for (index, statement) in statements.enumerated() {
+                if startsFunctionScope(statement, suffix: suffix) {
+                    safeDateFormatValues.removeAll()
+                }
+                safeDateFormatValuesBeforeLine[index] = safeDateFormatValues
+                if let written = firstCapture(#"(?<![\w$])([A-Za-z_$][\w$]*)\s*(?:(?:<<|>>|[+\-*/%&|^])?=(?!=))"#, in: statement) {
+                    safeDateFormatValues.remove(written)
+                }
+                if let name = firstCapture(#"\b([A-Za-z_$][\w$]*)\s*=\s*DateUtil\.getDate\s*\(\s*[\"'][^\"'%]+[\"']\s*\)"#, in: statement) {
+                    safeDateFormatValues.insert(name)
+                }
+                if let name = firstCapture(#"\b([A-Za-z_$][\w$]*)\s*=\s*DateUtil\.(?:getNextMonthDate|getPrevDate)\s*\("#, in: statement),
+                   let source = firstCapture(#"DateUtil\.(?:getNextMonthDate|getPrevDate)\s*\(\s*([A-Za-z_$][\w$]*)\s*,"#, in: statement),
+                   safeDateFormatValues.contains(source) {
+                    safeDateFormatValues.insert(name)
+                }
+            }
+        }
+        if ["java", "kt"].contains(suffix) {
+            var acquired: [String: Int] = [:]
+            var released = Set<String>()
+            func appendUnreleasedResources() {
+                for (name, index) in acquired where !released.contains(name) {
+                    let nearby = statements[max(0, index - 1)...min(statements.count - 1, index + 1)].joined(separator: "\n")
+                    if !matches(#"\btry\s*\([^)]*\b"# + NSRegularExpression.escapedPattern(for: name) + #"\b"#, nearby) {
+                        findings.append(finding("code.improper-resource-release", "medium", "code", "자원 해제 누락 가능성", displayPath, index + 1, lines[index], "모든 경로에서 자원을 닫거나 try-with-resources를 사용하세요."))
+                    }
+                }
+            }
+            for (index, statement) in statements.enumerated() {
+                if startsFunctionScope(statement, suffix: suffix) {
+                    appendUnreleasedResources()
+                    acquired.removeAll()
+                    released.removeAll()
+                }
+                if let name = firstCapture(#"\b([A-Za-z_$][\w$]*)\s*=\s*[^;]*(?:getConnection|prepareStatement|createStatement|new\s+(?:File)?InputStream|Files\.newInputStream)"#, in: statement) {
+                    acquired[name] = index
+                    released.remove(name)
+                }
+                for name in acquired.keys where matches(#"\b"# + NSRegularExpression.escapedPattern(for: name) + #"\s*\.\s*(?:close|release)\s*\("#, statement) {
+                    released.insert(name)
+                }
+            }
+            appendUnreleasedResources()
+        }
+        if ["c", "cc", "cpp", "cxx", "h", "hpp"].contains(suffix) {
+            var freed: [String: Int] = [:]
+            var uninitialized = Set<String>()
+            for (index, statement) in statements.enumerated() {
+                if startsFunctionScope(statement, suffix: suffix) {
+                    freed.removeAll()
+                    uninitialized.removeAll()
+                }
+                if let name = firstCapture(#"\b(?:int|char|float|double|long|short|size_t)\s+([A-Za-z_]\w*)\s*;"#, in: statement) {
+                    uninitialized.insert(name)
+                    continue
+                }
+                if let name = firstCapture(#"\bfree\s*\(\s*([A-Za-z_]\w*)\s*\)\s*;"#, in: statement) {
+                    freed[name] = index
+                    continue
+                }
+                for name in Array(uninitialized) {
+                    let escaped = NSRegularExpression.escapedPattern(for: name)
+                    if matches(#"\b"# + escaped + #"\s*="# , statement) {
+                        uninitialized.remove(name)
+                    } else if matches(#"\b(?:return|printf|fprintf|assert)\b[^;]*\b"# + escaped + #"\b|\b"# + escaped + #"\b\s*[+\-*/;,)\]]"#, statement) {
+                        findings.append(finding("code.uninitialized-variable", "high", "code", "초기화되지 않은 변수 사용 가능성", displayPath, index + 1, lines[index], "지역 변수를 모든 제어 흐름에서 읽기 전에 초기화하세요."))
+                        uninitialized.remove(name)
+                    }
+                }
+                for name in Array(freed.keys) {
+                    let escaped = NSRegularExpression.escapedPattern(for: name)
+                    if matches(#"\b"# + escaped + #"\s*="# , statement) {
+                        freed.removeValue(forKey: name)
+                    } else if matches(#"\b"# + escaped + #"\b"#, statement) {
+                        findings.append(finding("code.use-after-free", "high", "code", "해제된 자원 사용 가능성", displayPath, index + 1, lines[index], "free 이후 포인터를 사용하지 말고 NULL로 초기화하거나 새 자원으로 재할당하세요."))
+                        freed.removeValue(forKey: name)
+                    }
+                }
+            }
+        }
+        var dnsNames = Set<String>()
+        for (index, statement) in statements.enumerated() {
+            if startsFunctionScope(statement, suffix: suffix) {
+                dnsNames.removeAll()
+            }
+            if let written = firstCapture(#"(?<![\w$])([A-Za-z_$][\w$]*)\s*(?:(?:<<|>>|[+\-*/%&|^])?=(?!=))"#, in: statement) {
+                dnsNames.remove(written)
+            }
+            if let name = firstCapture(#"\b([A-Za-z_]\w*)\s*=\s*[^;]*(?:gethostbyname|getaddrinfo|gethostbyaddr|getnameinfo|socket\.gethost|dns\.lookup|InetAddress\.getByName)"#, in: statement) {
+                dnsNames.insert(name)
+            }
+            if matches(#"(?i)\b(?:auth|authoriz|allow|permit|trust|trusted|is_internal|role|admin|principal)\w*\b"#, statement),
+               matches(#"(?:==|!=|\bin\b|\.equals\s*\(|\.contains\s*\()"#, statement),
+               dnsNames.contains(where: { matches(#"\b"# + NSRegularExpression.escapedPattern(for: $0) + #"\b"#, statement) }) {
+                findings.append(finding("code.dns-security-decision", "medium", "code", "DNS 결과를 사용한 보안결정 가능성", displayPath, index + 1, lines[index], "DNS 이름 대신 인증된 식별자와 인증서 검증을 사용하세요."))
+            }
+        }
+        let hasAuthEntry = matches(#"(?im)(?:@(?:\w+\.)?(?:post|route)\s*\([^\n]*(?:login|sign[_-]?in|authenticate|token)|\b(?:app|router|server)\.(?:post|use)\s*\([^\n]*(?:login|sign[_-]?in|authenticate|token)|\b(?:def|function|public|private|protected)\s+\w*(?:login|signin|authenticate|issueToken)\w*)"#, document)
+        let hasAuthSink = matches(#"(?i)\b(?:authenticate|verifyPassword|check_password|issueToken|create_access_token|authenticationManager\.authenticate)\s*\("#, document)
+        let hasAuthAttemptProtection = matches(#"(?i)\b(?:express-rate-limit|rateLimit|RateLimiter|SlowAPIMiddleware|limiter\.limit|Bucket4j|failedAttempts?|loginAttempts?|lockAccount|lockedUntil|accountLocked|captcha|mfa|2fa|otp|webauthn)\b"#, document)
+        if hasAuthEntry && hasAuthSink && !hasAuthAttemptProtection,
+           let index = statements.firstIndex(where: { matches(#"(?i)(?:login|sign[_-]?in|authenticate|token)"#, $0) }) {
+            findings.append(finding("code.auth-attempt-protection-missing", "medium", "code", "반복 인증시도 제한 기능 부재 가능성", displayPath, index + 1, lines[index], "로그인 흐름에 인증 전용 속도 제한, 실패 횟수, 잠금 또는 추가 인증을 적용하세요."))
+        }
         let hasRateLimit = matches(#"(?i)\b(express-rate-limit|rateLimit\s*\(|RateLimiter|SlowAPIMiddleware|@\w*limiter\.limit|Bucket4j|resilience4j.*ratelimit)"#, document)
         let hasGlobalAuth = matches(#"(?i)\b(app|router|server)\.use\s*\([^\n]*(authenticate|authorize|requireAuth|requireAdmin)|\b(SecurityFilterChain|OncePerRequestFilter|AuthMiddleware|AuthorizationMiddleware)\b"#, document)
         let sanitizerOnLine = #"(?i)\b(DOMPurify\.sanitize|sanitizeHtml|escapeHtml|html\.escape|encodeForHTML|secure_filename|Path\.GetFileName|basename|realpath|canonicalPath|allowlist|allowed_hosts?|validate(?:Url|Path|Host|Redirect|Input)|escapeLdap|encodeForLDAP|stripCrLf|sanitizeHeader)\b"#
@@ -2335,6 +2474,9 @@ final class NativeSecurityScanner {
             if matches(#"(?i)(\bexcept\b[^:\n]*:\s*pass\b|\bcatch\s*(\([^)]*\))?\s*\{\s*\})"#, line) {
                 findings.append(finding("code.empty-exception-handler", "low", "code", "예외가 조용히 무시되는 것으로 보임", displayPath, lineNumber, rawLine, "예상 예외를 명시적으로 처리하고 필요한 경우 보안 관련 실패를 기록하세요."))
             }
+            if matches(#"(?i)(?:\bexcept\s*(?::|(?:Exception|BaseException)\b[^:]*:)|\bcatch\s*\(\s*(?:final\s+)?(?:Exception|Throwable|System\.Exception)\b|\brescue\s+Exception\b)"#, line) {
+                findings.append(finding("code.broad-exception-handler", "low", "code", "과도하게 포괄적인 예외 처리", displayPath, lineNumber, rawLine, "예상 예외 형식을 구체적으로 처리하고 예상하지 못한 실패는 안전하게 재전파하세요."))
+            }
             if matches(#"(?i)\b(printStackTrace|traceback\.print_exc|console\.trace)\s*\("#, line)
                 && !matches(#"(?i)\b(if|guard)\b[^\n]*(DEBUG|development|isDev|devMode)"#, nearby) {
                 findings.append(finding("code.stack-trace-exposure", "low", "code", "스택 트레이스 출력이 내부 정보를 노출할 수 있음", displayPath, lineNumber, rawLine, "중앙 오류 처리로 전달하고 사용자 노출 경로에서는 원본 스택을 숨기세요."))
@@ -2361,6 +2503,11 @@ final class NativeSecurityScanner {
             }
             if matches(#"(?i)(secure\s*:\s*false|httpOnly\s*:\s*false|SameSite\s*=\s*None)"#, line) {
                 findings.append(finding("code.insecure-cookie-settings", "medium", "code", "쿠키/세션 보안 설정 약화", displayPath, lineNumber, rawLine, "Secure, HttpOnly, SameSite 속성을 적절히 설정하세요."))
+            }
+            if matches(#"(?i)\b(?:cookie|set-cookie)\b"#, line)
+                && matches(#"(?i)\b(?:pass(?:word)?|passwd|pwd|secret|credentials?|authorization|jwt|(?:access|refresh|auth|id|bearer|csrf|xsrf|session)[_-]?tokens?|tokens?|api[_-]?keys?|secret[_-]?keys?|private[_-]?keys?|session[_-]?ids?|sessions?)\b"#, line)
+                && matches(#"(?i)\b(?:max[_-]?age|expires?)\b"#, line) {
+                findings.append(finding("code.persistent-sensitive-cookie", "medium", "code", "민감 값이 영속 쿠키에 저장될 수 있음", displayPath, lineNumber, rawLine, "민감 쿠키는 가능한 세션 범위로 제한하고 불투명하며 폐기 가능한 식별자만 저장하세요."))
             }
             if matches(#"(?i)(verify_signature\s*[:=]\s*False|verify\s*[:=]\s*false|jwt\.decode.*(verify\s*=\s*False|verify_signature.*False))"#, line) {
                 findings.append(finding("code.jwt-verification-disabled", "high", "code", "JWT 서명 검증이 비활성화된 것으로 보임", displayPath, lineNumber, rawLine, "모든 JWT에 대해 서명, issuer, audience, 만료, 알고리즘 검증을 강제하세요."))
@@ -2417,7 +2564,9 @@ final class NativeSecurityScanner {
             let hasFixedFormatDeclaration = formatConstant.map { name in
                 matches(#"\b(?:static\s+)?final\s+String\s+"# + NSRegularExpression.escapedPattern(for: name) + #"\s*=\s*[\"']"#, document)
             } ?? false
-            if !hasFixedFormatDeclaration && matches(#"(?i)(\b(printf|vprintf|syslog)\s*\(\s*[A-Za-z_][\w>.\-\[\]]*\s*\)|\bString\.format\s*\(\s*[A-Za-z_][\w.\[\]]*\s*[,\)])"#, line) {
+            let formatVariable = firstCapture(#"\bString\.format\s*\(\s*([A-Za-z_$][\w$]*)\s*[,)]"#, in: line)
+            let hasSafeDateFormatValue = formatVariable.map { safeDateFormatValuesBeforeLine[lineNumber - 1].contains($0) } ?? false
+            if !hasFixedFormatDeclaration && !hasSafeDateFormatValue && matches(#"(?i)(\b(printf|vprintf|syslog)\s*\(\s*[A-Za-z_][\w>.\-\[\]]*\s*\)|\bString\.format\s*\(\s*[A-Za-z_][\w.\[\]]*\s*[,\)])"#, line) {
                 findings.append(finding("code.format-string-user-input", "high", "code", "변수 기반 포맷 문자열 사용", displayPath, lineNumber, rawLine, "상수 포맷 문자열을 사용하고 동적 값은 별도 인자로 전달하세요."))
             }
             if matches(#"(?i)(\bRSA\b.{0,60}\b(512|768|1024)\b|\bKeyPairGenerator\b.*initialize\s*\(\s*(512|768|1024))"#, line) {
@@ -3797,6 +3946,7 @@ private extension NativeSecurityScanner {
         case "code.unbounded-request-body": return "Request body parser has no obvious size limit"
         case "code.logging-sensitive-data": return "Sensitive data may be written to logs"
         case "code.empty-exception-handler": return "Exception appears to be silently ignored"
+        case "code.broad-exception-handler": return "Overly broad exception handler"
         case "code.stack-trace-exposure": return "Stack trace output may expose internals"
         case "code.unversioned-api-route": return "API route appears to be unversioned"
         case "code.insecure-temp-file": return "Insecure temporary file creation"
@@ -3804,12 +3954,14 @@ private extension NativeSecurityScanner {
         case "code.public-bind-all-interfaces": return "Binds to all network interfaces"
         case "code.weak-hash": return "Weak hash algorithm"
         case "code.insecure-cookie-settings": return "Weak cookie/session security settings"
+        case "code.persistent-sensitive-cookie": return "Sensitive value stored in a persistent cookie"
         case "code.jwt-verification-disabled": return "JWT signature verification appears disabled"
         case "code.jwt-none-algorithm": return "JWT none algorithm appears allowed"
         case "code.session-long-expiry": return "Session or token expiry appears excessive"
         case "code.api-route-missing-auth": return "Sensitive API route appears to lack an auth guard"
         case "code.api-mass-assignment": return "API handler appears to mass-assign request body data"
         case "code.api-missing-rate-limit": return "API server appears to lack rate limiting"
+        case "code.auth-attempt-protection-missing": return "Authentication flow may lack repeated-attempt protection"
         case "code.external-api-no-timeout": return "External API call appears to omit a timeout"
         case "code.pii-logging": return "Personal data may be written to logs"
         case "code.directory-listing-enabled": return "Directory listing enabled"
@@ -3817,6 +3969,10 @@ private extension NativeSecurityScanner {
         case "code.legacy-board-software": return "Legacy bulletin-board software marker"
         case "code.xml-external-entity": return "XML parser may allow external entities"
         case "code.null-pointer-dereference": return "Possible null pointer dereference"
+        case "code.improper-resource-release": return "Potential resource leak"
+        case "code.use-after-free": return "Potential use after free"
+        case "code.uninitialized-variable": return "Potential uninitialized variable use"
+        case "code.dns-security-decision": return "DNS result used in a security decision"
         case "code.llm-prompt-user-concat": return "LLM prompt concatenates user-controlled input"
         case "code.llm-tool-unrestricted": return "LLM tool or function access is broad"
         case "code.llm-sensitive-data-in-prompt": return "Sensitive data may be sent to an LLM prompt"
@@ -4063,6 +4219,8 @@ private extension NativeSecurityScanner {
             return "Remove sensitive values from logs or record only redacted identifiers."
         case "code.empty-exception-handler":
             return "Handle expected exceptions explicitly and log security-relevant failures with sanitized context."
+        case "code.broad-exception-handler":
+            return "Catch expected exception types and fail closed or rethrow unexpected failures."
         case "code.stack-trace-exposure":
             return "Route exceptions through centralized error handling and avoid exposing raw stack traces."
         case "code.unversioned-api-route":
@@ -4077,6 +4235,8 @@ private extension NativeSecurityScanner {
             return "Use SHA-256 or stronger; for passwords use bcrypt or argon2."
         case "code.insecure-cookie-settings":
             return "Set Secure, HttpOnly, and SameSite attributes appropriately."
+        case "code.persistent-sensitive-cookie":
+            return "Keep sensitive cookies session-scoped where possible and store only opaque, revocable identifiers."
         case "code.jwt-verification-disabled":
             return "Require signature, issuer, audience, expiry, and algorithm validation for every trusted JWT."
         case "code.jwt-none-algorithm":
@@ -4089,6 +4249,8 @@ private extension NativeSecurityScanner {
             return "Map only allowed fields explicitly and reject unexpected object properties before persistence."
         case "code.api-missing-rate-limit":
             return "Add rate limits, request quotas, and abuse controls for login, signup, password reset, search, export, and high-cost API routes."
+        case "code.auth-attempt-protection-missing":
+            return "Apply authentication-specific throttling, failed-attempt controls, lockout, or step-up verification."
         case "code.external-api-no-timeout":
             return "Set conservative timeouts, retries with backoff, and allowlisted destinations for outbound API integrations."
         case "code.pii-logging":
@@ -4103,6 +4265,14 @@ private extension NativeSecurityScanner {
             return "Disable DTD and external entity resolution in XML parser configuration."
         case "code.null-pointer-dereference":
             return "Check for null before dereferencing and handle absent lookup results explicitly."
+        case "code.improper-resource-release":
+            return "Close or release acquired resources on every path."
+        case "code.use-after-free":
+            return "Do not use a pointer after free; reset or reassign it before reuse."
+        case "code.uninitialized-variable":
+            return "Initialize local variables before every read on all control-flow paths."
+        case "code.dns-security-decision":
+            return "Use authenticated identity and certificate validation instead of DNS identity for security decisions."
         case "code.llm-prompt-user-concat":
             return "Keep system and developer instructions fixed, separate user content into user-message fields, and add prompt-injection tests."
         case "code.llm-tool-unrestricted":

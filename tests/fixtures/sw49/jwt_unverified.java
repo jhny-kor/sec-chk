@@ -1,3 +1,1 @@
-// SW49 S-10 positive fixture
-// Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-final class Fixture { static Object value(Object value) { return value; } }
+final class Fixture { Object parse(String token) { return jwt.decode(token, verify=false); } }

@@ -1,3 +1,1 @@
-// SW49 I-13 positive fixture
-// Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-final class Fixture { static Object value(Object value) { return value; } }
+final class Fixture { void write(HttpServletResponse response, HttpServletRequest request) { response.setHeader("X-Name", request.getParameter("n")); } }

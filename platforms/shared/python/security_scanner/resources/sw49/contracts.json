@@ -203,6 +203,7 @@
       "applicability": {
         "languages": [
           "HTML",
+          "JSP",
           "JavaScript",
           "TypeScript"
         ],
@@ -806,10 +807,18 @@
         "CWE-190"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C#",
+          "C++",
+          "Java",
+          "Kotlin"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.integer-overflow-user-input"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -857,10 +866,21 @@
         "CWE-20"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.security-decision-user-input"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -1088,10 +1108,21 @@
         "CWE-863"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.authorization-check-missing"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -1138,10 +1169,21 @@
         "CWE-732"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C#",
+          "C++",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "Python",
+          "TypeScript"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.insecure-resource-permissions"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -1490,10 +1532,21 @@
         "CWE-521"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.weak-password-policy"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -1683,7 +1736,7 @@
         "extensions": []
       },
       "local_rule_ids": [
-        "code.insecure-cookie-settings"
+        "code.persistent-sensitive-cookie"
       ],
       "external_mappings": [],
       "sources": [],
@@ -1900,6 +1953,7 @@
       ],
       "applicability": {
         "languages": [
+          "C#",
           "Java",
           "JavaScript",
           "Kotlin",
@@ -1909,7 +1963,7 @@
         "extensions": []
       },
       "local_rule_ids": [
-        "code.api-missing-rate-limit"
+        "code.auth-attempt-protection-missing"
       ],
       "external_mappings": [],
       "sources": [],
@@ -2010,10 +2064,24 @@
         "CWE-674"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C#",
+          "C++",
+          "Go",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.uncontrolled-loop"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2169,12 +2237,17 @@
         "CWE-397"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "Kotlin",
+          "Python",
+          "Ruby"
+        ],
         "extensions": []
       },
       "local_rule_ids": [
-        "code.empty-exception-handler",
-        "code.stack-trace-exposure"
+        "code.broad-exception-handler"
       ],
       "external_mappings": [],
       "sources": [],
@@ -2291,10 +2364,15 @@
         "CWE-772"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "Java",
+          "Kotlin"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.improper-resource-release"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2341,10 +2419,15 @@
         "CWE-416"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C++"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.use-after-free"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2391,10 +2474,15 @@
         "CWE-457"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C++"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.uninitialized-variable"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2499,10 +2587,17 @@
         "CWE-488"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "Kotlin",
+          "Python"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.session-shared-state"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2602,10 +2697,16 @@
         "CWE-495"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "Kotlin"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.private-array-return"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2652,10 +2753,16 @@
         "CWE-496"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "Kotlin"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.private-array-assignment"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2703,10 +2810,24 @@
         "CWE-247"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C#",
+          "C++",
+          "Go",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.dns-security-decision"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2755,12 +2876,16 @@
       "applicability": {
         "languages": [
           "C",
-          "C++"
+          "C#",
+          "C++",
+          "Java",
+          "Kotlin"
         ],
         "extensions": []
       },
       "local_rule_ids": [
-        "code.dangerous-c-buffer-api"
+        "code.dangerous-c-buffer-api",
+        "code.dangerous-managed-api"
       ],
       "external_mappings": [],
       "sources": [],

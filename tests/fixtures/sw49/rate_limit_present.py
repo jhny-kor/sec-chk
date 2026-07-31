@@ -1,3 +1,10 @@
-# SW49 S-16 negative fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+from fastapi import FastAPI
+from slowapi import Limiter
+app = FastAPI()
+limiter = Limiter(key_func=get_remote_address)
+app.add_middleware(SlowAPIMiddleware)
+
+@app.post("/login")
+@limiter.limit("5/minute")
+def login(password: str):
+    return authenticate(password)

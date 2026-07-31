@@ -19,10 +19,12 @@ CODE_EXTENSIONS = {
     ".go",
     ".h",
     ".hpp",
+    ".htm",
     ".html",
     ".java",
     ".jsp",
     ".js",
+    ".cjs",
     ".jsx",
     ".kt",
     ".php",
@@ -36,6 +38,7 @@ CODE_EXTENSIONS = {
     ".vue",
     ".xml",
     ".md",
+    ".mjs",
     ".txt",
 }
 
@@ -78,6 +81,11 @@ SENSITIVE_NAME = (
     r"\b(?:pass" r"(?:word)?|passwd|pwd|secret|credentials?|authorization|"
     r"(?:access|refresh|auth|id|bearer|csrf|xsrf|session)[_-]?tokens?|tokens?|"
     r"api[_-]?keys?|secret[_-]?keys?|private[_-]?keys?|session[_-]?ids?|sessions?|cookies?)\b"
+)
+COOKIE_SENSITIVE_NAME = (
+    r"\b(?:pass(?:word)?|passwd|pwd|secret|credentials?|authorization|jwt|"
+    r"(?:access|refresh|auth|id|bearer|csrf|xsrf|session)[_-]?tokens?|tokens?|"
+    r"api[_-]?keys?|secret[_-]?keys?|private[_-]?keys?|session[_-]?ids?|sessions?)\b"
 )
 XML_PARSER_API = (
     r"(Document" r"BuilderFactory|SAX" r"ParserFactory|Xml" r"ReaderSettings|Xml" r"Document)"
@@ -254,6 +262,20 @@ CODE_PATTERN_RULES = (
         frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".swift", ".ts", ".tsx"}),
     ),
     CodePatternRule(
+        "code.broad-exception-handler",
+        "Overly broad exception handler",
+        "low",
+        re.compile(
+            r"(?:\bexcept\s*(?::|(?:Exception|BaseException)\b[^:]*:)|"
+            r"\bcatch\s*\(\s*(?:final\s+)?(?:Exception|Throwable|System\.Exception)\b|"
+            r"\brescue\s+Exception\b)",
+            re.IGNORECASE,
+        ),
+        "A handler catches the broadest exception type, which can hide unexpected security-relevant failures.",
+        "Catch expected exception types and fail closed or rethrow unexpected failures at the application boundary.",
+        frozenset({".cs", ".java", ".kt", ".py", ".rb"}),
+    ),
+    CodePatternRule(
         "code.stack-trace-exposure",
         "Stack trace output may expose internals",
         "low",
@@ -328,6 +350,19 @@ CODE_PATTERN_RULES = (
         frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".swift", ".ts", ".tsx"}),
     ),
     CodePatternRule(
+        "code.persistent-sensitive-cookie",
+        "Sensitive value stored in a persistent cookie",
+        "medium",
+        re.compile(
+            rf"(?=.*\b(?:cookie|set-cookie)\b)(?=.*{COOKIE_SENSITIVE_NAME})"
+            r"(?=.*\b(?:max[_-]?age|expires?)\b).+",
+            re.IGNORECASE,
+        ),
+        "A credential, session, or token value appears to be stored in a cookie with persistent expiry.",
+        "Keep sensitive cookies session-scoped where possible and store only opaque, revocable identifiers.",
+        frozenset({".cs", ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
         "code.jwt-verification-disabled",
         "JWT signature verification appears disabled",
         "high",
@@ -392,6 +427,15 @@ CODE_PATTERN_RULES = (
         "An API framework bootstrap was found; KODA did not see route-level rate limiting from this line.",
         "Add rate limits, request quotas, and abuse controls for login, signup, password reset, and high-cost API routes.",
         frozenset({".java", ".js", ".jsx", ".kt", ".py", ".ts", ".tsx"}),
+    ),
+    CodePatternRule(
+        "code.auth-attempt-protection-missing",
+        "Authentication flow may lack repeated-attempt protection",
+        "medium",
+        re.compile(r"(?!)"),
+        "A login or authentication flow was found without visible throttling, lockout, CAPTCHA, or step-up authentication.",
+        "Apply authentication-specific throttling and failed-attempt controls, with lockout or step-up verification where appropriate.",
+        frozenset({".cs", ".java", ".js", ".jsx", ".kt", ".py", ".ts", ".tsx"}),
     ),
     CodePatternRule(
         "code.external-api-no-timeout",
@@ -625,6 +669,20 @@ CODE_PATTERN_RULES = (
         "Check for null before dereferencing, return a non-null type, or use a fail-closed wrapper such as Objects.requireNonNull or Optional.orElseThrow.",
         frozenset({".java", ".kt"}),
     ),
+    CodePatternRule("code.improper-resource-release", "Potential resource leak", "medium", re.compile(r"(?!)"), "A resource appears to be acquired without an obvious same-scope release.", "Close or release acquired resources on every path.", frozenset({".java", ".kt"})),
+    CodePatternRule("code.use-after-free", "Potential use after free", "high", re.compile(r"(?!)"), "A C/C++ variable appears to be used after free without reset or reassignment.", "Do not use a pointer after free; set it to NULL or reassign before use.", frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"})),
+    CodePatternRule("code.uninitialized-variable", "Potential uninitialized variable use", "high", re.compile(r"(?!)"), "A local C/C++ variable appears to be read before initialization.", "Initialize local variables before any read on every control-flow path.", frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"})),
+    CodePatternRule("code.dns-security-decision", "DNS result used in security decision", "medium", re.compile(r"(?!)"), "A DNS lookup result appears to flow directly into an authentication, authorization, or trust decision.", "Do not use DNS identity alone for security decisions; use authenticated identity and certificate validation.", frozenset({".py", ".java", ".kt", ".js", ".ts", ".go", ".cs", ".rb", ".php"})),
+    CodePatternRule("code.integer-overflow-user-input", "Unbounded external integer used in allocation or indexing", "high", re.compile(r"(?!)"), "An integer parsed from external input appears to be used as an array index or allocation size without a visible range check.", "Validate lower and upper bounds before using externally supplied integers in arithmetic, allocation, or indexing.", frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".java", ".kt", ".cs"})),
+    CodePatternRule("code.security-decision-user-input", "External input used in a security or business decision", "high", re.compile(r"(?!)"), "A security-sensitive decision value appears to come directly from request-controlled input.", "Derive authorization, price, role, and permission decisions from trusted server-side state and validate any external input.", frozenset({".java", ".kt", ".cs", ".py", ".js", ".jsx", ".ts", ".tsx", ".php", ".rb"})),
+    CodePatternRule("code.authorization-check-missing", "Sensitive operation lacks a visible authorization check", "high", re.compile(r"(?!)"), "A sensitive endpoint or method appears to perform an operation without a nearby role, ownership, or permission check.", "Enforce function- and object-level authorization before the sensitive operation.", frozenset({".java", ".kt", ".cs", ".py", ".js", ".jsx", ".ts", ".tsx", ".php", ".rb"})),
+    CodePatternRule("code.insecure-resource-permissions", "Critical resource receives permissive permissions", "high", re.compile(r"(?!)"), "Code explicitly grants broad write or full-control permissions to a resource.", "Grant only the owner or required service identity the minimum read and write permissions.", frozenset({".java", ".kt", ".cs", ".py", ".js", ".jsx", ".ts", ".tsx", ".c", ".cc", ".cpp", ".cxx"})),
+    CodePatternRule("code.weak-password-policy", "Weak password length policy", "medium", re.compile(r"(?!)"), "An explicit password policy accepts passwords shorter than eight characters.", "Require an appropriate minimum length and apply the organization's password composition and breached-password controls.", frozenset({".java", ".kt", ".cs", ".py", ".js", ".jsx", ".ts", ".tsx", ".php", ".rb"})),
+    CodePatternRule("code.uncontrolled-loop", "Loop or recursion lacks a visible termination path", "medium", re.compile(r"(?!)"), "A literal infinite loop or direct recursion appears without a visible exit or base case.", "Add a bounded condition, explicit exit, timeout, or recursive base case.", frozenset({".java", ".kt", ".cs", ".py", ".js", ".jsx", ".ts", ".tsx", ".php", ".rb", ".go", ".c", ".cc", ".cpp", ".cxx"})),
+    CodePatternRule("code.session-shared-state", "Request or session data stored in shared mutable state", "high", re.compile(r"(?!)"), "Per-user request or session data appears to be stored in module or instance state shared across requests.", "Keep per-user data in request/session scope and avoid mutable servlet or controller instance fields.", frozenset({".java", ".kt", ".cs", ".py"})),
+    CodePatternRule("code.private-array-return", "Private array returned directly by a public method", "medium", re.compile(r"(?!)"), "A public method appears to return a private array or mutable collection reference directly.", "Return a clone, immutable view, or defensive copy.", frozenset({".java", ".kt", ".cs"})),
+    CodePatternRule("code.private-array-assignment", "Public array assigned directly to a private field", "medium", re.compile(r"(?!)"), "A public method appears to assign a caller-owned array or mutable collection directly to a private field.", "Clone or defensively copy mutable input before storing it in private state.", frozenset({".java", ".kt", ".cs"})),
+    CodePatternRule("code.dangerous-managed-api", "Dangerous Java/J2EE or C# API", "high", re.compile(r"(?!)"), "Code uses a runtime API identified by the guide as unsafe in a managed application context.", "Use managed connection APIs and graceful lifecycle handling instead of direct sockets or forced process exit.", frozenset({".java", ".kt", ".cs"})),
     CodePatternRule(
         "code.llm-sensitive-data-in-prompt",
         "Sensitive data may be sent to an LLM prompt",
@@ -732,6 +790,8 @@ def _java_null_pointer_findings(path: Path, lines: list[str], analysis_lines: li
             name = nonnull_guard.group(1) or nonnull_guard.group(2)
             if "{" in stripped:
                 nonnull_scopes.append((name, brace_depth + 1))
+            elif stripped[nonnull_guard.end():].strip():
+                nonnull_on_line = name
             else:
                 next_statement = next(
                     (candidate for candidate in range(index + 1, len(analysis_lines)) if analysis_lines[candidate].strip()),
@@ -1234,6 +1294,56 @@ def _safe_sql_binding(line: str) -> bool:
     )
 
 
+def _dateutil_format_variable_is_safe(
+    name: str,
+    document: str,
+    lines: list[str] | None,
+    line_number: int | None,
+) -> bool:
+    if (
+        lines is None
+        or line_number is None
+        or not re.search(r"\bimport\s+devonframe\.util\.DateUtil\s*;?", document)
+    ):
+        return False
+
+    safe: set[str] = set()
+    assignment = re.compile(
+        r"^\s*(?:final\s+)?(?:String\s+)?([A-Za-z_$][\w$]*)\s*=\s*(.+?)\s*$"
+    )
+    write = re.compile(
+        r"(?<![\w$])([A-Za-z_$][\w$]*)\s*(?:(?:<<|>>|[+\-*/%&|^])?=(?!=))"
+    )
+    for source_line in lines[: max(0, line_number - 1)]:
+        if _starts_function_scope(source_line, ".java"):
+            safe.clear()
+        for statement in source_line.split(";"):
+            statement = statement.strip()
+            if not statement:
+                continue
+            written = write.search(statement)
+            if written:
+                safe.discard(written.group(1))
+
+            match = assignment.match(statement)
+            if not match:
+                continue
+            variable, expression = match.groups()
+            direct = re.fullmatch(r"DateUtil\.getDate\(\s*[\"']([^\"']*)[\"']\s*\)", expression)
+            if direct and "%" not in direct.group(1):
+                safe.add(variable)
+                continue
+
+            derived = re.match(
+                r"DateUtil\.(?:getNextMonthDate|getPrevDate)\(\s*([A-Za-z_$][\w$]*)\s*,",
+                expression,
+            )
+            if derived:
+                safe.add(variable)
+
+    return name in safe
+
+
 def _candidate_is_suppressed(
     rule_id: str,
     line: str,
@@ -1268,13 +1378,21 @@ def _candidate_is_suppressed(
         return True
     if rule_id == "code.sql-dynamic-query" and _safe_sql_binding(line):
         return True
+    if rule_id == "code.eval-user-input" and re.search(r"\.\s*exec\s*\(", line, re.IGNORECASE) and not re.search(
+        r"(?<![.\w])(?:eval|exec|(?-i:Function)|instance_eval|class_eval)\s*\(",
+        line,
+        re.IGNORECASE,
+    ):
+        return True
     if rule_id == "code.format-string-user-input":
-        constant = re.search(r"\bString\.format\s*\(\s*([A-Z][A-Z0-9_]*)\s*[,)]", line)
-        if constant and re.search(
-            rf"\b(?:static\s+)?final\s+String\s+{re.escape(constant.group(1))}\s*=\s*[\"']",
-            document,
-        ):
-            return True
+        format_variable = re.search(r"\bString\.format\s*\(\s*([A-Za-z_$][\w$]*)\s*[,)]", line)
+        if format_variable:
+            name = format_variable.group(1)
+            if re.search(
+                rf"\b(?:static\s+)?final\s+String\s+{re.escape(name)}\s*=\s*[\"']",
+                document,
+            ) or _dateutil_format_variable_is_safe(name, document, lines, line_number):
+                return True
     if rule_id in {
         "code.xss-dom-sink",
         "code.path-traversal",
@@ -1360,6 +1478,42 @@ def _logical_lines(code_lines: list[str]) -> list[str]:
     return joined
 
 
+def _starts_function_scope(line: str, suffix: str) -> bool:
+    """Return whether a source line starts a new callable body.
+
+    The SW49 stateful checks are intentionally intraprocedural. A lightweight
+    boundary is enough to prevent a variable named in one function from
+    affecting a different function without pretending to build a full parser.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if suffix == ".py":
+        return bool(re.match(r"(?:async\s+)?def\s+[A-Za-z_]\w*\s*\(", stripped))
+    if suffix == ".rb":
+        return bool(re.match(r"def\s+(?:self\.)?[A-Za-z_]\w*[!?=]?", stripped))
+    if suffix == ".go":
+        return bool(re.match(r"func\s+(?:\([^)]*\)\s*)?[A-Za-z_]\w*\s*\(", stripped))
+    if suffix == ".swift":
+        return bool(re.match(r"(?:[\w@]+\s+)*func\s+[A-Za-z_]\w*\s*\(", stripped))
+    if suffix in {".js", ".jsx", ".ts", ".tsx"}:
+        return bool(
+            re.match(r"(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+[A-Za-z_$][\w$]*\s*\(", stripped)
+            or re.match(r"(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=.*=>\s*\{", stripped)
+            or re.match(r"(?:async\s+)?[A-Za-z_$][\w$]*\s*\([^;{}]*\)\s*\{", stripped)
+        )
+    if suffix == ".php":
+        return bool(re.match(r"(?:public\s+|protected\s+|private\s+|static\s+)*function\s+\w+\s*\(", stripped, re.I))
+    if suffix in {".java", ".kt", ".cs", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"}:
+        match = re.match(
+            r"(?:(?:public|private|protected|internal|static|final|abstract|synchronized|native|default|open|override|virtual|inline|constexpr|extern|friend)\s+)*"
+            r"(?:<[^>]+>\s+)?(?:[\w$:.<>,?\[\]*&]+\s+)?([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws\s+[^\{]+)?\{",
+            stripped,
+        )
+        return bool(match and match.group(1) not in {"if", "for", "while", "switch", "catch", "try", "synchronized"})
+    return False
+
+
 def _call_arguments(line: str, call_end: int) -> str | None:
     """Return the argument text of a call whose name ends at ``call_end``.
 
@@ -1433,6 +1587,13 @@ def _contextual_dataflow_findings(path: Path, lines: list[str], code_lines: list
             match = sink.search(line)
             if not match:
                 continue
+            if (
+                rule_id == "code.eval-user-input"
+                and match.lastindex
+                and match.group(1).lower() == "exec"
+                and line[: match.start(1)].rstrip().endswith(".")
+            ):
+                continue
             # Taint anywhere on the line is not enough for a call sink: the
             # untrusted value has to be an argument of that call, otherwise
             # `ctx.save()` next to unrelated request handling reads as a flow.
@@ -1467,6 +1628,279 @@ def _contextual_dataflow_findings(path: Path, lines: list[str], code_lines: list
     return findings
 
 
+def _sw49_semantic_findings(path: Path, lines: list[str], statements: list[str]) -> list[Finding]:
+    suffix = path.suffix.lower()
+    out: list[Finding] = []
+    def add(rule_id: str, i: int, note: str) -> None:
+        rule = _RULE_BY_ID[rule_id]
+        out.append(Finding(rule_id=rule_id, category="code", severity=rule.severity, title=rule.title,
+            path=path, line=i + 1, evidence=_trim_evidence(lines[i].strip()), description=rule.description,
+            recommendation=rule.recommendation, verification_status="needs_review", verification_note=note))
+    if suffix in {".java", ".kt"}:
+        acquired: dict[str, int] = {}; released: set[str] = set()
+        def report_unreleased() -> None:
+            for name, acquired_at in acquired.items():
+                if name not in released and not any("try (" in x and re.search(rf"\b{name}\b", x) for x in statements[max(0, acquired_at-1):acquired_at+2]):
+                    add("code.improper-resource-release", acquired_at, "자원 취득 후 close/release 또는 try-with-resources를 확인하지 못했습니다.")
+        for i, line in enumerate(statements):
+            if _starts_function_scope(line, suffix):
+                report_unreleased()
+                acquired.clear(); released.clear()
+            m = re.search(r"\b([A-Za-z_$][\w$]*)\s*=\s*[^;]*(?:getConnection|prepareStatement|createStatement|new\s+(?:File)?InputStream|Files\.newInputStream)", line, re.I)
+            if m:
+                acquired[m.group(1)] = i
+                released.discard(m.group(1))
+            for name in acquired:
+                if re.search(rf"\b{name}\s*\.\s*(?:close|release)\s*\(", line): released.add(name)
+        report_unreleased()
+    if suffix in {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"}:
+        freed: dict[str, int] = {}
+        uninit: set[str] = set()
+        for i, line in enumerate(statements):
+            if _starts_function_scope(line, suffix):
+                freed.clear(); uninit.clear()
+            dm = re.search(r"\b(?:int|char|float|double|long|short|size_t)\s+([A-Za-z_]\w*)\s*;", line)
+            if dm: uninit.add(dm.group(1)); continue
+            fm = re.search(r"\bfree\s*\(\s*([A-Za-z_]\w*)\s*\)\s*;", line)
+            if fm: freed[fm.group(1)] = i; continue
+            for name in list(uninit):
+                if re.search(rf"\b{name}\s*=", line): uninit.remove(name)
+                elif re.search(rf"\b(?:return|printf|fprintf|assert)\b[^;]*\b{name}\b|\b{name}\b\s*[+\-*/;,)\]]", line):
+                    add("code.uninitialized-variable", i, "명시적 초기화 없는 지역 변수가 읽히는 후보입니다."); uninit.remove(name)
+            for name in list(freed):
+                if re.search(rf"\b{name}\s*=", line): del freed[name]
+                elif re.search(rf"\b{name}\b", line):
+                    add("code.use-after-free", i, "free(var) 이후 재할당/초기화 없이 같은 변수를 사용했습니다."); del freed[name]
+    dns_names: set[str] = set()
+    for i, line in enumerate(statements):
+        if _starts_function_scope(line, suffix):
+            dns_names.clear()
+        written = re.search(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*(?:(?:<<|>>|[+\-*/%&|^])?=(?!=))", line)
+        m = re.search(r"\b([A-Za-z_]\w*)\s*=\s*[^;]*(?:gethostbyname|getaddrinfo|gethostbyaddr|getnameinfo|socket\.gethost|dns\.lookup|InetAddress\.getByName)", line, re.I)
+        if written:
+            dns_names.discard(written.group(1))
+        if m:
+            dns_names.add(m.group(1))
+        if dns_names and re.search(r"\b(?:auth|authoriz|allow|permit|trust|trusted|is_internal|role|admin|principal)\w*\b", line, re.I) and re.search(r"(?:==|!=|\bin\b|\.equals\s*\(|\.contains\s*\()", line, re.I) and any(re.search(rf"\b{name}\b", line) for name in dns_names):
+            add("code.dns-security-decision", i, "DNS 조회 결과가 인증/인가/신뢰 비교에 직접 사용됩니다.")
+
+    document = "\n".join(statements)
+    auth_entry = re.search(
+        r"(?im)(?:@(?:\w+\.)?(?:post|route)\s*\([^\n]*(?:login|sign[_-]?in|authenticate|token)|"
+        r"\b(?:app|router|server)\.(?:post|use)\s*\([^\n]*(?:login|sign[_-]?in|authenticate|token)|"
+        r"\b(?:def|function|public|private|protected)\s+\w*(?:login|signin|authenticate|issueToken)\w*)",
+        document,
+    )
+    auth_sink = re.search(
+        r"(?i)\b(?:authenticate|verifyPassword|check_password|issueToken|create_access_token|"
+        r"authenticationManager\.authenticate)\s*\(",
+        document,
+    )
+    protection = re.search(
+        r"(?i)\b(?:express-rate-limit|rateLimit|RateLimiter|SlowAPIMiddleware|limiter\.limit|"
+        r"Bucket4j|failedAttempts?|loginAttempts?|lockAccount|lockedUntil|accountLocked|"
+        r"captcha|mfa|2fa|otp|webauthn)\b",
+        document,
+    )
+    if auth_entry and auth_sink and not protection:
+        line_index = document[:auth_entry.start()].count("\n")
+        add("code.auth-attempt-protection-missing", line_index, "인증 흐름에서 반복 시도 제한, 잠금 또는 추가 인증 통제를 확인하지 못했습니다.")
+
+    integer_inputs: dict[str, int] = {}
+    guarded_integers: set[str] = set()
+    for i, line in enumerate(statements):
+        if _starts_function_scope(line, suffix):
+            integer_inputs.clear()
+            guarded_integers.clear()
+        assignment = re.search(r"\b([A-Za-z_$][\w$]*)\s*=\s*([^;]+)", line)
+        if assignment and re.search(
+            r"\b(?:atoi|atol|strtol|Integer\.parseInt|Long\.parseLong|Int32\.Parse|Convert\.ToInt32)\s*\("
+            r"[^)]*(?:argv|args|request|params?|getParameter|query|input)",
+            assignment.group(2),
+            re.I,
+        ):
+            integer_inputs[assignment.group(1)] = i
+        for name in tuple(integer_inputs):
+            if re.search(rf"\b{name}\b\s*(?:<=|>=|<|>)|(?:<=|>=|<|>)\s*\b{name}\b", line):
+                guarded_integers.add(name)
+            if name not in guarded_integers and (
+                re.search(rf"\[\s*{re.escape(name)}\s*\]", line)
+                or re.search(rf"\b(?:malloc|calloc|realloc)\s*\([^;]*\b{re.escape(name)}\b", line)
+                or re.search(rf"\bnew\s+[\w$.<>\[\]]+\s*\[\s*{re.escape(name)}\s*\]", line)
+            ):
+                add("code.integer-overflow-user-input", i, "외부 입력에서 파싱한 정수가 범위 확인 없이 인덱스 또는 할당 크기에 사용됩니다.")
+                del integer_inputs[name]
+                guarded_integers.discard(name)
+
+    decision_inputs: set[str] = set()
+    for i, line in enumerate(statements):
+        if _starts_function_scope(line, suffix):
+            decision_inputs.clear()
+        assignment = re.search(r"\b([A-Za-z_$][\w$]*)\s*=\s*([^;]+)", line)
+        if assignment:
+            name, expression = assignment.groups()
+            if (
+                re.search(r"(?:request|req|params?|query|cookies?|headers?|getParameter|process\.env|os\.environ)", expression, re.I)
+                and re.search(r"(?:role|admin|authoriz|permit|permission|price|amount|discount|limit|trusted|privilege)", name, re.I)
+            ):
+                decision_inputs.add(name)
+        for name in tuple(decision_inputs):
+            if re.search(rf"\b(?:validate|verify|allowlist|lookup|loadTrusted)\w*\s*\([^;]*\b{re.escape(name)}\b", line, re.I):
+                decision_inputs.discard(name)
+            elif re.search(rf"\b{re.escape(name)}\b", line) and (
+                re.search(r"\b(?:if|return|authorize|permit|allow|total|price|amount|discount)\b", line, re.I)
+                or re.search(r"[+\-*/]|==|!=", line)
+            ) and not (assignment and assignment.group(1) == name):
+                add("code.security-decision-user-input", i, "요청에서 받은 보안·업무 결정값이 서버측 기준 조회 없이 사용됩니다.")
+                decision_inputs.discard(name)
+
+    sensitive_route = re.compile(
+        r"(?i)@(?:Delete|Put|Patch|Post|Request)Mapping\s*\([^\n]*(?:admin|users?|accounts?|payments?|orders?|roles?|permissions?)"
+        r"|\b(?:public|protected|private)\b[^\n{]*(?:delete|remove|update|approve|grant|revoke|export)\w*\s*\(",
+    )
+    authorization_guard = re.compile(
+        r"(?i)@PreAuthorize|@Secured|@RolesAllowed|hasRole|hasAuthority|checkPermission|"
+        r"authorize|isOwner|isAdmin|requireRole|permissionService",
+    )
+    for match in sensitive_route.finditer(document):
+        i = document[:match.start()].count("\n")
+        nearby = "\n".join(statements[max(0, i - 3): i + 12])
+        duplicate = any(
+            item.rule_id == "code.authorization-check-missing" and abs(item.line - (i + 1)) <= 3
+            for item in out
+        )
+        if not duplicate and not authorization_guard.search(nearby):
+            add("code.authorization-check-missing", i, "중요 기능 주변에서 역할·소유권·권한 검사를 확인하지 못했습니다.")
+
+    for i, line in enumerate(statements):
+        if re.search(
+            r"(?i)\bos\.chmod\s*\([^,]+,\s*(?:0o?777|0o?666|0x1ff)\b|"
+            r"\bchmod\s*\([^,]+,\s*0?777\b|"
+            r"\.setWritable\s*\(\s*true\s*,\s*false\s*\)|"
+            r"PosixFilePermissions\.fromString\s*\(\s*[\"']rwxrwxrwx[\"']\s*\)|"
+            r"FileSystemRights\.FullControl[^\n]*(?:WorldSid|Everyone)",
+            line,
+        ):
+            add("code.insecure-resource-permissions", i, "모든 사용자에게 쓰기 또는 전체 제어를 허용하는 권한 설정입니다.")
+
+        password_length = re.search(
+            r"(?i)(?:min(?:imum)?[_-]?password[_-]?length|password[_-]?min(?:imum)?[_-]?length)\s*[:=]\s*(\d+)",
+            line,
+        )
+        annotation_length = re.search(r"(?i)@Size\s*\(\s*min\s*=\s*(\d+)", line)
+        length = int((password_length or annotation_length).group(1)) if password_length or annotation_length else None
+        if length is not None and length < 8 and (password_length or "password" in "\n".join(statements[max(0, i - 2):i + 3]).lower()):
+            add("code.weak-password-policy", i, "명시된 비밀번호 최소 길이가 8자보다 짧습니다.")
+
+    for i, line in enumerate(statements):
+        if suffix == ".py" and re.match(r"^\s*while\s+(?:True|1)\s*:", line):
+            indent = len(line) - len(line.lstrip())
+            body: list[str] = []
+            for following in statements[i + 1:i + 26]:
+                if following.strip() and len(following) - len(following.lstrip()) <= indent:
+                    break
+                body.append(following)
+            if not re.search(r"(?m)^\s*(?:break|return|raise)\b", "\n".join(body)):
+                add("code.uncontrolled-loop", i, "상수 조건 반복문 본문에서 종료 경로를 확인하지 못했습니다.")
+        elif suffix != ".py" and re.search(r"\bwhile\s*\(\s*(?:true|1)\s*\)|\bfor\s*\(\s*;\s*;\s*\)", line, re.I):
+            nearby = "\n".join(statements[i:i + 25])
+            if not re.search(r"\b(?:break|return|throw|goto)\b", nearby):
+                add("code.uncontrolled-loop", i, "상수 조건 반복문 주변에서 종료 경로를 확인하지 못했습니다.")
+
+    if suffix == ".py":
+        for match in re.finditer(r"(?m)^(\s*)def\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*:", document):
+            indent, name = len(match.group(1)), match.group(2)
+            start = document[:match.start()].count("\n")
+            body_lines: list[str] = []
+            for following in statements[start + 1:]:
+                if following.strip() and len(following) - len(following.lstrip()) <= indent:
+                    break
+                body_lines.append(following)
+            body = "\n".join(body_lines)
+            call = re.search(rf"(?<![.\w]){re.escape(name)}\s*\(", body)
+            if call and not re.search(r"(?s)\bif\b.*?\b(?:return|raise)\b", body):
+                add("code.uncontrolled-loop", start + 1 + body[:call.start()].count("\n"), "직접 재귀 호출 전에 종료 기저 조건을 확인하지 못했습니다.")
+
+    if suffix == ".py":
+        shared_names = {
+            match.group(1)
+            for match in re.finditer(
+                r"(?m)^([A-Za-z_]\w*(?:user|session|account|profile|token)\w*)\s*=",
+                document,
+                re.I,
+            )
+        }
+        for i, line in enumerate(statements):
+            for name in shared_names:
+                if re.search(rf"\bglobal\s+{re.escape(name)}\b", document, re.I) and re.search(
+                    rf"\b{re.escape(name)}\s*=\s*[^;]*(?:session|request)",
+                    line,
+                    re.I,
+                ):
+                    add("code.session-shared-state", i, "요청별 사용자 정보가 모듈 전역 상태에 저장됩니다.")
+    elif suffix in {".java", ".kt", ".cs"} and re.search(
+        r"(?i)extends\s+HttpServlet|HttpServletRequest|@WebServlet|@Controller|@RestController",
+        document,
+    ):
+        fields = {
+            match.group(1)
+            for match in re.finditer(
+                r"(?im)^\s*(?:private|protected|public)\s+(?:static\s+)?[\w$.<>\[\]?]+\s+"
+                r"([A-Za-z_$][\w$]*(?:user|session|account|profile|token)\w*)\s*(?:[;=])",
+                document,
+            )
+        }
+        for i, line in enumerate(statements):
+            for name in fields:
+                if re.search(rf"\b(?:this\.)?{re.escape(name)}\s*=\s*[^;]*(?:request|session|getParameter|getAttribute)", line, re.I):
+                    add("code.session-shared-state", i, "요청별 사용자 정보가 서블릿·컨트롤러의 공유 인스턴스 필드에 저장됩니다.")
+
+    if suffix in {".java", ".kt", ".cs"}:
+        private_arrays = {
+            match.group(1)
+            for match in re.finditer(
+                r"(?im)^\s*private\s+(?:static\s+)?(?:[\w$.<>?]+\s*\[\]|"
+                r"(?:List|Collection|ArrayList|IList|ICollection)<[^>]+>)\s+([A-Za-z_$][\w$]*)",
+                document,
+            )
+        }
+        for name in private_arrays:
+            direct_return = re.search(
+                rf"(?is)\bpublic\b[^;{{}}]*\([^;{{}}]*\)\s*\{{[^{{}}]*\breturn\s+(?:this\.)?{re.escape(name)}\s*;",
+                document,
+            )
+            if direct_return:
+                i = document[:direct_return.start()].count("\n")
+                add("code.private-array-return", i, "public 메소드가 private 배열·컬렉션 참조를 복사 없이 반환합니다.")
+            for method in re.finditer(r"(?is)\bpublic\b[^;{}]*\(([^)]*)\)\s*\{([^{}]*)\}", document):
+                parameters, body = method.groups()
+                for parameter in re.finditer(
+                    r"(?:[\w$.<>?]+\s*\[\]|(?:List|Collection|ArrayList|IList|ICollection)<[^>]+>)\s+([A-Za-z_$][\w$]*)",
+                    parameters,
+                ):
+                    value = parameter.group(1)
+                    assignment = re.search(
+                        rf"\b(?:this\.)?{re.escape(name)}\s*=\s*{re.escape(value)}\s*;",
+                        body,
+                    )
+                    if assignment:
+                        i = document[:method.start()].count("\n") + body[:assignment.start()].count("\n")
+                        add("code.private-array-assignment", i, "public 메소드 인자의 배열·컬렉션 참조를 private 필드에 복사 없이 저장합니다.")
+
+    if suffix in {".java", ".kt"} and re.search(
+        r"(?i)extends\s+HttpServlet|HttpServletRequest|ServletException|@WebServlet",
+        document,
+    ):
+        for i, line in enumerate(statements):
+            if re.search(r"\bnew\s+(?:java\.net\.)?Socket\s*\(|\bSystem\.exit\s*\(", line):
+                add("code.dangerous-managed-api", i, "J2EE 실행 문맥에서 직접 Socket 또는 System.exit API를 사용합니다.")
+    elif suffix == ".cs":
+        for i, line in enumerate(statements):
+            if re.search(r"\bApplication\.Exit\s*\(", line):
+                add("code.dangerous-managed-api", i, "Application.Exit은 일부 종료 이벤트 처리를 건너뛸 수 있습니다.")
+    return out
+
+
 def check_file(path: Path, target: TargetConfig) -> list[Finding]:
     if not is_text_candidate(path) or (path.suffix.lower() not in CODE_EXTENSIONS and path.name not in CODE_FILENAMES):
         return []
@@ -1480,6 +1914,15 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
     # first-party bundles often include a library banner before application code.
     if path.suffix.lower() in {".js", ".mjs", ".cjs"}:
         parts = {part.lower().replace("-", "_") for part in path.parts}
+        is_pdfjs_bundle = (
+            any(part in {"pdfjs", "pdf.js"} or part.startswith("pdfjs_") for part in parts)
+            and path.name.lower() in {
+                "viewer.js", "viewer.mjs", "pdf.js", "pdf.min.js",
+                "pdf.worker.js", "pdf.worker.min.js", "pdf.worker.mjs",
+            }
+        )
+        if is_pdfjs_bundle:
+            return []
         banner = "\n".join(lines[:5])[:2000]
         is_dependency_path = bool(parts.intersection({"node_modules", "vendor", "vendors", "thirdparty", "third_party"}))
         has_library_banner = bool(re.search(
@@ -1487,12 +1930,12 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
             banner,
         ))
         versioned_library_file = re.match(
-            r"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
+            r"(?i)^(jquery|jsrender|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
             r"[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$",
             path.name,
         )
         named_library_file = re.match(
-            r"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
+            r"(?i)^(jquery|jsrender|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
             r"(?:\.min)?\.(?:js|mjs|cjs)$",
             path.name,
         )
@@ -1507,6 +1950,7 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
     code_lines = _code_view(lines, suffix)
     statements = _logical_lines(code_lines)
     findings = _java_document_builder_xxe_findings(path, lines, code_lines) if suffix in {".java", ".kt"} else []
+    findings.extend(_sw49_semantic_findings(path, lines, statements))
     if suffix in {".java", ".kt"}:
         findings.extend(_java_null_pointer_findings(path, lines, code_lines))
     findings.extend(_contextual_dataflow_findings(path, lines, statements))

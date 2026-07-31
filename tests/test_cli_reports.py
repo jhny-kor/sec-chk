@@ -42,7 +42,7 @@ class CliReportTests(unittest.TestCase):
         self.assertTrue(samples)
         for sample in samples:
             document = sample.read_text(encoding="utf-8")
-            self.assertIn("대외 비인가", document, sample.name)
+            self.assertIn("대외 비공개", document, sample.name)
             self.assertRegex(document, r"border: ?2px solid #(ef4444|ff4d5e|b42318)", sample.name)
 
     def test_standard_is_selected_from_registered_profiles(self) -> None:
@@ -117,6 +117,7 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("치명", main_html)
             self.assertIn("우선 조치", main_html)
             self.assertIn("소스 취약점 요약", main_html)
+            self.assertIn("<b>분석 언어</b> Python", main_html)
             self.assertIn("max-width:1560px", main_html)
             self.assertIn('class="source-summary-table"', main_html)
             self.assertIn(".source-summary-wrap{overflow:auto;padding:0 20px 20px}", main_html)
@@ -133,10 +134,11 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("source.py:1", main_html)
             self.assertIn("source-main-guide-open", main_html)
             self.assertIn("OWASP ASVS 5.0", main_html)
-            self.assertIn("대외 비인가", main_html)
+            self.assertIn("대외 비공개", main_html)
+            self.assertIn('<svg viewBox="0 0 24 24"', main_html)
             self.assertIn('class="koda-main-classification-badge" style="order:2"', main_html)
             self.assertIn('class="standards-guide-button" type="button" style="order:1;', main_html)
-            self.assertLess(main_html.index("source-main-guide-open"), main_html.index("대외 비인가"))
+            self.assertLess(main_html.index("source-main-guide-open"), main_html.index("대외 비공개"))
             self.assertIn('class="standards-guide-name" style="display:block">OWASP ASVS 5.0</strong>', main_html)
             self.assertIn('class="standards-guide-description" style="display:block;color:#60708a">', main_html)
             self.assertIn("border:2px solid #ef4444", main_html)
@@ -153,7 +155,8 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("조치 방법", detail_html)
             self.assertNotIn('id="settings-toggle"', detail_html)
             self.assertNotIn('id="web-scan-run"', detail_html)
-            self.assertIn("대외 비인가", detail_html)
+            self.assertIn("대외 비공개", detail_html)
+            self.assertIn('<svg viewBox="0 0 24 24"', detail_html)
             self.assertIn("external-classification-badge", detail_html)
             self.assertIn("min-height:46px", detail_html)
             self.assertNotIn('id="lang-ko"', detail_html)
@@ -192,6 +195,30 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("<redacted sensitive source line>", detail_html)
             self.assertNotIn(secret, detail_html)
 
+    def test_source_main_report_lists_all_analyzed_languages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Clean.java").write_text("class Clean {}\n", encoding="utf-8")
+            (root / "clean.ts").write_text("export const clean = true;\n", encoding="utf-8")
+            output = root / "source.html"
+
+            exit_code = main(
+                [
+                    "scan",
+                    "--target",
+                    str(root),
+                    "--standard",
+                    "sw-dev-security-49",
+                    "--format",
+                    "html",
+                    "--output",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("<b>분석 언어</b> Java, TypeScript", output.read_text(encoding="utf-8"))
+
 
 class WindowsAliasPackagingTests(unittest.TestCase):
     def test_windows_installer_stages_koda_alias_and_path(self) -> None:
@@ -202,6 +229,25 @@ class WindowsAliasPackagingTests(unittest.TestCase):
         self.assertIn('Name: "{app}\\koda.cmd"', iss)
         self.assertIn("ChangesEnvironment=yes", iss)
         self.assertIn('ValueName: "Path"', iss)
+
+    def test_windows_installer_bundles_and_smoke_tests_sw49_contracts(self) -> None:
+        script = (ROOT / "platforms/windows/scripts/build-koda-windows-installer.ps1").read_text(encoding="utf-8")
+        pyproject = (ROOT / "platforms/shared/python/pyproject.toml").read_text(encoding="utf-8")
+        self.assertGreaterEqual(script.count('"--add-data", $Sw49ResourcesData'), 2)
+        self.assertIn('"_internal\\security_scanner\\resources\\sw49\\contracts.json"', script)
+        self.assertIn('& $CliExecutable --help', script)
+        self.assertIn('$sw49SmokeReport', script)
+        self.assertIn('DateUtil.getNextMonthDate', script)
+        self.assertIn('code.null-pointer-dereference', script)
+        self.assertIn('code.eval-user-input', script)
+        self.assertIn('code.empty-exception-handler', script)
+        self.assertIn('$previousErrorActionPreference = $ErrorActionPreference', script)
+        self.assertIn('$sw49SmokeExitCode = $LASTEXITCODE', script)
+        self.assertIn('if ($sw49SmokeExitCode -ne 0', script)
+        self.assertIn('validate-sw49-smoke.py', script)
+        self.assertIn('json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))', script)
+        self.assertNotIn('$sw49SmokeReport -Raw | ConvertFrom-Json', script)
+        self.assertIn('"resources/sw49/*.json"', pyproject)
 
 
 class MacAppStorePackagingTests(unittest.TestCase):
