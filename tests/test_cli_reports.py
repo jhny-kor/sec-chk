@@ -239,6 +239,9 @@ class WindowsAliasPackagingTests(unittest.TestCase):
         self.assertIn('code.null-pointer-dereference', script)
         self.assertIn('code.eval-user-input', script)
         self.assertIn('code.empty-exception-handler', script)
+        self.assertIn('$previousErrorActionPreference = $ErrorActionPreference', script)
+        self.assertIn('$sw49SmokeExitCode = $LASTEXITCODE', script)
+        self.assertIn('if ($sw49SmokeExitCode -ne 0', script)
         self.assertIn('"resources/sw49/*.json"', pyproject)
 
 

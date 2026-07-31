@@ -820,13 +820,23 @@ Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "unsafe.c") -Content @'
 void log_value(char *user_input) { printf(user_input); }
 '@
 
-& $CliExecutable scan `
-    --target $sw49SmokeDir `
-    --standard sw-dev-security-49 `
-    --format json `
-    --output $sw49SmokeReport *> $null
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    # Windows PowerShell 5.1 promotes native stderr progress messages to
+    # NativeCommandError when the script-wide preference is Stop.
+    $ErrorActionPreference = "Continue"
+    & $CliExecutable scan `
+        --target $sw49SmokeDir `
+        --standard sw-dev-security-49 `
+        --format json `
+        --output $sw49SmokeReport *> $null
+    $sw49SmokeExitCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
 
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sw49SmokeReport -PathType Leaf)) {
+if ($sw49SmokeExitCode -ne 0 -or -not (Test-Path -LiteralPath $sw49SmokeReport -PathType Leaf)) {
     throw "Packaged KODA CLI failed the SW49 false-positive smoke scan."
 }
 
