@@ -1,3 +1,6 @@
-/* SW49 I-14 positive fixture */
-/* Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture. */
-int fixture(int value) { return value; }
+#include <stdlib.h>
+int fixture(char **argv) {
+    int index = atoi(argv[1]);
+    int values[8] = {0};
+    return values[index];
+}

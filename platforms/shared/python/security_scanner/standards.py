@@ -136,6 +136,16 @@ CODE_PATTERN_RULE_IDS = (
     "code.use-after-free",
     "code.uninitialized-variable",
     "code.dns-security-decision",
+    "code.integer-overflow-user-input",
+    "code.security-decision-user-input",
+    "code.authorization-check-missing",
+    "code.insecure-resource-permissions",
+    "code.weak-password-policy",
+    "code.uncontrolled-loop",
+    "code.session-shared-state",
+    "code.private-array-return",
+    "code.private-array-assignment",
+    "code.dangerous-managed-api",
 )
 
 PREVENTION_RULE_IDS = (
@@ -805,13 +815,16 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "I-14", "input-validation-expression", "정수형 오버플로우", "Integer Overflow", ("CWE-190",),
-        (), "manual-review",
-        note_ko="정확한 판정에 데이터 흐름 분석이 필요해 자동 룰을 제공하지 않습니다. 외부 SAST 또는 수동 검토가 필요합니다.",
-        note_en="Accurate judgement needs data-flow analysis; no automatic rule is provided. Use external SAST or manual review.",
+        ("code.integer-overflow-user-input",), "partial", _C_LANGS + ("Java", "Kotlin", "C#"),
+        note_ko="외부 입력에서 파싱한 정수가 동일 함수에서 범위 확인 없이 인덱스·할당 크기에 사용되는 경우를 후보로 표시합니다.",
+        note_en="Flags integers parsed from external input and used in same-function indexing or allocation without a visible bounds check.",
     ),
     _control(
         "I-15", "input-validation-expression", "보안기능 결정에 사용되는 부적절한 입력값", "Improper Input in Security Decisions", ("CWE-807", "CWE-20"),
-        (), "manual-review",
+        ("code.security-decision-user-input",), "partial",
+        ("Java", "Kotlin", "C#", "Python", "JavaScript", "TypeScript", "PHP", "Ruby"),
+        note_ko="요청에서 받은 역할·권한·가격 등 결정값이 서버측 기준 조회 없이 사용되는 동일 함수 흐름을 후보로 표시합니다.",
+        note_en="Flags same-function uses of request-controlled role, permission, price, and similar decision values without a visible server-side lookup.",
     ),
     _control(
         "I-16", "input-validation-expression", "메모리 버퍼 오버플로우", "Memory Buffer Overflow", ("CWE-119", "CWE-120", "CWE-121", "CWE-122"),
@@ -832,13 +845,17 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "S-02", "security-features", "부적절한 인가", "Improper Authorization", ("CWE-862", "CWE-863"),
-        (), "manual-review",
-        note_ko="객체·기능 수준 인가는 설계와 데이터 흐름 검토가 필요해 자동 판정하지 않습니다.",
-        note_en="Object/function-level authorization needs design and data-flow review and is not auto-judged.",
+        ("code.authorization-check-missing",), "partial",
+        ("Java", "Kotlin", "C#", "Python", "JavaScript", "TypeScript", "PHP", "Ruby"),
+        note_ko="중요 기능의 라우트·메소드 주변에서 역할·소유권·권한 검사가 보이지 않는 경우를 후보로 표시합니다.",
+        note_en="Flags sensitive routes or methods without a nearby role, ownership, or permission check.",
     ),
     _control(
         "S-03", "security-features", "중요한 자원에 대한 잘못된 권한 설정", "Incorrect Permission for Critical Resource", ("CWE-732",),
-        (), "manual-review",
+        ("code.insecure-resource-permissions",), "partial",
+        ("Java", "Kotlin", "C#", "Python", "JavaScript", "TypeScript", "C", "C++"),
+        note_ko="모든 사용자 쓰기·전체 제어처럼 명시적으로 과도한 파일·자원 권한을 설정하는 API 호출을 탐지합니다.",
+        note_en="Detects API calls that explicitly grant world-writable or full-control resource permissions.",
     ),
     _control(
         "S-04", "security-features", "취약한 암호화 알고리즘 사용", "Use of Weak Cryptographic Algorithm", ("CWE-327",),
@@ -877,7 +894,10 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "S-09", "security-features", "취약한 비밀번호 허용", "Weak Password Requirements", ("CWE-521",),
-        (), "manual-review",
+        ("code.weak-password-policy",), "partial",
+        ("Java", "Kotlin", "C#", "Python", "JavaScript", "TypeScript", "PHP", "Ruby"),
+        note_ko="명시된 비밀번호 최소 길이가 8자 미만인 정책을 탐지합니다. 조합·유출 비밀번호 검증의 완전성은 수동 확인이 필요합니다.",
+        note_en="Detects explicit minimum password lengths below eight; composition and breached-password controls still need review.",
     ),
     _control(
         "S-10", "security-features", "부적절한 전자서명 확인", "Improper Verification of Digital Signature", ("CWE-347",),
@@ -935,9 +955,10 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "T-02", "time-state", "종료되지 않는 반복문 또는 재귀 함수", "Uncontrolled Loop or Recursion", ("CWE-835", "CWE-674"),
-        (), "manual-review",
-        note_ko="종료 조건 부재는 제어 흐름 분석이 필요해 정규식으로 판정하지 않습니다.",
-        note_en="Missing termination conditions need control-flow analysis and are not judged by regex.",
+        ("code.uncontrolled-loop",), "partial",
+        ("Java", "Kotlin", "C#", "Python", "JavaScript", "TypeScript", "PHP", "Ruby", "Go", "C", "C++"),
+        note_ko="상수 조건 반복문에 종료 경로가 없거나 직접 재귀에 기저 조건이 보이지 않는 동일 함수 후보를 표시합니다.",
+        note_en="Flags literal infinite loops without an exit and direct recursion without a visible base case in the same function.",
     ),
     # 에러처리 (3)
     _control(
@@ -982,7 +1003,9 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     # 캡슐화 (4)
     _control(
         "P-01", "encapsulation", "잘못된 세션에 의한 데이터 정보 노출", "Data Exposure Between Sessions", ("CWE-488",),
-        (), "manual-review",
+        ("code.session-shared-state",), "partial", ("Java", "Kotlin", "C#", "Python"),
+        note_ko="요청·세션별 사용자 데이터를 모듈 전역 또는 서블릿·컨트롤러 인스턴스 필드에 저장하는 패턴을 탐지합니다.",
+        note_en="Detects request or session user data stored in module globals or servlet/controller instance fields.",
     ),
     _control(
         "P-02", "encapsulation", "제거되지 않고 남은 디버그 코드", "Leftover Debug Code", ("CWE-489",),
@@ -992,11 +1015,15 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "P-03", "encapsulation", "Public 메소드부터 반환된 Private 배열", "Private Array Returned From Public Method", ("CWE-495",),
-        (), "manual-review",
+        ("code.private-array-return",), "partial", ("Java", "Kotlin", "C#"),
+        note_ko="public 메소드가 private 배열·가변 컬렉션 참조를 clone 또는 복사 없이 직접 반환하는 경우를 탐지합니다.",
+        note_en="Detects public methods that directly return private array or mutable collection references without cloning or copying.",
     ),
     _control(
         "P-04", "encapsulation", "Private 배열에 Public 데이터 할당", "Public Data Assigned to Private Array", ("CWE-496",),
-        (), "manual-review",
+        ("code.private-array-assignment",), "partial", ("Java", "Kotlin", "C#"),
+        note_ko="public 메소드 인자의 배열·가변 컬렉션 참조를 private 필드에 clone 또는 복사 없이 직접 저장하는 경우를 탐지합니다.",
+        note_en="Detects public method parameters assigned directly to private array or mutable collection fields without defensive copying.",
     ),
     # API 오용 (2)
     _control(
@@ -1007,9 +1034,10 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "A-02", "api-misuse", "취약한 API 사용", "Use of Dangerous API", ("CWE-676",),
-        ("code.dangerous-c-buffer-api",), "partial", _C_LANGS,
-        note_ko="C/C++ 위험 API 목록(gets, strcpy, strcat, sprintf, vsprintf)만 탐지합니다.",
-        note_en="Covers the C/C++ banned-API list (gets, strcpy, strcat, sprintf, vsprintf) only.",
+        ("code.dangerous-c-buffer-api", "code.dangerous-managed-api"), "partial",
+        _C_LANGS + ("Java", "Kotlin", "C#"),
+        note_ko="가이드의 C/C++ 금지 API와 J2EE 직접 Socket·System.exit, C# Application.Exit 사용을 탐지합니다.",
+        note_en="Covers the guide's C/C++ banned APIs, direct J2EE Socket/System.exit calls, and C# Application.Exit.",
     ),
 )
 
@@ -1465,8 +1493,8 @@ SW_DEV_SECURITY_49 = SecurityStandard(
         *_SW_DEV_SECURITY_CATEGORIES,
     ),
     description=_text(
-        "Registers all 49 MOIS/KISA implementation-stage security weaknesses as individual controls. Every control has either an executable local strategy or an explicit manual-review strategy; partial evidence never becomes an automatic PASS.",
-        "행정안전부·KISA 구현단계 보안약점 49개를 기준별로 표시합니다. 모든 기준은 실행 가능한 로컬 전략 또는 명시적 수동 검토 전략을 가지며, 부분 증거는 자동으로 PASS가 되지 않습니다.",
+        "Registers all 49 MOIS/KISA implementation-stage security weaknesses as individual controls with executable local strategies. Partial evidence never becomes an automatic PASS.",
+        "행정안전부·KISA 구현단계 보안약점 49개를 기준별 실행 가능한 로컬 전략으로 표시하며, 부분 증거는 자동으로 PASS가 되지 않습니다.",
     ),
     coverage=_text(
         "Lists all 49 controls, but not every control is auto-diagnosed. Automated/partial controls are checked via source, configuration, secret, dependency, and optional web probes; design, permission, session, and complex data-flow controls need manual review or external SAST.",

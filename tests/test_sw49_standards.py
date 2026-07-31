@@ -17,7 +17,7 @@ if str(SHARED_PYTHON) not in sys.path:
 
 from security_scanner.checks import code_patterns, secrets  # noqa: E402
 from security_scanner.cli import _has_failure  # noqa: E402
-from security_scanner.models import DEFAULT_CATEGORIES, Finding, TargetConfig  # noqa: E402
+from security_scanner.models import DEFAULT_CATEGORIES, Finding, ScannerConfig, TargetConfig  # noqa: E402
 from security_scanner.reporting import (  # noqa: E402
     build_dashboard_payload,
     render_hwpx,
@@ -26,6 +26,7 @@ from security_scanner.reporting import (  # noqa: E402
     render_report,
     render_xlsx,
 )
+from security_scanner.scanner import SecurityScanner  # noqa: E402
 from security_scanner.standards import (  # noqa: E402
     CODE_PATTERN_RULE_IDS,
     CONFIGURATION_RULE_IDS,
@@ -145,8 +146,8 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
     def test_source_profile_does_not_overclaim_full_automation(self) -> None:
         support_counts = Counter(control.support_level for control in SW49_CONTROLS)
         self.assertEqual(support_counts["automated"], 0)
-        self.assertEqual(support_counts["partial"], 40)
-        self.assertEqual(support_counts["manual-review"], 9)
+        self.assertEqual(support_counts["partial"], 49)
+        self.assertEqual(support_counts["manual-review"], 0)
         self.assertEqual(support_counts["unsupported"], 0)
 
     def test_sw_dev_security_category_counts(self) -> None:
@@ -199,10 +200,9 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
             if control.support_level in ("automated", "partial"):
                 self.assertTrue(control.rule_ids, f"{control.official_id} has no rules")
 
-    def test_manual_and_unsupported_controls_have_no_local_rules(self) -> None:
+    def test_no_control_is_left_without_a_local_or_external_rule(self) -> None:
         for control in SW49_CONTROLS:
-            if control.support_level in ("manual-review", "unsupported"):
-                self.assertFalse(control.rule_ids, f"{control.official_id} should not map rules")
+            self.assertTrue(control.rule_ids, f"{control.official_id} has no executable rule")
 
     def test_titles_have_korean_and_english(self) -> None:
         for control in SW49_CONTROLS:
@@ -344,7 +344,7 @@ class Sw49EvaluationTests(unittest.TestCase):
         # formerly unsupported controls now run conservative local review rules
         for official_id in ("C-02", "C-03", "C-04", "A-01"):
             self.assertEqual(by_id[official_id]["status"], "NEEDS_REVIEW")
-        # manual-review controls stay NEEDS_REVIEW
+        # Conservative local rules run, but clean partial coverage is not PASS.
         for official_id in ("S-02", "S-03", "S-09", "T-02", "P-01", "P-03", "P-04", "I-14", "I-15"):
             self.assertEqual(by_id[official_id]["status"], "NEEDS_REVIEW")
         # partial controls without findings are not PASS either
@@ -1189,6 +1189,27 @@ class Sw49ReportTests(unittest.TestCase):
         payload = build_dashboard_payload([], (), "ko", standard="owasp-top-10-2025", scanned_categories=ALL_SCAN_CATEGORIES)
         self.assertIsNone(payload["sw49"])
 
+    def test_not_applicable_is_not_displayed_as_not_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "OnlyJava.java"
+            source.write_text("final class OnlyJava {}\n", encoding="utf-8")
+            result = SecurityScanner(ScannerConfig(
+                targets=(TargetConfig("java", source),),
+                standard="sw-dev-security-49",
+            )).scan()
+        report = render_report(
+            list(result.findings),
+            "markdown",
+            ("java",),
+            "ko",
+            standard="sw-dev-security-49",
+            scanned_categories=ALL_SCAN_CATEGORIES,
+            source_analysis=result.source_analysis,
+        )
+        c03 = next(line for line in report.splitlines() if "(C-03)" in line)
+        self.assertGreaterEqual(c03.count("해당 없음"), 2)
+        self.assertNotIn("미실행", c03)
+
 class Sw49SemanticRuleTests(unittest.TestCase):
     def _rules(self, suffix: str, source: str) -> set[str]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1226,6 +1247,90 @@ class Sw49SemanticRuleTests(unittest.TestCase):
             "code.dns-security-decision",
             self._rules(".py", "def resolve(name):\n    host = socket.gethostbyname(name)\n    return host\n\ndef authorize(host):\n    return trusted == host"),
         )
+
+    def test_previously_manual_controls_have_bounded_positive_and_negative_rules(self) -> None:
+        cases = (
+            (
+                "code.integer-overflow-user-input",
+                ".c",
+                'int count = atoi(argv[1]);\nint values[8];\nreturn values[count];',
+                'int count = atoi(argv[1]);\nif (count < 0 || count >= 8) return -1;\nint values[8];\nreturn values[count];',
+            ),
+            (
+                "code.security-decision-user-input",
+                ".py",
+                'price = request.args["price"]\nreturn quantity * price',
+                'price = product_service.get_price(item_id)\nreturn quantity * price',
+            ),
+            (
+                "code.authorization-check-missing",
+                ".java",
+                '@DeleteMapping("/admin/users/{id}")\npublic void deleteUser(String id) { repository.delete(id); }',
+                '@PreAuthorize("hasRole(\'ADMIN\')")\n@DeleteMapping("/admin/users/{id}")\npublic void deleteUser(String id) { repository.delete(id); }',
+            ),
+            (
+                "code.insecure-resource-permissions",
+                ".py",
+                'os.chmod(path, 0o777)',
+                'os.chmod(path, 0o600)',
+            ),
+            (
+                "code.weak-password-policy",
+                ".py",
+                'MIN_PASSWORD_LENGTH = 4',
+                'MIN_PASSWORD_LENGTH = 12',
+            ),
+            (
+                "code.uncontrolled-loop",
+                ".py",
+                'def worker():\n    while True:\n        process_next()',
+                'def worker(items):\n    for item in items:\n        process(item)',
+            ),
+            (
+                "code.session-shared-state",
+                ".py",
+                'current_user = None\ndef handle_request():\n    global current_user\n    current_user = session["user"]',
+                'def handle_request():\n    current_user = session["user"]\n    return current_user',
+            ),
+            (
+                "code.private-array-return",
+                ".java",
+                'private String[] roles;\npublic String[] getRoles() { return roles; }',
+                'private String[] roles;\npublic String[] getRoles() { return roles.clone(); }',
+            ),
+            (
+                "code.private-array-assignment",
+                ".java",
+                'private String[] roles;\npublic void setRoles(String[] values) { this.roles = values; }',
+                'private String[] roles;\npublic void setRoles(String[] values) { this.roles = values.clone(); }',
+            ),
+        )
+        for rule_id, suffix, positive, negative in cases:
+            with self.subTest(rule_id=rule_id):
+                self.assertIn(rule_id, self._rules(suffix, positive))
+                self.assertNotIn(rule_id, self._rules(suffix, negative))
+
+    def test_a02_covers_managed_runtime_apis_from_the_guide(self) -> None:
+        servlet_socket = (
+            "class Handler extends HttpServlet {\n"
+            "  void run() { Socket socket = new Socket(host, port); }\n"
+            "}"
+        )
+        servlet_exit = (
+            "class Handler extends HttpServlet {\n"
+            "  void run() { System.exit(1); }\n"
+            "}"
+        )
+        desktop_exit = "void CloseNow() { Application.Exit(); }"
+        safe_java = (
+            "class Handler extends HttpServlet {\n"
+            "  void run() { URLConnection connection = url.openConnection(); }\n"
+            "}"
+        )
+        self.assertIn("code.dangerous-managed-api", self._rules(".java", servlet_socket))
+        self.assertIn("code.dangerous-managed-api", self._rules(".java", servlet_exit))
+        self.assertIn("code.dangerous-managed-api", self._rules(".cs", desktop_exit))
+        self.assertNotIn("code.dangerous-managed-api", self._rules(".java", safe_java))
 
     def test_e03_broad_exception_handler_only(self) -> None:
         self.assertIn(

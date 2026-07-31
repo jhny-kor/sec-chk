@@ -1,3 +1,3 @@
-# SW49 S-03 positive fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+import os
+def publish(path):
+    os.chmod(path, 0o777)

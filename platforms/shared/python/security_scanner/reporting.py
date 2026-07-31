@@ -252,7 +252,7 @@ TRANSLATIONS = {
         "no_findings_filter": "No findings match the current filters.",
         "sw49_heading": "SW Development Security 49 Control Status",
         "sw49_intro": "All 49 official implementation-stage weaknesses. Controls without automated coverage are never marked PASS.",
-        "sw49_zero_note": "No vulnerable items were detected within the automated checks that actually ran. Unsupported, manual-review, and not-scanned controls must be confirmed separately; this does not mean all 49 controls are satisfied.",
+        "sw49_zero_note": "No vulnerable items were detected within the checks that actually ran. Partial, not-applicable, and not-scanned controls must be interpreted separately; this does not mean all 49 controls are satisfied.",
         "sw49_columns": {
             "official_id": "Official item (KODA ID)",
             "category": "Type",
@@ -490,7 +490,7 @@ TRANSLATIONS = {
         "no_findings_filter": "현재 필터와 일치하는 발견 항목이 없습니다.",
         "sw49_heading": "소프트웨어 개발보안 49 기준 현황",
         "sw49_intro": "공식 구현단계 보안약점 49개 전체 상태입니다. 자동 점검이 없는 기준은 통과로 표시하지 않습니다.",
-        "sw49_zero_note": "현재 실행된 자동 점검 범위에서는 취약 항목이 탐지되지 않았습니다. 미지원·수동 검토·미실행 기준은 별도로 확인해야 하며, 전체 49개 기준의 준수를 의미하지 않습니다.",
+        "sw49_zero_note": "현재 실행된 점검 범위에서는 취약 항목이 탐지되지 않았습니다. 부분 점검·해당 없음·미실행 기준은 별도로 확인해야 하며, 전체 49개 기준의 준수를 의미하지 않습니다.",
         "sw49_columns": {
             "official_id": "공식 항목 (KODA ID)",
             "category": "분류",
@@ -1082,6 +1082,56 @@ RULE_TRANSLATIONS_KO = {
         "title": "위험한 C/C++ 버퍼 API 사용",
         "description": "버퍼 오버플로우와 자주 연결되는 오래된 C/C++ API가 사용된 패턴입니다.",
         "recommendation": "경계가 있는 대체 API를 사용하고 대상 버퍼 크기를 검증하세요.",
+    },
+    "code.integer-overflow-user-input": {
+        "title": "외부 정수 입력의 범위 검증 누락 의심",
+        "description": "외부 입력에서 파싱한 정수가 범위 확인 없이 배열 인덱스나 할당 크기에 사용되는 패턴입니다.",
+        "recommendation": "인덱스·할당·산술에 사용하기 전에 하한과 상한을 모두 검증하세요.",
+    },
+    "code.security-decision-user-input": {
+        "title": "외부 입력에 의한 보안·업무 결정 의심",
+        "description": "역할, 권한, 가격 등의 결정값이 요청 입력에서 직접 전달되는 패턴입니다.",
+        "recommendation": "결정값은 신뢰할 수 있는 서버측 상태에서 조회하고 외부 입력을 검증하세요.",
+    },
+    "code.authorization-check-missing": {
+        "title": "중요 기능의 인가 검사 누락 의심",
+        "description": "중요 엔드포인트나 메소드 주변에서 역할·소유권·권한 검사가 보이지 않습니다.",
+        "recommendation": "민감 작업 전에 기능 수준과 객체 수준 인가를 모두 강제하세요.",
+    },
+    "code.insecure-resource-permissions": {
+        "title": "중요 자원의 과도한 권한 설정",
+        "description": "모든 사용자 쓰기 또는 전체 제어 권한을 명시적으로 부여하는 패턴입니다.",
+        "recommendation": "필요한 서비스 계정에만 최소 읽기·쓰기 권한을 부여하세요.",
+    },
+    "code.weak-password-policy": {
+        "title": "취약한 비밀번호 길이 정책",
+        "description": "명시된 비밀번호 최소 길이가 8자보다 짧습니다.",
+        "recommendation": "조직 정책에 맞는 최소 길이와 유출 비밀번호 차단 정책을 적용하세요.",
+    },
+    "code.uncontrolled-loop": {
+        "title": "종료 경로 없는 반복문·재귀 의심",
+        "description": "상수 조건 반복문 또는 직접 재귀에서 종료 경로가 보이지 않습니다.",
+        "recommendation": "종료 조건, 제한 횟수, 시간 제한 또는 재귀 기저 조건을 추가하세요.",
+    },
+    "code.session-shared-state": {
+        "title": "세션 데이터의 공유 상태 저장 의심",
+        "description": "요청별 사용자 데이터가 모듈 전역 또는 서블릿·컨트롤러 인스턴스 필드에 저장됩니다.",
+        "recommendation": "사용자 데이터는 요청·세션 범위에 유지하고 공유 가변 필드에 저장하지 마세요.",
+    },
+    "code.private-array-return": {
+        "title": "Private 배열의 직접 반환",
+        "description": "public 메소드가 private 배열 또는 가변 컬렉션 참조를 직접 반환합니다.",
+        "recommendation": "clone, 불변 뷰 또는 방어적 복사본을 반환하세요.",
+    },
+    "code.private-array-assignment": {
+        "title": "Public 데이터의 Private 배열 직접 할당",
+        "description": "호출자가 소유한 배열 또는 가변 컬렉션 참조를 private 필드에 직접 저장합니다.",
+        "recommendation": "저장 전에 입력을 clone하거나 방어적으로 복사하세요.",
+    },
+    "code.dangerous-managed-api": {
+        "title": "위험한 Java/J2EE 또는 C# API 사용",
+        "description": "가이드가 관리형 애플리케이션 문맥에서 취약하다고 제시한 API 사용 패턴입니다.",
+        "recommendation": "직접 소켓·강제 프로세스 종료 대신 관리형 연결 API와 정상 종료 절차를 사용하세요.",
     },
     "code.unbounded-request-body": {
         "title": "요청 본문 크기 제한이 보이지 않음",
@@ -1683,13 +1733,17 @@ def _sw49_display_row(entry: dict[str, object], language: str) -> dict[str, str]
     guide_id = str(entry.get("guide_id", "")).strip()
     koda_id = str(entry.get("official_id", "")).strip()
     display_id = f"{guide_id} ({koda_id})" if guide_id and koda_id else guide_id or koda_id
+    if status == "NOT_APPLICABLE":
+        executed = str(status_labels.get(status, status)) if isinstance(status_labels, dict) else status
+    else:
+        executed = str(labels.get("sw49_executed_yes", "Run")) if entry.get("executed") else str(labels.get("sw49_executed_no", "Not run"))
     return {
         "official_id": display_id,
         "category": str(category_labels.get(language) or category_labels.get("en") or entry.get("category_id", "")) if isinstance(category_labels, dict) else str(entry.get("category_id", "")),
         "title": str(title.get(language) or title.get("en") or "") if isinstance(title, dict) else str(title),
         "cwe": ", ".join(str(item) for item in entry.get("cwe_ids", [])),
         "support": str(support_labels.get(support, support)) if isinstance(support_labels, dict) else support,
-        "executed": str(labels.get("sw49_executed_yes", "Run")) if entry.get("executed") else str(labels.get("sw49_executed_no", "Not run")),
+        "executed": executed,
         "status": str(status_labels.get(status, status)) if isinstance(status_labels, dict) else status,
         "rules": ", ".join(str(item) for item in entry.get("rule_ids", [])),
         "finding_count": str(entry.get("finding_count", 0)),
@@ -5262,7 +5316,9 @@ HTML_TEMPLATE = """<!doctype html>
           title,
           cwe: (entry.cwe_ids || []).join(", "),
           support: supportLabels[entry.support_level] || entry.support_level || "",
-          executed: entry.executed ? (activeLabels.sw49_executed_yes || "Run") : (activeLabels.sw49_executed_no || "Not run"),
+          executed: entry.status === "NOT_APPLICABLE"
+            ? (statusLabels.NOT_APPLICABLE || "Not applicable")
+            : (entry.executed ? (activeLabels.sw49_executed_yes || "Run") : (activeLabels.sw49_executed_no || "Not run")),
           status: statusLabels[entry.status] || entry.status || "",
           rules: (entry.rule_ids || []).join(", "),
           finding_count: String(entry.finding_count || 0),
