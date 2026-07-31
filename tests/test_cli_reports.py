@@ -242,6 +242,9 @@ class WindowsAliasPackagingTests(unittest.TestCase):
         self.assertIn('$previousErrorActionPreference = $ErrorActionPreference', script)
         self.assertIn('$sw49SmokeExitCode = $LASTEXITCODE', script)
         self.assertIn('if ($sw49SmokeExitCode -ne 0', script)
+        self.assertIn('validate-sw49-smoke.py', script)
+        self.assertIn('json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))', script)
+        self.assertNotIn('$sw49SmokeReport -Raw | ConvertFrom-Json', script)
         self.assertIn('"resources/sw49/*.json"', pyproject)
 
 

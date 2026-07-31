@@ -779,10 +779,14 @@ if ($LASTEXITCODE -ne 0) {
 
 # Test the packaged executable itself against Windows false-positive regressions.
 $sw49SmokeDir = Join-Path $BuildRoot "sw49-false-positive-smoke"
-$sw49SmokeReport = Join-Path $sw49SmokeDir "report.json"
+$sw49SmokeReport = Join-Path $BuildRoot "sw49-false-positive-smoke-report.json"
+$sw49SmokeValidator = Join-Path $BuildRoot "validate-sw49-smoke.py"
 
 if (Test-Path -LiteralPath $sw49SmokeDir) {
     Remove-Item -LiteralPath $sw49SmokeDir -Recurse -Force
+}
+if (Test-Path -LiteralPath $sw49SmokeReport) {
+    Remove-Item -LiteralPath $sw49SmokeReport -Force
 }
 
 New-Item -ItemType Directory -Path (Join-Path $sw49SmokeDir "pdfjs\web") -Force | Out-Null
@@ -819,6 +823,36 @@ const layout = pdfDocument.getPageLayout().catch(function () {});
 Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "unsafe.c") -Content @'
 void log_value(char *user_input) { printf(user_input); }
 '@
+Write-Utf8NoBomFile -Path $sw49SmokeValidator -Content @'
+import json
+import sys
+from pathlib import Path
+
+findings = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")).get("findings", [])
+unexpected = []
+
+for finding in findings:
+    leaf = Path(str(finding.get("path", ""))).name
+    rule_id = str(finding.get("rule_id", ""))
+    if (
+        (leaf == "DateCase.java" and rule_id == "code.format-string-user-input")
+        or (leaf == "ThreadCase.java" and rule_id == "code.null-pointer-dereference")
+        or (leaf == "viewer.html" and rule_id == "code.eval-user-input")
+        or leaf == "jsrender.min.js"
+        or (leaf == "viewer.js" and rule_id == "code.empty-exception-handler")
+    ):
+        unexpected.append(rule_id)
+
+if unexpected:
+    raise SystemExit("known SW49 false positives: " + ", ".join(unexpected))
+
+if not any(
+    str(finding.get("rule_id", "")) == "code.format-string-user-input"
+    and Path(str(finding.get("path", ""))).name == "unsafe.c"
+    for finding in findings
+):
+    raise SystemExit("SW49 positive control was not detected")
+'@
 
 $previousErrorActionPreference = $ErrorActionPreference
 try {
@@ -831,31 +865,20 @@ try {
         --format json `
         --output $sw49SmokeReport *> $null
     $sw49SmokeExitCode = $LASTEXITCODE
+
+    if ($sw49SmokeExitCode -ne 0 -or -not (Test-Path -LiteralPath $sw49SmokeReport -PathType Leaf)) {
+        throw "Packaged KODA CLI failed the SW49 false-positive smoke scan."
+    }
+
+    $sw49SmokeValidationOutput = @(& $VenvPython $sw49SmokeValidator $sw49SmokeReport 2>&1)
+    $sw49SmokeValidationExitCode = $LASTEXITCODE
+
+    if ($sw49SmokeValidationExitCode -ne 0) {
+        throw "Packaged KODA CLI failed SW49 smoke validation: $($sw49SmokeValidationOutput -join ' ')"
+    }
 }
 finally {
     $ErrorActionPreference = $previousErrorActionPreference
-}
-
-if ($sw49SmokeExitCode -ne 0 -or -not (Test-Path -LiteralPath $sw49SmokeReport -PathType Leaf)) {
-    throw "Packaged KODA CLI failed the SW49 false-positive smoke scan."
-}
-
-$sw49SmokeFindings = @((Get-Content -LiteralPath $sw49SmokeReport -Raw | ConvertFrom-Json).findings)
-$unexpectedSmokeFindings = @($sw49SmokeFindings | Where-Object {
-    $leaf = Split-Path -Leaf $_.path
-    ($leaf -eq "DateCase.java" -and $_.rule_id -eq "code.format-string-user-input") -or
-    ($leaf -eq "ThreadCase.java" -and $_.rule_id -eq "code.null-pointer-dereference") -or
-    ($leaf -eq "viewer.html" -and $_.rule_id -eq "code.eval-user-input") -or
-    ($leaf -eq "jsrender.min.js") -or
-    ($leaf -eq "viewer.js" -and $_.rule_id -eq "code.empty-exception-handler")
-})
-
-if ($unexpectedSmokeFindings.Count -gt 0) {
-    throw "Packaged KODA CLI still reports known SW49 false positives: $($unexpectedSmokeFindings.rule_id -join ', ')"
-}
-
-if (-not ($sw49SmokeFindings | Where-Object { $_.rule_id -eq "code.format-string-user-input" -and (Split-Path -Leaf $_.path) -eq "unsafe.c" })) {
-    throw "Packaged KODA CLI SW49 smoke scan did not detect the positive control."
 }
 
 # ---------------------------------------------------------------------------
