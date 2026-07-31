@@ -1,3 +1,6 @@
-/* SW49 C-03 positive fixture */
-/* Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture. */
-int fixture(int value) { return value; }
+#include <stdlib.h>
+int read(void) {
+  int *p = malloc(sizeof(int));
+  free(p);
+  return *p;
+}

@@ -1,3 +1,2 @@
-# SW49 S-04 negative fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+import hashlib
+def digest(file_bytes): return hashlib.sha256(file_bytes).hexdigest()

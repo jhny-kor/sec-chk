@@ -9,13 +9,13 @@ from typing import Callable
 
 from . import git_changes, reachability
 from .checks import code_patterns, configuration, dependencies, prevention, screen_quality, secrets
-from .checks.common import clear_read_text_cache, normalized_relpath, read_text_lines
+from .checks.common import clear_read_text_cache, is_text_candidate, normalized_relpath, read_text_lines
 from .checks.host import HostScanOptions, check_host
 from .dependency_inventory import components_from_file, queryable_osv_components, unique_components
 from .discovery import discover_projects
 from .ignore import filter_ignored_findings
 from .models import DependencyComponent, Finding, ScanResult, ScannerConfig, TargetConfig
-from .source_analysis import AnalyzerRun, SourceAnalysisSummary, SourceManifest, enumerate_source_files, is_source_file
+from .source_analysis import AnalyzerRun, SourceAnalysisSummary, SourceManifest, enumerate_source_files, is_source_file, source_languages
 from .sarif_import import SarifImportError, import_sarif, load_sarif
 from .osv_vulnerabilities import query_osv_findings
 
@@ -79,11 +79,13 @@ class SecurityScanner:
         self._js_imports: set[str] = set()
         self._changed_scope: set[Path] = set()
         self._changed_scope_active = False
+        self._analyzed_languages: set[str] = set()
 
     def scan(self) -> ScanResult:
         clear_read_text_cache()
         self._changed_scope.clear()
         self._changed_scope_active = False
+        self._analyzed_languages.clear()
         findings: list[Finding] = []
         components: list[DependencyComponent] = []
         source_profile = self.config.standard == "sw-dev-security-49"
@@ -179,6 +181,7 @@ class SecurityScanner:
             analyzer_runs=tuple(analyzer_runs), strategies=strategies,
             all_findings=ordered, report_findings=report_findings,
             warnings=tuple(self.warnings),
+            analyzed_languages=tuple(sorted(self._analyzed_languages)),
         )
         return ScanResult(report_findings, summary, tuple(self.components), tuple(self.warnings))
 
@@ -256,9 +259,10 @@ class SecurityScanner:
             return [], []
         if target.path.is_file():
             source_profile = self.config.standard == "sw-dev-security-49"
-            if source_profile and not is_source_file(target.path):
+            if source_profile and not (is_source_file(target.path) or is_text_candidate(target.path)):
                 return [], []
             components = [] if source_profile else self._components_from_file(target.path, target)
+            self._analyzed_languages.update(source_languages(target.path))
             findings = self._scan_file(target.path, target)
             self._collect_imports(target.path, target)
             if self.config.standard != "sw-dev-security-49":
@@ -279,18 +283,19 @@ class SecurityScanner:
         # diff-scoped; the evidence ledger and status use the full project.
         filtering = self.config.changed_only and changed is not None and self.config.standard != "sw-dev-security-49"
         for file_path in self._iter_files(target):
-            if self.config.standard == "sw-dev-security-49" and not is_source_file(file_path):
+            if self.config.standard == "sw-dev-security-49" and not (is_source_file(file_path) or is_text_candidate(file_path)):
                 continue
             if filtering and file_path.resolve() not in changed:
                 continue
             scanned_files.append(file_path)
+            self._analyzed_languages.update(source_languages(file_path))
             file_components = [] if self.config.standard == "sw-dev-security-49" else self._components_from_file(file_path, target)
             components.extend(file_components)
             findings.extend(self._scan_file(file_path, target))
             self._collect_imports(file_path, target)
         # Project-level prevention reasons over the whole project; skip it while diff-scoping
         # so a partial file list does not produce spurious "missing control" findings.
-        if self.config.standard != "sw-dev-security-49" and "prevention" in target.categories and not filtering:
+        if "prevention" in target.categories and not filtering:
             findings.extend(
                 replace(finding, target=target.name) if not finding.target else finding
                 for finding in prevention.check_project(target.path, scanned_files, target)
@@ -308,17 +313,17 @@ class SecurityScanner:
             root = self.effective_targets[0].path.parent.resolve() if self.effective_targets else Path.cwd()
             return root, ()
         if len(paths) == 1 and paths[0].is_file():
-            return paths[0], paths if is_source_file(paths[0]) else ()
+            return paths[0], paths if (is_source_file(paths[0]) or is_text_candidate(paths[0])) else ()
         roots: list[Path] = []
         files: list[Path] = []
         for path in paths:
             if path.is_file():
                 roots.append(path.parent)
-                if is_source_file(path):
+                if is_source_file(path) or is_text_candidate(path):
                     files.append(path)
             else:
                 roots.append(path)
-                files.extend(item for item in enumerate_source_files(path, exclude=DEFAULT_EXCLUDE_DIRS) if is_source_file(item))
+                files.extend(item for item in enumerate_source_files(path, exclude=DEFAULT_EXCLUDE_DIRS) if is_source_file(item) or is_text_candidate(item))
         if not roots:
             return Path.cwd(), ()
         common = Path(os.path.commonpath([str(path) for path in roots])).resolve()

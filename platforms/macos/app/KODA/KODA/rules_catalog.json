@@ -241,6 +241,11 @@
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.unbounded-request-body",
           "title": "요청 본문 크기 제한이 보이지 않음",
           "description": "명시적 크기 제한 없이 요청 본문 파서가 활성화된 패턴입니다."
@@ -274,6 +279,11 @@
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.csrf-disabled",
@@ -963,6 +973,11 @@
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.unsafe-deserialization",
           "title": "위험한 역직렬화 API 사용",
           "description": "신뢰할 수 없는 데이터에 위험할 수 있는 역직렬화 API가 사용된 패턴입니다."
@@ -976,6 +991,11 @@
           "id": "code.stack-trace-exposure",
           "title": "스택 트레이스 노출 의심",
           "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다."
+        },
+        {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
         }
       ]
     },
@@ -1143,6 +1163,11 @@
           "id": "code.empty-exception-handler",
           "title": "빈 예외 처리 블록",
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
+        },
+        {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
         },
         {
           "id": "code.stack-trace-exposure",
@@ -1620,6 +1645,11 @@
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
@@ -1802,6 +1832,11 @@
           "id": "code.session-long-expiry",
           "title": "세션 또는 토큰 만료 시간이 과도함",
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.unbounded-request-body",
@@ -2201,6 +2236,11 @@
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.xss-dom-sink",
           "title": "XSS 의심 HTML 출력 지점",
           "description": "사용자 입력으로 보이는 값이 HTML 렌더링 지점으로 전달되는 패턴입니다."
@@ -2558,9 +2598,19 @@
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.csrf-disabled",
@@ -3032,9 +3082,9 @@
           "description": "외부 연결에서 인증서 또는 호스트명 검증이 꺼져 있는 것으로 보입니다."
         },
         {
-          "id": "code.insecure-cookie-settings",
-          "title": "안전하지 않은 쿠키 설정",
-          "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "secret.sensitive-comment",
@@ -3062,9 +3112,9 @@
           "description": "main, master, latest 같은 mutable branch/ref를 참조하는 GitHub Actions가 있습니다."
         },
         {
-          "id": "code.api-missing-rate-limit",
-          "title": "API rate limit 기준이 보이지 않음",
-          "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.insecure-temp-file",
@@ -3087,9 +3137,29 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
         },
         {
           "id": "code.unsafe-deserialization",
@@ -3100,6 +3170,11 @@
           "id": "config.development-environment",
           "title": "개발 환경 플래그가 있음",
           "description": "개발 환경 설정이 배포에 재사용되면 런타임 보안 가정이 약해질 수 있습니다."
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         }
       ]
     },
@@ -3279,9 +3354,9 @@
           "description": "외부 연결에서 인증서 또는 호스트명 검증이 꺼져 있는 것으로 보입니다."
         },
         {
-          "id": "code.insecure-cookie-settings",
-          "title": "안전하지 않은 쿠키 설정",
-          "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "secret.sensitive-comment",
@@ -3309,9 +3384,9 @@
           "description": "main, master, latest 같은 mutable branch/ref를 참조하는 GitHub Actions가 있습니다."
         },
         {
-          "id": "code.api-missing-rate-limit",
-          "title": "API rate limit 기준이 보이지 않음",
-          "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.insecure-temp-file",
@@ -3334,9 +3409,29 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
         },
         {
           "id": "code.unsafe-deserialization",
@@ -3347,6 +3442,11 @@
           "id": "config.development-environment",
           "title": "개발 환경 플래그가 있음",
           "description": "개발 환경 설정이 배포에 재사용되면 런타임 보안 가정이 약해질 수 있습니다."
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         }
       ]
     },
@@ -3526,9 +3626,9 @@
           "description": "외부 연결에서 인증서 또는 호스트명 검증이 꺼져 있는 것으로 보입니다."
         },
         {
-          "id": "code.insecure-cookie-settings",
-          "title": "안전하지 않은 쿠키 설정",
-          "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "secret.sensitive-comment",
@@ -3556,9 +3656,9 @@
           "description": "main, master, latest 같은 mutable branch/ref를 참조하는 GitHub Actions가 있습니다."
         },
         {
-          "id": "code.api-missing-rate-limit",
-          "title": "API rate limit 기준이 보이지 않음",
-          "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.insecure-temp-file",
@@ -3581,9 +3681,29 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
         },
         {
           "id": "code.unsafe-deserialization",
@@ -3594,6 +3714,11 @@
           "id": "config.development-environment",
           "title": "개발 환경 플래그가 있음",
           "description": "개발 환경 설정이 배포에 재사용되면 런타임 보안 가정이 약해질 수 있습니다."
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         }
       ]
     },
@@ -3616,6 +3741,11 @@
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.csrf-disabled",
@@ -4260,6 +4390,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "스택 트레이스 노출 의심",
           "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다."
@@ -4290,6 +4425,11 @@
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
         },
         {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
+        },
+        {
           "id": "code.jwt-verification-disabled",
           "title": "JWT 서명 검증이 비활성화된 것으로 보임",
           "description": "JWT decode 또는 검증 설정에서 서명 검증이 꺼져 있을 수 있습니다."
@@ -4318,6 +4458,11 @@
           "id": "code.api-missing-rate-limit",
           "title": "API rate limit 기준이 보이지 않음",
           "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.external-api-no-timeout",
@@ -4418,6 +4563,26 @@
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         }
       ]
     },
@@ -4557,6 +4722,11 @@
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.external-api-no-timeout",
           "title": "외부 API 호출에 timeout이 보이지 않음",
           "description": "외부 API 호출에 명시적 timeout 또는 abort signal이 없어 장애 전파와 리소스 고갈 위험이 있습니다."
@@ -4570,6 +4740,11 @@
           "id": "prevention.api-security-plan-missing",
           "title": "API 보안 계획이 없음",
           "description": "API 라우트 또는 핸들러가 있으나 인벤토리, 인증/인가, rate limit, 외부 API 사용 기준이 문서화되어 있지 않습니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.weak-hash",
@@ -4867,6 +5042,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "스택 트레이스 노출 의심",
           "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다."
@@ -5114,6 +5294,11 @@
           "description": "애플리케이션 자격증명으로 쓰이는 세션이나 토큰 수명이 매우 길어 보입니다."
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.api-route-missing-auth",
           "title": "민감 API 라우트에 인증 가드가 보이지 않음",
           "description": "관리자, 사용자, 계정, 결제 등 민감 API 라우트가 명시적 인증/인가 가드 없이 선언된 것으로 보입니다."
@@ -5127,6 +5312,11 @@
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.csrf-disabled",
@@ -5177,6 +5367,11 @@
           "id": "code.empty-exception-handler",
           "title": "빈 예외 처리 블록",
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
+        },
+        {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
         },
         {
           "id": "code.stack-trace-exposure",
@@ -5816,6 +6011,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "스택 트레이스 노출 의심",
           "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다."
@@ -5846,6 +6046,11 @@
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
         },
         {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
+        },
+        {
           "id": "code.jwt-verification-disabled",
           "title": "JWT 서명 검증이 비활성화된 것으로 보임",
           "description": "JWT decode 또는 검증 설정에서 서명 검증이 꺼져 있을 수 있습니다."
@@ -5874,6 +6079,11 @@
           "id": "code.api-missing-rate-limit",
           "title": "API rate limit 기준이 보이지 않음",
           "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.external-api-no-timeout",
@@ -5969,6 +6179,26 @@
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         },
         {
           "id": "dependency.package-json-invalid",
@@ -6393,6 +6623,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "스택 트레이스 노출 의심",
           "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다."
@@ -6411,6 +6646,11 @@
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.jwt-verification-disabled",
@@ -6441,6 +6681,11 @@
           "id": "code.api-missing-rate-limit",
           "title": "API rate limit 기준이 보이지 않음",
           "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.external-api-no-timeout",
@@ -6531,6 +6776,26 @@
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         },
         {
           "id": "prevention.ci-security-scan-missing",
@@ -7191,6 +7456,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "스택 트레이스 노출 의심",
           "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다."
@@ -7209,6 +7479,11 @@
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.jwt-verification-disabled",
@@ -7239,6 +7514,11 @@
           "id": "code.api-missing-rate-limit",
           "title": "API rate limit 기준이 보이지 않음",
           "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.external-api-no-timeout",
@@ -7329,6 +7609,26 @@
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         },
         {
           "id": "prevention.pre-commit-hook-missing",
@@ -7706,6 +8006,11 @@
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.csrf-disabled",
@@ -8100,6 +8405,11 @@
           "description": "예외를 기록하거나 복구하지 않고 무시하는 패턴입니다."
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "스택 트레이스 노출 의심",
           "description": "애플리케이션 코드에서 원시 스택 트레이스를 출력할 수 있는 패턴입니다."
@@ -8118,6 +8428,11 @@
           "id": "code.insecure-cookie-settings",
           "title": "안전하지 않은 쿠키 설정",
           "description": "세션 쿠키의 Secure 또는 HttpOnly 보호가 비활성화된 것으로 보이는 패턴입니다."
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
         },
         {
           "id": "code.jwt-verification-disabled",
@@ -8148,6 +8463,11 @@
           "id": "code.api-missing-rate-limit",
           "title": "API rate limit 기준이 보이지 않음",
           "description": "API framework bootstrap이 있으나 이 라인에서 rate limit 또는 quota 통제가 확인되지 않습니다."
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
         },
         {
           "id": "code.external-api-no-timeout",
@@ -8238,6 +8558,26 @@
           "id": "code.null-pointer-dereference",
           "title": "NULL 포인터 역참조 가능성",
           "description": "null이거나 null을 반환할 수 있는 조회 결과가 방어 처리 없이 참조되는 것으로 보입니다."
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
+          "description": ""
         },
         {
           "id": "prevention.ssdf-workflow-missing",
@@ -8812,6 +9152,11 @@
           "description": ""
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.unbounded-request-body",
           "title": "Unbounded request body",
           "description": ""
@@ -8844,6 +9189,11 @@
         {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -9534,6 +9884,11 @@
           "description": ""
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.unsafe-deserialization",
           "title": "Unsafe deserialization",
           "description": ""
@@ -9546,6 +9901,11 @@
         {
           "id": "code.stack-trace-exposure",
           "title": "Stack trace exposure",
+          "description": ""
+        },
+        {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
           "description": ""
         }
       ]
@@ -9713,6 +10073,11 @@
         {
           "id": "code.empty-exception-handler",
           "title": "Empty exception handler",
+          "description": ""
+        },
+        {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
           "description": ""
         },
         {
@@ -10191,6 +10556,11 @@
           "description": ""
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
           "description": ""
@@ -10372,6 +10742,11 @@
         {
           "id": "code.session-long-expiry",
           "title": "Session long expiry",
+          "description": ""
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -10772,6 +11147,11 @@
           "description": ""
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.xss-dom-sink",
           "title": "Xss dom sink",
           "description": ""
@@ -11129,8 +11509,18 @@
           "description": ""
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -11603,8 +11993,8 @@
           "description": ""
         },
         {
-          "id": "code.insecure-cookie-settings",
-          "title": "Insecure cookie settings",
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -11633,8 +12023,8 @@
           "description": ""
         },
         {
-          "id": "code.api-missing-rate-limit",
-          "title": "Api missing rate limit",
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -11658,8 +12048,28 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
           "description": ""
         },
         {
@@ -11670,6 +12080,11 @@
         {
           "id": "config.development-environment",
           "title": "Development environment",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         }
       ]
@@ -11850,8 +12265,8 @@
           "description": ""
         },
         {
-          "id": "code.insecure-cookie-settings",
-          "title": "Insecure cookie settings",
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -11880,8 +12295,8 @@
           "description": ""
         },
         {
-          "id": "code.api-missing-rate-limit",
-          "title": "Api missing rate limit",
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -11905,8 +12320,28 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
           "description": ""
         },
         {
@@ -11917,6 +12352,11 @@
         {
           "id": "config.development-environment",
           "title": "Development environment",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         }
       ]
@@ -12097,8 +12537,8 @@
           "description": ""
         },
         {
-          "id": "code.insecure-cookie-settings",
-          "title": "Insecure cookie settings",
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -12127,8 +12567,8 @@
           "description": ""
         },
         {
-          "id": "code.api-missing-rate-limit",
-          "title": "Api missing rate limit",
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -12152,8 +12592,28 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
           "description": ""
         },
         {
@@ -12164,6 +12624,11 @@
         {
           "id": "config.development-environment",
           "title": "Development environment",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         }
       ]
@@ -12186,6 +12651,11 @@
         {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -12831,6 +13301,11 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "Stack trace exposure",
           "description": ""
@@ -12861,6 +13336,11 @@
           "description": ""
         },
         {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
+        },
+        {
           "id": "code.jwt-verification-disabled",
           "title": "Jwt verification disabled",
           "description": ""
@@ -12888,6 +13368,11 @@
         {
           "id": "code.api-missing-rate-limit",
           "title": "Api missing rate limit",
+          "description": ""
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -12988,6 +13473,26 @@
         {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         }
       ]
@@ -13128,6 +13633,11 @@
           "description": ""
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.external-api-no-timeout",
           "title": "External api no timeout",
           "description": ""
@@ -13140,6 +13650,11 @@
         {
           "id": "prevention.api-security-plan-missing",
           "title": "Api security plan missing",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -13438,6 +13953,11 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "Stack trace exposure",
           "description": ""
@@ -13685,6 +14205,11 @@
           "description": ""
         },
         {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
+          "description": ""
+        },
+        {
           "id": "code.api-route-missing-auth",
           "title": "Api route missing auth",
           "description": ""
@@ -13697,6 +14222,11 @@
         {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -13747,6 +14277,11 @@
         {
           "id": "code.empty-exception-handler",
           "title": "Empty exception handler",
+          "description": ""
+        },
+        {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
           "description": ""
         },
         {
@@ -14387,6 +14922,11 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "Stack trace exposure",
           "description": ""
@@ -14417,6 +14957,11 @@
           "description": ""
         },
         {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
+          "description": ""
+        },
+        {
           "id": "code.jwt-verification-disabled",
           "title": "Jwt verification disabled",
           "description": ""
@@ -14444,6 +14989,11 @@
         {
           "id": "code.api-missing-rate-limit",
           "title": "Api missing rate limit",
+          "description": ""
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -14539,6 +15089,26 @@
         {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         },
         {
@@ -14964,6 +15534,11 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "Stack trace exposure",
           "description": ""
@@ -14981,6 +15556,11 @@
         {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -15011,6 +15591,11 @@
         {
           "id": "code.api-missing-rate-limit",
           "title": "Api missing rate limit",
+          "description": ""
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -15101,6 +15686,26 @@
         {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         },
         {
@@ -15762,6 +16367,11 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "Stack trace exposure",
           "description": ""
@@ -15779,6 +16389,11 @@
         {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -15809,6 +16424,11 @@
         {
           "id": "code.api-missing-rate-limit",
           "title": "Api missing rate limit",
+          "description": ""
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -15899,6 +16519,26 @@
         {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         },
         {
@@ -16276,6 +16916,11 @@
         {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -16671,6 +17316,11 @@
           "description": ""
         },
         {
+          "id": "code.broad-exception-handler",
+          "title": "Broad exception handler",
+          "description": ""
+        },
+        {
           "id": "code.stack-trace-exposure",
           "title": "Stack trace exposure",
           "description": ""
@@ -16688,6 +17338,11 @@
         {
           "id": "code.insecure-cookie-settings",
           "title": "Insecure cookie settings",
+          "description": ""
+        },
+        {
+          "id": "code.persistent-sensitive-cookie",
+          "title": "Persistent sensitive cookie",
           "description": ""
         },
         {
@@ -16718,6 +17373,11 @@
         {
           "id": "code.api-missing-rate-limit",
           "title": "Api missing rate limit",
+          "description": ""
+        },
+        {
+          "id": "code.auth-attempt-protection-missing",
+          "title": "Auth attempt protection missing",
           "description": ""
         },
         {
@@ -16808,6 +17468,26 @@
         {
           "id": "code.null-pointer-dereference",
           "title": "Null pointer dereference",
+          "description": ""
+        },
+        {
+          "id": "code.improper-resource-release",
+          "title": "Improper resource release",
+          "description": ""
+        },
+        {
+          "id": "code.use-after-free",
+          "title": "Use after free",
+          "description": ""
+        },
+        {
+          "id": "code.uninitialized-variable",
+          "title": "Uninitialized variable",
+          "description": ""
+        },
+        {
+          "id": "code.dns-security-decision",
+          "title": "Dns security decision",
           "description": ""
         },
         {

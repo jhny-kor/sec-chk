@@ -1,3 +1,4 @@
-# SW49 E-03 positive fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+try:
+    process()
+except Exception as exc:
+    logger.warning("request failed: %s", exc)

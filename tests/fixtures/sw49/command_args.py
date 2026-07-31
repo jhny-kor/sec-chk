@@ -1,3 +1,2 @@
-# SW49 I-05 negative fixture
-# Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-def fixture(value=None): return value
+def ping(request):
+    subprocess.run(["ping", "--", request.args["host"]], shell=False, check=True)

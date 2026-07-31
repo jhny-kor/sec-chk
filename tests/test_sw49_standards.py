@@ -145,9 +145,9 @@ class Sw49ControlIntegrityTests(unittest.TestCase):
     def test_source_profile_does_not_overclaim_full_automation(self) -> None:
         support_counts = Counter(control.support_level for control in SW49_CONTROLS)
         self.assertEqual(support_counts["automated"], 0)
-        self.assertEqual(support_counts["partial"], 36)
+        self.assertEqual(support_counts["partial"], 40)
         self.assertEqual(support_counts["manual-review"], 9)
-        self.assertEqual(support_counts["unsupported"], 4)
+        self.assertEqual(support_counts["unsupported"], 0)
 
     def test_sw_dev_security_category_counts(self) -> None:
         counts = Counter(control.category_id for control in SW49_CONTROLS)
@@ -256,8 +256,11 @@ class Sw49MappingCorrectionTests(unittest.TestCase):
         mappings = rule_standard_mappings_payload()
         expected_controls = {
             "code.dangerous-c-buffer-api": {"I-16", "A-02"},
-            "code.empty-exception-handler": {"E-02", "E-03"},
-            "code.stack-trace-exposure": {"E-01", "E-03"},
+            "code.empty-exception-handler": {"E-02"},
+            "code.stack-trace-exposure": {"E-01"},
+            "code.broad-exception-handler": {"E-03"},
+            "code.persistent-sensitive-cookie": {"S-12"},
+            "code.auth-attempt-protection-missing": {"S-16"},
             "config.docker-add-http": {"S-05", "S-15"},
         }
         for rule_id, official_ids in expected_controls.items():
@@ -338,20 +341,20 @@ class Sw49EvaluationTests(unittest.TestCase):
         results = evaluate_sw49_controls([], ALL_SCAN_CATEGORIES)
         by_id = {entry["official_id"]: entry for entry in results}
         self.assertEqual(len(results), 49)
-        # unsupported controls are never PASS
+        # formerly unsupported controls now run conservative local review rules
         for official_id in ("C-02", "C-03", "C-04", "A-01"):
-            self.assertEqual(by_id[official_id]["status"], "UNSUPPORTED")
+            self.assertEqual(by_id[official_id]["status"], "NEEDS_REVIEW")
         # manual-review controls stay NEEDS_REVIEW
         for official_id in ("S-02", "S-03", "S-09", "T-02", "P-01", "P-03", "P-04", "I-14", "I-15"):
             self.assertEqual(by_id[official_id]["status"], "NEEDS_REVIEW")
         # partial controls without findings are not PASS either
         self.assertEqual(by_id["I-16"]["status"], "NEEDS_REVIEW")
 
-    def test_not_scanned_distinct_from_unsupported(self) -> None:
+    def test_unselected_controls_are_not_scanned(self) -> None:
         results = evaluate_sw49_controls([], scanned_categories=())
         by_id = {entry["official_id"]: entry for entry in results}
         self.assertEqual(by_id["I-01"]["status"], "NOT_SCANNED")
-        self.assertEqual(by_id["C-02"]["status"], "UNSUPPORTED")
+        self.assertEqual(by_id["C-02"]["status"], "NOT_SCANNED")
         self.assertFalse(by_id["I-01"]["executed"])
 
     def test_selected_category_does_not_leak_findings_to_other_controls(self) -> None:
@@ -390,7 +393,7 @@ class Sw49EvaluationTests(unittest.TestCase):
 
     def test_review_candidate_is_not_reported_as_confirmed_violation(self) -> None:
         finding = Finding(
-            rule_id="code.api-missing-rate-limit",
+            rule_id="code.auth-attempt-protection-missing",
             category="code",
             severity="low",
             title="candidate",
@@ -654,6 +657,82 @@ builder.parse(xmlInputStream);
             ),
         )
 
+        fixed_date = """\
+import devonframe.util.DateUtil;
+String applDate = DateUtil.getDate("yyyyMMdd");
+String startDate = DateUtil.getNextMonthDate(applDate, 1);
+String value = String.format(startDate, 6);
+"""
+        self.assertNotIn("code.format-string-user-input", self._rule_ids("A.java", fixed_date))
+        self.assertIn(
+            "code.format-string-user-input",
+            self._rule_ids("A.java", fixed_date.replace("import devonframe.util.DateUtil;\n", "")),
+        )
+
+        reassigned = fixed_date.replace(
+            "String value =",
+            'startDate = request.getParameter("startDate");\nString value =',
+        )
+        self.assertIn("code.format-string-user-input", self._rule_ids("A.java", reassigned))
+
+        compound_reassigned = fixed_date.replace(
+            "String value =",
+            'startDate += request.getParameter("suffix");\nString value =',
+        )
+        self.assertIn("code.format-string-user-input", self._rule_ids("A.java", compound_reassigned))
+
+        conditional_reassigned = fixed_date.replace(
+            "String value =",
+            'if (request != null) startDate += request.getParameter("suffix");\nString value =',
+        )
+        self.assertIn("code.format-string-user-input", self._rule_ids("A.java", conditional_reassigned))
+
+        cross_method = """\
+import devonframe.util.DateUtil;
+void first() {
+    String startDate = DateUtil.getDate("yyyyMMdd");
+}
+void second() {
+    String value = String.format(startDate, 6);
+}
+"""
+        self.assertIn("code.format-string-user-input", self._rule_ids("A.java", cross_method))
+
+        later_assignment = """\
+import devonframe.util.DateUtil;
+String value = String.format(startDate, 6);
+String startDate = DateUtil.getDate("yyyyMMdd");
+"""
+        self.assertIn("code.format-string-user-input", self._rule_ids("A.java", later_assignment))
+
+        class_field_source = """\
+import devonframe.util.DateUtil;
+class Dates {
+    String applDate = DateUtil.getDate("yyyyMMdd");
+    void run() {
+        String startDate = DateUtil.getNextMonthDate(applDate, 1);
+        String value = String.format("%s01", String.format(startDate, "yyyyMM"));
+    }
+}
+"""
+        self.assertNotIn("code.format-string-user-input", self._rule_ids("A.java", class_field_source))
+
+    def test_regexp_exec_is_not_eval(self) -> None:
+        source = """\
+function getParam(name) {
+    return new RegExp('[?&]' + name + '=([^&#]*)').exec(window.location.href);
+}
+"""
+        self.assertNotIn("code.eval-user-input", self._rule_ids("viewer.html", source))
+        self.assertIn(
+            "code.eval-user-input",
+            self._rule_ids("worker.py", 'exec(request.args["expression"])\n'),
+        )
+        self.assertIn(
+            "code.eval-user-input",
+            self._rule_ids("worker.js", "exec(window.location.href);\n"),
+        )
+
     def test_minified_javascript_is_not_treated_as_application_source(self) -> None:
         minified = (
             '/*! jQuery v1.9.1 */(function(e,t){var token=Math.random();'
@@ -682,6 +761,39 @@ builder.parse(xmlInputStream);
                 "code.xss-dom-sink",
                 {item.rule_id for item in code_patterns.check_file(application_path, TargetConfig(name="t", path=Path(tmp)))},
             )
+
+            jsrender_path = Path(tmp) / "thirdparty" / "jsrender.min.js"
+            jsrender_path.write_text(
+                "/*! JsRender v1.0.5 */\n"
+                "!function(){try{}catch(e){};target.innerHTML=location.hash}();\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(code_patterns.check_file(jsrender_path, TargetConfig(name="t", path=Path(tmp))))
+
+            banner_application_path = Path(tmp) / "thirdparty" / "application.js"
+            banner_application_path.write_text(
+                "/*! JsRender v1.0.5 */\n"
+                "const value = location.hash; target.innerHTML = value;\n",
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "code.xss-dom-sink",
+                {
+                    item.rule_id
+                    for item in code_patterns.check_file(
+                        banner_application_path,
+                        TargetConfig(name="t", path=Path(tmp)),
+                    )
+                },
+            )
+
+            pdfjs_viewer = Path(tmp) / "pdfjs" / "web" / "viewer.js"
+            pdfjs_viewer.parent.mkdir(parents=True)
+            pdfjs_viewer.write_text(
+                "const layout = pdfDocument.getPageLayout().catch(function () {});\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(code_patterns.check_file(pdfjs_viewer, TargetConfig(name="t", path=Path(tmp))))
 
     def test_java_null_pointer_definite_and_nullable_candidates(self) -> None:
         definite = """\
@@ -746,6 +858,13 @@ user.getName();
             self._rule_ids(
                 "SingleStatementGuard.java",
                 "User user = users.get(userId);\nif (user != null)\n    user.getName();\n",
+            ),
+        )
+        self.assertNotIn(
+            "code.null-pointer-dereference",
+            self._rule_ids(
+                "InlineNonNull.java",
+                "Thread thread11 = null;\nif (thread11 != null) thread11.join();\n",
             ),
         )
         self.assertNotIn(
@@ -985,13 +1104,13 @@ class Sw49ReportTests(unittest.TestCase):
         self.assertIn("미지원", report)
         self.assertIn("CWE-89", report)
 
-    def test_markdown_partial_and_unsupported_controls_are_not_shown_as_pass(self) -> None:
+    def test_markdown_partial_controls_are_not_shown_as_pass(self) -> None:
         report = render_markdown_from_payload(self._payload([]), "ko")
         c01_row = next(line for line in report.splitlines() if "(C-01)" in line)
         self.assertIn("부분 자동", c01_row)
         self.assertNotIn("통과", c01_row)
         c02_row = next(line for line in report.splitlines() if "(C-02)" in line)
-        self.assertIn("미지원", c02_row)
+        self.assertIn("부분 자동", c02_row)
         self.assertNotIn("통과", c02_row)
 
     def test_xlsx_and_hwpx_include_49_rows(self) -> None:
@@ -1069,6 +1188,84 @@ class Sw49ReportTests(unittest.TestCase):
     def test_other_standard_payload_has_no_sw49_table(self) -> None:
         payload = build_dashboard_payload([], (), "ko", standard="owasp-top-10-2025", scanned_categories=ALL_SCAN_CATEGORIES)
         self.assertIsNone(payload["sw49"])
+
+class Sw49SemanticRuleTests(unittest.TestCase):
+    def _rules(self, suffix: str, source: str) -> set[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"sample{suffix}"
+            path.write_text(source, encoding="utf-8")
+            return {item.rule_id for item in code_patterns.check_file(path, TargetConfig(name="t", path=path))}
+
+    def test_c02_resource_release_positive_and_safe_cases(self) -> None:
+        self.assertIn("code.improper-resource-release", self._rules(".java", "Connection c = DriverManager.getConnection(url);\nreturn c;"))
+        self.assertNotIn("code.improper-resource-release", self._rules(".java", "try (Connection c = DriverManager.getConnection(url)) { use(c); }"))
+        self.assertNotIn("code.improper-resource-release", self._rules(".java", "Connection c = DriverManager.getConnection(url);\nc.close();"))
+        self.assertIn(
+            "code.improper-resource-release",
+            self._rules(".java", "void first() { Connection in = getConnection(url); in.close(); }\nvoid second() { Connection in = getConnection(url); use(in); }"),
+        )
+
+    def test_c03_use_after_free_and_reset_or_reassign(self) -> None:
+        self.assertIn("code.use-after-free", self._rules(".c", "int *p = malloc(4);\nfree(p);\nreturn *p;"))
+        self.assertNotIn("code.use-after-free", self._rules(".c", "int *p = malloc(4);\nfree(p);\np = NULL;\nreturn 0;"))
+        self.assertNotIn("code.use-after-free", self._rules(".c", "int *p = malloc(4);\nfree(p);\np = malloc(4);\nreturn *p;"))
+        self.assertNotIn(
+            "code.use-after-free",
+            self._rules(".c", "void first() { int *p = malloc(4); free(p); }\nint second() { int *p = malloc(4); return *p; }"),
+        )
+
+    def test_c04_uninitialized_and_initialized_cases(self) -> None:
+        self.assertIn("code.uninitialized-variable", self._rules(".c", "int value;\nreturn value;"))
+        self.assertNotIn("code.uninitialized-variable", self._rules(".c", "int value = 1;\nreturn value;"))
+        self.assertNotIn("code.uninitialized-variable", self._rules(".c", "int value;\nvalue = 1;\nreturn value;"))
+
+    def test_a01_dns_security_decision_and_lookup_only(self) -> None:
+        self.assertIn("code.dns-security-decision", self._rules(".py", "import socket\nhost = socket.gethostbyname(name)\nreturn trusted == host"))
+        self.assertNotIn("code.dns-security-decision", self._rules(".py", "import socket\nhost = socket.gethostbyname(name)\nprint(host)"))
+        self.assertNotIn(
+            "code.dns-security-decision",
+            self._rules(".py", "def resolve(name):\n    host = socket.gethostbyname(name)\n    return host\n\ndef authorize(host):\n    return trusted == host"),
+        )
+
+    def test_e03_broad_exception_handler_only(self) -> None:
+        self.assertIn(
+            "code.broad-exception-handler",
+            self._rules(".py", "try:\n    process()\nexcept Exception as exc:\n    logger.warning(exc)"),
+        )
+        self.assertNotIn(
+            "code.broad-exception-handler",
+            self._rules(".py", "try:\n    process()\nexcept ValueError as exc:\n    raise exc"),
+        )
+
+    def test_s12_requires_sensitive_persistent_cookie(self) -> None:
+        self.assertIn(
+            "code.persistent-sensitive-cookie",
+            self._rules(".js", 'res.cookie("access_token", token, { maxAge: 2592000000 });'),
+        )
+        self.assertNotIn(
+            "code.persistent-sensitive-cookie",
+            self._rules(".js", 'res.cookie("theme", "dark", { maxAge: 2592000000 });'),
+        )
+        self.assertNotIn(
+            "code.persistent-sensitive-cookie",
+            self._rules(".js", 'res.cookie("session", token, { secure: true, httpOnly: true });'),
+        )
+
+    def test_s16_requires_authentication_flow_without_protection(self) -> None:
+        vulnerable = '''\
+@app.post("/login")
+def login(password: str):
+    return authenticate(password)
+'''
+        protected = '''\
+@app.post("/login")
+@limiter.limit("5/minute")
+def login(password: str):
+    return authenticate(password)
+'''
+        self.assertIn("code.auth-attempt-protection-missing", self._rules(".py", vulnerable))
+        self.assertNotIn("code.auth-attempt-protection-missing", self._rules(".py", protected))
+        self.assertNotIn("code.auth-attempt-protection-missing", self._rules(".py", "app = FastAPI()"))
 
 
 if __name__ == "__main__":

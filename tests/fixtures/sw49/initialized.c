@@ -1,3 +1,4 @@
-/* SW49 C-04 negative fixture */
-/* Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture. */
-int fixture(int value) { return value; }
+int read(void) {
+  int value = 0;
+  return value;
+}

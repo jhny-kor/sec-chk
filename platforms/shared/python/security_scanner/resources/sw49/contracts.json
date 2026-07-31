@@ -203,6 +203,7 @@
       "applicability": {
         "languages": [
           "HTML",
+          "JSP",
           "JavaScript",
           "TypeScript"
         ],
@@ -1683,7 +1684,7 @@
         "extensions": []
       },
       "local_rule_ids": [
-        "code.insecure-cookie-settings"
+        "code.persistent-sensitive-cookie"
       ],
       "external_mappings": [],
       "sources": [],
@@ -1900,6 +1901,7 @@
       ],
       "applicability": {
         "languages": [
+          "C#",
           "Java",
           "JavaScript",
           "Kotlin",
@@ -1909,7 +1911,7 @@
         "extensions": []
       },
       "local_rule_ids": [
-        "code.api-missing-rate-limit"
+        "code.auth-attempt-protection-missing"
       ],
       "external_mappings": [],
       "sources": [],
@@ -2169,12 +2171,17 @@
         "CWE-397"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C#",
+          "Java",
+          "Kotlin",
+          "Python",
+          "Ruby"
+        ],
         "extensions": []
       },
       "local_rule_ids": [
-        "code.empty-exception-handler",
-        "code.stack-trace-exposure"
+        "code.broad-exception-handler"
       ],
       "external_mappings": [],
       "sources": [],
@@ -2291,10 +2298,15 @@
         "CWE-772"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "Java",
+          "Kotlin"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.improper-resource-release"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2341,10 +2353,15 @@
         "CWE-416"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C++"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.use-after-free"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2391,10 +2408,15 @@
         "CWE-457"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C++"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.uninitialized-variable"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],
@@ -2703,10 +2725,24 @@
         "CWE-247"
       ],
       "applicability": {
-        "languages": [],
+        "languages": [
+          "C",
+          "C#",
+          "C++",
+          "Go",
+          "Java",
+          "JavaScript",
+          "Kotlin",
+          "PHP",
+          "Python",
+          "Ruby",
+          "TypeScript"
+        ],
         "extensions": []
       },
-      "local_rule_ids": [],
+      "local_rule_ids": [
+        "code.dns-security-decision"
+      ],
       "external_mappings": [],
       "sources": [],
       "sinks": [],

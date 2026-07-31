@@ -1,3 +1,6 @@
-// SW49 I-08 positive fixture
-// Minimal bounded example; semantic evidence is supplied by the rule/analyzer fixture.
-final class Fixture { static Object value(Object value) { return value; } }
+import javax.xml.parsers.DocumentBuilderFactory;
+final class Fixture { void parse(java.io.InputStream input) throws Exception {
+  DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+  DocumentBuilder builder = factory.newDocumentBuilder();
+  builder.parse(request.getInputStream());
+} }

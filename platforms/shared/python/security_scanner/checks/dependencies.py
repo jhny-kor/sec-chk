@@ -26,7 +26,7 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
         return _check_requirements(path, target)
     if path.name == "pyproject.toml":
         return _check_pyproject(path, target)
-    if path.name == "Dockerfile" or path.name.startswith("Dockerfile."):
+    if path.name.lower() == "dockerfile" or path.name.lower().startswith("dockerfile."):
         return _check_dockerfile(path, target)
     return []
 

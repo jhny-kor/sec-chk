@@ -97,18 +97,21 @@ CODE_PATTERN_RULE_IDS = (
     "code.unbounded-request-body",
     "code.logging-sensitive-data",
     "code.empty-exception-handler",
+    "code.broad-exception-handler",
     "code.stack-trace-exposure",
     "code.unversioned-api-route",
     "code.insecure-temp-file",
     "code.wildcard-cors",
     "code.public-bind-all-interfaces",
     "code.insecure-cookie-settings",
+    "code.persistent-sensitive-cookie",
     "code.jwt-verification-disabled",
     "code.jwt-none-algorithm",
     "code.session-long-expiry",
     "code.api-route-missing-auth",
     "code.api-mass-assignment",
     "code.api-missing-rate-limit",
+    "code.auth-attempt-protection-missing",
     "code.external-api-no-timeout",
     "code.pii-logging",
     "code.directory-listing-enabled",
@@ -129,6 +132,10 @@ CODE_PATTERN_RULE_IDS = (
     "code.tls-certificate-verification-disabled",
     "code.password-hash-without-salt",
     "code.null-pointer-dereference",
+    "code.improper-resource-release",
+    "code.use-after-free",
+    "code.uninitialized-variable",
+    "code.dns-security-decision",
 )
 
 PREVENTION_RULE_IDS = (
@@ -197,6 +204,7 @@ AUTHENTICATION_RULE_IDS = (
     "code.jwt-verification-disabled",
     "code.jwt-none-algorithm",
     "code.session-long-expiry",
+    "code.auth-attempt-protection-missing",
 )
 
 INJECTION_RULE_IDS = (
@@ -268,6 +276,7 @@ ERROR_HANDLING_RULE_IDS = (
     "config.debug-enabled",
     "config.development-environment",
     "code.empty-exception-handler",
+    "code.broad-exception-handler",
     "code.stack-trace-exposure",
 )
 
@@ -291,6 +300,7 @@ MISCONFIGURATION_RULE_IDS = CONFIGURATION_RULE_IDS + (
 
 SESSION_MANAGEMENT_RULE_IDS = (
     "code.insecure-cookie-settings",
+    "code.persistent-sensitive-cookie",
     "code.csrf-disabled",
     "code.jwt-verification-disabled",
     "code.jwt-none-algorithm",
@@ -746,7 +756,7 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     _control(
         "I-04", "input-validation-expression", "크로스사이트 스크립트", "Cross-site Scripting", ("CWE-79", "CWE-80"),
         ("code.xss-dom-sink", "web.reflected-xss-verified"), "partial",
-        ("HTML", "JavaScript", "TypeScript"),
+        ("HTML", "JSP", "JavaScript", "TypeScript"),
         note_ko="DOM 싱크 패턴과 웹 능동 점검(실행 시)으로 확인합니다. 서버측 템플릿 XSS는 부분적으로만 탐지됩니다.",
         note_en="Covers DOM sinks and (when run) active web probes. Server-side template XSS is only partially detected.",
     ),
@@ -882,9 +892,9 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "S-12", "security-features", "사용자 하드디스크에 저장되는 쿠키를 통한 정보 노출", "Information Exposure Through Persistent Cookies", ("CWE-539",),
-        ("code.insecure-cookie-settings",), "partial", _WEB_LANGS,
-        note_ko="쿠키 보호 속성 약화만 탐지합니다. 쿠키에 실제 민감정보가 저장되는지는 수동 확인이 필요합니다.",
-        note_en="Detects weakened cookie attributes; whether sensitive data is actually stored needs manual review.",
+        ("code.persistent-sensitive-cookie",), "partial", _WEB_LANGS,
+        note_ko="민감한 이름의 값과 쿠키 영속성 속성이 같은 저장 지점에 있을 때만 후보로 표시합니다. 실제 값의 민감도는 검토가 필요합니다.",
+        note_en="Flags only cookie sinks that combine a sensitive-looking value with persistence; actual data sensitivity still needs review.",
     ),
     _control(
         "S-13", "security-features", "주석문 안에 포함된 시스템 주요정보", "Sensitive Information in Comments", ("CWE-615",),
@@ -912,9 +922,9 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "S-16", "security-features", "반복된 인증시도 제한 기능 부재", "Missing Brute-force Protection", ("CWE-307",),
-        ("code.api-missing-rate-limit",), "partial", ("Java", "Kotlin", "Python", "JavaScript", "TypeScript"),
-        note_ko="속도 제한 부재 힌트만 제공합니다. 로그인 경로별 잠금 정책은 수동 확인이 필요합니다.",
-        note_en="Provides missing-rate-limit hints only; per-login lockout policy needs manual review.",
+        ("code.auth-attempt-protection-missing",), "partial", ("Java", "Kotlin", "Python", "JavaScript", "TypeScript", "C#"),
+        note_ko="인증 흐름이 확인되면서 속도 제한·잠금·추가 인증 통제가 보이지 않을 때만 후보로 표시합니다.",
+        note_en="Flags authentication flows only when throttling, lockout, or step-up controls are not visible.",
     ),
     # 시간 및 상태 (2)
     _control(
@@ -940,7 +950,9 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "E-03", "error-handling", "부적절한 예외 처리", "Improper Exception Handling", ("CWE-754", "CWE-755", "CWE-396", "CWE-397"),
-        ("code.empty-exception-handler", "code.stack-trace-exposure"), "partial",
+        ("code.broad-exception-handler",), "partial", ("Java", "Kotlin", "Python", "Ruby", "C#"),
+        note_ko="최상위 예외 형식을 포괄적으로 처리하는 지점만 후보로 표시하며, 빈 처리와 스택 노출은 각각 E-02와 E-01로 분리합니다.",
+        note_en="Flags broad exception types for review; empty handlers and stack exposure remain E-02 and E-01 respectively.",
     ),
     # 코드오류 (5)
     _control(
@@ -951,17 +963,17 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     ),
     _control(
         "C-02", "code-error", "부적절한 자원 해제", "Improper Resource Release", ("CWE-404", "CWE-772"),
-        (), "unsupported",
-        note_ko="자원 수명 추적이 필요해 로컬 룰로 점검하지 못합니다.",
-        note_en="Needs resource-lifetime tracking; not checkable with local rules.",
+        ("code.improper-resource-release",), "partial", ("Java", "Kotlin"),
+        note_ko="동일 파일에서 자원 취득 후 명시적 해제나 try-with-resources가 보이지 않는 경우를 후보로 표시합니다.",
+        note_en="Flags same-file acquisitions without an obvious close/release or try-with-resources construct.",
     ),
     _control(
         "C-03", "code-error", "해제된 자원 사용", "Use After Free", ("CWE-416",),
-        (), "unsupported",
+        ("code.use-after-free",), "partial", _C_LANGS,
     ),
     _control(
         "C-04", "code-error", "초기화되지 않은 변수 사용", "Use of Uninitialized Variable", ("CWE-457",),
-        (), "unsupported",
+        ("code.uninitialized-variable",), "partial", _C_LANGS,
     ),
     _control(
         "C-05", "code-error", "신뢰할 수 없는 데이터의 역직렬화", "Deserialization of Untrusted Data", ("CWE-502",),
@@ -989,9 +1001,9 @@ SW49_CONTROLS: tuple[SecurityControl, ...] = (
     # API 오용 (2)
     _control(
         "A-01", "api-misuse", "DNS lookup에 의존한 보안결정", "Security Decision Based on DNS Lookup", ("CWE-350", "CWE-247"),
-        (), "unsupported",
-        note_ko="DNS 결과가 보안 결정에 쓰이는지는 의미 분석이 필요해 점검하지 못합니다.",
-        note_en="Whether DNS results drive security decisions needs semantic analysis; not checkable.",
+        ("code.dns-security-decision",), "partial", ("Java", "Kotlin", "Python", "JavaScript", "TypeScript", "Go", "C#", "Ruby", "PHP", "C", "C++"),
+        note_ko="동일 파일에서 DNS 조회 결과가 인증·인가·신뢰 비교에 직접 사용되는 경우를 후보로 표시합니다.",
+        note_en="Flags same-file DNS results used directly in authentication, authorization, or trust comparisons.",
     ),
     _control(
         "A-02", "api-misuse", "취약한 API 사용", "Use of Dangerous API", ("CWE-676",),
@@ -1231,7 +1243,7 @@ def build_sw49_strategy_executions(
     Local regex/context rules remain PARTIAL in this release. Imported SARIF is
     positive-only, so even a successful import cannot certify clean coverage.
     """
-    from .source_analysis import StrategyExecution
+    from .source_analysis import StrategyExecution, source_languages
 
     files = tuple(entry[0] for entry in getattr(manifest, "files", ()))
     selected_categories = set(scanned_categories)
@@ -1239,13 +1251,22 @@ def build_sw49_strategy_executions(
     strategies = []
     for row in SW49_CONTRACTS:
         official_id = row["official_id"]
+        control = SW49_CONTROLS_BY_OFFICIAL_ID[official_id]
+        applicable_files = tuple(
+            path for path in files
+            if not control.supported_languages
+            or any(language in control.supported_languages for language in source_languages(Path(path)))
+        )
         for strategy_id in row["required_strategies"]:
             definition = SW49_STRATEGY_REGISTRY[strategy_id]
             kind = definition["kind"]
             required_rules = tuple(definition["required_rule_ids"])
             if kind == "external_rule":
                 run = analyzer_by_name.get("codeql") or analyzer_by_name.get("sarif")
-                if run is None or getattr(run, "status", "") != "SUCCESS":
+                if control.supported_languages and not applicable_files:
+                    status = "NOT_APPLICABLE"
+                    reason = "no_applicable_source_files"
+                elif run is None or getattr(run, "status", "") != "SUCCESS":
                     status = "NOT_RUN"
                     reason = getattr(run, "failure_reason", "analyzer_not_run") if run else "analyzer_not_run"
                 else:
@@ -1253,16 +1274,17 @@ def build_sw49_strategy_executions(
                     reason = "pre_generated_sarif_positive_only" if getattr(run, "output_origin", "") == "pre_generated" else "negative_rule_coverage_not_certified"
                     if sarif_warnings:
                         reason = "sarif_rule_coverage_incomplete"
-                strategies.append(StrategyExecution(official_id, language="Java", profile_id=str(definition["profile_id"] or ""), strategy=strategy_id, status=status, analyzer_run_id=str(getattr(run, "run_id", "")) if run else "", required_rule_ids=required_rules, expected_files=files, analyzed_files=files if status == "PARTIAL" else (), reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
+                strategies.append(StrategyExecution(official_id, language="Java", profile_id=str(definition["profile_id"] or ""), strategy=strategy_id, status=status, analyzer_run_id=str(getattr(run, "run_id", "")) if run else "", required_rule_ids=required_rules, expected_files=applicable_files, analyzed_files=applicable_files if status == "PARTIAL" else (), reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
                 continue
             if not required_rules:
-                reason = "manual_context_required" if kind == "manual_context" else "no_source_static_strategy"
-                strategies.append(StrategyExecution(official_id, strategy=strategy_id, status="NOT_RUN", expected_files=files, reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
+                status = "NOT_APPLICABLE" if control.supported_languages and not applicable_files else "NOT_RUN"
+                reason = "no_applicable_source_files" if status == "NOT_APPLICABLE" else ("manual_context_required" if kind == "manual_context" else "no_source_static_strategy")
+                strategies.append(StrategyExecution(official_id, strategy=strategy_id, status=status, expected_files=applicable_files, reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
                 continue
             rules_selected = all(_rule_scanner_category(rule_id) in selected_categories for rule_id in required_rules)
-            status = "PARTIAL" if rules_selected else "NOT_RUN"
-            reason = "local_source_rules_are_partial" if rules_selected else "required_scanner_category_not_selected"
-            strategies.append(StrategyExecution(official_id, strategy=strategy_id, status=status, required_rule_ids=required_rules, present_rule_ids=required_rules if rules_selected else (), requested_rule_ids=required_rules if rules_selected else (), executed_rule_ids=required_rules if rules_selected else (), expected_files=files, analyzed_files=files if rules_selected else (), reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
+            status = "PARTIAL" if rules_selected and applicable_files else ("NOT_RUN" if not rules_selected else "NOT_APPLICABLE")
+            reason = "local_source_rules_are_partial" if status == "PARTIAL" else ("no_applicable_source_files" if status == "NOT_APPLICABLE" else "required_scanner_category_not_selected")
+            strategies.append(StrategyExecution(official_id, strategy=strategy_id, status=status, required_rule_ids=required_rules, present_rule_ids=required_rules if status == "PARTIAL" else (), requested_rule_ids=required_rules if status == "PARTIAL" else (), executed_rule_ids=required_rules if status == "PARTIAL" else (), expected_files=applicable_files, analyzed_files=applicable_files if status == "PARTIAL" else (), reason=reason, manifest_digest=str(getattr(manifest, "digest", ""))))
     return tuple(strategies)
 
 
@@ -1314,6 +1336,7 @@ def evaluate_sw49_controls(
         contract = next(row for row in SW49_CONTRACTS if row["official_id"] == control.official_id)
         required_strategy_ids = tuple(contract["required_strategies"])
         control_strategies = strategy_by_control.get(control.official_id, [])
+        all_not_applicable = bool(control_strategies) and all(getattr(item, "status", "") == "NOT_APPLICABLE" for item in control_strategies)
         successful_strategies = tuple(sorted(str(getattr(item, "strategy", "")) for item in control_strategies if getattr(item, "status", "") == "COMPLETE" and bool(getattr(item, "negative_coverage_certified", False))))
         missing_strategies = tuple(sorted(strategy_id for strategy_id in required_strategy_ids if strategy_id not in successful_strategies))
         coverage_complete = bool(required_strategy_ids) and not missing_strategies
@@ -1326,6 +1349,9 @@ def evaluate_sw49_controls(
         elif source_analysis is not None and review_candidates:
             status = "NEEDS_REVIEW"
             executed = True
+        elif source_analysis is not None and all_not_applicable:
+            status = "NOT_APPLICABLE"
+            executed = False
         elif source_analysis is not None and not coverage_complete:
             executed = any(getattr(item, "status", "") not in {"NOT_RUN", "NOT_APPLICABLE"} for item in control_strategies)
             if control.support_level == "unsupported":
@@ -1439,8 +1465,8 @@ SW_DEV_SECURITY_49 = SecurityStandard(
         *_SW_DEV_SECURITY_CATEGORIES,
     ),
     description=_text(
-        "Registers all 49 MOIS/KISA implementation-stage security weaknesses as individual controls. Items KODA can check automatically run as local rules; items that static analysis cannot judge are marked partial, manual-review, or unsupported.",
-        "행정안전부·KISA 구현단계 보안약점 49개를 기준별로 표시합니다. KODA가 자동으로 확인 가능한 항목은 로컬 룰로 점검하며, 정적 분석만으로 판단할 수 없는 항목은 부분 지원, 수동 검토 또는 미지원으로 구분합니다.",
+        "Registers all 49 MOIS/KISA implementation-stage security weaknesses as individual controls. Every control has either an executable local strategy or an explicit manual-review strategy; partial evidence never becomes an automatic PASS.",
+        "행정안전부·KISA 구현단계 보안약점 49개를 기준별로 표시합니다. 모든 기준은 실행 가능한 로컬 전략 또는 명시적 수동 검토 전략을 가지며, 부분 증거는 자동으로 PASS가 되지 않습니다.",
     ),
     coverage=_text(
         "Lists all 49 controls, but not every control is auto-diagnosed. Automated/partial controls are checked via source, configuration, secret, dependency, and optional web probes; design, permission, session, and complex data-flow controls need manual review or external SAST.",

@@ -777,6 +777,77 @@ if ($LASTEXITCODE -ne 0) {
     throw "KODA-CLI.exe startup smoke test failed."
 }
 
+# Test the packaged executable itself against Windows false-positive regressions.
+$sw49SmokeDir = Join-Path $BuildRoot "sw49-false-positive-smoke"
+$sw49SmokeReport = Join-Path $sw49SmokeDir "report.json"
+
+if (Test-Path -LiteralPath $sw49SmokeDir) {
+    Remove-Item -LiteralPath $sw49SmokeDir -Recurse -Force
+}
+
+New-Item -ItemType Directory -Path (Join-Path $sw49SmokeDir "pdfjs\web") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $sw49SmokeDir "thirdparty") -Force | Out-Null
+
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "DateCase.java") -Content @'
+import devonframe.util.DateUtil;
+class DateCase {
+    String applDate = DateUtil.getDate("yyyyMMdd");
+    void run() {
+        String startDate = DateUtil.getNextMonthDate(applDate, 1);
+        String value = String.format("%s01", String.format(startDate, "yyyyMM"));
+    }
+}
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "ThreadCase.java") -Content @'
+class ThreadCase {
+    void run() throws Exception {
+        Thread thread11 = null;
+        if (thread11 != null) thread11.join();
+    }
+}
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "viewer.html") -Content @'
+<script>new RegExp("x").exec(window.location.href);</script>
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "thirdparty\jsrender.min.js") -Content @'
+/*! JsRender v1.0.5 */
+!function(){try{}catch(e){};target.innerHTML=location.hash}();
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "pdfjs\web\viewer.js") -Content @'
+const layout = pdfDocument.getPageLayout().catch(function () {});
+'@
+Write-Utf8NoBomFile -Path (Join-Path $sw49SmokeDir "unsafe.c") -Content @'
+void log_value(char *user_input) { printf(user_input); }
+'@
+
+& $CliExecutable scan `
+    --target $sw49SmokeDir `
+    --standard sw-dev-security-49 `
+    --format json `
+    --output $sw49SmokeReport *> $null
+
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sw49SmokeReport -PathType Leaf)) {
+    throw "Packaged KODA CLI failed the SW49 false-positive smoke scan."
+}
+
+$sw49SmokeFindings = @((Get-Content -LiteralPath $sw49SmokeReport -Raw | ConvertFrom-Json).findings)
+$unexpectedSmokeFindings = @($sw49SmokeFindings | Where-Object {
+    $leaf = Split-Path -Leaf $_.path
+    ($leaf -eq "DateCase.java" -and $_.rule_id -eq "code.format-string-user-input") -or
+    ($leaf -eq "ThreadCase.java" -and $_.rule_id -eq "code.null-pointer-dereference") -or
+    ($leaf -eq "viewer.html" -and $_.rule_id -eq "code.eval-user-input") -or
+    ($leaf -eq "jsrender.min.js") -or
+    ($leaf -eq "viewer.js" -and $_.rule_id -eq "code.empty-exception-handler")
+})
+
+if ($unexpectedSmokeFindings.Count -gt 0) {
+    throw "Packaged KODA CLI still reports known SW49 false positives: $($unexpectedSmokeFindings.rule_id -join ', ')"
+}
+
+if (-not ($sw49SmokeFindings | Where-Object { $_.rule_id -eq "code.format-string-user-input" -and (Split-Path -Leaf $_.path) -eq "unsafe.c" })) {
+    throw "Packaged KODA CLI SW49 smoke scan did not detect the positive control."
+}
+
 # ---------------------------------------------------------------------------
 # Copy Syft, Grype and the Grype DB into the installation tree.
 # ---------------------------------------------------------------------------

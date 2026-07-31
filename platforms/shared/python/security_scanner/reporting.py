@@ -1356,7 +1356,7 @@ def render_json(
         "generated_at": _generated_at()[0],
         "language": _labels(language)["html_lang"],
         "scanner": {"name": "local-security-scanner", "version": __version__},
-        "summary": _summary(findings, target_names, target_paths),
+        "summary": _summary(findings, target_names, target_paths, source_analysis),
         "warnings": list(warnings),
         "components": [component_payload(component) for component in components],
         "findings": [
@@ -1382,7 +1382,7 @@ def render_markdown(
 ) -> str:
     labels = _labels(language)
     generated_at, generated_display = _generated_at()
-    summary = _summary(findings, target_names, target_paths)
+    summary = _summary(findings, target_names, target_paths, source_analysis)
     lines = [
         f"# {labels['report_heading']}",
         "",
@@ -2382,6 +2382,7 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
     standard_text = "기준" if is_ko else "Standard"
     category_text = "범주" if is_ko else "Category"
     generated_text = "생성" if is_ko else "Generated"
+    languages_text = "분석 언어" if is_ko else "Analyzed languages"
     findings_text = "전체 취약점" if is_ko else "Total findings"
     severity_text = {
         "critical": "치명" if is_ko else "Critical",
@@ -2403,6 +2404,10 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         for key, label, value in cards
     )
     generated_at = str(payload.get("generated_display", payload.get("generated_at", "")))
+    analyzed_languages = summary.get("analyzed_languages", ())
+    if not isinstance(analyzed_languages, (list, tuple)):
+        analyzed_languages = ()
+    analyzed_languages_text = ", ".join(str(item) for item in analyzed_languages if str(item).strip())
     critical_count = by_severity.get("critical", 0)
     high_count = by_severity.get("high", 0)
     if is_ko:
@@ -2465,7 +2470,7 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 :root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1120px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}.source-summary-panel{{overflow:hidden;margin-top:18px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}}.source-summary-head{{padding:20px 22px 14px;border-bottom:1px solid var(--line)}}.source-summary-head h2{{margin:0;font-size:20px}}.source-summary-head p{{margin:5px 0 0;color:var(--muted)}}.source-summary-wrap{{overflow:auto}}.source-summary-table{{width:{table_width}px;min-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}}.source-summary-table th{{position:relative;padding:11px 13px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px;letter-spacing:.04em}}.source-summary-table td{{padding:13px;border-top:1px solid #e7edf4;vertical-align:top;overflow-wrap:anywhere}}.source-summary-table th:not(:last-child),.source-summary-table td:not(:last-child){{border-right:1px solid #e7edf4}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}code{{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#0b3b89}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
 main{{max-width:1560px;padding:28px}}.detail-cta{{display:flex;justify-content:flex-end;margin-top:18px}}.detail-cta a{{display:inline-flex;align-items:center;gap:10px;min-height:48px;padding:0 20px;border:1px solid #0b3b89;border-radius:13px;color:#fff;background:linear-gradient(135deg,#1368e8,#0b3b89);box-shadow:0 12px 24px rgba(19,104,232,.24);text-decoration:none;font-weight:850;transition:transform .16s ease,box-shadow .16s ease}}.detail-cta a:hover{{transform:translateY(-2px);box-shadow:0 16px 30px rgba(19,104,232,.3)}}.detail-cta a:focus-visible{{outline:3px solid #8ec5ff;outline-offset:3px}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{sw49_table}<div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비인가">대외 비인가</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(languages_text)}</b> {html.escape(analyzed_languages_text) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{sw49_table}<div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
 
 
 def _source_report_findings(payload: dict[str, object], language: str) -> list[dict[str, object]]:
@@ -2689,7 +2694,7 @@ def build_dashboard_payload(
     source_analysis: object | None = None,
 ) -> dict[str, object]:
     generated, generated_display = _generated_at()
-    summary = _summary(findings, target_names, target_paths)
+    summary = _summary(findings, target_names, target_paths, source_analysis)
     summary["raw_finding_count"] = len(findings)
     summary["displayed_finding_count"] = len(findings)
     labels = _labels(language)
@@ -2980,6 +2985,7 @@ def _summary(
     findings: list[Finding],
     target_names: tuple[str, ...] = (),
     target_paths: dict[str, str] | None = None,
+    source_analysis: object | None = None,
 ) -> dict[str, object]:
     by_target = Counter({target: 0 for target in target_names})
     by_target.update(finding.target for finding in findings)
@@ -2997,7 +3003,18 @@ def _summary(
         "by_category": dict(Counter(finding.category for finding in findings)),
         "by_target": dict(by_target),
         "target_paths": resolved_target_paths,
+        "analyzed_languages": _source_analysis_languages(source_analysis),
     }
+
+
+def _source_analysis_languages(source_analysis: object | None) -> list[str]:
+    if isinstance(source_analysis, dict):
+        values = source_analysis.get("analyzed_languages", ())
+    else:
+        values = getattr(source_analysis, "analyzed_languages", ())
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return []
+    return sorted({str(value) for value in values if str(value).strip()})
 
 
 def _labels(language: str) -> dict[str, object]:

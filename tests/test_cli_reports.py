@@ -117,6 +117,7 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("치명", main_html)
             self.assertIn("우선 조치", main_html)
             self.assertIn("소스 취약점 요약", main_html)
+            self.assertIn("<b>분석 언어</b> Python", main_html)
             self.assertIn("max-width:1560px", main_html)
             self.assertIn('class="source-summary-table"', main_html)
             self.assertIn(".source-summary-wrap{overflow:auto;padding:0 20px 20px}", main_html)
@@ -192,6 +193,30 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("<redacted sensitive source line>", detail_html)
             self.assertNotIn(secret, detail_html)
 
+    def test_source_main_report_lists_all_analyzed_languages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Clean.java").write_text("class Clean {}\n", encoding="utf-8")
+            (root / "clean.ts").write_text("export const clean = true;\n", encoding="utf-8")
+            output = root / "source.html"
+
+            exit_code = main(
+                [
+                    "scan",
+                    "--target",
+                    str(root),
+                    "--standard",
+                    "sw-dev-security-49",
+                    "--format",
+                    "html",
+                    "--output",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("<b>분석 언어</b> Java, TypeScript", output.read_text(encoding="utf-8"))
+
 
 class WindowsAliasPackagingTests(unittest.TestCase):
     def test_windows_installer_stages_koda_alias_and_path(self) -> None:
@@ -209,6 +234,11 @@ class WindowsAliasPackagingTests(unittest.TestCase):
         self.assertGreaterEqual(script.count('"--add-data", $Sw49ResourcesData'), 2)
         self.assertIn('"_internal\\security_scanner\\resources\\sw49\\contracts.json"', script)
         self.assertIn('& $CliExecutable --help', script)
+        self.assertIn('$sw49SmokeReport', script)
+        self.assertIn('DateUtil.getNextMonthDate', script)
+        self.assertIn('code.null-pointer-dereference', script)
+        self.assertIn('code.eval-user-input', script)
+        self.assertIn('code.empty-exception-handler', script)
         self.assertIn('"resources/sw49/*.json"', pyproject)
 
 
