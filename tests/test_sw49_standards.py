@@ -1019,9 +1019,11 @@ class Sw49ReportTests(unittest.TestCase):
 
         markdown = render_markdown_from_payload(payload, "ko")
         self.assertIn("전체 발견 항목: 1", markdown)
-        criteria_line = next(line for line in markdown.splitlines() if line.startswith("- 공식 점검 기준:"))
-        self.assertIn("1.16 (I-16)", criteria_line)
-        self.assertNotIn("7.2 (A-02)", criteria_line)
+        criteria_start = markdown.index("- 공식 점검 기준:")
+        criteria_text = markdown[criteria_start:markdown.index("- 중요한 이유:", criteria_start)]
+        self.assertIn("소프트웨어 개발보안 49\n1.16 (I-16)", criteria_text)
+        self.assertIn("1.16 (I-16)", criteria_text)
+        self.assertNotIn("7.2 (A-02)", criteria_text)
 
         xlsx_bytes = render_xlsx(payload, "ko")
         with zipfile.ZipFile(io.BytesIO(xlsx_bytes)) as archive:
@@ -1043,6 +1045,7 @@ class Sw49ReportTests(unittest.TestCase):
             detail_html = archive.read("report-detail.html").decode("utf-8")
         self.assertIn("code.dangerous-c-buffer-api", main_html)
         self.assertIn("code.dangerous-c-buffer-api", detail_html)
+        self.assertIn("소프트웨어 개발보안 49\n1.16 (I-16)", detail_html)
         self.assertIn("1.16 (I-16)", detail_html)
         self.assertNotIn("7.2 (A-02)", detail_html)
         i16_row = re.search(r'<tr data-sw49-control="sw49\.i16"[^>]*>(.*?)</tr>', main_html)

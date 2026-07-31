@@ -254,7 +254,7 @@ class JavaScanTests(unittest.TestCase):
             self.assertNotIn("summary-edge-hint", main_report)
             self.assertNotIn("← 왼쪽 끝", main_report)
             self.assertIn("max-width:1560px", main_report)
-            self.assertIn("대외 비인가", main_report)
+            self.assertIn("대외 비공개", main_report)
             self.assertIn("border:2px solid #ef4444", main_report)
             self.assertIn("border-radius:0", main_report)
             self.assertIn("background:none", main_report)
@@ -262,7 +262,7 @@ class JavaScanTests(unittest.TestCase):
             self.assertIn('<html lang="ko">', html_report)
             self.assertNotIn('id="language-ko"', html_report)
             self.assertNotIn('id="language-en"', html_report)
-            self.assertIn("대외 비인가", html_report)
+            self.assertIn("대외 비공개", html_report)
             self.assertIn("border:2px solid #ef4444", html_report)
             self.assertIn("border-radius:0", html_report)
             self.assertIn("background:none", html_report)
@@ -312,6 +312,7 @@ class JavaScanTests(unittest.TestCase):
         self.assertIn('id="main-vulnerability-table"', main_html)
         self.assertIn("server-vulnerability-details.html", main_html)
         self.assertIn(">KEV<span class=\"column-resizer\"", main_html)
+        self.assertIn(">CVSS<span class=\"column-resizer\"", main_html)
         self.assertIn(">조치<span class=\"column-resizer\"", main_html)
         self.assertIn("vulnerability-action-link", main_html)
         self.assertIn('card card--critical', main_html)
@@ -320,6 +321,7 @@ class JavaScanTests(unittest.TestCase):
         self.assertIn('class="library-summary-table"', main_html)
         self.assertIn("demo", main_html)
         self.assertIn("CVE-2026-0301", main_html)
+        self.assertIn("9.8", main_html)
         self.assertIn("1.1.0", main_html)
         self.assertIn('class="final-version"', main_html)
         self.assertIn("최종 버전", main_html)
@@ -334,10 +336,14 @@ class JavaScanTests(unittest.TestCase):
         self.assertNotIn("class=\"library-details action-details\"", detail_html)
         self.assertIn("A test vulnerability description.", detail_html)
         self.assertIn("CVE-2026-0301", detail_html)
+        self.assertIn("CVSS", detail_html)
+        self.assertIn("9.8", detail_html)
         self.assertIn("취약점별 상세 리포트", vulnerability_details_html)
         self.assertIn("원문 보기", vulnerability_details_html)
         self.assertIn("문제 파일", vulnerability_details_html)
         self.assertIn("CVE-2026-0301", vulnerability_details_html)
+        self.assertIn("CVSS", vulnerability_details_html)
+        self.assertIn("9.8", vulnerability_details_html)
         self.assertIn('class="vulnerability-report-toolbar"', vulnerability_details_html)
         self.assertIn('id="vulnerability-detail-count"', vulnerability_details_html)
         self.assertIn("#vulnerability-detail-count", vulnerability_details_html)
@@ -345,6 +351,35 @@ class JavaScanTests(unittest.TestCase):
         self.assertIn('class="vulnerability-remediation"', vulnerability_details_html)
         self.assertIn("설치 버전", vulnerability_details_html)
         self.assertIn("최종 후보", vulnerability_details_html)
+
+    def test_library_detail_orders_target_groups_by_cvss(self) -> None:
+        records = (
+            self._record(
+                "CVE-2026-0401",
+                ("CVE-2026-0401",),
+                ("1.1.0",),
+                "medium",
+                "/target-low/demo.jar",
+            ),
+            self._record(
+                "CVE-2026-0402",
+                ("CVE-2026-0402",),
+                ("2.1.0",),
+                "high",
+                "/target-high/demo.jar",
+                purl="pkg:maven/org.example/demo@2.0.0",
+                installed_version="2.0.0",
+            ),
+        )
+        with patch("security_scanner.java_vulnerability_scan.run_grype_purls", return_value=GrypeResult((), "", {}, "", False)):
+            vulnerabilities, _ = aggregate_vulnerabilities(records, Path("/tmp/grype"), 5.0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_reports(output, (), vulnerabilities, 2, (), "2026-07-23", language="ko", targets=("target-low", "target-high"))
+            detail_html = (output / "server-library-report-detail.html").read_text(encoding="utf-8")
+
+        self.assertLess(detail_html.index("CVSS 8"), detail_html.index("CVSS 5"))
 
     def test_fixed_versions_render_one_line_per_vulnerability_id(self) -> None:
         records = (
@@ -393,6 +428,7 @@ class JavaScanTests(unittest.TestCase):
         self.assertIn("더보기 (1)", main_rendered)
         self.assertIn(">접기</button>", main_rendered)
         self.assertIn('collapse-item" hidden', main_rendered)
+        self.assertNotIn(":scope > .collapse-item", main_rendered)
         self.assertIn("1,319", detail_rendered)
         self.assertIn("라이브러리 취약점 상세", detail_rendered)
         self.assertIn('href="server-library-report.html"', detail_rendered)

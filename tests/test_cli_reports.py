@@ -42,7 +42,7 @@ class CliReportTests(unittest.TestCase):
         self.assertTrue(samples)
         for sample in samples:
             document = sample.read_text(encoding="utf-8")
-            self.assertIn("대외 비인가", document, sample.name)
+            self.assertIn("대외 비공개", document, sample.name)
             self.assertRegex(document, r"border: ?2px solid #(ef4444|ff4d5e|b42318)", sample.name)
 
     def test_standard_is_selected_from_registered_profiles(self) -> None:
@@ -134,10 +134,11 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("source.py:1", main_html)
             self.assertIn("source-main-guide-open", main_html)
             self.assertIn("OWASP ASVS 5.0", main_html)
-            self.assertIn("대외 비인가", main_html)
+            self.assertIn("대외 비공개", main_html)
+            self.assertIn('<svg viewBox="0 0 24 24"', main_html)
             self.assertIn('class="koda-main-classification-badge" style="order:2"', main_html)
             self.assertIn('class="standards-guide-button" type="button" style="order:1;', main_html)
-            self.assertLess(main_html.index("source-main-guide-open"), main_html.index("대외 비인가"))
+            self.assertLess(main_html.index("source-main-guide-open"), main_html.index("대외 비공개"))
             self.assertIn('class="standards-guide-name" style="display:block">OWASP ASVS 5.0</strong>', main_html)
             self.assertIn('class="standards-guide-description" style="display:block;color:#60708a">', main_html)
             self.assertIn("border:2px solid #ef4444", main_html)
@@ -154,7 +155,8 @@ class CliReportTests(unittest.TestCase):
             self.assertIn("조치 방법", detail_html)
             self.assertNotIn('id="settings-toggle"', detail_html)
             self.assertNotIn('id="web-scan-run"', detail_html)
-            self.assertIn("대외 비인가", detail_html)
+            self.assertIn("대외 비공개", detail_html)
+            self.assertIn('<svg viewBox="0 0 24 24"', detail_html)
             self.assertIn("external-classification-badge", detail_html)
             self.assertIn("min-height:46px", detail_html)
             self.assertNotIn('id="lang-ko"', detail_html)
