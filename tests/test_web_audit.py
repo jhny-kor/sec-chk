@@ -94,7 +94,10 @@ class _BoastHandler(BaseHTTPRequestHandler):
 class _AccessHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         authorization = self.headers.get("Authorization", "")
-        if self.path == "/private" and authorization == "Bearer user-a":
+        if self.path == "/state" and authorization == "Bearer user-a":
+            body = b"unchanged-state"
+            status = 200
+        elif self.path == "/private" and authorization == "Bearer user-a":
             body = b"private-user-a"
             status = 200
         elif self.path == "/private":
@@ -163,6 +166,63 @@ class _UploadHandler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
 
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(403)
+        self.end_headers()
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+class _StatefulHandler(BaseHTTPRequestHandler):
+    value = 0
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path != "/state":
+            self.send_error(404)
+            return
+        body = str(type(self).value).encode("ascii")
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/unsafe":
+            type(self).value += 1
+        self.send_response(403)
+        self.end_headers()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        type(self).value = 0
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+class _MethodHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.end_headers()
+
+    def do_TRACE(self) -> None:  # noqa: N802
+        self.send_response(405)
+        self.end_headers()
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self.end_headers()
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self.end_headers()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self.end_headers()
+
     def log_message(self, *_args: object) -> None:
         return
 
@@ -178,12 +238,20 @@ class WebAuditTests(unittest.TestCase):
                 "id": "multi-strategy",
                 "control_id": "web.authentication",
                 "strategies": ["koda-scenario", "timing"],
-                "steps": [{
-                    "resource": "home",
-                    "method": "GET",
-                    "assertions": [{"type": "status", "equals": 200}],
-                }],
-                "oracle": {"response_time_max_ms": 5000},
+                "steps": [
+                    {
+                        "id": "baseline",
+                        "resource": "home",
+                        "method": "GET",
+                        "state_snapshot": True,
+                        "assertions": [{"type": "status", "equals": 200}],
+                    },
+                    {
+                        "resource": "home",
+                        "method": "GET",
+                        "assertions": [{"type": "response_time_delta_max_ms", "max_ms": 5000}],
+                    },
+                ],
             }]))
             request = build_approval_request(profile)
             approval = approve_request(request, "operator", key="test-key")
@@ -218,6 +286,78 @@ class WebAuditTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_state_strategy_compares_named_snapshot_before_and_after_mutation(self) -> None:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _StatefulHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            origin = f"http://127.0.0.1:{server.server_port}"
+            for action, expected in (("/safe", "PASS"), ("/unsafe", "VULNERABLE")):
+                _StatefulHandler.value = 0
+                profile = _profile(origin, scenarios=[{
+                    "id": f"state-{action[1:]}",
+                    "control_id": "web.csrf",
+                    "strategies": ["state"],
+                    "steps": [{
+                        "id": "baseline",
+                        "resource": "state",
+                        "method": "GET",
+                        "state_snapshot": True,
+                        "assertions": [{"type": "status", "equals": 200}],
+                    }],
+                    "mutations": [{
+                        "resource": "action",
+                        "method": "POST",
+                        "assertions": [{"type": "status", "equals": 403}],
+                    }, {
+                        "resource": "state",
+                        "method": "GET",
+                        "assertions": [{"type": "state_unchanged", "snapshot": "baseline"}],
+                    }],
+                    "cleanup": [{"resource": "state", "method": "DELETE"}],
+                }])
+                profile["target"]["scopes"] = ["state_change"]
+                profile["resources"] = [
+                    {"id": "state", "path": "/state", "methods": ["GET", "DELETE"]},
+                    {"id": "action", "path": action, "methods": ["POST"]},
+                ]
+                profile = validate_profile(profile)
+                runner = ScenarioRunner(profile, NetworkContext(profile, build_approval_request(profile)))
+                result = runner.run_state(profile["scenarios"][0])
+                self.assertEqual(result["status"], expected)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_http_method_strategy_uses_declared_probe_methods(self) -> None:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _MethodHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            origin = f"http://127.0.0.1:{server.server_port}"
+            for probe_method, expected in (("TRACE", "PASS"), ("OPTIONS", "PASS"), ("PUT", "VULNERABLE")):
+                profile = _profile(origin, scenarios=[{
+                    "id": f"method-{probe_method.lower()}",
+                    "control_id": "web.http-methods",
+                    "strategies": ["http-methods"],
+                    "steps": [{"resource": "method", "method": "GET"}],
+                    "cleanup": [{"resource": "method", "method": "DELETE"}],
+                }])
+                profile["target"]["scopes"] = ["state_change"]
+                profile["resources"] = [{
+                    "id": "method", "path": "/", "methods": ["GET", "DELETE"], "probe_methods": [probe_method],
+                }]
+                profile = validate_profile(profile)
+                runner = ScenarioRunner(profile, NetworkContext(profile, build_approval_request(profile)))
+                result = runner.run_http_methods(profile["scenarios"][0])
+                self.assertEqual(result["status"], expected)
+                self.assertEqual(result["coverage"]["required"], 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_access_matrix_and_multipart_upload_are_executable(self) -> None:
         access_server = ThreadingHTTPServer(("127.0.0.1", 0), _AccessHandler)
         upload_server = ThreadingHTTPServer(("127.0.0.1", 0), _UploadHandler)
@@ -237,7 +377,17 @@ class WebAuditTests(unittest.TestCase):
             access_profile["resources"] = [{
                 "id": "private", "path": "/private", "methods": ["GET"],
                 "actors": ["anonymous", "userA"],
-                "access": {"anonymous": "deny", "userA": "allow"},
+                "access": {
+                    "anonymous": {
+                        "status": "deny",
+                        "state_unchanged": True,
+                        "state_resource": "state",
+                        "state_account": "userA",
+                    },
+                    "userA": "allow",
+                },
+            }, {
+                "id": "state", "path": "/state", "methods": ["GET"], "read_only": True,
             }]
             access_profile = validate_profile(access_profile)
             access_runner = ScenarioRunner(access_profile, NetworkContext(access_profile, build_approval_request(access_profile)))
@@ -257,14 +407,17 @@ class WebAuditTests(unittest.TestCase):
                         "field": "file", "filename": "probe.jpg.php", "content_type": "image/jpeg", "content": "KODA-INERT-CANARY",
                     }},
                     "assertions": [{"type": "status", "equals": 201}, {"type": "body_contains", "value": "probe.jpg.php"}],
+                }, {
+                    "resource": "upload", "method": "GET",
+                    "assertions": [{"type": "status", "equals": 403}],
                 }],
                 "cleanup": [{"resource": "upload", "method": "DELETE"}],
             }])
             upload_profile["target"]["scopes"] = ["state_change"]
-            upload_profile["resources"] = [{"id": "upload", "path": "/upload", "methods": ["POST", "DELETE"]}]
+            upload_profile["resources"] = [{"id": "upload", "path": "/upload", "methods": ["GET", "POST", "DELETE"]}]
             upload_profile = validate_profile(upload_profile)
             upload_runner = ScenarioRunner(upload_profile, NetworkContext(upload_profile, build_approval_request(upload_profile)))
-            upload_result = upload_runner.run(upload_profile["scenarios"][0])
+            upload_result = upload_runner.run_upload(upload_profile["scenarios"][0])
             self.assertEqual(upload_result["status"], "PASS")
         finally:
             access_server.shutdown()

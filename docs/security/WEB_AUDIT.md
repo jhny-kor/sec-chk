@@ -116,8 +116,18 @@ control without application-specific resources and expected outcomes.
 Supported strategy names include `koda-scenario`, `passive`, `browser`,
 `playwright`, `dom`, `browser-canary`, `oast`, `ssrf-oast`, `callback`, `zap`,
 `zap-active`, `zap-passive`, `access-control`, `authorization`, `matrix`,
-`timing`, `state`, and `upload`. All strategies declared on a required scenario
+`timing`, `state`, `http-methods`, and `upload`. All strategies declared on a required scenario
 run; one incomplete strategy prevents a `PASS`.
+
+`timing` requires a named baseline plus a response-time delta assertion. `state`
+compares a later `state_unchanged` assertion to a named step snapshot (for example,
+`{"snapshot":"baseline"}`) and requires cleanup before state-changing mutations.
+Access expectations may set `state_resource` and `state_account` to perform the
+same before/after comparison around an actor request. `http-methods` executes only
+declared `probe_methods`; OPTIONS success alone is allowed, while an unexpected
+`Allow` advertisement or an accepted forbidden verb is a finding. `upload` accepts
+only `KODA-INERT-CANARY...` multipart content and requires both read-only
+post-upload verification and cleanup.
 
 ## Status and output
 

@@ -136,7 +136,7 @@ SSRF·코드 삽입에서 실제 callback을 확인하려면 `target.scopes`에 
 시나리오에 여러 `strategies`를 선언하면 모두 실행하고, 각 전략의 PASS가
 확인될 때만 composite coverage를 완료합니다. 지원 전략은 `koda-scenario`,
 `passive`, `browser`/`playwright`, `oast`, `zap`/`zap-active`,
-`access-control`/`matrix`, `timing`, `state`, `upload`입니다.
+`access-control`/`matrix`, `timing`, `state`, `http-methods`, `upload`입니다.
 HTTP 메서드 점검처럼 실제 허용 목록 밖의 verb를 안전하게 시험할 때는
 리소스의 `probe_methods`에만 추가합니다. 일반 `methods`와 중복할 수 없습니다.
 `web.authentication`, `web.authorization`, `web.csrf`, `web.password-recovery`,
@@ -212,8 +212,17 @@ crawl/ZAP 경고가 없다는 이유만으로 미선언 항목을 PASS로 만들
 지원 전략 이름은 `koda-scenario`, `passive`, `browser`, `playwright`, `dom`,
 `browser-canary`, `oast`, `ssrf-oast`, `callback`, `zap`, `zap-active`,
 `zap-passive`, `access-control`, `authorization`, `matrix`, `timing`, `state`,
-`upload`입니다. 하나의 필수 시나리오에 여러 전략을 선언하면 모두 실행되며,
+`http-methods`, `upload`입니다. 하나의 필수 시나리오에 여러 전략을 선언하면 모두 실행되며,
 하나라도 미완료이면 항목은 PASS가 되지 않습니다.
+
+`timing`은 명명된 기준 응답과 응답시간 차이 assertion을 요구합니다. `state`는
+`{"type":"state_unchanged","snapshot":"baseline"}`처럼 이전 단계의
+snapshot과 변경 시도 후 상태를 직접 비교하며, 상태변경 요청에는 cleanup이
+필수입니다. 접근 행렬은 `state_resource`와 `state_account`를 선언하면 actor
+요청 전후의 상태를 자동 비교합니다. `http-methods`는 선언된 `probe_methods`만
+실행하며 OPTIONS 성공 자체는 허용하고, 예상하지 않은 `Allow` 메서드 또는 금지
+verb 수락만 취약으로 판정합니다. `upload`는 `KODA-INERT-CANARY...` 내용만
+전송하며 업로드 후 GET/HEAD 검증과 cleanup이 모두 있어야 PASS가 가능합니다.
 
 ## 대시보드 API와 인증 경계
 
