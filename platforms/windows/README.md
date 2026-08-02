@@ -82,6 +82,23 @@ If Inno Setup is installed in a custom path:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1 -InnoCompilerPath "C:\Path\To\ISCC.exe"
 ```
 
+For fast SW49 source-code testing, build the same `KODASetup.exe` without
+Java/library scanning, live-web scanning, Playwright/Chromium, Syft, Grype, or
+the Grype database. On the first build, omit `-SkipDependencyInstall` once to
+install PyInstaller; keep it for subsequent source-only rebuilds:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-koda-windows-installer.ps1 `
+  -SourceOnly -SkipDependencyInstall
+```
+
+This profile keeps the dashboard, `koda scan --standard sw-dev-security-49`,
+HTML/JSON/Markdown source reports, and the packaged SW49 smoke test. It is a
+test installer, not a replacement for the full production installer; rebuild
+without `-SourceOnly` for `jar-scan`, `web-scan`, or `web-audit`. The 21-control
+`web-audit` command reports `UNSUPPORTED(package_capability_missing)` in this
+profile instead of making live requests.
+
 ## Microsoft Store path
 
 `KODASetup.exe` is an Inno Setup desktop installer for direct download.

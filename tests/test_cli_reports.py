@@ -249,6 +249,15 @@ class WindowsAliasPackagingTests(unittest.TestCase):
         self.assertNotIn('$sw49SmokeReport -Raw | ConvertFrom-Json', script)
         self.assertIn('"resources/sw49/*.json"', pyproject)
 
+    def test_windows_source_only_profile_skips_library_and_web_assets(self) -> None:
+        script = (ROOT / "platforms/windows/scripts/build-koda-windows-installer.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$SourceOnly", script)
+        self.assertIn("Source-only build: skipping Syft, Grype, NVD/CISA data, and Grype DB.", script)
+        self.assertIn('"security_scanner.java_vulnerability_scan"', script)
+        self.assertIn('"security_scanner.web"', script)
+        self.assertIn('"--exclude-module", $module', script)
+        self.assertIn('"SOURCE-ONLY.txt"', script)
+
 
 class MacAppStorePackagingTests(unittest.TestCase):
     def test_java_helper_excludes_unused_dashboard_tk_modules(self) -> None:

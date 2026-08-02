@@ -30,6 +30,12 @@ App Store 제출은 다음 경로를 사용합니다.
 platforms/macos/scripts/archive-koda-app-store.command
 ```
 
+App Store 아카이브는 `KODA_APP_STORE` Swift 조건으로 빌드됩니다. 네이티브 웹
+점검은 GET/HEAD 기반 read-only만 허용하고, 로그인 POST·능동 probe·ZAP·상태 변경
+시나리오는 실행하지 않습니다. 전체 21개 프로필 점검은 공유 Python CLI 또는
+직접배포판에서 실행해야 하며, App Store판의 미지원 항목은 PASS가 아닌
+`UNSUPPORTED`/검토 상태로 남깁니다.
+
 서명된 앱의 App Sandbox와 오프라인 JAR 스모크 테스트를 제출 전에 확인하세요.
 
 - [한국어 문서 인덱스](../../../docs/README.md)

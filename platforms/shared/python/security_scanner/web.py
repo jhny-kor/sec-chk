@@ -61,6 +61,7 @@ def check_web(
     timeout: float = 15.0,
     opener: urllib.request.OpenerDirector | None = None,
     extra_headers: Mapping[str, str] | None = None,
+    network_context: object | None = None,
 ) -> tuple[list[Finding], list[str]]:
     """Run all live web checks against a single ``url``.
 
@@ -76,6 +77,7 @@ def check_web(
         delay=0.0,
         opener=opener,
         extra_headers=extra_headers,
+        network_context=network_context,
     )
     return findings, warnings
 
@@ -105,6 +107,7 @@ def crawl_web(
     scanned_pages: list[str] | None = None,
     page_results: list[dict[str, object]] | None = None,
     allowed_origins: Sequence[str] = (),
+    network_context: object | None = None,
 ) -> tuple[list[Finding], list[str], int]:
     """Crawl same-host pages from ``seed_url`` and run web checks on each.
 
@@ -147,7 +150,7 @@ def crawl_web(
     target = parsed.netloc
     allowed = {_origin(seed_url), *(_origin(origin) for origin in allowed_origins)}
     if opener is None:
-        opener = build_auth_opener()
+        opener = network_context.build_opener() if network_context is not None else build_auth_opener()
     headers = {"User-Agent": _USER_AGENT}
     if extra_headers:
         headers.update(extra_headers)
@@ -185,7 +188,7 @@ def crawl_web(
         if pages_scanned and delay:
             time.sleep(delay)
 
-        fetched = _fetch(opener, current, headers, timeout, allowed)
+        fetched = _fetch(opener, current, headers, timeout, allowed, network_context=network_context)
         if fetched is None:
             # Only the seed's unreachability is worth a finding; sub-pages degrade
             # to a warning so one dead link never dominates the report.
@@ -253,6 +256,7 @@ def crawl_web(
                 _access_control_check(
                     final_url, opener, headers, timeout, target,
                     compare_unauth=compare_unauth, secondary_headers=secondary_headers,
+                    network_context=network_context,
                 )
             )
 
@@ -273,7 +277,8 @@ def crawl_web(
         if final.scheme == "https" and final.hostname and final.hostname not in tls_checked_hosts:
             tls_checked_hosts.add(final.hostname)
             tls_findings, tls_warnings = check_tls(
-                final.hostname, final.port or 443, timeout=timeout, target=target, url=final_url
+                final.hostname, final.port or 443, timeout=timeout, target=target, url=final_url,
+                network_context=network_context,
             )
             collected.extend(tls_findings)
             warnings.extend(tls_warnings)
@@ -285,7 +290,7 @@ def crawl_web(
             host_probed.add(final.hostname)
             collected.extend(_cors_reflection_probe(final_url, opener, headers, timeout, target))
             collected.extend(_http_methods_probe(final_url, opener, headers, timeout, target))
-            collected.extend(_host_header_probe(final_url, headers, timeout, target))
+            collected.extend(_host_header_probe(final_url, headers, timeout, target, opener=opener))
 
         if max_depth is None or depth < max_depth:
             candidates: set[str] = set()
@@ -299,6 +304,7 @@ def crawl_web(
                     interact=interact,
                     max_clicks=max_clicks,
                     cookies=_opener_cookies(opener),
+                    network_context=network_context,
                 )
                 if rendered is not None:
                     # Rendered DOM is a superset of the raw HTML for link discovery.
@@ -462,16 +468,22 @@ def check_tls(
     timeout: float = 15.0,
     target: str = "",
     url: str = "",
+    network_context: object | None = None,
 ) -> tuple[list[Finding], list[str]]:
     """Inspect certificate expiry and negotiated protocol via one TLS handshake."""
 
     location = url or f"https://{host}"
     context = ssl.create_default_context()
     try:
-        with socket.create_connection((host, port), timeout=timeout) as sock:
-            with context.wrap_socket(sock, server_hostname=host) as tls:
+        if network_context is not None:
+            with network_context.connect_tls(host, port, timeout) as tls:
                 cert = tls.getpeercert()
                 version = tls.version() or ""
+        else:
+            with socket.create_connection((host, port), timeout=timeout) as sock:
+                with context.wrap_socket(sock, server_hostname=host) as tls:
+                    cert = tls.getpeercert()
+                    version = tls.version() or ""
     except ssl.SSLCertVerificationError as exc:
         return (
             [
@@ -984,10 +996,17 @@ def _http_methods_probe(
     return findings
 
 
-def _host_header_probe(url: str, headers: Mapping[str, str], timeout: float, target: str) -> list[Finding]:
+def _host_header_probe(
+    url: str,
+    headers: Mapping[str, str],
+    timeout: float,
+    target: str,
+    *,
+    opener: urllib.request.OpenerDirector | None = None,
+) -> list[Finding]:
     """Send a spoofed Host header (once per host); flag when the app reflects it into
     a redirect Location or the body (cache / password-reset poisoning risk)."""
-    opener = urllib.request.build_opener(_NoRedirect())
+    opener = opener or urllib.request.build_opener(_NoRedirect())
     request = urllib.request.Request(url, headers={**_without_credentials(headers), "Host": _HOST_PROBE}, method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
@@ -1073,17 +1092,29 @@ def _fetch(
     headers: Mapping[str, str],
     timeout: float,
     allowed_origins: set[str],
+    *,
+    network_context: object | None = None,
 ) -> tuple[str, int, str, list[tuple[str, str]], list[str], bytes] | None:
     current_url = url
     current_headers = dict(headers)
     current_opener = opener
-    for _ in range(6):
+    max_redirects = 5
+    if network_context is not None:
+        max_redirects = int(getattr(network_context, "limits", {}).get("redirects", max_redirects))
+    for _ in range(max_redirects + 1):
         request = urllib.request.Request(current_url, headers=current_headers, method="GET")
         try:
-            with current_opener.open(request, timeout=timeout) as response:
+            if network_context is not None:
+                network_context.authorize_url(current_url, method="GET", reserve=False)
+                request_timeout = min(float(timeout), float(network_context.remaining_timeout()))
+                if request_timeout <= 0:
+                    return None
+            else:
+                request_timeout = timeout
+            with current_opener.open(request, timeout=request_timeout) as response:
                 header_items = list(response.headers.items())
                 set_cookies = response.headers.get_all("Set-Cookie") or []
-                return response.geturl(), response.status, response.headers.get("Content-Type") or "", header_items, set_cookies, _read_safe_body(response)
+                return response.geturl(), response.status, response.headers.get("Content-Type") or "", header_items, set_cookies, _read_safe_body(response, _response_limit(current_opener))
         except urllib.error.HTTPError as exc:
             header_items = list(exc.headers.items()) if exc.headers else []
             set_cookies = exc.headers.get_all("Set-Cookie") if exc.headers else []
@@ -1096,21 +1127,32 @@ def _fetch(
                     return next_url, exc.code, content_type or "", header_items, set_cookies, b""
                 if _origin(next_url) != _origin(url):
                     current_headers = _without_credentials(current_headers)
-                    current_opener = urllib.request.build_opener(_NoRedirect())
                 exc.close()
                 current_url = next_url
                 continue
-            return exc.geturl() if hasattr(exc, "geturl") else current_url, exc.code, content_type or "", header_items, set_cookies, _read_safe_body(exc)
+            return exc.geturl() if hasattr(exc, "geturl") else current_url, exc.code, content_type or "", header_items, set_cookies, _read_safe_body(exc, _response_limit(current_opener))
         except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
             return None
     return current_url, 0, "", [], [], b""
 
 
-def _read_safe_body(response) -> bytes:
+def _response_limit(opener: urllib.request.OpenerDirector) -> int:
+    for handler in getattr(opener, "handlers", ()):
+        network = getattr(handler, "network", None)
+        limits = getattr(network, "limits", None)
+        if isinstance(limits, Mapping) and "max_response_bytes" in limits:
+            try:
+                return max(1, int(limits["max_response_bytes"]))
+            except (TypeError, ValueError):
+                break
+    return _MAX_BODY_BYTES
+
+
+def _read_safe_body(response, max_bytes: int = _MAX_BODY_BYTES) -> bytes:
     content_type = (response.headers.get("Content-Type") or "").lower()
     if "html" not in content_type and not content_type.startswith("text/"):
         return b""
-    return response.read(_MAX_BODY_BYTES)
+    return response.read(max_bytes)
 
 
 def _without_credentials(headers: Mapping[str, str]) -> dict[str, str]:
@@ -1191,6 +1233,7 @@ def _render_page(
     interact: bool = False,
     max_clicks: int = 20,
     cookies: Sequence[dict[str, object]] = (),
+    network_context: object | None = None,
 ) -> tuple[str | None, set[str], list[dict[str, object]], str]:
     """Render ``url`` in headless Chromium; return ``(html, extra_urls, cookies, error)``.
 
@@ -1218,9 +1261,11 @@ def _render_page(
     captured: set[str] = set()
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            launch_options = network_context.browser_launch_options() if network_context is not None else {"headless": True}
+            browser = p.chromium.launch(**launch_options)
             try:
-                context = browser.new_context(user_agent=_USER_AGENT)
+                context_options = network_context.browser_context_options() if network_context is not None else {}
+                context = browser.new_context(user_agent=_USER_AGENT, **context_options)
                 if cookies:
                     try:
                         context.add_cookies(list(cookies))
@@ -1229,11 +1274,50 @@ def _render_page(
                 if headers:
                     context.set_extra_http_headers(headers)
                 page = context.new_page()
+                invalid_response = False
+                invalid_request = False
+
+                def validate_request(route) -> None:
+                    nonlocal invalid_request
+                    request = route.request
+                    if network_context is not None and request.url.startswith(("http://", "https://")):
+                        try:
+                            network_context.authorize_url(request.url, method=request.method)
+                        except Exception:
+                            invalid_request = True
+                            try:
+                                route.abort()
+                            except Exception:
+                                pass
+                            return
+                    try:
+                        route.continue_()
+                    except Exception:
+                        invalid_request = True
+
+                def validate_response(response) -> None:
+                    nonlocal invalid_response
+                    if network_context is not None and response.url.startswith(("http://", "https://")):
+                        if not network_context.validate_browser_response(response):
+                            invalid_response = True
+
+                if network_context is not None:
+                    page.route("**/*", validate_request)
+                    page.on("response", validate_response)
                 if capture_network:
                     page.on("request", lambda req: captured.add(req.url))
                 if interact:
                     page.add_init_script(_ROUTE_HOOK_JS)
-                page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
+                render_timeout = float(timeout)
+                if network_context is not None:
+                    render_timeout = min(render_timeout, float(network_context.remaining_timeout()))
+                if render_timeout <= 0:
+                    return None, set(), [], "JS 렌더링을 건너뜁니다: 웹 점검 시간 제한을 초과했습니다."
+                page.goto(url, wait_until="networkidle", timeout=render_timeout * 1000)
+                if invalid_request:
+                    return None, set(), [], "JS 렌더링을 건너뜁니다: 브라우저 요청이 승인된 origin/path/메서드 범위를 벗어났습니다."
+                if invalid_response:
+                    return None, set(), [], "JS 렌더링을 건너뜁니다: 브라우저 응답의 승인 IP를 검증하지 못했습니다."
                 html = page.content()
                 if interact:
                     captured.update(_interact_page(page, max_clicks))
@@ -1336,7 +1420,7 @@ def _read_asset(
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
-            return response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+            return response.read(_response_limit(opener)).decode("utf-8", "replace")
     except (urllib.error.HTTPError, urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
 
@@ -1643,7 +1727,9 @@ def active_probe(
 
     findings: list[Finding] = []
     token = secrets.token_hex(4)
-    no_redirect_opener = urllib.request.build_opener(_NoRedirect())
+    # The caller's opener is already policy-bound and configured not to follow
+    # redirects.  Creating a fresh opener here would bypass NetworkContext.
+    no_redirect_opener = opener
     for name in list(params)[:max_params]:
         original = params[name][0] if params[name] else ""
 
@@ -1820,10 +1906,10 @@ def _submit_form(
         request = urllib.request.Request(action_url + sep + encoded, headers=dict(headers), method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
-            return response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+            return response.read(_response_limit(opener)).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         try:
-            return exc.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+            return exc.read(_response_limit(opener)).decode("utf-8", "replace")
         except Exception:
             return None
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
@@ -1843,11 +1929,11 @@ def _probe_body(
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
-            return response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+            return response.read(_response_limit(opener)).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         # A 500 with a SQL error in the body is exactly what we want to inspect.
         try:
-            return exc.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+            return exc.read(_response_limit(opener)).decode("utf-8", "replace")
         except Exception:
             return None
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
@@ -1879,6 +1965,7 @@ def _access_control_check(
     *,
     compare_unauth: bool,
     secondary_headers: Mapping[str, str] | None,
+    network_context: object | None = None,
 ) -> list[Finding]:
     """Compare an authenticated response against lower-privileged contexts.
 
@@ -1895,7 +1982,8 @@ def _access_control_check(
     base_headers = {k: v for k, v in headers.items() if k.lower() != "cookie"}
 
     if compare_unauth:
-        meta = _fetch_meta(urllib.request.build_opener(), url, base_headers, timeout)
+        unauth_opener = network_context.build_opener() if network_context is not None else urllib.request.build_opener()
+        meta = _fetch_meta(unauth_opener, url, base_headers, timeout)
         if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _responses_equivalent(primary[1], meta[1]):
             findings.append(
                 _finding(
@@ -1908,7 +1996,8 @@ def _access_control_check(
             )
 
     if secondary_headers:
-        meta = _fetch_meta(urllib.request.build_opener(), url, {**base_headers, **secondary_headers}, timeout)
+        secondary_opener = network_context.build_opener() if network_context is not None else urllib.request.build_opener()
+        meta = _fetch_meta(secondary_opener, url, {**base_headers, **secondary_headers}, timeout)
         if meta and meta[0] == 200 and not _looks_like_login(meta[1]) and _responses_equivalent(primary[1], meta[1]):
             findings.append(
                 _finding(
@@ -2091,6 +2180,8 @@ def login(
     *,
     user_field: str | None = None,
     pass_field: str | None = None,
+    request_url: str | None = None,
+    extra_headers: Mapping[str, str] | None = None,
     timeout: float = 15.0,
     result: dict[str, object] | None = None,
 ) -> tuple[list[str], list[Finding]]:
@@ -2114,11 +2205,12 @@ def login(
             "message": "Login success could not yet be confirmed.",
         })
     target = urllib.parse.urlparse(login_url).netloc
-    request = urllib.request.Request(login_url, headers={"User-Agent": _USER_AGENT})
+    page_headers = {"User-Agent": _USER_AGENT, **dict(extra_headers or {})}
+    request = urllib.request.Request(login_url, headers=page_headers)
     try:
         with opener.open(request, timeout=timeout) as response:
             page_url = response.geturl()
-            body = response.read(_MAX_BODY_BYTES).decode("utf-8", "replace")
+            body = response.read(_response_limit(opener)).decode("utf-8", "replace")
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
         if result is not None:
             result.update({"status": "failed", "message": "Login page could not be loaded."})
@@ -2141,24 +2233,28 @@ def login(
     fields = dict(parser.fields)
     fields[user_key] = username
     fields[pass_key] = password
-    action_url = urllib.parse.urljoin(page_url, parser.action) if parser.action else page_url
+    action_url = request_url or (urllib.parse.urljoin(page_url, parser.action) if parser.action else page_url)
     cookies_before = _cookie_count(opener)
     sessions_before = _session_cookie_values(opener)
 
     data = urllib.parse.urlencode(fields).encode("utf-8")
+    post_headers = {
+        **page_headers,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
     post = urllib.request.Request(
         action_url,
         data=data,
-        headers={"User-Agent": _USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"},
+        headers=post_headers,
         method="POST",
     )
     try:
         with opener.open(post, timeout=timeout) as response:
             final_url = response.geturl()
-            response_body = _read_safe_body(response).decode("utf-8", "replace")
+            response_body = _read_safe_body(response, _response_limit(opener)).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         final_url = exc.geturl() if hasattr(exc, "geturl") else action_url
-        response_body = _read_safe_body(exc).decode("utf-8", "replace")
+        response_body = _read_safe_body(exc, _response_limit(opener)).decode("utf-8", "replace")
         exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
         if result is not None:

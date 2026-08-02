@@ -14,6 +14,7 @@ xcodebuild_bin="${XCODEBUILD:-/Applications/Xcode.app/Contents/Developer/usr/bin
   -configuration Release \
   -archivePath "$archive_path" \
   ARCHS="$macos_archs" \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS="KODA_APP_STORE" \
   KODA_INCLUDE_JAVA_SCANNER=1 \
   archive
 echo "Created App Store archive: $archive_path"

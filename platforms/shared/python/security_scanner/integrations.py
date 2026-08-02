@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shlex
@@ -18,12 +19,12 @@ _DEFAULT_ZAP_IMAGE = "ghcr.io/zaproxy/zaproxy:stable"
 _ZAP_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]+|@sha256:[0-9a-f]{64})$")
 
 
-def zap_image() -> str:
+def zap_image(image: str | None = None) -> str:
     """The ZAP Docker image, overridable via ``KODA_ZAP_IMAGE`` for pinning/offline."""
-    image = os.environ.get("KODA_ZAP_IMAGE", "").strip() or _DEFAULT_ZAP_IMAGE
-    if not _ZAP_IMAGE_RE.match(image):
-        raise ValueError(f"Invalid KODA_ZAP_IMAGE reference: {image!r}")
-    return image
+    selected = (image or os.environ.get("KODA_ZAP_IMAGE", "").strip() or _DEFAULT_ZAP_IMAGE).strip()
+    if not _ZAP_IMAGE_RE.match(selected):
+        raise ValueError(f"Invalid ZAP image reference: {selected!r}")
+    return selected
 
 
 # ZAP packaged-scan scripts. baseline = passive spider; full = active attack
@@ -110,7 +111,8 @@ def zap_baseline_command(target_url: str, *, output_dir: str = "reports/zap", mi
 # --- ZAP Automation Framework (YAML plan) -------------------------------------
 
 ZAP_AUTOMATION_REPORT_PREFIX = "zap-automation"
-_ZAP_AF_AUTH_METHODS = {"form", "json"}
+_ZAP_AF_AUTH_METHODS = {"form", "json", "header"}
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def build_zap_plan(
@@ -123,13 +125,17 @@ def build_zap_plan(
     exclude_paths: tuple[str, ...] = (),
     openapi_url: str | None = None,
     openapi_file: str | None = None,
-    auth: dict[str, str] | None = None,
+    auth: dict[str, object] | None = None,
+    zap_rps: float | None = None,
+    zap_threads_per_host: int | None = None,
+    zap_rule_minutes: int | None = None,
+    max_response_bytes: int | None = None,
     fail_on_error: bool = True,
 ) -> dict:
     """Build a ZAP Automation Framework plan (a dict; emit as JSON — valid YAML).
 
     Sequences spider (+ optional ajaxSpider), passive scan, and an optional
-    activeScan inside a context. ``auth`` (form/json) plus a user enables
+    activeScan inside a context. ``auth`` (form/json/header) enables
     authenticated scanning; ``openapi_url``/``openapi_file`` import an OpenAPI
     definition as a job. Reports are written to /zap/wrk for the caller to parse.
     """
@@ -146,34 +152,69 @@ def build_zap_plan(
         method = auth.get("method", "form")
         if method not in _ZAP_AF_AUTH_METHODS:
             raise ValueError(f"auth method must be one of {sorted(_ZAP_AF_AUTH_METHODS)}")
-        login_url = auth.get("login_url") or ""
-        if not login_url:
-            raise ValueError("auth requires 'login_url'")
-        user_name = "koda-user"
-        context["authentication"] = {
-            "method": method,
-            "parameters": {
-                "loginPageUrl": login_url,
-                "loginRequestUrl": auth.get("login_request_url") or login_url,
-                "loginRequestBody": auth.get("login_body")
-                or "username={%username%}&password={%password%}",
-            },
-            "verification": {
-                "method": "response",
-                "loggedInRegex": auth.get("logged_in_regex") or "",
-                "loggedOutRegex": auth.get("logged_out_regex") or "",
-            },
-        }
-        context["sessionManagement"] = {"method": "cookie"}
-        context["users"] = [
-            {
-                "name": user_name,
-                "credentials": {
-                    "username": auth.get("username") or "",
-                    "password": auth.get("password") or "",
+        if method == "header":
+            header_envs = auth.get("header_envs")
+            if not isinstance(header_envs, dict) or not header_envs:
+                raise ValueError("header auth requires header_envs")
+            parameters: dict[str, str] = {}
+            for header_name, env_name in header_envs.items():
+                if not _ENV_NAME_RE.fullmatch(str(env_name)):
+                    raise ValueError("header auth environment names are invalid")
+                parameters[str(header_name)] = f"{{%env:{env_name}%}}"
+            context["authentication"] = {"method": "manual", "parameters": {}, "verification": {"method": "response"}}
+            context["sessionManagement"] = {"method": "headers", "parameters": parameters}
+        else:
+            login_url = auth.get("login_url") or ""
+            if not login_url:
+                raise ValueError("auth requires 'login_url'")
+            user_name = "koda-user"
+            context["authentication"] = {
+                "method": method,
+                "parameters": {
+                    "loginPageUrl": login_url,
+                    "loginRequestUrl": auth.get("login_request_url") or login_url,
+                    "loginRequestBody": auth.get("login_body")
+                    or (
+                        '{"username":"{%username%}","password":"{%password%}"}'
+                        if method == "json"
+                        else "username={%username%}&password={%password%}"
+                    ),
+                },
+                "verification": {
+                    "method": "response",
+                    "loggedInRegex": auth.get("logged_in_regex") or "",
+                    "loggedOutRegex": auth.get("logged_out_regex") or "",
                 },
             }
-        ]
+            token_json_path = str(auth.get("token_json_path") or "")
+            if token_json_path:
+                session_header = str(auth.get("session_header") or "Authorization")
+                token_prefix = str(auth.get("token_prefix") or "Bearer ")
+                context["sessionManagement"] = {
+                    "method": "headers",
+                    "parameters": {
+                        session_header: f"{token_prefix}{{%json:{token_json_path}%}}",
+                    },
+                }
+            else:
+                context["sessionManagement"] = {"method": "cookie"}
+            context["users"] = [
+                {
+                    "name": user_name,
+                    "credentials": {
+                        "username": (
+                            f"${{{auth['username_env']}}}"
+                            if auth.get("username_env")
+                            else auth.get("username") or ""
+                        ),
+                        "password": (
+                            f"${{{auth['password_env']}}}"
+                            if auth.get("password_env")
+                            else auth.get("password") or ""
+                        ),
+                    },
+                }
+            ]
 
     def _with_user(params: dict) -> dict:
         if user_name:
@@ -191,12 +232,40 @@ def build_zap_plan(
             params["apiFile"] = openapi_file
         jobs.append({"type": "openapi", "parameters": params})
 
-    jobs.append({"type": "spider", "parameters": _with_user({"context": "koda", "url": target_url, "maxDuration": minutes})})
+    if zap_threads_per_host is not None and zap_threads_per_host <= 0:
+        raise ValueError("zap_threads_per_host must be positive")
+    if max_response_bytes is not None and max_response_bytes <= 0:
+        raise ValueError("max_response_bytes must be positive")
+    spider_parameters = {"context": "koda", "url": target_url, "maxDuration": minutes}
+    if zap_threads_per_host is not None:
+        spider_parameters["threadCount"] = int(zap_threads_per_host)
+    if max_response_bytes is not None:
+        spider_parameters["maxParseSizeBytes"] = int(max_response_bytes)
+    jobs.append({"type": "spider", "parameters": _with_user(spider_parameters)})
     if ajax_spider:
-        jobs.append({"type": "spiderAjax", "parameters": _with_user({"context": "koda", "url": target_url, "maxDuration": minutes})})
+        ajax_parameters = {
+            "context": "koda",
+            "url": target_url,
+            "maxDuration": minutes,
+            "inScopeOnly": True,
+        }
+        if zap_threads_per_host is not None:
+            ajax_parameters["numberOfBrowsers"] = int(zap_threads_per_host)
+        jobs.append({"type": "spiderAjax", "parameters": _with_user(ajax_parameters)})
     jobs.append({"type": "passiveScan-wait", "parameters": {}})
     if active_scan:
-        jobs.append({"type": "activeScan", "parameters": _with_user({"context": "koda"})})
+        active_parameters = {"context": "koda", "maxScanDurationInMins": minutes}
+        if zap_rps is not None:
+            if zap_rps <= 0:
+                raise ValueError("zap_rps must be positive")
+            active_parameters["delayInMs"] = max(1, math.ceil(1000 / float(zap_rps)))
+        if zap_threads_per_host is not None:
+            active_parameters["threadPerHost"] = int(zap_threads_per_host)
+        if zap_rule_minutes is not None:
+            if zap_rule_minutes <= 0:
+                raise ValueError("zap_rule_minutes must be positive")
+            active_parameters["maxRuleDurationInMins"] = int(zap_rule_minutes)
+        jobs.append({"type": "activeScan", "parameters": _with_user(active_parameters)})
     for template in ("traditional-json", "traditional-html", "traditional-md"):
         jobs.append(
             {
@@ -208,6 +277,18 @@ def build_zap_plan(
                 },
             }
         )
+    jobs.append(
+        {
+            "type": "exitStatus",
+            "parameters": {
+                "warnLevel": "Low",
+                "errorLevel": "High",
+                "okExitValue": 0,
+                "errorExitValue": 1,
+                "warnExitValue": 2,
+            },
+        }
+    )
 
     return {
         "env": {
@@ -223,7 +304,15 @@ def render_zap_plan(plan: dict) -> str:
     return json.dumps(plan, indent=2, ensure_ascii=False)
 
 
-def zap_automation_command(output_dir: str = "reports/zap", *, plan_filename: str = "koda-zap-plan.yaml") -> str:
+def zap_automation_command(
+    output_dir: str = "reports/zap",
+    *,
+    plan_filename: str = "koda-zap-plan.yaml",
+    image: str | None = None,
+    host_mappings: tuple[tuple[str, str], ...] = (),
+    environment_vars: tuple[str, ...] = (),
+    pull_never: bool = False,
+) -> str:
     """Docker command that runs a ZAP Automation Framework plan from ``output_dir``."""
     output_path = output_dir.rstrip("/") or "reports/zap"
     if not re.fullmatch(r"[A-Za-z0-9_./-]+", output_path):
@@ -231,12 +320,23 @@ def zap_automation_command(output_dir: str = "reports/zap", *, plan_filename: st
     if not _ZAP_SAFE_NAME.match(plan_filename):
         raise ValueError("plan_filename must be a bare filename")
     mount_path = output_path if output_path.startswith("/") else f"$PWD/{output_path}"
+    docker_args = ["docker", "run", "--rm", "-t"]
+    if pull_never:
+        docker_args.extend(["--pull", "never"])
+    for name in environment_vars:
+        if not _ENV_NAME_RE.fullmatch(name):
+            raise ValueError("environment_vars must contain valid environment variable names")
+        docker_args.extend(["-e", shlex.quote(name)])
+    for host, address in host_mappings:
+        if not _ZAP_SAFE_NAME.match(host) or not re.fullmatch(r"[0-9A-Fa-f:.]+", address):
+            raise ValueError("host_mappings must contain a hostname and an IP address")
+        docker_args.extend(["--add-host", f"{shlex.quote(host)}:{shlex.quote(address)}"])
     return " ".join(
         [
             "mkdir", "-p", shlex.quote(output_path), "&&",
-            "docker", "run", "--rm", "-t",
+            *docker_args,
             "-v", f'"{mount_path}:/zap/wrk:rw"',
-            shlex.quote(zap_image()),
+            shlex.quote(zap_image(image)),
             "zap.sh", "-cmd", "-autorun", f"/zap/wrk/{plan_filename}",
         ]
     )

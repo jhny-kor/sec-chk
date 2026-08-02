@@ -219,6 +219,21 @@ or password directly in shell history. `--compare-unauth` and `--secondary-heade
 can compare access behavior, so use them only with suitable test accounts and
 authorization.
 
+For the 21-control profile-driven audit, use the approval-gated `web-audit` command:
+
+```bash
+export KODA_APPROVAL_KEY='operator-managed-secret'
+python3 -m security_scanner web-audit plan --profile profile.json --out approval-request.json
+python3 -m security_scanner web-audit approve --request approval-request.json --approver name --out approval.json
+python3 -m security_scanner web-audit run --profile profile.json --approval approval.json \
+  --confirm-origin https://staging.example.com --format markdown --output reports/web-audit.md
+```
+
+`plan` performs DNS/IP preflight without target traffic. `run` verifies the profile
+hash, exact origin, current IP set, expiry, signature, and one-time nonce. A profile
+must declare its expected success/rejection oracles; undeclared surfaces cannot be
+reported as PASS. See the [web audit runbook](security/WEB_AUDIT.md).
+
 ## Actions that can change state or contact a target
 
 | Command | Behavior |

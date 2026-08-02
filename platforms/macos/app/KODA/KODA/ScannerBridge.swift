@@ -610,6 +610,11 @@ final class ScannerBridge: ObservableObject {
     }
 
     func runZAPBaseline(language: AppLanguage) {
+        #if KODA_APP_STORE
+        setStatus(ko: "App Store판에서는 ZAP/능동 점검을 지원하지 않습니다.", en: "ZAP and active scanning are unavailable in the App Store build.")
+        statusColor = .orange
+        return
+        #endif
         let alert = NSAlert()
         alert.messageText = language == .ko ? "ZAP DAST 실행" : "Run ZAP DAST"
         alert.informativeText = language == .ko
@@ -4310,6 +4315,12 @@ private enum NativeWebScanner {
         var compareUnauth = false    // access-control: compare authed vs unauthenticated
         var secondaryHeaders: [String: String] = [:]  // access-control: second account
 
+        #if KODA_APP_STORE
+        static let appStoreReadOnly = true
+        #else
+        static let appStoreReadOnly = false
+        #endif
+
         static let singlePage = Options()
     }
 
@@ -4353,8 +4364,12 @@ private enum NativeWebScanner {
 
         let jar = CookieJar()
         var warnings: [String] = []
+        let appStoreReadOnly = Options.appStoreReadOnly
+        if appStoreReadOnly {
+            warnings.append("App Store판은 GET/HEAD 기반 native read-only 점검만 실행합니다.")
+        }
 
-        if !options.loginURL.isEmpty {
+        if !options.loginURL.isEmpty && !appStoreReadOnly {
             warnings.append(contentsOf: await login(session: session, jar: jar, options: options, timeout: timeout))
         }
 
@@ -4371,7 +4386,7 @@ private enum NativeWebScanner {
         }
         var pagesScanned = 0
         var assetsSeen: Set<String> = []  // A: JS bundles already scraped (global budget)
-        let renderer: WebPageRenderer? = options.render ? await WebPageRenderer() : nil
+        let renderer: WebPageRenderer? = options.render && !appStoreReadOnly ? await WebPageRenderer() : nil
 
         if options.ingestSitemap {
             for url in await ingestSitemaps(seed: seed, session: session, options: options, jar: jar, timeout: timeout)
@@ -4381,7 +4396,9 @@ private enum NativeWebScanner {
         }
         if options.probePaths {
             collected.append(contentsOf: await probeSensitivePaths(seed: seed, session: session, options: options, jar: jar, timeout: timeout))
-            collected.append(contentsOf: await probeGraphQL(seed: seed, session: session, options: options, jar: jar, timeout: timeout))
+            if !appStoreReadOnly {
+                collected.append(contentsOf: await probeGraphQL(seed: seed, session: session, options: options, jar: jar, timeout: timeout))
+            }
         }
 
         while !queue.isEmpty {
@@ -4412,7 +4429,7 @@ private enum NativeWebScanner {
                 if !page.body.isEmpty {
                     collected.append(contentsOf: analyzeBody(url: page.finalURL, html: page.body))
                 }
-                if options.active, !(URLComponents(url: page.finalURL, resolvingAgainstBaseURL: false)?.queryItems ?? []).isEmpty {
+                if options.active && !appStoreReadOnly, !(URLComponents(url: page.finalURL, resolvingAgainstBaseURL: false)?.queryItems ?? []).isEmpty {
                     collected.append(contentsOf: await activeProbe(url: page.finalURL, session: session, options: options, jar: jar, timeout: timeout))
                 }
                 if (options.compareUnauth || !options.secondaryHeaders.isEmpty), !isStaticAsset(page.finalURL.absoluteString) {
@@ -4440,7 +4457,9 @@ private enum NativeWebScanner {
                     // Host header) — that check lives in the Python engine and ZAP.
                     hostProbed.insert(host)
                     collected.append(contentsOf: await corsReflectionProbe(url: page.finalURL, session: session, timeout: timeout))
-                    collected.append(contentsOf: await httpMethodsProbe(url: page.finalURL, session: session, timeout: timeout))
+                    if !appStoreReadOnly {
+                        collected.append(contentsOf: await httpMethodsProbe(url: page.finalURL, session: session, timeout: timeout))
+                    }
                 }
                 if options.crawl {
                     var links = extractLinks(base: page.finalURL, body: page.body)
@@ -5802,6 +5821,16 @@ private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate {
 private final class WebScanTLSDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
     private(set) var serverTrust: SecTrust?
     private(set) var negotiatedTLSVersion: tls_protocol_version_t?
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        // Keep native scans inside the exact seed origin. This is required for
+        // the App Store read-only lane and also makes redirect evidence explicit.
+        completionHandler(nil)
+    }
 
     func urlSession(
         _ session: URLSession,

@@ -7,7 +7,7 @@ struct PreventionKitGroup: Identifiable {
     let items: [String]
 }
 
-enum AppLanguage: String, Hashable {
+enum AppLanguage: String, Hashable, Sendable {
     case ko
     case en
 
@@ -2071,6 +2071,7 @@ struct SecurityStandardDetailScreen: View {
     @Binding var language: AppLanguage
     let onBack: () -> Void
     let onHelp: () -> Void
+    @State private var expandedCategoryIDs: Set<String> = []
 
     var body: some View {
         GeometryReader { proxy in
@@ -2145,9 +2146,13 @@ struct SecurityStandardDetailScreen: View {
             }
 
             section(title: language.criteriaTitle) {
-                LazyVGrid(columns: detailColumns(width), spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(standard.categories) { category in
-                        StandardCategoryRow(category: category, language: language)
+                        StandardCategoryAccordion(
+                            category: category,
+                            language: language,
+                            isExpanded: categoryExpansionBinding(for: category.id)
+                        )
                     }
                 }
             }
@@ -2189,6 +2194,19 @@ struct SecurityStandardDetailScreen: View {
                 .font(.title2.weight(.bold))
             content()
         }
+    }
+
+    private func categoryExpansionBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedCategoryIDs.contains(id) },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedCategoryIDs.insert(id)
+                } else {
+                    expandedCategoryIDs.remove(id)
+                }
+            }
+        )
     }
 
     private func detailColumns(_ width: CGFloat) -> [GridItem] {
@@ -2503,32 +2521,55 @@ private struct HelpInfoBlock: View {
     }
 }
 
-private struct StandardCategoryRow: View {
+private struct StandardCategoryAccordion: View {
     let category: AppStandardCategory
     let language: AppLanguage
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(category.title(language: language))
-                    .font(.headline)
-                    .lineLimit(2)
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(category.coverage(language: language))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(language.detailedChecksTitle)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
 
+                    ForEach(category.detailItems(language: language), id: \.self) { item in
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(category.isMapped ? .green : .orange)
+                                .padding(.top, 2)
+                            Text(item)
+                                .font(.caption)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                HelpInfoBlock(
+                    title: language.evidenceSourceTitle,
+                    text: category.evidenceSummary(language: language)
+                )
+            }
+            .padding(.top, 8)
+        } label: {
+            HStack(spacing: 8) {
+                Text(category.title(language: language))
+                    .font(.headline)
+                Spacer()
                 Text(category.isMapped ? language.localCheckBadge : language.evidenceRequiredBadge)
-                    .font(.caption.weight(.bold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(category.isMapped ? .green : .orange)
             }
-
-            Text(category.coverage(language: language))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(KODATheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {

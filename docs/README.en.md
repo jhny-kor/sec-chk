@@ -36,6 +36,7 @@ switching languages.
 - [GitHub repository security checklist](security/GITHUB_REPOSITORY_SECURITY.md)
 - [Dependency-Track SBOM upload](security/DEPENDENCY_TRACK.md)
 - [OWASP ZAP baseline](security/ZAP_BASELINE.md)
+- [Profile-driven 21-control web audit](security/WEB_AUDIT.md)
 - [CycloneDX VEX tracking](security/VEX.md)
 - [SLSA and Sigstore release guardrails](security/SLSA_SIGSTORE.md)
 - [NIST SSDF workflow](security/NIST_SSDF_WORKFLOW.md)

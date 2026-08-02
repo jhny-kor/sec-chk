@@ -51,6 +51,7 @@ Linux 오프라인 배포 계층 설명은
 | [GITHUB_REPOSITORY_SECURITY.ko.md](security/GITHUB_REPOSITORY_SECURITY.ko.md) | GitHub 저장소 보안 설정 체크리스트 |
 | [DEPENDENCY_TRACK.ko.md](security/DEPENDENCY_TRACK.ko.md) | Dependency-Track SBOM 업로드 연동 |
 | [ZAP_BASELINE.ko.md](security/ZAP_BASELINE.ko.md) | OWASP ZAP baseline DAST 실행 |
+| [WEB_AUDIT.ko.md](security/WEB_AUDIT.ko.md) | 승인·프로필·oracle 기반 21개 웹취약점 자동 점검 |
 | [VEX.ko.md](security/VEX.ko.md) | CycloneDX VEX 취약점 상태 추적 |
 | [SLSA_SIGSTORE.ko.md](security/SLSA_SIGSTORE.ko.md) | SLSA·Sigstore 릴리스 출처 증명 |
 | [NIST_SSDF_WORKFLOW.ko.md](security/NIST_SSDF_WORKFLOW.ko.md) | NIST SSDF 워크플로 증적 |

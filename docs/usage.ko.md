@@ -53,5 +53,22 @@ KODA가 구현한 정적 룰 매핑 범위이며 전체 SAST 또는 공식 준�
 `zap-run --mode full`처럼 요청 범위를 넓히는 옵션은 소유하거나 명시적 권한을
 받은 대상에서만 사용하고, ZAP 활성 모드에는 `--authorize-active`를 지정하세요.
 
+21개 웹취약점 항목을 프로필·승인·일회성 nonce로 실행하려면 `web-audit`을
+사용합니다. 프로필에는 대상 origin/CIDR, 리소스, 정상·거부 oracle, cleanup,
+N/A 사유를 명시해야 하며, 선언되지 않은 표면은 PASS가 되지 않습니다.
+
+```bash
+export KODA_APPROVAL_KEY='operator-managed-secret'
+koda web-audit plan --profile profile.json --out approval-request.json
+koda web-audit approve --request approval-request.json --approver 'name' --out approval.json
+koda web-audit run --profile profile.json --approval approval.json \
+  --confirm-origin https://staging.example.com --format markdown --output reports/web-audit.md
+```
+
+`plan`은 대상 DNS/IP만 확인하고 트래픽을 보내지 않습니다. `run`은 승인서의
+프로필 hash·origin·현재 IP·만료·서명을 검증하고 승인서를 한 번만 소비합니다.
+자격증명은 `${ENV:NAME}` 또는 환경변수 이름으로만 참조하세요. 프로필 예시와
+21개 상태 판정은 [웹취약점 자동 점검 런북](security/WEB_AUDIT.ko.md)에 있습니다.
+
 - [한국어 문서 인덱스](README.md)
 - [English CLI and local usage](usage.md)

@@ -2,6 +2,7 @@
 param(
     [string]$Version = "0.1.0",
     [switch]$SkipDependencyInstall,
+    [switch]$SourceOnly,
     [string]$InnoCompilerPath,
 
     # Pinned security-tool versions. Override these parameters when upgrading.
@@ -40,6 +41,22 @@ $SyftExe = Join-Path $SecurityToolsCacheDir "syft.exe"
 $GrypeExe = Join-Path $SecurityToolsCacheDir "grype.exe"
 $GrypeDbDir = Join-Path $SecurityToolsCacheDir "grype-db"
 $SecurityToolLicensesDir = Join-Path $SecurityToolsCacheDir "licenses"
+
+# The source-only installer keeps the dashboard and SW49 source scan, but does
+# not ship Java/library or live-web scanner modules, Playwright, or Grype data.
+$SourceOnlyExcludedModules = @(
+    "security_scanner.web",
+    "security_scanner.api_spec",
+    "security_scanner.dast",
+    "security_scanner.java_vulnerability_scan",
+    "security_scanner.java_vulnerability_reporting",
+    "security_scanner.java_archives",
+    "security_scanner.java_inventory",
+    "security_scanner.grype_adapter",
+    "security_scanner.syft_adapter",
+    "security_scanner.offline_vuln_data",
+    "security_scanner.sbom_verification"
+)
 
 $GuiEntryPoint = Join-Path $RepoRoot "platforms\windows\scripts\koda-desktop.py"
 $CliEntryPoint = Join-Path $BuildRoot "koda-cli-entry.py"
@@ -458,22 +475,29 @@ if (-not $SkipDependencyInstall) {
 
     Write-Host "Installing build dependencies."
 
-    & $VenvPython -m pip install --upgrade `
-        pyinstaller `
-        pywebview `
-        "playwright==1.61.0"
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to install PyInstaller, pywebview, and playwright."
+    $buildPackages = @("pyinstaller")
+    if (-not $SourceOnly) {
+        $buildPackages += @("pywebview", "playwright==1.61.0")
     }
 
-    Write-Host "Downloading Playwright Chromium for offline SPA rendering."
-
-    $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
-    & $VenvPython -m playwright install chromium
+    & $VenvPython -m pip install --upgrade $buildPackages
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to download Playwright Chromium."
+        throw "Failed to install the Windows build dependencies."
+    }
+
+    if (-not $SourceOnly) {
+        Write-Host "Downloading Playwright Chromium for offline SPA rendering."
+
+        $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
+        & $VenvPython -m playwright install chromium
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download Playwright Chromium."
+        }
+    }
+    else {
+        Write-Host "Source-only build: skipping pywebview, Playwright, and Chromium."
     }
 }
 else {
@@ -487,43 +511,48 @@ else {
 }
 
 # ---------------------------------------------------------------------------
-# Download Syft and Grype for Windows x86_64.
+# Download Syft and Grype for Windows x86_64 unless this is a source-only build.
 # ---------------------------------------------------------------------------
 
-if (-not $SkipSecurityToolDownload) {
-    $syftUri = "https://github.com/anchore/syft/releases/download/v$SyftVersion/syft_${SyftVersion}_windows_amd64.zip"
-    $grypeUri = "https://github.com/anchore/grype/releases/download/v$GrypeVersion/grype_${GrypeVersion}_windows_amd64.zip"
-
-    Install-ZippedSecurityTool `
-        -ToolName "syft" `
-        -Version $SyftVersion `
-        -DownloadUri $syftUri `
-        -ExecutableName "syft.exe" `
-        -DestinationExecutable $SyftExe
-
-    Install-ZippedSecurityTool `
-        -ToolName "grype" `
-        -Version $GrypeVersion `
-        -DownloadUri $grypeUri `
-        -ExecutableName "grype.exe" `
-        -DestinationExecutable $GrypeExe
+if ($SourceOnly) {
+    Write-Host "Source-only build: skipping Syft, Grype, NVD/CISA data, and Grype DB."
 }
 else {
-    Write-Host "Skipping Syft and Grype downloads. Using cached executables."
-}
+    if (-not $SkipSecurityToolDownload) {
+        $syftUri = "https://github.com/anchore/syft/releases/download/v$SyftVersion/syft_${SyftVersion}_windows_amd64.zip"
+        $grypeUri = "https://github.com/anchore/grype/releases/download/v$GrypeVersion/grype_${GrypeVersion}_windows_amd64.zip"
 
-Test-SecurityTool -ToolName "Syft" -Executable $SyftExe
-Test-SecurityTool -ToolName "Grype" -Executable $GrypeExe
+        Install-ZippedSecurityTool `
+            -ToolName "syft" `
+            -Version $SyftVersion `
+            -DownloadUri $syftUri `
+            -ExecutableName "syft.exe" `
+            -DestinationExecutable $SyftExe
 
-if (-not $SkipGrypeDatabaseUpdate) {
-    Update-GrypeDatabase
-}
-else {
-    Write-Host "Skipping Grype database update. Using cached database."
-    Confirm-GrypeDatabaseExists
-}
+        Install-ZippedSecurityTool `
+            -ToolName "grype" `
+            -Version $GrypeVersion `
+            -DownloadUri $grypeUri `
+            -ExecutableName "grype.exe" `
+            -DestinationExecutable $GrypeExe
+    }
+    else {
+        Write-Host "Skipping Syft and Grype downloads. Using cached executables."
+    }
 
-Write-SecurityToolManifest
+    Test-SecurityTool -ToolName "Syft" -Executable $SyftExe
+    Test-SecurityTool -ToolName "Grype" -Executable $GrypeExe
+
+    if (-not $SkipGrypeDatabaseUpdate) {
+        Update-GrypeDatabase
+    }
+    else {
+        Write-Host "Skipping Grype database update. Using cached database."
+        Confirm-GrypeDatabaseExists
+    }
+
+    Write-SecurityToolManifest
+}
 
 # ---------------------------------------------------------------------------
 # Generate runtime hook shared by GUI and CLI builds.
@@ -599,6 +628,10 @@ for candidate in browser_candidates:
         break
 '@
 
+if ($SourceOnly) {
+    $runtimeHookSource += "`r`nos.environ.setdefault('KODA_SOURCE_ONLY', '1')`r`n"
+}
+
 Write-Utf8NoBomFile `
     -Path $RuntimeHook `
     -Content $runtimeHookSource
@@ -653,33 +686,42 @@ $guiPyInstallerArgs = @(
 
     "--add-data", $Sw49ResourcesData,
 
-    "--collect-submodules", "security_scanner",
-    "--hidden-import", "security_scanner.web",
-
-    "--collect-all", "webview",
-    "--collect-all", "clr_loader",
-    "--collect-all", "pythonnet",
-    "--collect-all", "playwright",
-
     "--hidden-import", "tkinter",
     "--hidden-import", "tkinter.filedialog",
-    "--hidden-import", "tkinter.messagebox"
+    "--hidden-import", "tkinter.messagebox",
+    "--hidden-import", "security_scanner.web_audit"
 )
 
-if (Test-Path -LiteralPath $BrowsersDir -PathType Container) {
+if ($SourceOnly) {
+    foreach ($module in $SourceOnlyExcludedModules) {
+        $guiPyInstallerArgs += @("--exclude-module", $module)
+    }
+}
+else {
+    $guiPyInstallerArgs += @(
+        "--collect-submodules", "security_scanner",
+        "--hidden-import", "security_scanner.web",
+        "--collect-all", "webview",
+        "--collect-all", "clr_loader",
+        "--collect-all", "pythonnet",
+        "--collect-all", "playwright"
+    )
+}
+
+if (-not $SourceOnly -and (Test-Path -LiteralPath $BrowsersDir -PathType Container)) {
     $guiPyInstallerArgs += @(
         "--add-data",
         ($BrowsersDir + ";ms-playwright")
     )
 }
-else {
-    Write-Warning @"
+elseif (-not $SourceOnly) {
+    throw @"
 Chromium was not found at:
 
 $BrowsersDir
 
-KODA will still build, but Playwright SPA rendering will not be available.
-Run the script again without -SkipDependencyInstall to download Chromium.
+The Full distribution requires bundled Chromium for the web-audit browser capability.
+Run the script again without -SkipDependencyInstall to stage Chromium.
 "@
 }
 
@@ -738,14 +780,24 @@ $cliPyInstallerArgs = @(
 
     "--add-data", $Sw49ResourcesData,
 
-    "--collect-submodules", "security_scanner",
-    "--hidden-import", "security_scanner.web",
-    "--collect-all", "playwright",
-
     "--hidden-import", "tkinter",
     "--hidden-import", "tkinter.filedialog",
-    "--hidden-import", "tkinter.messagebox"
+    "--hidden-import", "tkinter.messagebox",
+    "--hidden-import", "security_scanner.web_audit"
 )
+
+if ($SourceOnly) {
+    foreach ($module in $SourceOnlyExcludedModules) {
+        $cliPyInstallerArgs += @("--exclude-module", $module)
+    }
+}
+else {
+    $cliPyInstallerArgs += @(
+        "--collect-submodules", "security_scanner",
+        "--hidden-import", "security_scanner.web",
+        "--collect-all", "playwright"
+    )
+}
 
 if (Test-Path -LiteralPath $IconPath -PathType Leaf) {
     $cliPyInstallerArgs += @(
@@ -885,29 +937,36 @@ finally {
 # Copy Syft, Grype and the Grype DB into the installation tree.
 # ---------------------------------------------------------------------------
 
-if (Test-Path -LiteralPath $InstalledToolsDir) {
-    Remove-Item -LiteralPath $InstalledToolsDir -Recurse -Force
+if (-not $SourceOnly) {
+    if (Test-Path -LiteralPath $InstalledToolsDir) {
+        Remove-Item -LiteralPath $InstalledToolsDir -Recurse -Force
+    }
+
+    Copy-Item `
+        -LiteralPath $SecurityToolsCacheDir `
+        -Destination $InstalledToolsDir `
+        -Recurse `
+        -Force
+
+    if (-not (Test-Path -LiteralPath (
+        Join-Path $InstalledToolsDir "syft.exe"
+    ) -PathType Leaf)) {
+        throw "Bundled syft.exe was not copied into the installer tree."
+    }
+
+    if (-not (Test-Path -LiteralPath (
+        Join-Path $InstalledToolsDir "grype.exe"
+    ) -PathType Leaf)) {
+        throw "Bundled grype.exe was not copied into the installer tree."
+    }
+
+    Confirm-GrypeDatabaseExists
 }
-
-Copy-Item `
-    -LiteralPath $SecurityToolsCacheDir `
-    -Destination $InstalledToolsDir `
-    -Recurse `
-    -Force
-
-if (-not (Test-Path -LiteralPath (
-    Join-Path $InstalledToolsDir "syft.exe"
-) -PathType Leaf)) {
-    throw "Bundled syft.exe was not copied into the installer tree."
+else {
+    Write-Utf8NoBomFile `
+        -Path (Join-Path $AppDistDir "SOURCE-ONLY.txt") `
+        -Content "This KODASetup.exe contains SW49 source-code analysis only. Java/library and live-web scans are excluded."
 }
-
-if (-not (Test-Path -LiteralPath (
-    Join-Path $InstalledToolsDir "grype.exe"
-) -PathType Leaf)) {
-    throw "Bundled grype.exe was not copied into the installer tree."
-}
-
-Confirm-GrypeDatabaseExists
 
 # Root-level CLI launcher.
 $cliLauncherPath = Join-Path $AppDistDir "KODA-CLI.cmd"

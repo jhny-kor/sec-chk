@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import platform
+import secrets
 import subprocess
 import time
 from dataclasses import replace
@@ -34,6 +35,7 @@ from .standards import (
     filter_findings_by_standard,
     resolve_standard_selection,
 )
+from .web_audit import approve_request, plan_profile, run_web_audit
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -44,6 +46,7 @@ LOCAL_CORS_HOSTS = {"127.0.0.1", "localhost", "::1"}
 def create_dashboard_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), _handler(language))
     server.daemon_threads = True
+    server.koda_session_token = secrets.token_urlsafe(32)
     return server
 
 
@@ -590,7 +593,9 @@ def _handler(language: str):
 
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
-            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/zap-scan", "/api/select-directory", "/api/prevention-kit", "/api/export"}:
+            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/zap-scan", "/api/select-directory", "/api/prevention-kit", "/api/export", "/api/web-audit/plan", "/api/web-audit/approve", "/api/web-audit/run"}:
+                if path.startswith("/api/web-audit/") and not self._require_web_audit_access(options=True):
+                    return
                 self.send_response(HTTPStatus.NO_CONTENT)
                 self._send_cors_headers()
                 self.send_header("Content-Length", "0")
@@ -600,6 +605,16 @@ def _handler(language: str):
 
         def do_POST(self) -> None:
             path = urlparse(self.path).path
+            if path in {"/api/web-audit/plan", "/api/web-audit/approve", "/api/web-audit/run"}:
+                if not self._require_web_audit_access():
+                    return
+                if path.endswith("/plan"):
+                    self._handle_web_audit_plan()
+                elif path.endswith("/approve"):
+                    self._handle_web_audit_approve()
+                else:
+                    self._handle_web_audit_run()
+                return
             if path == "/api/select-directory":
                 self._handle_select_directory()
                 return
@@ -649,6 +664,8 @@ def _handler(language: str):
         def _handle_web_scan(self) -> None:
             try:
                 request = self._read_json(max_bytes=4_194_304)  # allow a pasted API spec
+                if bool(request.get("active")) and not self._require_web_audit_access():
+                    return
                 auth = request.get("auth") if isinstance(request.get("auth"), dict) else {}
                 payload = web_scan_payload(
                     _string_value(request, "url"),
@@ -684,6 +701,11 @@ def _handler(language: str):
         def _handle_zap_scan(self) -> None:
             try:
                 request = self._read_json(max_bytes=8_388_608)  # allow a prior report to merge into
+                # Preserve the legacy 400 authorization diagnostic for an
+                # unconfirmed request; an actually authorized active request
+                # must also carry the stricter local web-audit session gate.
+                if bool(request.get("active_scan")) and bool(request.get("authorization_confirmed")) and not self._require_web_audit_access():
+                    return
                 payload = zap_scan_payload(
                     _string_value(request, "url"),
                     language=_choice_value(request, "language", {"en", "ko"}, language),
@@ -702,6 +724,50 @@ def _handler(language: str):
                     merge=request.get("merge") if isinstance(request.get("merge"), dict) else None,
                 )
             except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(payload)
+
+        def _handle_web_audit_plan(self) -> None:
+            try:
+                request = self._read_json(max_bytes=2_097_152)
+                profile = request.get("profile")
+                if not isinstance(profile, dict):
+                    raise ValueError("'profile' must be an object")
+                payload = plan_profile(profile)
+            except (json.JSONDecodeError, TypeError, ValueError, RuntimeError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(payload)
+
+        def _handle_web_audit_approve(self) -> None:
+            try:
+                request = self._read_json(max_bytes=2_097_152)
+                approval_request = request.get("request")
+                approver = _string_value(request, "approver")
+                if not isinstance(approval_request, dict):
+                    raise ValueError("'request' must be an object")
+                payload = approve_request(approval_request, approver)
+            except (json.JSONDecodeError, TypeError, ValueError, RuntimeError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(payload)
+
+        def _handle_web_audit_run(self) -> None:
+            try:
+                request = self._read_json(max_bytes=4_194_304)
+                profile = request.get("profile")
+                approval = request.get("approval")
+                confirm_origin = _string_value(request, "confirm_origin")
+                if not isinstance(profile, dict) or not isinstance(approval, dict):
+                    raise ValueError("'profile' and 'approval' must be objects")
+                payload = run_web_audit(
+                    profile,
+                    approval,
+                    confirm_origin=confirm_origin,
+                    dry_run=bool(request.get("dry_run")),
+                )
+            except (json.JSONDecodeError, TypeError, ValueError, RuntimeError) as exc:
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(payload)
@@ -767,6 +833,28 @@ def _handler(language: str):
         def log_message(self, format: str, *args: object) -> None:
             print(f"{self.address_string()} - {format % args}")
 
+        def _require_web_audit_access(self, *, options: bool = False) -> bool:
+            bound_host = str(self.server.server_address[0])
+            client_host = str(self.client_address[0])
+            if bound_host not in LOCAL_CORS_HOSTS or client_host not in LOCAL_CORS_HOSTS:
+                if not options:
+                    self._send_json({"error": "web-audit execution API is disabled for non-loopback bindings"}, status=HTTPStatus.FORBIDDEN)
+                else:
+                    self.send_error(HTTPStatus.FORBIDDEN)
+                return False
+            port = int(self.server.server_address[1])
+            allowed_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}", f"http://[::1]:{port}"}
+            if self.headers.get("Origin") not in allowed_origins:
+                if not options:
+                    self._send_json({"error": "exact loopback Origin is required"}, status=HTTPStatus.FORBIDDEN)
+                else:
+                    self.send_error(HTTPStatus.FORBIDDEN)
+                return False
+            if not options and self.headers.get("X-KODA-Session") != getattr(self.server, "koda_session_token", ""):
+                self._send_json({"error": "invalid X-KODA-Session"}, status=HTTPStatus.FORBIDDEN)
+                return False
+            return True
+
         def _read_json(self, *, required: bool = True, max_bytes: int = 32768) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0"))
             if content_length <= 0:
@@ -784,6 +872,7 @@ def _handler(language: str):
             body = content.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("X-KODA-Session", getattr(self.server, "koda_session_token", ""))
             self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -813,7 +902,7 @@ def _handler(language: str):
                 return
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-KODA-Session")
             self.send_header("Vary", "Origin")
 
     return DashboardHandler

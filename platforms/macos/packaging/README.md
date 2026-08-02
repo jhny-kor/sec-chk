@@ -79,6 +79,13 @@ Use the native Xcode project as the App Store lane:
 platforms/macos/scripts/archive-koda-app-store.command
 ```
 
+The archive script passes the `KODA_APP_STORE` Swift condition. In that build,
+the native web scanner is restricted to GET/HEAD read-only requests; login POSTs,
+active probes, ZAP, and state-changing scenarios are disabled. Run the complete
+21-control profile-driven audit through the shared Python CLI or the direct
+distribution, and keep App Store capability gaps as `UNSUPPORTED`/review rather
+than treating them as PASS.
+
 Then upload the archive from Xcode Organizer or export it with an App Store
 Connect export profile. Before submission, verify the signed app has the App
 Sandbox entitlement:
