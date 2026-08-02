@@ -26,6 +26,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Scan JAR/WAR/EAR files on an offline server | [Offline Java SBOM and vulnerability runbook](docs/security/java-sbom-vulnerability-scan.en.md) |
 | Choose an air-gapped delivery method | [Offline delivery overview](docs/install/offline-delivery.en.md) |
 | Run scans, configure reports, or set up CI | [CLI and local usage](docs/usage.md) |
+| Run the approval-gated 21-control web audit | [Web audit runbook](docs/security/WEB_AUDIT.md) |
 | Integrate with security tooling | [Security integration docs](docs/README.en.md#security-integrations) |
 
 ## Platform support
@@ -37,7 +38,8 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Offline JAR/WAR/EAR SBOM and vulnerability scan | Yes | Yes | Yes | Yes |
 | Baseline SBOM verification | No | Yes | Yes | Yes |
 | Host posture scan | No | Yes | Yes | No |
-| Live web scan or ZAP baseline | Yes | Yes | Yes | No, by design |
+| Live web posture or ZAP baseline | Yes | Yes | Yes | No, by design |
+| Profile-driven 21-control web audit | Direct/native lane only | Full build | Shared engine | No, by design |
 
 The Python engine can run from source on any OS. The macOS column above refers only to the native app.
 
@@ -80,7 +82,7 @@ The diagram summarizes KODA's supported workflows, the native macOS and shared P
 | Check whether a UI has basic quality issues | `screen_quality` checks for markup accessibility and exposure problems | A focused quality report for HTML/JSP/CLX/JS/Vue/React sources. |
 | Prioritize dependency findings | Optional OSV/CVE, CISA KEV, FIRST EPSS, reachability, and AI triage | More context without changing the original finding severity. |
 | Audit deployed Java archives offline | JAR/WAR/EAR inventory, CycloneDX SBOM, vulnerability matching, and baseline comparison | Evidence for what is deployed and whether it matches an approved SBOM. |
-| Check a workstation or an authorized web target | Optional host posture, web posture, and ZAP workflows | A bounded security posture report; active checks require explicit authorization. |
+| Check a workstation or an authorized web target | Optional host posture, web posture, ZAP, and profile-driven 21-control workflows | A bounded security posture report; active checks require explicit authorization and declared pass/rejection oracles. |
 
 Security scans run `secrets`, `dependencies`, `configuration`, `code`, and `prevention` by default. `screen_quality` and `host` are separate categories. A zero-finding result is not a security guarantee; coverage depends on selected checks, reachable targets, and available data.
 
@@ -94,6 +96,7 @@ The [English documentation index](docs/README.en.md) is the complete map. The [K
 | Closed-network Docker, Linux, and Windows delivery | [Offline delivery overview](docs/install/offline-delivery.en.md) |
 | macOS, Linux, and Windows installation | [Install guides](docs/README.en.md#installation-and-delivery) |
 | Java SBOM, pre-commit, Dependency-Track, ZAP, VEX, and supply-chain guidance | [Security integration docs](docs/README.en.md#security-integrations) |
+| Approval-gated web controls, profiles, OAST, and package limits | [Web audit runbook](docs/security/WEB_AUDIT.md) |
 | Report fields and output contracts | [Report contract](docs/report-contract.md) |
 | Dashboard design rationale and limits | [Dashboard research](docs/security-dashboard-research.md) |
 

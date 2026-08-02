@@ -234,6 +234,52 @@ hash, exact origin, current IP set, expiry, signature, and one-time nonce. A pro
 must declare its expected success/rejection oracles; undeclared surfaces cannot be
 reported as PASS. See the [web audit runbook](security/WEB_AUDIT.md).
 
+Use `--dry-run` to validate the approval, profile, and installed capability without
+sending target requests or consuming the nonce:
+
+```bash
+python3 -m security_scanner web-audit run \
+  --profile profile.json \
+  --approval approval.json \
+  --confirm-origin https://staging.example.com \
+  --dry-run
+```
+
+Build a profile in this order:
+
+1. Pin exact `target.origins`, path includes/exclusions, approved IP/CIDR ranges,
+   and the smallest required scopes.
+2. Declare every `resources` entry with an ID, allowed methods, read-only flag,
+   and actor-specific access expectation. Scenarios may reference resource IDs only.
+3. Attach each scenario to one `web.*` control and declare its strategies, steps,
+   mutations, cleanup, and success/rejection oracle. Every required strategy must
+   complete before the control can be `PASS`.
+4. Reference credentials with `${ENV:NAME}` or an environment-variable name. Do
+   not put passwords, cookies, tokens, shell/eval, Python callbacks, or arbitrary
+   URLs in a profile.
+5. Mark a genuinely unavailable control with `applicability` status
+   `NOT_APPLICABLE` and a reason. An omitted scenario is `NOT_SCANNED`, not N/A.
+
+The dashboard exposes the same gate through loopback-only endpoints:
+
+| Endpoint | Purpose | Required JSON fields |
+| --- | --- | --- |
+| `POST /api/web-audit/plan` | Validate a profile without target traffic | `profile` |
+| `POST /api/web-audit/approve` | Create an HMAC approval | `request`, `approver` |
+| `POST /api/web-audit/run` | Execute one approved run | `profile`, `approval`, `confirm_origin`, optional `dry_run` |
+
+The request must come from a loopback client with the exact local `Origin` and the
+per-process `X-KODA-Session` value returned by the dashboard HTML. Binding the
+server to a non-loopback address disables these three endpoints with 403. Results
+always contain all 21 `web.*` controls, but publish only redacted evidence IDs,
+coverage, tested surfaces, and status—not raw requests/responses, cookies, tokens,
+passwords, or ZAP plugin IDs.
+
+The CLI exits with 1 for `VULNERABLE`, 2 for profile/approval/capability errors,
+and 0 for `PASS`, `NEEDS_REVIEW`, `UNSUPPORTED`, or `NOT_SCANNED`. Treat exit 0 as
+“the run completed” rather than “all 21 controls passed”; inspect every control and
+require `coverage.completed == coverage.required` in a stricter CI policy.
+
 ## Actions that can change state or contact a target
 
 | Command | Behavior |

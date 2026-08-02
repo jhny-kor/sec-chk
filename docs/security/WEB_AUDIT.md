@@ -1,67 +1,218 @@
 # KODA profile-driven 21-control web audit
 
-`web-audit` executes only the origins, resources, strategies, and success/rejection
-oracles declared in a strict JSON profile. Use it only against a staging or test
-system you own or are explicitly authorized to assess.
+`web-audit` is the approval-gated path for testing an owned or explicitly
+authorized staging/test service. It is not a generic crawler command and it does
+not infer that an undeclared endpoint is safe. A control is `PASS` only when its
+profile declares the tested surface, expected result, required strategies, and
+cleanup, and all of those checks complete without evidence of a violation.
+
+The existing `web-scan` command remains the lightweight web-posture/crawl path.
+Use `web-audit` when the result must carry a reproducible target scope, approval,
+one-time nonce, bounded traffic, and per-control coverage.
+
+## Quick start
+
+Run from a source checkout with Python 3.10 or newer:
 
 ```bash
+export PYTHONPATH="$PWD/platforms/shared/python"
 export KODA_APPROVAL_KEY='operator-managed-secret'
-export KODA_OAST_SECRET='base64-secret-from-boast' # valid base64, only for OAST profiles
-koda web-audit plan --profile profile.json --out approval-request.json
-koda web-audit approve --request approval-request.json --approver name --out approval.json
-koda web-audit run --profile profile.json --approval approval.json \
-  --confirm-origin https://staging.example.com --format json --output reports/web-audit.json
+
+python3 -m security_scanner web-audit plan \
+  --profile profile.json \
+  --out approval-request.json
+
+python3 -m security_scanner web-audit approve \
+  --request approval-request.json \
+  --approver 'security-operator' \
+  --out approval.json
+
+python3 -m security_scanner web-audit run \
+  --profile profile.json \
+  --approval approval.json \
+  --confirm-origin https://staging.example.com \
+  --format json \
+  --output reports/web-audit.json
 ```
 
-`plan` validates the profile and resolves target DNS/IP addresses without target
-traffic. `approve` signs the request with HMAC-SHA256. `run` verifies the profile
-hash, exact origin, current IP set, scope, limits, signature, and expiry, then
-consumes the nonce once from `~/.koda/web-audit-nonces.sqlite3`.
+The approval request is valid for at most 24 hours. `run` revalidates the
+canonical profile hash, exact origin, current DNS/IP set, scope, limits,
+signature, and expiry, then consumes the approval nonce from
+`~/.koda/web-audit-nonces.sqlite3`. A nonce cannot be reused.
 
-Profiles use `schema_version: 1` and declare `target`, `limits`, `accounts`,
-`auth`, `resources`, `scenarios`, `oast`, and `applicability`. Resource paths are
-origin-relative and scenario steps can reference only declared resource IDs.
-Credentials must be `${ENV:NAME}` or an environment-variable-name reference.
-Shell, eval, Python callbacks, arbitrary URLs, raw secrets, and raw request/response
-publication are rejected or redacted.
+Use a no-traffic preflight before the real run:
 
-For SSRF/code-injection callback verification, add `oast` to `target.scopes` and
-declare `oast.control_plane_origin`, `oast.callback_domain`, and the approved
-`oast.allowed_ips` IP/CIDR list. KODA uses the pinned BOAST `GET /events` control plane to
-register and poll a test. A new event is `VULNERABLE`; a completed poll with no
-event can contribute to `PASS` only when the scenario oracle and cleanup also
-complete. The secret is read only from `KODA_OAST_SECRET` and is never stored in
-the profile, approval, or report. Use `${CAPTURE:OAST_PAYLOAD}` in the declared
-scenario to send the generated callback payload.
+```bash
+python3 -m security_scanner web-audit run \
+  --profile profile.json \
+  --approval approval.json \
+  --confirm-origin https://staging.example.com \
+  --dry-run
+```
 
-Every control is returned with a canonical `web.*` ID, status, execution flag,
-reason code, coverage, tested surfaces, strategy results, and evidence IDs. A clean
-ZAP or crawl result does not close undeclared controls.
+`--dry-run` validates the approval and capabilities without sending target
+requests or consuming the nonce. `plan` also performs no target requests; it
+does resolve the declared target DNS/IP addresses so the approval envelope can
+record them.
 
-All strategies declared on one scenario execute; the scenario reaches complete
-coverage only when every strategy passes. Native scenarios support JSON/form/header
-authentication, access matrices, timing/state oracles, bounded multipart uploads,
-cleanup, and test-only HTTP verbs through `resource.probe_methods`. JSON auth tokens
-and ZAP credentials remain environment references; bounded `delay_seconds` supports
-expiry/replay checks without a hidden sleep;
-the ZAP Docker invocation forwards only the referenced variable names.
+## Profile contract
+
+Profiles use strict JSON `schema_version: 1`. Unknown keys, unknown controls,
+undeclared resource references, unsafe interpolation, and out-of-range limits
+are rejected before execution.
+
+| Section | Required declaration |
+| --- | --- |
+| `target` | Environment, exact origins, included/excluded paths, approved IP/CIDR ranges, scopes, distribution, and optional ZAP manifest. |
+| `limits` | Request/response/upload/time/rate/redirect/retry/OAST/ZAP envelope. Defaults are bounded and values cannot exceed the engine maximums. |
+| `accounts` / `auth` | Role/account references and form, JSON, or header authentication. Credentials are environment references, not literal secrets. |
+| `resources` | Stable resource ID, origin-relative path, allowed methods, optional probe methods, actors, access expectations, and read-only/state flags. |
+| `scenarios` | One `web.*` control, required flag, strategies, steps, mutations, assertions/oracle, captures, and cleanup. Every step references a declared resource ID. |
+| `oast` | BOAST control-plane origin, callback DNS name, approved control-plane IP/CIDR list, and polling interval when callback verification is used. |
+| `applicability` | Explicit `NOT_APPLICABLE` plus a non-empty reason for a control that the service does not provide. |
+
+Only these interpolations are supported:
+
+- `${ENV:NAME}` for an environment value.
+- `${CAPTURE:NAME}` for a value captured by an earlier declared step, including
+  `${CAPTURE:OAST_PAYLOAD}`.
+- `${RUN_ID}` for the current run identifier.
+
+Shell, `eval`, Python callbacks, arbitrary URLs, raw request/response bodies,
+literal passwords, cookies, tokens, and secret-bearing profile keys are rejected
+or redacted. Use `body_type` `json`, `form`, `raw`, or bounded `multipart`; use
+`delay_seconds` for bounded expiry/replay timing rather than an unbounded sleep.
+
+## 21-control coverage contract
+
+The profile must attach scenarios to the canonical IDs below. The table is the
+minimum oracle contract; it is not a promise that a generic crawl can close the
+control without application-specific resources and expected outcomes.
+
+| # | ID | Required declaration before PASS |
+| ---: | --- | --- |
+| 1 | `web.code-injection` | Bounded canary/input sink, response/state oracle, and OAST only where an approved callback is required. |
+| 2 | `web.ssrf` | Every URL sink, approved BOAST control plane, callback polling, and no-callback oracle. |
+| 3 | `web.file-download` | Download/file resources, traversal/LFI and object-scope variants, and deny-oracle for unauthorized files. |
+| 4 | `web.sql-injection` | Declared parameters, bounded KODA/ZAP strategies, and response/time/data/state baseline. |
+| 5 | `web.session-management` | Pre/post-login session observation, cookie attributes, logout reuse, and expiry evidence or explicit review. |
+| 6 | `web.directory-indexing` | Declared directory surfaces and non-listing status/body oracle. |
+| 7 | `web.password-policy` | Disposable account, weak/valid password cases, and cleanup/restoration. |
+| 8 | `web.plaintext-transmission` | Complete page/asset/form surface plus HTTPS, redirect, mixed-content, and cookie-security oracle. |
+| 9 | `web.error-pages` | Safe malformed requests and forbidden-pattern/general-error oracle for stack, path, SQL, and secret disclosure. |
+| 10 | `web.authentication` | Valid login success followed by unauthenticated/negative access checks. |
+| 11 | `web.cookie-tampering` | Deleted/changed/swapped session or role cookies and protected-resource/state oracle. |
+| 12 | `web.information-disclosure` | Declared seed/API/JS/header/sensitive-path surface and forbidden-pattern/passive results. |
+| 13 | `web.authorization` | Anonymous/userA/userB/admin and object-ID access matrix with allow/deny expectations. |
+| 14 | `web.admin-exposure` | Declared admin paths checked as anonymous and non-admin; discovered-but-undeclared paths remain review. |
+| 15 | `web.xss` | Reflected/stored/DOM strategy declaration, canary/browser coverage where needed, and stored-data cleanup. |
+| 16 | `web.password-recovery` | Disposable account/test inbox, enumeration, token binding/expiry/one-use, and cleanup. |
+| 17 | `web.automated-attacks` | Bounded login/recovery attempts, declared throttle/lock/CAPTCHA threshold, and unlock cleanup. |
+| 18 | `web.csrf` | Normal state snapshot, missing/invalid token and Origin/Referer variants, rejection plus unchanged state. |
+| 19 | `web.process-validation` | Normal sequence and skip/reorder/replay mutations with rejection and unchanged state. |
+| 20 | `web.http-methods` | Resource `methods`/`probe_methods` comparison, TRACE/override/forbidden-verb checks; OPTIONS alone is not a finding. |
+| 21 | `web.file-upload` | Inert extension/MIME/HTML/SVG canaries, reject/quarantine/non-execution/private access, and cleanup. |
+
+Supported strategy names include `koda-scenario`, `passive`, `browser`,
+`playwright`, `dom`, `browser-canary`, `oast`, `ssrf-oast`, `callback`, `zap`,
+`zap-active`, `zap-passive`, `access-control`, `authorization`, `matrix`,
+`timing`, `state`, and `upload`. All strategies declared on a required scenario
+run; one incomplete strategy prevents a `PASS`.
+
+## Status and output
+
+Each result contains the canonical ID/title, `status`, `executed`, `reason_code`,
+`coverage.required/completed`, `surfaces_tested`, `strategy_results`, and
+`evidence_ids`. The top-level result also includes capability, traffic, auth
+summary, warnings, and redacted findings.
 
 | Status | Meaning |
 | --- | --- |
-| `VULNERABLE` | Verified exploit, state violation, or callback evidence |
-| `PASS` | Required strategies, oracle, and cleanup completed without evidence |
-| `NEEDS_REVIEW` | Incomplete oracle, OAST, cleanup, or surface coverage |
-| `NOT_APPLICABLE` | Explicit profile exclusion with a reason |
-| `UNSUPPORTED` | Required capability is absent from the distribution |
-| `NOT_SCANNED` | Approval, profile, credential, or preflight prevented execution |
+| `VULNERABLE` | Verified exploit, state violation, forbidden access, or OAST callback evidence. |
+| `PASS` | Every required scenario/strategy/oracle/cleanup completed without a violation. |
+| `NEEDS_REVIEW` | Oracle, coverage, OAST polling, browser response validation, or cleanup is incomplete. |
+| `NOT_APPLICABLE` | The profile explicitly excludes the control with a reason. |
+| `UNSUPPORTED` | The selected distribution lacks a required capability. |
+| `NOT_SCANNED` | Approval, credential, profile, origin/IP preflight, or another execution gate prevented the run. |
 
-SourceOnly and macOS App Store distributions keep this boundary fail-closed and
-report the web capability as unsupported/review; they must not present a missing
-web engine as PASS. See the [Korean runbook](WEB_AUDIT.ko.md) for a complete sample
-profile.
+The CLI exits 1 when the top-level status is `VULNERABLE`, 2 for profile,
+approval, or execution errors, and 0 for `PASS`, `NEEDS_REVIEW`, `UNSUPPORTED`,
+`NOT_APPLICABLE`, or `NOT_SCANNED`. A zero exit code is therefore not equivalent
+to “all 21 controls passed”; CI should inspect every control and its coverage.
 
-ZAP web-audit runs require a preinstalled digest-pinned image and add-on manifest;
-the command uses Docker pull-never behavior. Missing ZAP, Playwright browsers, or
-BOAST capabilities remain `UNSUPPORTED` or `NOT_SCANNED`.
-The ZAP Automation Framework plan carries spider/active-scan limits and an
-`exitStatus` outcome check; a clean ZAP exit code alone never closes all 21 controls.
+Dynamic evidence is redacted. Reports do not expose raw requests/responses,
+headers, cookies, credentials, passwords, tokens, or ZAP plugin IDs. The
+canonical public IDs remain `web.*` even when a ZAP alert contributes evidence.
+
+## Local dashboard API
+
+The API is intentionally stricter than ordinary dashboard endpoints:
+
+| Endpoint | Purpose | JSON fields |
+| --- | --- | --- |
+| `POST /api/web-audit/plan` | Validate a profile and create a no-traffic plan | `profile` |
+| `POST /api/web-audit/approve` | Sign an approval request with the server key | `request`, `approver` |
+| `POST /api/web-audit/run` | Execute one approved audit | `profile`, `approval`, `confirm_origin`, optional `dry_run` |
+
+The server must bind to `127.0.0.1`, `localhost`, or `::1`, and the client must
+also be loopback. POST requests require the exact local `Origin` and the
+per-process `X-KODA-Session` returned in the dashboard HTML response. A
+non-loopback binding disables these execution endpoints with 403. The token is
+not a profile credential and must not be copied into a report.
+
+## Capability and packaging boundaries
+
+| Distribution | Native web audit | ZAP/Playwright/OAST behavior |
+| --- | --- | --- |
+| Shared Python CLI/server | Native stdlib strategy available | External capabilities are preflighted and fail closed. |
+| Windows Full | Included | External Docker/ZAP, Chromium, and BOAST must already exist. |
+| Windows SourceOnly | `UNSUPPORTED(package_capability_missing)` | No Java/library/web/Playwright vulnerability-data bundle. |
+| macOS direct distribution | Supported by the direct/shared lane | Use the preinstalled capability set; no automatic downloads. |
+| macOS App Store | GET/HEAD native read-only only | Active/state-changing steps, login POST, ZAP, and non-read-only profiles are rejected or review/unsupported. |
+
+ZAP requires an image containing `@sha256:<digest>` and an add-on manifest whose
+entries are `sha256:<64 lowercase hex>` digests. Docker uses pull-never behavior.
+The approved ZAP envelope defaults to 2 RPS, 1 thread per host, 15 minutes total,
+and 2 minutes per rule; the maximums are 5 RPS, 2 threads, 60 minutes, and 5
+minutes. Native defaults are 1,000 requests, 2 MiB responses, 1 MiB uploads,
+900 seconds, 3 redirects, 120 seconds OAST polling, and 30 seconds cleanup. The
+engine rejects values above its hard maximums and never retries state-changing
+requests.
+
+## OAST/BOAST boundary
+
+For SSRF or code-injection callbacks, add `oast` to `target.scopes` and declare
+`control_plane_origin`, DNS `callback_domain`, and approved `allowed_ips`/CIDRs.
+Set the base64 BOAST credential only in `KODA_OAST_SECRET`. KODA pins the control
+plane to the approved IP set, registers a test, polls `GET /events`, and treats a
+new event as `VULNERABLE`. A completed poll with no event can contribute to PASS
+only after the scenario oracle and cleanup pass. Missing/invalid secret, callback
+domain, or control-plane preflight remains unsupported/not scanned.
+
+## Verification checklist
+
+Before a real run:
+
+1. Confirm written authorization, staging ownership, disposable accounts/inbox,
+   cleanup ownership, and the exact origin/IP scope.
+2. Run `plan`, inspect control declarations and the traffic envelope, then create
+   the HMAC approval with an operator identity.
+3. Run `--dry-run`; stop if capability is missing or the approval envelope is not
+   the intended one.
+4. Run once, archive the redacted JSON/Markdown report, and verify that every
+   required control has complete coverage or an explicit non-PASS status.
+5. Confirm cleanup and inspect the target for test records, uploads, sessions,
+   locks, password changes, and callback events.
+
+Repository-level checks for the implementation are:
+
+```bash
+PYTHONPATH=platforms/shared/python python3 -m unittest -q \
+  tests.test_web_audit tests.test_cli_reports tests.test_settings_and_exports
+python3 -m compileall -q platforms/shared/python/security_scanner
+```
+
+These checks cover profile canonicalization, HMAC/expiry/nonce, redaction,
+network pinning, status aggregation, packaging capability boundaries, and report
+exports. They do not authorize a live target or replace an application-specific
+oracle.

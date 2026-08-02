@@ -178,3 +178,100 @@ Docker image를 자동 pull하지 않습니다. 이미지·Playwright browser·B
 해당 capability를 `UNSUPPORTED` 또는 `NOT_SCANNED`로 남깁니다.
 ZAP Automation Framework plan에는 spider/activeScan 제한과 `exitStatus` 결과 검사가
 포함되며, ZAP 종료 코드만으로 21개 항목 PASS를 만들지는 않습니다.
+
+## 21개 항목별 coverage 계약
+
+아래 ID는 결과에 항상 포함되는 공개 표준 ID입니다. 표의 내용은 해당 항목을
+`PASS`로 닫기 위해 프로필에 선언해야 하는 최소 oracle 계약입니다. 일반
+crawl/ZAP 경고가 없다는 이유만으로 미선언 항목을 PASS로 만들 수 없습니다.
+
+| 번호 | ID | PASS를 위해 선언할 범위 |
+| ---: | --- | --- |
+| 1 | `web.code-injection` | bounded canary/input sink, 응답·상태 oracle, 필요 시 승인된 OAST |
+| 2 | `web.ssrf` | 모든 URL sink, BOAST control plane, callback polling, callback 부재 oracle |
+| 3 | `web.file-download` | 다운로드 리소스, traversal/LFI·object ID 변형, 비인가 거부 oracle |
+| 4 | `web.sql-injection` | 파라미터, KODA/ZAP 전략, 응답·시간·데이터·상태 기준선 |
+| 5 | `web.session-management` | 로그인 전후 세션, cookie 속성, logout 재사용, 만료 또는 검토 상태 |
+| 6 | `web.directory-indexing` | 디렉터리 표면, non-listing status/body oracle |
+| 7 | `web.password-policy` | disposable 계정, 약한/정상 비밀번호, cleanup·복구 |
+| 8 | `web.plaintext-transmission` | 페이지·asset·form 전체 표면, HTTPS/redirect/mixed content/cookie oracle |
+| 9 | `web.error-pages` | 안전한 malformed 요청, stack/path/SQL/secret 금지 패턴과 일반 오류 oracle |
+| 10 | `web.authentication` | 정상 로그인 성공 및 비인증·우회 거부 검사 |
+| 11 | `web.cookie-tampering` | session/role cookie 삭제·변경·교환 및 보호 리소스·상태 oracle |
+| 12 | `web.information-disclosure` | seed/API/JS/header/민감 경로와 forbidden pattern/passive 결과 |
+| 13 | `web.authorization` | anonymous/userA/userB/admin 및 object ID 접근 행렬 |
+| 14 | `web.admin-exposure` | 관리자 경로의 anonymous/non-admin 검사; 미선언 발견 경로는 검토 |
+| 15 | `web.xss` | reflected/stored/DOM 전략, canary/browser 필요 여부, stored cleanup |
+| 16 | `web.password-recovery` | disposable 계정·test inbox, 계정 열거·token binding/만료/1회 사용 |
+| 17 | `web.automated-attacks` | 제한된 login/recovery 시도, throttle/lock/CAPTCHA threshold, unlock cleanup |
+| 18 | `web.csrf` | 정상 상태 snapshot, token/Origin/Referer 변형, 거부 및 상태 불변 |
+| 19 | `web.process-validation` | 정상 sequence와 skip/reorder/replay mutation, 거부 및 상태 불변 |
+| 20 | `web.http-methods` | `methods`/`probe_methods`, TRACE/override/금지 verb; OPTIONS만으로 취약 판정하지 않음 |
+| 21 | `web.file-upload` | inert 확장자/MIME/HTML/SVG canary, 거부·격리·비실행·비공개·cleanup |
+
+지원 전략 이름은 `koda-scenario`, `passive`, `browser`, `playwright`, `dom`,
+`browser-canary`, `oast`, `ssrf-oast`, `callback`, `zap`, `zap-active`,
+`zap-passive`, `access-control`, `authorization`, `matrix`, `timing`, `state`,
+`upload`입니다. 하나의 필수 시나리오에 여러 전략을 선언하면 모두 실행되며,
+하나라도 미완료이면 항목은 PASS가 되지 않습니다.
+
+## 대시보드 API와 인증 경계
+
+대시보드에서도 CLI와 같은 승인 게이트를 사용합니다.
+
+| API | 목적 | 본문 필드 |
+| --- | --- | --- |
+| `POST /api/web-audit/plan` | 프로필 검증·무트래픽 계획 | `profile` |
+| `POST /api/web-audit/approve` | HMAC 승인서 생성 | `request`, `approver` |
+| `POST /api/web-audit/run` | 승인된 1회 실행 | `profile`, `approval`, `confirm_origin`, 선택 `dry_run` |
+
+서버와 클라이언트는 `127.0.0.1`, `localhost`, `::1` 중 loopback이어야 합니다.
+POST에는 대시보드 HTML 응답의 프로세스별 `X-KODA-Session` 값과 정확한
+`Origin: http://127.0.0.1:<port>`가 필요합니다. 외부 주소로 바인딩하면 세 API는
+403으로 비활성화됩니다. `OPTIONS`도 origin 검사를 통과해야 하며, 세션 token은
+보고서·프로필·승인서에 복사하지 않습니다.
+
+결과에는 21개 `web.*` 항목, `status`, `executed`, `reason_code`,
+`coverage.required/completed`, `surfaces_tested`, `strategy_results`,
+`evidence_ids`가 포함됩니다. raw 요청/응답·header·cookie·credential·token·
+password·ZAP plugin ID는 공개 결과에서 제거됩니다.
+
+CLI 종료 코드는 top-level `VULNERABLE`이면 1, 프로필·승인·실행 오류이면 2,
+`PASS`·`NEEDS_REVIEW`·`UNSUPPORTED`·`NOT_APPLICABLE`·`NOT_SCANNED`이면 0입니다.
+따라서 종료 코드 0을 21개 전부 PASS로 해석하지 말고 각 항목의 coverage를
+확인하세요.
+
+## 배포판 capability 경계
+
+| 배포판 | 웹 감사 범위 | 외부 capability |
+| --- | --- | --- |
+| 공유 Python CLI/server | stdlib native 전략 포함 | Playwright/ZAP/BOAST는 preflight 후 fail-closed |
+| Windows Full | 공통 web-audit 엔진 포함 | Chromium, digest 고정 ZAP/Docker, BOAST 사전 설치 필요 |
+| Windows SourceOnly | `UNSUPPORTED(package_capability_missing)` | Java/library/web/Playwright/취약점 데이터 제외 |
+| macOS 직접배포판 | 지원 | 외부 도구를 자동 다운로드하지 않음 |
+| macOS App Store | GET/HEAD native read-only만 | POST·능동 probe·ZAP·상태 변경 profile은 거부/검토 |
+
+ZAP은 `@sha256:<digest>` 이미지와 `sha256:<64자리 소문자 hex>` add-on
+manifest를 요구하고 Docker image를 자동 pull하지 않습니다. 기본 제한은 native
+1,000 request/2 MiB response/1 MiB upload/900초/redirect 3/OAST 120초/cleanup
+30초, ZAP 2 RPS·host당 1 thread·15분·rule당 2분입니다. 최대값을 넘는 프로필은
+검증에서 거부되고 상태 변경 request retry는 0입니다.
+
+## 실행 후 확인
+
+1. 결과 JSON/Markdown을 저장하고 21개 항목이 모두 존재하는지 확인합니다.
+2. 필수 항목마다 `coverage.completed == coverage.required`인지 확인하고,
+   `NEEDS_REVIEW`/`UNSUPPORTED`/`NOT_SCANNED` 사유를 별도 기록합니다.
+3. disposable 계정, 비밀번호, 업로드, 세션, lock, callback event 등 cleanup
+   대상을 확인합니다.
+4. 구현 회귀 검증은 저장소 루트에서 다음 명령으로 실행합니다.
+
+```bash
+PYTHONPATH=platforms/shared/python python3 -m unittest -q \
+  tests.test_web_audit tests.test_cli_reports tests.test_settings_and_exports
+python3 -m compileall -q platforms/shared/python/security_scanner
+```
+
+이 검증은 profile canonicalization, HMAC/만료/nonce, redaction, 네트워크 고정,
+상태 집계, 패키지 capability, 리포트 export를 확인하지만 실제 대상에 대한
+점검 권한이나 애플리케이션별 oracle을 대신하지 않습니다.

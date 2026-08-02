@@ -35,6 +35,24 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 `web-audit`의 21개 항목은 SourceOnly에서 자동 실행하지 않고
 `UNSUPPORTED(package_capability_missing)`으로 보고합니다.
 
+정식 Full 설치본은 공유 Python 엔진과 웹 점검 모듈을 포함하지만, 실행 전
+Playwright/Chromium·Docker/ZAP 이미지·add-on manifest·BOAST가 설치되어 있어야
+합니다. 설치본은 외부 도구나 브라우저를 자동 다운로드하지 않습니다. 먼저
+다음처럼 무트래픽 사전 검증을 수행한 뒤 승인된 staging origin으로 실행하세요.
+
+```powershell
+$env:KODA_APPROVAL_KEY = "operator-managed-secret"
+koda web-audit run `
+  --profile .\profile.json `
+  --approval .\approval.json `
+  --confirm-origin https://staging.example.com `
+  --dry-run
+```
+
+`PASS`는 모든 필수 시나리오·oracle·cleanup이 완료된 경우에만 의미가 있습니다.
+SourceOnly의 `UNSUPPORTED`와 승인/인증 실패의 `NOT_SCANNED`를 구분하여 릴리스
+게이트에서 확인하세요.
+
 Microsoft Store 배포에는 Inno 설치본이 아니라 MSIX 또는 `.msixupload`를
 사용해야 합니다.
 

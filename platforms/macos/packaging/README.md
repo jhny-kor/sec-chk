@@ -86,6 +86,19 @@ active probes, ZAP, and state-changing scenarios are disabled. Run the complete
 distribution, and keep App Store capability gaps as `UNSUPPORTED`/review rather
 than treating them as PASS.
 
+The distribution boundary is:
+
+| Distribution | 21-control web audit | Execution boundary |
+| --- | --- | --- |
+| Direct macOS/shared Python | Supported | Profile, approval, and one-time nonce gates apply. |
+| Mac App Store | Partial | Native GET/HEAD read-only checks only; POST, active probes, ZAP, and state-changing scenarios are disabled. |
+
+For the direct lane, set `PYTHONPATH` from the repository root and run
+`web-audit run --dry-run` before any target traffic. ZAP, Playwright, and BOAST
+are never downloaded by the app; missing preinstalled capability, image digest, or
+add-on manifest must remain a capability status rather than PASS. App Store
+profiles that request `state_change` or a non-GET/HEAD step fail profile validation.
+
 Then upload the archive from Xcode Organizer or export it with an App Store
 Connect export profile. Before submission, verify the signed app has the App
 Sandbox entitlement:

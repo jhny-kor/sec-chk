@@ -99,6 +99,25 @@ without `-SourceOnly` for `jar-scan`, `web-scan`, or `web-audit`. The 21-control
 `web-audit` command reports `UNSUPPORTED(package_capability_missing)` in this
 profile instead of making live requests.
 
+The full installer includes the shared web-audit engine, but external capabilities
+remain preflight requirements. Playwright/Chromium, Docker with a digest-pinned
+ZAP image and add-on manifest, and BOAST must already be installed/configured;
+the installer and scanner do not download them automatically. Validate an
+approval without target traffic first:
+
+```powershell
+$env:KODA_APPROVAL_KEY = "operator-managed-secret"
+koda web-audit run `
+  --profile .\profile.json `
+  --approval .\approval.json `
+  --confirm-origin https://staging.example.com `
+  --dry-run
+```
+
+Only a complete required scenario/oracle/cleanup set produces `PASS`. Keep
+`UNSUPPORTED` (package capability missing) separate from `NOT_SCANNED` (approval,
+credential, or preflight prevented execution) in release gates.
+
 ## Microsoft Store path
 
 `KODASetup.exe` is an Inno Setup desktop installer for direct download.

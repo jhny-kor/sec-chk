@@ -16,6 +16,7 @@ switching languages.
 | Deliver an offline Java scanner | [Offline delivery overview](install/offline-delivery.en.md) |
 | Refresh Windows vulnerability data | [Vulnerability data refresh](install/vuln-data-refresh.en.md) |
 | Scan deployed JAR/WAR/EAR files | [Java SBOM and vulnerability runbook](security/java-sbom-vulnerability-scan.en.md) |
+| Run an authorized 21-control web audit | [Profile-driven web audit](security/WEB_AUDIT.md) |
 
 ## Installation and delivery
 
