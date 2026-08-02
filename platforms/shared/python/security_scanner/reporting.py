@@ -1685,7 +1685,38 @@ def render_markdown_from_payload(payload: dict[str, object], language: str = "ko
     sw49 = _payload_sw49(payload)
     if sw49:
         report = report.rstrip("\n") + "\n" + "\n".join(_sw49_markdown_lines(sw49, language)) + "\n"
+    web_audit = payload.get("web_audit")
+    if isinstance(web_audit, dict):
+        report = report.rstrip("\n") + "\n\n" + render_web_audit_markdown(web_audit, language=language)
     return report
+
+
+def render_web_audit_markdown(result: dict[str, object], language: str = "ko") -> str:
+    """Render the redacted 21-control result for CLI and dashboard exports."""
+    controls = result.get("controls") if isinstance(result.get("controls"), list) else []
+    korean = language == "ko"
+    title = "웹취약점 21개 항목 자동 점검" if korean else "21-control web vulnerability audit"
+    headers = "| ID | 항목 | 상태 | 실행 | 커버리지 | 사유 |\n|---|---|---|---:|---:|---|" if korean else "| ID | Control | Status | Executed | Coverage | Reason |\n|---|---|---|---:|---:|---|"
+    lines = [f"## {title}", "", f"- Overall: `{result.get('status', 'NOT_SCANNED')}`", "", headers]
+    for item in controls:
+        if not isinstance(item, dict):
+            continue
+        coverage = item.get("coverage") if isinstance(item.get("coverage"), dict) else {}
+        required = coverage.get("required", 0)
+        completed = coverage.get("completed", 0)
+        lines.append(
+            f"| `{_web_audit_markdown_escape(str(item.get('id', '')))}` | {_web_audit_markdown_escape(str(item.get('title', '')))} | "
+            f"`{_web_audit_markdown_escape(str(item.get('status', 'NOT_SCANNED')))}` | "
+            f"{'yes' if item.get('executed') else 'no'} | {completed}/{required} | "
+            f"{_web_audit_markdown_escape(str(item.get('reason_code', '')))} |"
+        )
+    traffic = result.get("traffic") if isinstance(result.get("traffic"), dict) else {}
+    lines.extend(["", f"- Requests: `{traffic.get('requests', 0)}`", f"- Pages: `{traffic.get('pages', 0)}`", ""])
+    return "\n".join(lines)
+
+
+def _web_audit_markdown_escape(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ").replace("\r", " ")
 
 
 def render_html_pair_zip_from_payload(payload: dict[str, object], language: str = "ko") -> bytes:
@@ -1710,6 +1741,11 @@ def render_html_pair_zip_from_payload(payload: dict[str, object], language: str 
         scanned_categories=tuple(str(item) for item in scan.get("scanned_categories", ()) if str(item).strip()),
         source_analysis=payload.get("source_analysis"),
     )
+    web_audit = payload.get("web_audit")
+    if isinstance(web_audit, dict):
+        audit_html = _web_audit_html(web_audit, language)
+        main_html = main_html.replace("</main>", f"{audit_html}</main>", 1)
+        detail_html = detail_html.replace("</main>", f"{audit_html}</main>", 1)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("report.html", main_html)
@@ -1863,6 +1899,21 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
         )
 
     sheets: list[tuple[str, list[list[object]]]] = [("Findings", rows)]
+
+    web_audit = payload.get("web_audit")
+    if isinstance(web_audit, dict):
+        controls = web_audit.get("controls") if isinstance(web_audit.get("controls"), list) else []
+        audit_rows: list[list[object]] = [["ID", "Control", "Status", "Executed", "Completed", "Required", "Reason"]]
+        for item in controls:
+            if not isinstance(item, dict):
+                continue
+            coverage = item.get("coverage") if isinstance(item.get("coverage"), dict) else {}
+            audit_rows.append([
+                item.get("id", ""), item.get("title", ""), item.get("status", ""),
+                "yes" if item.get("executed") else "no", coverage.get("completed", 0),
+                coverage.get("required", 0), item.get("reason_code", ""),
+            ])
+        sheets.append(("WebAudit", audit_rows))
 
     sw49 = _payload_sw49(payload)
     if sw49:
@@ -2078,6 +2129,21 @@ def render_hwpx(payload: dict[str, object], language: str = "ko") -> bytes:
             para_id += 1
             paragraphs.append(_hwpx_paragraph(str(labels.get("sw49_zero_note", "")), "16", "25", para_id))
 
+    web_audit = payload.get("web_audit")
+    if isinstance(web_audit, dict):
+        para_id += 1
+        paragraphs.append(_hwpx_paragraph("웹취약점 21개 항목 자동 점검", "17", "24", para_id))
+        for item in web_audit.get("controls", []):
+            if not isinstance(item, dict):
+                continue
+            coverage = item.get("coverage") if isinstance(item.get("coverage"), dict) else {}
+            para_id += 1
+            paragraphs.append(_hwpx_paragraph(
+                f"{item.get('id', '')} · {item.get('title', '')} · {item.get('status', 'NOT_SCANNED')} · "
+                f"{coverage.get('completed', 0)}/{coverage.get('required', 0)} · {item.get('reason_code', '')}",
+                "16", "25", para_id,
+            ))
+
     new_section = (prefix + "".join(paragraphs) + "</hs:sec>").encode("utf-8")
 
     buffer = io.BytesIO()
@@ -2090,6 +2156,33 @@ def render_hwpx(payload: dict[str, object], language: str = "ko") -> bytes:
             compress = zipfile.ZIP_STORED if name == "mimetype" else zipfile.ZIP_DEFLATED
             archive.writestr(name, data, compress_type=compress)
     return buffer.getvalue()
+
+
+def _web_audit_html(result: dict[str, object], language: str = "ko") -> str:
+    controls = result.get("controls") if isinstance(result.get("controls"), list) else []
+    rows: list[str] = []
+    for item in controls:
+        if not isinstance(item, dict):
+            continue
+        coverage = item.get("coverage") if isinstance(item.get("coverage"), dict) else {}
+        rows.append(
+            "<tr>"
+            f"<td><code>{html.escape(str(item.get('id', '')))}</code></td>"
+            f"<td>{html.escape(str(item.get('title', '')))}</td>"
+            f"<td><strong>{html.escape(str(item.get('status', 'NOT_SCANNED')))}</strong></td>"
+            f"<td>{'yes' if item.get('executed') else 'no'}</td>"
+            f"<td>{html.escape(str(coverage.get('completed', 0)))}/{html.escape(str(coverage.get('required', 0)))}</td>"
+            f"<td>{html.escape(str(item.get('reason_code', '')))}</td>"
+            "</tr>"
+        )
+    title = "웹취약점 21개 항목 자동 점검" if language == "ko" else "21-control web vulnerability audit"
+    return (
+        '<section class="web-audit-results">'
+        f"<h2>{html.escape(title)}</h2>"
+        f"<p>Overall: <strong>{html.escape(str(result.get('status', 'NOT_SCANNED')))}</strong></p>"
+        '<table><thead><tr><th>ID</th><th>Control</th><th>Status</th><th>Executed</th><th>Coverage</th><th>Reason</th></tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody></table></section>"
+    )
 
 
 def render_html(

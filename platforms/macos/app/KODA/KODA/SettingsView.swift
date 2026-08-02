@@ -26,13 +26,13 @@ enum KodaRuleSettings {
     }
 }
 
-struct RuleCatalogRule: Decodable, Identifiable, Hashable {
+struct RuleCatalogRule: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let description: String
 }
 
-struct RuleCatalogGroup: Decodable, Identifiable, Hashable {
+struct RuleCatalogGroup: Decodable, Identifiable, Hashable, Sendable {
     let key: String
     let kind: String  // "security" | "quality"
     let label: String
@@ -44,15 +44,19 @@ struct RuleCatalogGroup: Decodable, Identifiable, Hashable {
 /// Loads the bundled `rules_catalog.json` (generated from the shared Python engine
 /// via `python -m security_scanner.rules_export`).
 enum RuleCatalog {
-    static func groups(language: AppLanguage) -> [RuleCatalogGroup] {
+    private static let allGroups: [String: [RuleCatalogGroup]] = {
         guard
             let url = Bundle.main.url(forResource: "rules_catalog", withExtension: "json"),
             let data = try? Data(contentsOf: url),
-            let byLanguage = try? JSONDecoder().decode([String: [RuleCatalogGroup]].self, from: data)
+            let groups = try? JSONDecoder().decode([String: [RuleCatalogGroup]].self, from: data)
         else {
-            return []
+            return [:]
         }
-        return byLanguage[language.rawValue] ?? byLanguage["ko"] ?? []
+        return groups
+    }()
+
+    static func groups(language: AppLanguage) -> [RuleCatalogGroup] {
+        allGroups[language.rawValue] ?? allGroups["ko"] ?? []
     }
 }
 
@@ -63,6 +67,12 @@ struct SettingsView: View {
     @State private var groups: [RuleCatalogGroup] = []
     @State private var disabled: Set<String> = KodaRuleSettings.disabledIDs()
     @State private var tab: String = "security"
+    @State private var expandedGroups: Set<String> = []
+    @State private var isLoading = true
+
+    private var visibleGroups: [RuleCatalogGroup] {
+        groups.filter { $0.kind == tab }
+    }
 
     private var title: String { language == .ko ? "점검 규칙 설정" : "Check rule settings" }
     private var intro: String {
@@ -93,20 +103,46 @@ struct SettingsView: View {
                     KodaRuleSettings.save(disabled)
                 }
                 .disabled(disabled.isEmpty)
+
+                Button(language == .ko ? "모두 닫기" : "Collapse all") {
+                    expandedGroups.removeAll()
+                }
+                .disabled(visibleGroups.isEmpty || expandedGroups.isEmpty)
             }
             .padding(.horizontal, 20)
 
             Divider().padding(.top, 12)
 
             ScrollView {
-                if groups.isEmpty {
+                if isLoading {
+                    ProgressView(language == .ko ? "기준 목록을 준비하고 있습니다…" : "Loading standards…")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(20)
+                } else if visibleGroups.isEmpty {
                     Text(language == .ko ? "규칙 목록을 불러올 수 없습니다." : "Rule catalog is unavailable.")
                         .foregroundStyle(.secondary)
                         .padding(20)
                 } else {
-                    VStack(alignment: .leading, spacing: 16) {
-                        ForEach(groups.filter { $0.kind == tab }) { group in
-                            groupSection(group)
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(visibleGroups) { group in
+                            DisclosureGroup(isExpanded: expansionBinding(for: group.key)) {
+                                LazyVStack(alignment: .leading, spacing: 0) {
+                                    ForEach(group.rules) { rule in
+                                        ruleRow(rule)
+                                        Divider()
+                                    }
+                                }
+                                .padding(.top, 8)
+                            } label: {
+                                groupHeader(group)
+                            }
+                            .padding(12)
+                            .background(KODATheme.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                            }
                         }
                     }
                     .padding(20)
@@ -114,8 +150,18 @@ struct SettingsView: View {
             }
         }
         .frame(minWidth: 560, minHeight: 520)
-        .onAppear { groups = RuleCatalog.groups(language: language) }
-        .onChange(of: language) { _ in groups = RuleCatalog.groups(language: language) }
+        .task(id: language) {
+            isLoading = true
+            groups.removeAll(keepingCapacity: true)
+            let rawLanguage = language.rawValue
+            let loadedGroups = await Task.detached(priority: .userInitiated) {
+                RuleCatalog.groups(language: AppLanguage(rawValue: rawLanguage) ?? .ko)
+            }.value
+            guard !Task.isCancelled else { return }
+            groups = loadedGroups
+            expandedGroups.removeAll()
+            isLoading = false
+        }
     }
 
     private func tabButton(_ value: String, _ label: String) -> some View {
@@ -125,15 +171,37 @@ struct SettingsView: View {
             .foregroundStyle(tab == value ? Color.white : Color.primary)
     }
 
-    private func groupSection(_ group: RuleCatalogGroup) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("\(group.label) (\(group.rules.count))")
+    private func groupHeader(_ group: RuleCatalogGroup) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(group.label)
                 .font(.headline)
-            ForEach(group.rules) { rule in
-                ruleRow(rule)
-                Divider()
-            }
+                .lineLimit(2)
+
+            Spacer(minLength: 8)
+
+            Text("\(enabledRuleCount(in: group))/\(group.rules.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
+    }
+
+    private func enabledRuleCount(in group: RuleCatalogGroup) -> Int {
+        group.rules.reduce(into: 0) { count, rule in
+            if !disabled.contains(rule.id) { count += 1 }
+        }
+    }
+
+    private func expansionBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedGroups.contains(key) },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedGroups.insert(key)
+                } else {
+                    expandedGroups.remove(key)
+                }
+            }
+        )
     }
 
     private func ruleRow(_ rule: RuleCatalogRule) -> some View {

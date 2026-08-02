@@ -93,8 +93,16 @@ def run_zap_automation(
     exclude_paths: tuple[str, ...] = (),
     openapi_url: str | None = None,
     openapi_file: str | None = None,
-    auth: dict[str, str] | None = None,
+    auth: dict[str, object] | None = None,
+    zap_rps: float | None = None,
+    zap_threads_per_host: int | None = None,
+    zap_rule_minutes: int | None = None,
+    max_response_bytes: int | None = None,
     plan_filename: str = "koda-zap-plan.yaml",
+    image: str | None = None,
+    host_mappings: tuple[tuple[str, str], ...] = (),
+    environment_vars: tuple[str, ...] = (),
+    pull_never: bool = False,
     dry_run: bool = False,
     timeout_seconds: int = 1800,
 ) -> ZAPRunResult:
@@ -109,8 +117,19 @@ def run_zap_automation(
         openapi_url=openapi_url,
         openapi_file=openapi_file,
         auth=auth,
+        zap_rps=zap_rps,
+        zap_threads_per_host=zap_threads_per_host,
+        zap_rule_minutes=zap_rule_minutes,
+        max_response_bytes=max_response_bytes,
     )
-    command = zap_automation_command(str(output_dir), plan_filename=plan_filename)
+    command = zap_automation_command(
+        str(output_dir),
+        plan_filename=plan_filename,
+        image=image,
+        host_mappings=host_mappings,
+        environment_vars=environment_vars,
+        pull_never=pull_never,
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / plan_filename).write_text(render_zap_plan(plan), encoding="utf-8")
     if dry_run:

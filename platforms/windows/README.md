@@ -3,8 +3,8 @@
 This folder contains the Inno Setup script used to build the direct-download
 KODA Windows installer.
 
-The native macOS App Store build is SwiftUI and cannot be compiled into a
-Windows executable on macOS. Build the Windows installer on a Windows PC so
+The native macOS build is separate from the Windows executable. Build the
+Windows installer on a Windows PC so
 PyInstaller can produce a real Windows `.exe`.
 
 ## Result

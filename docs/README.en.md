@@ -26,7 +26,6 @@ switching languages.
 - [Vulnerability data refresh](install/vuln-data-refresh.en.md)
 - [Linux Docker delivery](../platforms/linux/docker/README.en.md)
 - [Linux offline distribution](../platforms/linux/README-offline.md)
-- [macOS packaging](../platforms/macos/packaging/README.md)
 - [Windows installer packaging](../platforms/windows/README.md)
 
 ## Security integrations

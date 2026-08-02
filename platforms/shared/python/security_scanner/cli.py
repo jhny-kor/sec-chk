@@ -152,6 +152,70 @@ def main(argv: list[str] | None = None) -> int:
             print(f"App error: {exc}", file=sys.stderr)
             return 2
 
+    if args.command == "web-audit":
+        from .web_audit import (
+            ApprovalError,
+            ProfileError,
+            approve_request,
+            plan_profile,
+            run_web_audit,
+        )
+
+        try:
+            if args.web_audit_action == "plan":
+                plan = plan_profile(args.profile)
+                request = plan["approval_request"]
+                if args.out:
+                    args.out.expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+                    args.out.expanduser().resolve().write_text(
+                        json.dumps(request, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                    )
+                print(json_dumps(plan))
+                return 0
+            if args.web_audit_action == "approve":
+                request_value = json.loads(args.request.expanduser().read_text(encoding="utf-8"))
+                if isinstance(request_value, dict) and request_value.get("kind") == "koda.web-audit.plan":
+                    request_value = request_value.get("approval_request")
+                if not isinstance(request_value, dict):
+                    raise ApprovalError("approval request must be a JSON object")
+                approval = approve_request(request_value, args.approver, key=os.environ.get(args.key_env))
+                if args.out:
+                    args.out.expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+                    args.out.expanduser().resolve().write_text(
+                        json.dumps(approval, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                    )
+                print(json_dumps(approval))
+                return 0
+            result = run_web_audit(
+                args.profile,
+                args.approval,
+                confirm_origin=args.confirm_origin,
+                key=os.environ.get(args.key_env),
+                state_dir=args.state_dir,
+                output_dir=args.output_dir,
+                dry_run=bool(args.dry_run),
+            )
+            if args.format == "markdown":
+                from .reporting import render_web_audit_markdown
+
+                content = render_web_audit_markdown(result, language=args.language)
+                if args.output:
+                    args.output.expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+                    args.output.expanduser().resolve().write_text(content, encoding="utf-8")
+                else:
+                    print(content, end="")
+            else:
+                content = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+                if args.output:
+                    args.output.expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+                    args.output.expanduser().resolve().write_text(content, encoding="utf-8")
+                else:
+                    print(content, end="")
+            return 1 if result.get("status") == "VULNERABLE" else 0
+        except (OSError, json.JSONDecodeError, ProfileError, ApprovalError, ValueError, RuntimeError) as exc:
+            print(f"Web audit error: {exc}", file=sys.stderr)
+            return 2
+
     if args.command == "init-security":
         from .toolkit import write_security_template_files
 
@@ -944,6 +1008,31 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="'Name: value'",
         help="extra request header, e.g. --header 'Cookie: session=...' (repeatable)",
     )
+
+    web_audit = subparsers.add_parser(
+        "web-audit",
+        help="run a profile-driven, approval-gated audit of 21 web controls",
+    )
+    web_audit_subparsers = web_audit.add_subparsers(dest="web_audit_action", required=True)
+    web_audit_plan = web_audit_subparsers.add_parser("plan", help="validate a profile and create a no-traffic approval request")
+    web_audit_plan.add_argument("--profile", type=Path, required=True)
+    web_audit_plan.add_argument("--out", type=Path, required=True)
+    web_audit_approve = web_audit_subparsers.add_parser("approve", help="sign an approval request with KODA_APPROVAL_KEY")
+    web_audit_approve.add_argument("--request", type=Path, required=True)
+    web_audit_approve.add_argument("--approver", required=True)
+    web_audit_approve.add_argument("--out", type=Path, required=True)
+    web_audit_approve.add_argument("--key-env", default="KODA_APPROVAL_KEY")
+    web_audit_run = web_audit_subparsers.add_parser("run", help="consume approval once and execute the declared audit")
+    web_audit_run.add_argument("--profile", type=Path, required=True)
+    web_audit_run.add_argument("--approval", type=Path, required=True)
+    web_audit_run.add_argument("--confirm-origin", required=True)
+    web_audit_run.add_argument("--key-env", default="KODA_APPROVAL_KEY")
+    web_audit_run.add_argument("--state-dir", type=Path, default=None)
+    web_audit_run.add_argument("--output-dir", type=Path, default=None)
+    web_audit_run.add_argument("--output", type=Path, default=None)
+    web_audit_run.add_argument("--format", choices=("json", "markdown"), default="json")
+    web_audit_run.add_argument("--language", choices=("en", "ko"), default="ko")
+    web_audit_run.add_argument("--dry-run", action="store_true", help="verify approval without target requests or nonce consumption")
 
     discover = subparsers.add_parser("discover", help="list project roots under a folder")
     discover.add_argument("--target", default=".", help="folder to inspect")

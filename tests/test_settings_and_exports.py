@@ -373,5 +373,62 @@ class ZapScanTests(unittest.TestCase):
             thread.join()
 
 
+class WebAuditRouteTests(unittest.TestCase):
+    def test_web_audit_plan_requires_loopback_origin_and_session(self) -> None:
+        server = create_dashboard_server(port=0)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        profile = {
+            "schema_version": 1,
+            "target": {
+                "environment": "fixture",
+                "origins": ["http://127.0.0.1:1"],
+                "include_paths": ["/"],
+                "scopes": ["passive"],
+            },
+            "limits": {"requests": 2, "timeout_seconds": 1},
+            "accounts": {},
+            "auth": {},
+            "resources": [],
+            "scenarios": [],
+            "oast": {},
+            "applicability": {},
+        }
+        body = json.dumps({"profile": profile})
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request("POST", "/api/web-audit/plan", body=body, headers={"Content-Type": "application/json"})
+            response = connection.getresponse()
+            self.assertEqual(response.status, 403)
+            response.read()
+
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            session = response.getheader("X-KODA-Session")
+            response.read()
+            self.assertTrue(session)
+
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request(
+                "POST",
+                "/api/web-audit/plan",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Origin": f"http://127.0.0.1:{server.server_port}",
+                    "X-KODA-Session": session,
+                },
+            )
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["kind"], "koda.web-audit.plan")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,7 +31,7 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 | 문서 | 내용 |
 | --- | --- |
 | [offline-delivery.md](install/offline-delivery.md) | 폐쇄망 배포 개요 — Docker 전달물 / Linux tarball / Windows 설치본+데이터 zip 비교, 점검 파이프라인, 종료 코드, 빌드 옵션 |
-| [macos.ko.md](install/macos.ko.md) | macOS 설치 (App Store 앱 및 스크립트 설치) |
+| [macos.ko.md](install/macos.ko.md) | macOS 설치 (스크립트 설치) |
 | [linux.ko.md](install/linux.ko.md) | Linux 설치·운영 가이드 (호스트 설치, 대시보드, Docker 전달물) |
 | [windows.ko.md](install/windows.ko.md) | Windows 설치본 빌드·설치 및 취약점 데이터 패키지 연결 |
 | [vuln-data-refresh.md](install/vuln-data-refresh.md) | Windows 취약점 데이터(`koda-vuln-data-<date>.zip`) 현행화 절차 |
