@@ -5958,6 +5958,7 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
 /// controls. Reads back into `NativeWebScanner.Options` for the scan.
 private final class WebScanAccessoryView: NSView {
     private let urlField = NSTextField()
+    private let selectAllButton = NSButton(title: "", target: nil, action: nil)
     private let crawlCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let renderCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let assetsCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -5975,10 +5976,28 @@ private final class WebScanAccessoryView: NSView {
     private let headersField = NSTextField()
     private let seedsField = NSTextField()
 
+    private var optionChecks: [NSButton] {
+        [
+            crawlCheck,
+            renderCheck,
+            assetsCheck,
+            networkCheck,
+            interactCheck,
+            secretsCheck,
+            sitemapCheck,
+            probeCheck,
+            activeCheck,
+            compareUnauthCheck,
+        ]
+    }
+
     init(language: AppLanguage) {
         super.init(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
         let ko = language == .ko
         urlField.placeholderString = "https://example.com"
+        selectAllButton.title = ko ? "전체 선택" : "Select all"
+        selectAllButton.target = self
+        selectAllButton.action = #selector(selectAllOptions(_:))
         crawlCheck.title = ko ? "하위 페이지 크롤 (같은 호스트)" : "Crawl sub-pages (same host)"
         renderCheck.title = ko ? "SPA 링크용 JS 렌더링 (WebKit)" : "Render JS for SPA links (WebKit)"
         assetsCheck.title = ko ? "JS 번들에서 라우트/API 추출" : "Mine JS bundles for routes/APIs"
@@ -6007,6 +6026,7 @@ private final class WebScanAccessoryView: NSView {
 
         let stack = NSStackView(views: [
             labeled("URL", urlField),
+            selectAllButton,
             crawlCheck,
             renderCheck,
             assetsCheck,
@@ -6077,6 +6097,10 @@ private final class WebScanAccessoryView: NSView {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         return opts
+    }
+
+    @objc private func selectAllOptions(_ sender: NSButton) {
+        optionChecks.forEach { $0.state = .on }
     }
 
     private static func parseHeaders(_ raw: String) -> [String: String] {
