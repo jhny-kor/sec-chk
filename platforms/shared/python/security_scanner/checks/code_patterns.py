@@ -1474,6 +1474,12 @@ def _candidate_is_suppressed(
         return True
     if rule_id == "code.sql-dynamic-query" and _safe_sql_binding(line):
         return True
+    if rule_id == "code.broad-exception-handler" and re.search(
+        r"\b(?:throw|raise)\b",
+        nearby,
+        re.IGNORECASE,
+    ):
+        return True
     if rule_id == "code.eval-user-input" and re.search(r"\.\s*exec\s*\(", line, re.IGNORECASE) and not re.search(
         r"(?<![.\w])(?:eval|exec|(?-i:Function)|instance_eval|class_eval)\s*\(",
         line,
@@ -1740,6 +1746,106 @@ def _contextual_dataflow_findings(path: Path, lines: list[str], code_lines: list
     return findings
 
 
+def _mybatis_sql_findings(path: Path, lines: list[str], code_lines: list[str]) -> list[Finding]:
+    """Find raw MyBatis substitutions only inside executable mapper SQL."""
+    if path.suffix.lower() != ".xml" or not re.search(r"<\s*mapper\b", "\n".join(code_lines), re.IGNORECASE):
+        return []
+
+    rule = _RULE_BY_ID["code.sql-dynamic-query"]
+    findings: list[Finding] = []
+    in_statement = False
+    for index, line in enumerate(code_lines):
+        if re.search(r"<\s*(?:select|insert|update|delete)\b", line, re.IGNORECASE):
+            in_statement = True
+        if in_statement and re.search(r"\$\{\s*[A-Za-z_$][\w$.-]*\s*\}", line):
+            findings.append(
+                Finding(
+                    rule_id=rule.rule_id,
+                    category="code",
+                    severity=rule.severity,
+                    title=rule.title,
+                    path=path,
+                    line=index + 1,
+                    evidence=_trim_evidence(lines[index].strip()),
+                    description=rule.description,
+                    recommendation=rule.recommendation,
+                    verification_status="needs_review",
+                    verification_note=(
+                        "MyBatis ${...} 치환이 SQL 원문에 삽입됩니다. 값의 서버측 고정 allowlist 여부를 확인해야 합니다."
+                    ),
+                )
+            )
+            if len(findings) >= 5:
+                break
+        if re.search(r"<\s*/\s*(?:select|insert|update|delete)\s*>", line, re.IGNORECASE):
+            in_statement = False
+    return findings
+
+
+_JSP_CONTEXT_ENCODER = re.compile(
+    r"(?:Encode\.(?:forHtml|forHtmlAttribute|forJavaScript)|ESAPI\.encoder\(\)\.encodeFor|"
+    r"fn:escapeXml|escapeXml|StringEscapeUtils\.escape)",
+    re.IGNORECASE,
+)
+
+
+def _jsp_xss_findings(path: Path, lines: list[str], code_lines: list[str]) -> list[Finding]:
+    """Find JSP output only when the source or a dangerous browser sink is visible."""
+    if path.suffix.lower() != ".jsp":
+        return []
+
+    rule = _RULE_BY_ID["code.xss-dom-sink"]
+    findings: list[Finding] = []
+    seen: set[int] = set()
+
+    def add(index: int, status: str, note: str) -> None:
+        if index in seen or len(findings) >= 5:
+            return
+        findings.append(
+            Finding(
+                rule_id=rule.rule_id,
+                category="code",
+                severity=rule.severity,
+                title=rule.title,
+                path=path,
+                line=index + 1,
+                evidence=_trim_evidence(lines[index].strip()),
+                description=rule.description,
+                recommendation=rule.recommendation,
+                verification_status=status,
+                verification_note=note,
+            )
+        )
+        seen.add(index)
+
+    for index, line in enumerate(code_lines):
+        if _JSP_CONTEXT_ENCODER.search(line):
+            continue
+        if re.search(r"<%=\s*(?:request\s*\.\s*getParameter|param\b)", line, re.IGNORECASE):
+            add(index, "confirmed", "요청값이 JSP 출력식에서 문맥 인코딩 없이 응답에 기록됩니다.")
+            continue
+        if "<c:out" not in line and re.search(r"\$\{\s*param(?:Values)?\.", line, re.IGNORECASE):
+            add(index, "confirmed", "JSP EL 요청값이 출력 인코딩 없이 HTML 응답에 기록됩니다.")
+            continue
+
+        assignment = re.search(
+            r"\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=.*<%=\s*([^%]+?)\s*%>",
+            line,
+            re.IGNORECASE,
+        )
+        if not assignment:
+            continue
+        variable = assignment.group(1)
+        following = "\n".join(code_lines[index + 1 : index + 13])
+        if re.search(rf"\bdocument\s*\.\s*write(?:ln)?\s*\(\s*{re.escape(variable)}\b", following, re.IGNORECASE):
+            add(
+                index,
+                "needs_review",
+                "JSP 출력식이 JavaScript 문자열을 거쳐 document.write에 전달됩니다. 서버 변수의 입력 출처를 확인해야 합니다.",
+            )
+    return findings
+
+
 def _sw49_semantic_findings(path: Path, lines: list[str], statements: list[str]) -> list[Finding]:
     suffix = path.suffix.lower()
     out: list[Finding] = []
@@ -1749,22 +1855,68 @@ def _sw49_semantic_findings(path: Path, lines: list[str], statements: list[str])
             path=path, line=i + 1, evidence=_trim_evidence(lines[i].strip()), description=rule.description,
             recommendation=rule.recommendation, verification_status="needs_review", verification_note=note))
     if suffix in {".java", ".kt"}:
-        acquired: dict[str, int] = {}; released: set[str] = set()
-        def report_unreleased() -> None:
+        acquired: dict[str, int] = {}
+        released: dict[str, int] = {}
+        delegated: dict[str, str] = {}
+        scope_start = 0
+
+        def report_unreleased(scope_end: int) -> None:
             for name, acquired_at in acquired.items():
-                if name not in released and not any("try (" in x and re.search(rf"\b{name}\b", x) for x in statements[max(0, acquired_at-1):acquired_at+2]):
-                    add("code.improper-resource-release", acquired_at, "자원 취득 후 close/release 또는 try-with-resources를 확인하지 못했습니다.")
+                if name in delegated:
+                    continue
+                try_with_resources = any(
+                    "try (" in candidate and re.search(rf"\b{name}\b", candidate)
+                    for candidate in statements[max(scope_start, acquired_at - 1):acquired_at + 2]
+                )
+                if try_with_resources:
+                    continue
+                release_at = released.get(name)
+                if release_at is None:
+                    add("code.improper-resource-release", acquired_at, "자원 취득 후 모든 경로의 close/release/disconnect를 확인하지 못했습니다.")
+                    continue
+                catch_after_release = any(
+                    re.search(r"\bcatch\s*\(", candidate)
+                    for candidate in statements[release_at + 1:scope_end]
+                )
+                release_in_finally = any(
+                    re.search(r"\bfinally\b", candidate)
+                    for candidate in statements[acquired_at:release_at + 1]
+                )
+                if catch_after_release and not release_in_finally:
+                    add("code.improper-resource-release", acquired_at, "예외 발생 시 close/release 전에 catch로 이동할 수 있어 자원 해제가 보장되지 않습니다.")
+
+        acquisition = re.compile(
+            r"\b([A-Za-z_$][\w$]*)\s*=\s*[^;]*(?:getConnection|prepareStatement|createStatement|"
+            r"new\s+(?:FileInputStream|FileOutputStream|FileReader|FileWriter|BufferedReader|BufferedWriter|"
+            r"Scanner|PrintWriter|ZipFile|JarFile)|Files\.newInputStream|Files\.newOutputStream)",
+            re.IGNORECASE,
+        )
+        http_connection = re.compile(
+            r"\b(?:HttpURLConnection\s+)?([A-Za-z_$][\w$]*)\s*=\s*[^;]*\bHttpURLConnection\b[^;]*\.openConnection\s*\(",
+            re.IGNORECASE,
+        )
         for i, line in enumerate(statements):
             if _starts_function_scope(line, suffix):
-                report_unreleased()
-                acquired.clear(); released.clear()
-            m = re.search(r"\b([A-Za-z_$][\w$]*)\s*=\s*[^;]*(?:getConnection|prepareStatement|createStatement|new\s+(?:File)?InputStream|Files\.newInputStream)", line, re.I)
+                report_unreleased(i)
+                acquired.clear(); released.clear(); delegated.clear()
+                scope_start = i
+            m = acquisition.search(line) or http_connection.search(line)
             if m:
-                acquired[m.group(1)] = i
-                released.discard(m.group(1))
+                name = m.group(1)
+                if not (re.search(r"\bnew\s+Scanner\s*\(\s*System\.in\b", line) and name):
+                    acquired[name] = i
+                    released.pop(name, None)
+                wrapper = re.search(
+                    rf"\b{name}\s*=\s*new\s+(?:PrintWriter|BufferedReader|BufferedWriter)\s*\(\s*([A-Za-z_$][\w$]*)",
+                    line,
+                    re.IGNORECASE,
+                )
+                if wrapper and wrapper.group(1) in acquired:
+                    delegated[wrapper.group(1)] = name
             for name in acquired:
-                if re.search(rf"\b{name}\s*\.\s*(?:close|release)\s*\(", line): released.add(name)
-        report_unreleased()
+                if re.search(rf"\b{name}\s*\.\s*(?:close|release|disconnect)\s*\(", line):
+                    released[name] = i
+        report_unreleased(len(statements))
     if suffix in {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"}:
         freed: dict[str, int] = {}
         uninit: set[str] = set()
@@ -1866,23 +2018,69 @@ def _sw49_semantic_findings(path: Path, lines: list[str], statements: list[str])
                 add("code.security-decision-user-input", i, "요청에서 받은 보안·업무 결정값이 서버측 기준 조회 없이 사용됩니다.")
                 decision_inputs.discard(name)
 
-    sensitive_route = re.compile(
-        r"(?i)@(?:Delete|Put|Patch|Post|Request)Mapping\s*\([^\n]*(?:admin|users?|accounts?|payments?|orders?|roles?|permissions?)"
-        r"|\b(?:public|protected|private)\b[^\n{]*(?:delete|remove|update|approve|grant|revoke|export)\w*\s*\(",
-    )
     authorization_guard = re.compile(
         r"(?i)@PreAuthorize|@Secured|@RolesAllowed|hasRole|hasAuthority|checkPermission|"
-        r"authorize|isOwner|isAdmin|requireRole|permissionService",
+        r"authorize|isOwner|isAdmin|requireRole|permissionService|SecurityContext|getPrincipal",
     )
-    for match in sensitive_route.finditer(document):
-        i = document[:match.start()].count("\n")
-        nearby = "\n".join(statements[max(0, i - 3): i + 12])
-        duplicate = any(
-            item.rule_id == "code.authorization-check-missing" and abs(item.line - (i + 1)) <= 3
-            for item in out
+    endpoint_annotation = re.compile(r"@(?:Delete|Put|Patch|Post|Request)Mapping\b", re.IGNORECASE)
+    sensitive_action = re.compile(r"(?:delete|remove|update|approve|grant|revoke|export|reset)", re.IGNORECASE)
+    sensitive_resource = re.compile(r"(?:admin|users?|accounts?|payments?|orders?|roles?|permissions?)", re.IGNORECASE)
+    mutation_sink = re.compile(
+        r"\b(?:[A-Za-z_$][\w$]*(?:Dao|Repository|Mapper|Service)|dao|repository|mapper|service)\s*\.\s*"
+        r"(?:delete|remove|update|save|insert|merge|approve|grant|revoke)\w*\s*\(",
+        re.IGNORECASE,
+    )
+    external_endpoint_input = re.compile(
+        r"@RequestBody|@PathVariable|@RequestParam|HttpServletRequest|HttpSession|\b(?:request|params?)\b",
+        re.IGNORECASE,
+    )
+    for annotation_index, annotation in enumerate(statements):
+        if not endpoint_annotation.search(annotation):
+            continue
+        method_index = next(
+            (
+                index
+                for index in range(annotation_index + 1, min(len(statements), annotation_index + 9))
+                if _starts_function_scope(statements[index], suffix)
+            ),
+            None,
         )
-        if not duplicate and not authorization_guard.search(nearby):
-            add("code.authorization-check-missing", i, "중요 기능 주변에서 역할·소유권·권한 검사를 확인하지 못했습니다.")
+        if method_index is None:
+            continue
+        signature = statements[method_index]
+        method_name = re.search(r"\b([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws\s+[^{}]+)?\{", signature)
+        if method_name is None:
+            continue
+
+        body_lines: list[str] = []
+        depth = 0
+        started = False
+        for body_index in range(method_index, min(len(statements), method_index + 180)):
+            body_line = statements[body_index]
+            body_lines.append(body_line)
+            if "{" in body_line:
+                started = True
+            depth += body_line.count("{") - body_line.count("}")
+            if started and body_index > method_index and depth <= 0:
+                break
+        body = "\n".join(body_lines)
+        descriptor = f"{annotation}\n{method_name.group(1)}"
+        if not (sensitive_action.search(descriptor) or sensitive_resource.search(descriptor)):
+            continue
+        has_endpoint_input = bool(
+            external_endpoint_input.search(f"{signature}\n{body}")
+            or re.search(r"\(\s*[^)]", signature)
+        )
+        if not has_endpoint_input or not mutation_sink.search(body):
+            continue
+        guarded_scope = "\n".join(statements[max(0, annotation_index - 3):method_index] + body_lines)
+        if authorization_guard.search(guarded_scope):
+            continue
+        add(
+            "code.authorization-check-missing",
+            method_index,
+            "외부 입력을 받는 상태 변경 엔드포인트에서 민감 저장 동작 전 인가 검사를 확인하지 못했습니다. 전역 보안 설정은 추가 검토해야 합니다.",
+        )
 
     for i, line in enumerate(statements):
         if re.search(
@@ -2065,6 +2263,8 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
     code_lines = _code_view(lines, suffix)
     statements = _logical_lines(code_lines)
     findings = _java_document_builder_xxe_findings(path, lines, code_lines) if suffix in {".java", ".kt"} else []
+    findings.extend(_mybatis_sql_findings(path, lines, code_lines))
+    findings.extend(_jsp_xss_findings(path, lines, code_lines))
     findings.extend(_sw49_semantic_findings(path, lines, statements))
     if suffix in {".java", ".kt"}:
         findings.extend(_java_null_pointer_findings(path, lines, code_lines))
