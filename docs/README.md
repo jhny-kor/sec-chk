@@ -48,7 +48,6 @@ Linux 오프라인 배포 계층 설명은
 | --- | --- |
 | [java-sbom-vulnerability-scan.md](security/java-sbom-vulnerability-scan.md) | 폐쇄망 Java(JAR/WAR/EAR) SBOM·취약점 점검 런북 |
 | [PRE_COMMIT.ko.md](security/PRE_COMMIT.ko.md) | KODA pre-commit 보안 게이트 |
-| [GITHUB_REPOSITORY_SECURITY.ko.md](security/GITHUB_REPOSITORY_SECURITY.ko.md) | GitHub 저장소 보안 설정 체크리스트 |
 | [DEPENDENCY_TRACK.ko.md](security/DEPENDENCY_TRACK.ko.md) | Dependency-Track SBOM 업로드 연동 |
 | [ZAP_BASELINE.ko.md](security/ZAP_BASELINE.ko.md) | OWASP ZAP baseline DAST 실행 |
 | [VEX.ko.md](security/VEX.ko.md) | CycloneDX VEX 취약점 상태 추적 |

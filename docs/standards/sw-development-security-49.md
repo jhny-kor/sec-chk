@@ -77,7 +77,7 @@
 | 2.12 (S-12) 사용자 하드디스크에 저장되는 쿠키를 통한 정보 노출 | 539 | 부분 | code.insecure-cookie-settings | 실제 민감정보 저장 여부는 수동 |
 | 2.13 (S-13) 주석문 안에 포함된 시스템 주요정보 | 615 | 부분 | secret.sensitive-comment | 신규 룰, 증거 마스킹 |
 | 2.14 (S-14) 솔트 없이 일방향 해쉬 함수 사용 | 759 | 부분 | code.password-hash-without-salt | 신규 룰, 비밀번호 문맥 결합 |
-| 2.15 (S-15) 무결성 검사 없는 코드 다운로드 | 494 | 부분 | dependency.remote-shell-script, dependency.docker-remote-shell, config.docker-add-http, prevention.github-actions-unpinned | 기존 공급망 룰 재사용 |
+| 2.15 (S-15) 무결성 검사 없는 코드 다운로드 | 494 | 부분 | dependency.remote-shell-script, dependency.docker-remote-shell, config.docker-add-http | 기존 공급망 룰 재사용 |
 | 2.16 (S-16) 반복된 인증시도 제한 기능 부재 | 307 | 부분 | code.api-missing-rate-limit | 로그인 경로 확인 없음 → 부분 |
 
 ### 시간 및 상태 (2)

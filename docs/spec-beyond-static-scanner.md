@@ -7,7 +7,7 @@
 > - **C1 LLM Provider ✅ 구현 완료**(`platforms/shared/python/security_scanner/ai/provider.py`: `KODA_LLM` 규약, ollama=stdlib/전송0, anthropic·openai=lazy extra).
 > - **C2 AI Triage ✅ 구현 완료**(`platforms/shared/python/security_scanner/ai/triage.py`: FP/TP 라벨, 심각도 불변, 시크릿 원문 미전송, graceful degrade, `--ai-triage`/`--llm`, JSON `triage_*` 필드, PRIVACY.md 갱신).
 > - **C3 Reachability ✅ 구현 완료**(`platforms/shared/python/security_scanner/reachability.py`, `--reachability`/`--reachable-only`, JSON `reachable` 필드).
-> - **C5 CI/CD diff-scope ✅ 구현 완료**(`platforms/shared/python/security_scanner/git_changes.py`, `--changed-only`/`--base`, git 실패 시 전체 스캔 폴백, 배포형 composite action `.github/actions/koda/action.yml`, README CI 섹션).
+> - **C5 CI/CD diff-scope ✅ 구현 완료**(`platforms/shared/python/security_scanner/git_changes.py`, `--changed-only`/`--base`, git 실패 시 전체 스캔 폴백, CI 섹션).
 > - **C4 Auto-Fix ✅ 구현 완료**(`platforms/shared/python/security_scanner/fixes/`: 결정론적 line-scoped fixer[weak-hash, yaml.load], `fix` CLI 기본 dry-run diff + `--apply` 백업·구문검증 게이트, `--rule`/`--no-backup`).
 > - 테스트: reachability 10 + provider 5 + triage 7 + diff-scope 5 + auto-fix 5 = 32종 추가(전체 123 통과). **C1·C2·C3·C4·C5 전부 구현 완료(Python).**
 > - **네이티브 Swift 앱 포팅 ✅ 완료** (`platforms/macos/app/KODA/KODA/ScannerBridge.swift` 등): C4 `SecurityCodeFixer`(+`.replaceFile` 백업), C3 `NativeReachability`(OSV 발견 라벨), C2 `NativeLLMProvider`+`NativeAITriage`(로컬 Ollama/클라우드, "AI 오탐 검토" 버튼), C5 `NativeGitChanges`("변경 파일만 점검" 버튼). 각 기능 `xcodebuild` BUILD SUCCEEDED. 동작 의미는 Python 구현(테스트 통과)과 동일.
@@ -227,26 +227,15 @@ def changed_files(base_ref: str) -> set[Path]:
 ```
 CLI: `scan ... --changed-only --base origin/main` → 변경 파일 + 변경 라인만 발견 필터. 기존 `diffing.py`로 신규/해결 비교.
 
-### 배포형 GitHub Action (`.github/actions/koda/action.yml`)
-```yaml
-name: KODA Security Scan
-inputs:
-  target: { default: "." }
-  fail-on: { default: "high" }
-  changed-only: { default: "true" }
-runs:
-  using: composite
-  steps:
-    - run: python -m security_scanner scan --target ${{ inputs.target }}
-           --format sarif --output koda.sarif
-           --fail-on ${{ inputs.fail-on }}
-           ${{ inputs.changed-only == 'true' && '--changed-only --base origin/${{ github.base_ref }}' || '' }}
-      shell: bash
-    - uses: github/codeql-action/upload-sarif@v3
-      with: { sarif_file: koda.sarif }
+### CI 파이프라인 통합
+CI 작업에서 아래 명령을 실행하고 `koda.sarif`를 파이프라인 산출물로 보관한다.
+
+```bash
+python3 -m security_scanner scan --target . --format sarif \
+  --output koda.sarif --fail-on high --changed-only --base main
 ```
-- 사용자 워크플로: `uses: jhny-kor/koda@v1`.
-- PR 인라인 코멘트: SARIF → 신규 발견만 리뷰 코멘트(GitHub API 또는 reviewdog). 기존 `diffing` 재사용해 노이즈 억제.
+
+변경 이력에 접근할 수 없으면 `--changed-only`를 생략하고 전체 스캔을 수행한다.
 - AI triage는 CI에서 **기본 OFF**(키 없음·재현성). 켤 경우 verdict는 코멘트 보조 정보로만, 게이트는 결정론 severity.
 
 ---
@@ -323,11 +312,10 @@ reachable_only_gate: bool = False
 
 ## 12. 참고 자료 (Sources)
 
-- [Strix — Open-source AI hackers](https://github.com/usestrix/strix) — 에이전트 툴킷, `STRIX_LLM`/`LLM_API_BASE` 규약, `--scan-mode`/`--scope-mode diff`/`-n`, Docker 샌드박스, GitHub Action.
+- Strix — Open-source AI hackers — 에이전트 툴킷, `STRIX_LLM`/`LLM_API_BASE` 규약, `--scan-mode`/`--scope-mode diff`/`-n`, Docker 샌드박스.
 - [XBOW — Autonomous Offensive Security Platform](https://xbow.com/platform) — 자율 탐색 + **결정론적 validator** 2-layer, exploitability 확정 후 surfacing.
 - [Deterministic + Agentic AI: The Architecture Exposure Validation Requires (The Hacker News)](https://thehackernews.com/2026/04/deterministic-agentic-ai-architecture.html) — pre/post-execution 결정론적 validator 패턴.
 - [Endor Labs — Reachability analysis (docs)](https://docs.endorlabs.com/scan/sca/reachability-analysis/) · [Pre-computed Reachability](https://docs.endorlabs.com/scan/sca/reachability-analysis/pre-computed-reachability/) — call graph, 미사용 의존성 강등, 92~97% 노이즈 감소, 빌드 없는 manifest 기반.
-- [GitHub Copilot Autofix for CodeQL (docs)](https://docs.github.com/en/code-security/concepts/code-scanning/copilot-autofix-for-code-scanning) · [Found means fixed (GitHub Blog)](https://github.blog/news-insights/product-news/found-means-fixed-introducing-code-scanning-autofix-powered-by-github-copilot-and-codeql/) — SARIF + source/sink 스니펫 + query help → LLM 패치 + 자연어 설명, 자동적용 안 함.
 - [Semgrep — Zero false positive SAST with AI-powered memory](https://semgrep.dev/blog/2025/making-zero-false-positive-sast-a-reality-with-ai-powered-memory/) · [Customize Assistant](https://semgrep.dev/docs/semgrep-assistant/customize) — 결정론+LLM, FP/TP 별도 프롬프트 체인, 95% FP 정확도, Memories.
 - [Top Ollama models for coding/agents (2026)](https://www.morphllm.com/best-ollama-models) · [Best Open-Source LLM for Cybersecurity 2026](https://www.siliconflow.com/articles/en/best-open-source-LLM-for-Cybersecurity-Threat-Analysis) — Qwen2.5/3-Coder, `localhost:11434`, thinking/non-thinking, 로컬 프라이버시.
 - [Inside AWS Security Agent: multi-agent pentesting (AWS)](https://aws.amazon.com/blogs/security/inside-aws-security-agent-a-multi-agent-architecture-for-automated-penetration-testing/) — 결정론적 validator + LLM 검증 이중화.

@@ -173,26 +173,19 @@ See the [report contract](report-contract.md) for output fields.
 
 ## CI
 
-The repository includes a composite action at `.github/actions/koda/`. A consuming repository can scan pull-request changes and upload SARIF:
+Run the scanner from a CI job and publish the SARIF file as a pipeline artifact:
 
-```yaml
-jobs:
-  koda-security:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: <owner>/<koda-repo>/.github/actions/koda@main
-        with:
-          fail-on: high
-          changed-only: "true"
+```bash
+python3 -m security_scanner scan \
+  --target . \
+  --format sarif \
+  --output koda.sarif \
+  --fail-on high \
+  --changed-only \
+  --base main
 ```
 
-The action scopes pull-request scans to changed files when history is available. Use `fail-on: none` to report without failing the job.
+Use `--fail-on none` to report without failing the job.
 
 ## Authorized web scanning
 

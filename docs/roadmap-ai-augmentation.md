@@ -1,6 +1,6 @@
 # KODA AI 증강 · 자동 교정 · CI/CD 로드맵 (Strix 벤치마킹)
 
-> 목적: 오픈소스 자율 AI 펜테스트 도구 [Strix](https://github.com/usestrix/strix)의 강점을 분석하고,
+> 목적: 오픈소스 자율 AI 펜테스트 도구 Strix의 강점을 분석하고,
 > **KODA의 "오프라인·읽기 전용·프라이버시·컴플라이언스" 정체성을 깨지 않으면서** 흡수할 4대 발전 축을 정의한다.
 > 상태: 계획(Planning). 이 문서는 추후 구현의 기준 로드맵이다(무엇을·왜·우선순위).
 > 구현 명세(어떻게·코드 스켈레톤·CLI/Config·프롬프트 체인): [spec-beyond-static-scanner.md](spec-beyond-static-scanner.md)
@@ -44,7 +44,7 @@ Strix를 그대로 복제하지 않는다. Strix는 ① 코드를 클라우드 L
 - 운영: 대시보드/서버(`server`, `app`), 점수 이력·리포트 diff(`diffing`), 예외 거버넌스(`ignore`, `koda-ignore.yml`),
   증거 레지스터(`evidence`), 릴리스 패키지(`release`).
 - 가벼운 DAST: OWASP ZAP baseline 실행(`dast.py`, subprocess 사용).
-- CI 기반: `--fail-on <severity>` 비-제로 종료 코드, SARIF 출력 → GitHub Code Scanning 업로드 가능.
+- CI 기반: `--fail-on <severity>` 비-제로 종료 코드, SARIF 출력 → 정적 분석 결과 소비 시스템에 전달 가능.
 - 배포: macOS 네이티브(Swift, MAS) + Windows(WebView2 단일창).
 
 ---
@@ -90,9 +90,9 @@ Strix를 그대로 복제하지 않는다. Strix는 ① 코드를 클라우드 L
 - 현재 스캔은 폴더 전체. CI에서 매 PR 전체 스캔은 노이즈·느림.
 - 대응: `--changed-only --base <ref>`로 `git diff --name-only` 결과만 스캔. 변경 라인 기준 발견 필터.
 
-### G6. 배포형 GitHub Action 부재 — ④
-- `init-security`가 워크플로 yml을 **생성**하지만, 마켓플레이스 재사용 액션(`uses: jhny-kor/koda-action@v1`)은 없음.
-- 대응: `action.yml`(composite) + SARIF 업로드 + PR 인라인 코멘트 게시(`reviewdog` 또는 GitHub API) 레인.
+### G6. CI 재사용 템플릿 보강 — ④
+- `init-security`가 스캔 작업 yml을 **생성**하지만, 공통 CI 템플릿과 SARIF 산출물 보관 규약은 보강이 필요하다.
+- 대응: 스캔 명령, `--fail-on`, 변경 파일 범위, SARIF 산출물 보관을 포함한 CI 템플릿을 제공한다.
 
 ### G7. reachability/검증 데이터 부재 — ③
 - 의존성 CVE는 "설치됨" 기준이지 "실제 사용됨" 기준이 아님 → SBOM에 있으나 import 안 하는 패키지도 동일 취급.
@@ -113,8 +113,6 @@ platforms/shared/python/security_scanner/
     deterministic.py   # (②) 안전한 결정론적 치환 (yaml.safe_load, sha256, timeout ...)
     apply.py           # (②) dry-run diff 생성 + 승인 게이트 + 적용/백업
   reachability.py      # (③) import/호출 그래프 기반 도달 가능성 (강등 신호)
-.github/
-  actions/koda/action.yml  # (④) 배포형 composite action
 ```
 
 - `Finding`에 선택 필드 추가: `triage_confidence: float|None`, `triage_note: str`, `fixable: bool`.
@@ -133,10 +131,10 @@ platforms/shared/python/security_scanner/
 ### Phase 0 — ④ CI/CD 네이티브 통합 (빠른 승리) — ☐
 가장 기반이 탄탄(SARIF·`--fail-on` 보유). 신규 LLM/쓰기 없음 → 정체성 충돌 0.
 - [ ] G5: `--changed-only --base <ref>` — `git diff --name-only` 교집합만 스캔 + 변경 라인 발견 필터.
-- [ ] G6: `.github/actions/koda/action.yml` composite 액션(setup → scan → SARIF). README에 `uses:` 예시.
-- [ ] PR 인라인 코멘트: SARIF→리뷰 코멘트(GitHub API 또는 reviewdog). 신규 발견만 코멘트(기존 `diffing` 재사용).
+- [ ] G6: CI 템플릿(setup → scan → SARIF 산출물 보관).
+- [ ] 변경 파일 기준 결과와 전체 스캔 결과를 동일한 SARIF 계약으로 비교.
 - [ ] 문서: `docs/ci-integration.md` + `init-security` 워크플로 템플릿을 배포형 액션 호출로 갱신.
-- 검증: 본 저장소(`.github/`)에서 셀프 도그푸드 → PR에 KODA 발견 코멘트 노출 확인.
+- 검증: CI 작업에서 변경 범위 스캔과 SARIF 산출물 생성을 확인.
 
 ### Phase 1 — ① AI triage 레이어 (차별화 핵심) — ☐
 오탐 제거 = 사용자 체감 가치 최대. **기본 OFF, opt-in.**

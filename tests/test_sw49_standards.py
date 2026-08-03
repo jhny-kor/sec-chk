@@ -487,6 +487,139 @@ cursor.execute(query)
         safe = 'cursor.execute("SELECT * FROM users WHERE id = %s", (request.args["id"],))\n'
         self.assertNotIn("code.sql-dynamic-query", self._rule_ids("a.py", safe))
 
+    def test_java_csharp_and_php_sql_injection_flows_are_confirmed(self) -> None:
+        fixtures = {
+            "Query.java": (
+                'String id = request.getParameter("id");\n'
+                'statement.executeQuery("SELECT * FROM users WHERE id=" + id);\n'
+            ),
+            "Update.java": (
+                'String name = request.getParameter("name");\n'
+                'statement.executeUpdate("UPDATE users SET name=\'" + name + "\' WHERE id=1");\n'
+            ),
+            "Batch.java": (
+                'String id = request.getParameter("id");\n'
+                'statement.addBatch("DELETE FROM users WHERE id=" + id);\n'
+                'statement.executeBatch();\n'
+            ),
+            "NativeQuery.java": (
+                'String id = request.getParameter("id");\n'
+                'entityManager.createNativeQuery("SELECT * FROM users WHERE id=" + id);\n'
+            ),
+            "JdbcTemplate.java": (
+                'String id = request.getParameter("id");\n'
+                'jdbcTemplate.update("DELETE FROM users WHERE id=" + id);\n'
+            ),
+            "Query.cs": (
+                'var id = Request.Query["id"];\n'
+                'var command = new SqlCommand("SELECT * FROM users WHERE id=" + id, connection);\n'
+                'command.ExecuteReader();\n'
+            ),
+            "CommandText.cs": (
+                'var id = Request.Query["id"];\n'
+                'var command = new SqlCommand();\n'
+                'command.CommandText = "DELETE FROM users WHERE id=" + id;\n'
+                'command.ExecuteNonQuery();\n'
+            ),
+            "CommandTextAppend.cs": (
+                'var id = Request.Query["id"];\n'
+                'var command = new SqlCommand();\n'
+                'command.CommandText += " WHERE id=" + id;\n'
+                'await command.ExecuteReaderAsync();\n'
+            ),
+            "EntityFramework.cs": (
+                'var id = Request.Query["id"];\n'
+                'context.Database.ExecuteSqlRaw("DELETE FROM users WHERE id=" + id);\n'
+            ),
+            "query.php": (
+                '$id = $_GET["id"];\n'
+                '$result = mysqli_query($db, "SELECT * FROM users WHERE id=" . $id);\n'
+            ),
+            "pdo.php": (
+                '$id = $_GET["id"];\n'
+                '$result = $pdo->query("SELECT * FROM users WHERE id=" . $id);\n'
+            ),
+            "prepare.php": (
+                '$id = $_GET["id"];\n'
+                '$stmt = $pdo->prepare("SELECT * FROM users WHERE id=" . $id);\n'
+            ),
+            "static_pdo.php": (
+                '$id = $_GET["id"];\n'
+                '$stmt = PDO::prepare("SELECT * FROM users WHERE id=" . $id);\n'
+            ),
+            "interpolated_pdo.php": (
+                '$id = $_GET["id"];\n'
+                '$stmt = $pdo->prepare("SELECT * FROM users WHERE id=$id");\n'
+                '$stmt->execute();\n'
+            ),
+            "separate_functions.php": (
+                'function safe($pdo) {\n'
+                '    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");\n'
+                '}\n'
+                'function unsafe($pdo) {\n'
+                '    $id = $_GET["id"];\n'
+                '    $stmt = $pdo->prepare("SELECT * FROM users WHERE id=" . $id);\n'
+                '}\n'
+            ),
+        }
+        for filename, source in fixtures.items():
+            with self.subTest(filename=filename):
+                finding = next(
+                    item for item in self._scan(filename, source)
+                    if item.rule_id == "code.sql-dynamic-query"
+                )
+                self.assertEqual(finding.verification_status, "confirmed")
+
+    def test_java_csharp_and_php_bound_sql_parameters_are_safe(self) -> None:
+        fixtures = {
+            "Query.java": (
+                'String id = request.getParameter("id");\n'
+                'PreparedStatement stmt = connection.prepareStatement("SELECT * FROM users WHERE id = ?");\n'
+                'stmt.setString(1, request.getParameter("id"));\n'
+                'stmt.executeQuery();\n'
+            ),
+            "LiteralDollar.java": (
+                'String id = request.getParameter("id");\n'
+                'statement.executeQuery("SELECT * FROM users WHERE id=$id");\n'
+            ),
+            "Query.cs": (
+                'var id = Request.Query["id"];\n'
+                'var command = new SqlCommand("SELECT * FROM users WHERE id=@id", connection);\n'
+                'command.Parameters.AddWithValue("@id", Request.Query["id"]);\n'
+                'command.ExecuteReader();\n'
+            ),
+            "query.php": (
+                '$stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");\n'
+                '$stmt->execute([$_GET["id"]]);\n'
+            ),
+            "mysqli.php": (
+                '$stmt = mysqli_prepare($db, "SELECT * FROM users WHERE id = ?");\n'
+                'mysqli_stmt_bind_param($stmt, "s", $_GET["id"]);\n'
+                'mysqli_stmt_execute($stmt);\n'
+            ),
+            "mysqli_inline.php": (
+                '$result = mysqli_execute_query('
+                '$db, "SELECT * FROM users WHERE id = ?", [$_GET["id"]]);\n'
+            ),
+            "postgres.php": (
+                '$id = $_GET["id"];\n'
+                '$result = pg_query_params($db, "SELECT * FROM users WHERE id = $1", [$id]);\n'
+            ),
+            "php_single_quote.php": (
+                '$id = $_GET["id"];\n'
+                "$stmt = $pdo->prepare('SELECT * FROM users WHERE id=$id');\n"
+                '$stmt->execute();\n'
+            ),
+            "php_escaped_dollar.php": (
+                '$id = $_GET["id"];\n'
+                '$stmt = $pdo->prepare("SELECT * FROM users WHERE id=\\$id");\n'
+                '$stmt->execute();\n'
+            ),
+        }
+        for filename, source in fixtures.items():
+            with self.subTest(filename=filename):
+                self.assertNotIn("code.sql-dynamic-query", self._rule_ids(filename, source))
+
     def test_multiline_xss_flow_is_confirmed_and_sanitized_flow_is_safe(self) -> None:
         vulnerable = """\
 const html = location.hash;
@@ -762,6 +895,22 @@ function getParam(name) {
                 {item.rule_id for item in code_patterns.check_file(application_path, TargetConfig(name="t", path=Path(tmp)))},
             )
 
+            minified_application_path = Path(tmp) / "thirdparty" / "application.min.js"
+            minified_application_path.write_text(
+                "const value=location.hash;target.innerHTML=value;\n",
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "code.xss-dom-sink",
+                {
+                    item.rule_id
+                    for item in code_patterns.check_file(
+                        minified_application_path,
+                        TargetConfig(name="t", path=Path(tmp)),
+                    )
+                },
+            )
+
             jsrender_path = Path(tmp) / "thirdparty" / "jsrender.min.js"
             jsrender_path.write_text(
                 "/*! JsRender v1.0.5 */\n"
@@ -769,6 +918,23 @@ function getParam(name) {
                 encoding="utf-8",
             )
             self.assertFalse(code_patterns.check_file(jsrender_path, TargetConfig(name="t", path=Path(tmp))))
+
+            datepicker_path = Path(tmp) / "thirdparty" / "jquery" / "datepicker" / "datepicker.min.js"
+            datepicker_path.parent.mkdir(parents=True)
+            datepicker_path.write_text(
+                "var picker=function(){try{activate()}catch(e){}};\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(code_patterns.check_file(datepicker_path, TargetConfig(name="t", path=Path(tmp))))
+
+            jsrender_outside_vendor = Path(tmp) / "common" / "js" / "jsrender.min.js"
+            jsrender_outside_vendor.parent.mkdir(parents=True)
+            jsrender_outside_vendor.write_text(
+                "/*! JsRender v1.0.5 */\n"
+                "!function(){target.innerHTML=location.hash}();\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(code_patterns.check_file(jsrender_outside_vendor, TargetConfig(name="t", path=Path(tmp))))
 
             banner_application_path = Path(tmp) / "thirdparty" / "application.js"
             banner_application_path.write_text(

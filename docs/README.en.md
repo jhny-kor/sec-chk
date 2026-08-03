@@ -32,7 +32,6 @@ switching languages.
 
 - [Java SBOM and vulnerability scan](security/java-sbom-vulnerability-scan.en.md)
 - [Pre-commit security gate](security/PRE_COMMIT.md)
-- [GitHub repository security checklist](security/GITHUB_REPOSITORY_SECURITY.md)
 - [Dependency-Track SBOM upload](security/DEPENDENCY_TRACK.md)
 - [OWASP ZAP baseline](security/ZAP_BASELINE.md)
 - [CycloneDX VEX tracking](security/VEX.md)

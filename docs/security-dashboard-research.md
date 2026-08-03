@@ -12,8 +12,7 @@ The current implementation borrows information architecture from established vul
   - https://docs.dependencytrack.org/
 - SARIF 2.1.0: OASIS standard interchange format for static analysis results.
   - https://www.oasis-open.org/standard/sarif-v2-1-0/
-- GitHub code scanning SARIF support: practical SARIF ingestion expectations for code scanning alerts.
-  - https://docs.github.com/github/finding-security-vulnerabilities-and-errors-in-your-code/sarif-support-for-code-scanning
+- SARIF consumers: practical ingestion expectations for static-analysis alerts.
 - FIRST CVSS v3.1: qualitative severity bands used by vulnerability management programs.
   - https://www.first.org/cvss/v3-1/specification-document
 - OWASP Top 10:2025: updated web application risk categories; added as a mapped profile where current local checks overlap.

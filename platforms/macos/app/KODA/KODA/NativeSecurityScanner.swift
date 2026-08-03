@@ -2130,7 +2130,7 @@ final class NativeSecurityScanner {
         return String(characters[(cursor + 1)...])
     }
 
-    private func checkContextualSourceFlows(lines: [String], codeLines: [String], displayPath: String) -> [NativeFinding] {
+    private func checkContextualSourceFlows(lines: [String], codeLines: [String], displayPath: String, suffix: String) -> [NativeFinding] {
         // Remote input only. `ctx` needs a request-shaped member: a bare `ctx.`
         // also matches a canvas 2D context, a crypto context, and most other
         // graphics or codec handles. Operator input (`sys.argv`, `input()`) is
@@ -2140,8 +2140,11 @@ final class NativeSecurityScanner {
         let requestBody = #"(?i)\b(?:req|request)\s*\.\s*(?:body|data|json|POST|form|params|query|values)\b"#
         let sanitizer = #"(?i)\b(DOMPurify\.sanitize|sanitizeHtml|escapeHtml|html\.escape|encodeForHTML|secure_filename|basename|realpath|canonicalPath|allowlist|allowed_hosts?|validate(?:Url|Path|Host|Redirect|Input)|escapeLdap|encodeForLDAP|stripCrLf|sanitizeHeader)\s*\([^)]*\)"#
         let assignmentName = #"^\s*(?:(?:const|let|var|final)\s+)?(?:[A-Za-z_$][\w$<>\[\].,?]*\s+)?([A-Za-z_$][\w$]*)\s*(?::[^=]+)?="#
+        let sqlCallNames = #"execute|executemany|executescript|executeQuery|executeUpdate|executeLargeUpdate|executeBatch|addBatch|query|raw|prepareStatement|createQuery|createNativeQuery|createSQLQuery|batchUpdate|SqlCommand|ExecuteReader|ExecuteScalar|ExecuteNonQuery|ExecuteReaderAsync|ExecuteScalarAsync|ExecuteNonQueryAsync|ExecuteSqlRaw|ExecuteSqlRawAsync|ExecuteSqlCommand|FromSqlRaw|FromSqlRawAsync|SqlQueryRaw|mysqli_query|mysqli_real_query|mysqli_multi_query|mysqli_prepare|mysqli_execute_query|mysqli_stmt_execute|pg_query|pg_send_query|pg_query_params"#
+        let sqlSink = #"(?i)(?:\b(?:"# + sqlCallNames + #")\b(?=\s*\()|(?:->|::)\s*(?:query|exec|prepare|execute)\b(?=\s*\()|\b(?:jdbcTemplate|namedParameterJdbcTemplate)\s*\.\s*update\b(?=\s*\()|\.\s*CommandText\b(?=\s*(?:\+?=)))"#
+        let sqlSinkTokens = ["execute", "query", "raw", "prepare", "commandtext", "sqlcommand", "batch", "jdbc"]
         let sinks: [(String, String, String, String, String)] = [
-            ("code.sql-dynamic-query", #"(?i)\b(execute|executemany|query|raw|prepareStatement|createQuery)\s*\("#, "high", "동적 SQL 쿼리 구성", "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."),
+            ("code.sql-dynamic-query", sqlSink, "high", "동적 SQL 쿼리 구성", "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."),
             ("code.xss-dom-sink", #"(?i)\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML)\b"#, "high", "DOM XSS 위험 sink", "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."),
             ("code.command-injection", #"(?i)\b(os\.system|os\.popen|subprocess\.(run|call|Popen|check_output)|child_process\.(exec|execSync)|shell_exec|passthru|Runtime\.getRuntime\(\)\.exec)\s*\("#, "high", "명령어 삽입 위험", "쉘 실행을 피하고 고정 인자 배열과 허용목록을 사용하세요."),
             // Bare `open(` or an explicit filesystem module only: `self.parent.open()`
@@ -2160,6 +2163,7 @@ final class NativeSecurityScanner {
             ("code.format-string-user-input", #"(?i)\b(printf|vprintf|syslog|fprintf|String\.format)\s*\("#, "high", "사용자 제어 포맷 문자열", "상수 포맷 문자열을 사용하고 동적 값은 별도 인자로 전달하세요.")
         ]
         var tainted = Set<String>()
+        var safePreparedStatements = Set<String>()
         var findings: [NativeFinding] = []
         var seen = Set<String>()
 
@@ -2171,8 +2175,19 @@ final class NativeSecurityScanner {
 
         func containsTaintedName(_ text: String) -> Bool {
             tainted.contains { name in
-                matches("(?i)\\b\(NSRegularExpression.escapedPattern(for: name))\\b", text)
+                let escaped = NSRegularExpression.escapedPattern(for: name)
+                let pattern = name.hasPrefix("$")
+                    ? "(?i)(?<![\\w$])\(escaped)(?![\\w$])"
+                    : "(?i)\\b\(escaped)\\b"
+                return matches(pattern, text)
             }
+        }
+
+        func hasUnsanitizedTaint(_ text: String) -> Bool {
+            let remaining = withoutSanitizers(text)
+            guard matches(untrusted, remaining) || containsTaintedName(remaining) else { return false }
+            let masked = maskLiteralProse(remaining, keepPHPVariables: suffix == "php")
+            return matches(untrusted, masked) || containsTaintedName(masked)
         }
 
         for (index, rawLine) in codeLines.enumerated() {
@@ -2182,26 +2197,57 @@ final class NativeSecurityScanner {
             }
             if let name = firstCapture(assignmentName, in: line), let equals = line.firstIndex(of: "=") {
                 let expression = String(line[line.index(after: equals)...])
-                let remaining = withoutSanitizers(expression)
-                if matches(untrusted, remaining) || containsTaintedName(remaining) {
+                let expressionIsTainted = hasUnsanitizedTaint(expression)
+                let isSafePreparedStatement = suffix == "php" && expression.localizedCaseInsensitiveContains("prepare") && matches(
+                        #"(?i)(?:\b(?:prepareStatement|mysqli_prepare)\b|(?:->|::)\s*prepare\b)\s*\([^;\n]*["'][^"']*(?:\?|%s|:\w+|@\w+|\$\d+)[^"']*["']"#,
+                    expression
+                ) && !expressionIsTainted
+                if isSafePreparedStatement {
+                    safePreparedStatements.insert(name)
+                } else {
+                    safePreparedStatements.remove(name)
+                }
+                if expressionIsTainted {
                     tainted.insert(name)
                 } else {
                     tainted.remove(name)
                 }
             }
 
-            let remaining = withoutSanitizers(line)
-            guard matches(untrusted, remaining) || containsTaintedName(remaining) else { continue }
-            for (ruleID, sink, severity, title, recommendation) in sinks where matches(sink, line) {
+            guard hasUnsanitizedTaint(line) else { continue }
+            for (ruleID, sink, severity, title, recommendation) in sinks {
+                if ruleID == "code.sql-dynamic-query" {
+                    let lowered = line.lowercased()
+                    guard sqlSinkTokens.contains(where: lowered.contains) else {
+                        continue
+                    }
+                }
+                guard matches(sink, line) else { continue }
                 // Taint anywhere on the line is not enough for a call sink: the
                 // untrusted value has to be an argument of that call, otherwise
                 // `ctx.save()` beside unrelated request handling reads as a flow.
                 if let callEnd = matchEnd(sink, line), let arguments = callArguments(line, callEnd: callEnd) {
-                    let argumentTaint = withoutSanitizers(arguments)
-                    guard matches(untrusted, argumentTaint) || containsTaintedName(argumentTaint) else { continue }
+                    guard hasUnsanitizedTaint(arguments) else { continue }
                 }
-                if ruleID == "code.sql-dynamic-query" && matches(#"(?i)\b(execute|executemany|query)\s*\(\s*[\"'][^\"']*(\?|%s|:\w+|\$\d+)[^\"']*[\"']\s*,"#, line) {
-                    continue
+                if ruleID == "code.sql-dynamic-query" {
+                    let inlineBinding = matches(
+                        #"(?i)(?:\b(?:"# + sqlCallNames + #")\b|(?:->|::)\s*(?:query|exec|prepare|execute)\b|\b(?:jdbcTemplate|namedParameterJdbcTemplate)\s*\.\s*update\b)\s*\(\s*[furb]*["'][^"']*(?:\?|%s|:\w+|@\w+|\$\d+)[^"']*["']\s*,"#,
+                        line
+                    ) || matches(#"(?i)\bmysqli_execute_query\s*\(\s*[^,]+,\s*["'][^"']*\?[^"']*["']\s*,"#, line)
+                        || matches(#"(?i)\bpg_query_params\s*\(\s*[^,]+,\s*["'][^"']*\$\d+[^"']*["']\s*,"#, line)
+                    let methodReceiver = firstCapture(
+                        #"(?i)(\$?[A-Za-z_][\w$]*)\s*(?:->|\.)\s*(?:execute|executeQuery|executeUpdate|executeLargeUpdate|executeBatch|ExecuteReader|ExecuteScalar|ExecuteNonQuery|ExecuteReaderAsync|ExecuteScalarAsync|ExecuteNonQueryAsync)\s*\("#,
+                        in: line
+                    )
+                    let functionReceiver = firstCapture(
+                        #"(?i)\bmysqli_stmt_execute\s*\(\s*(\$?[A-Za-z_][\w$]*)"#,
+                        in: line
+                    )
+                    if inlineBinding
+                        || methodReceiver.map({ safePreparedStatements.contains($0) }) == true
+                        || functionReceiver.map({ safePreparedStatements.contains($0) }) == true {
+                        continue
+                    }
                 }
                 if ruleID == "code.command-injection" && matches(#"(?i)subprocess\.(run|call|Popen|check_output)\s*\(\s*\["#, line) && !matches(#"(?i)shell\s*=\s*True"#, line) {
                     continue
@@ -2258,11 +2304,12 @@ final class NativeSecurityScanner {
     /// Drops prose inside string literals, keeping interpolations and labelled
     /// keys, so a sensitive *word* in an English log message is not read as
     /// sensitive *data* reaching the log.
-    private func maskLiteralProse(_ line: String) -> String {
+    private func maskLiteralProse(_ line: String, keepPHPVariables: Bool = false) -> String {
         guard let literals = try? NSRegularExpression(pattern: #"(['"`])(?:\\.|(?!\1).)*?\1"#),
               // Only interpolations stay. A bare label inside a literal is prose:
               // `"shlex: token="` is a debug caption, not a credential in a log.
-              let keep = try? NSRegularExpression(pattern: #"\$\{[^}]*\}|\{[^{}]*\}"#) else {
+              let keep = try? NSRegularExpression(pattern: #"\$\{[^}]*\}|\{[^{}]*\}"#),
+              let phpVariable = try? NSRegularExpression(pattern: #"(?<!\\)\$[A-Za-z_]\w*"#) else {
             return line
         }
         var output = line
@@ -2271,9 +2318,15 @@ final class NativeSecurityScanner {
             guard let literalRange = Range(match.range, in: line) else { continue }
             let literal = String(line[literalRange])
             let literalNSRange = NSRange(literal.startIndex..<literal.endIndex, in: literal)
-            let kept = keep.matches(in: literal, range: literalNSRange).compactMap { item -> String? in
+            var kept = keep.matches(in: literal, range: literalNSRange).compactMap { item -> String? in
                 guard let keptRange = Range(item.range, in: literal) else { return nil }
                 return String(literal[keptRange])
+            }
+            if keepPHPVariables && literal.first != "'" {
+                kept += phpVariable.matches(in: literal, range: literalNSRange).compactMap { item -> String? in
+                    guard let keptRange = Range(item.range, in: literal) else { return nil }
+                    return String(literal[keptRange])
+                }
             }
             output.replaceSubrange(literalRange, with: "\"\(kept.joined(separator: " "))\"")
         }
@@ -2291,10 +2344,10 @@ final class NativeSecurityScanner {
                 || normalizedPath.contains("/thirdparty/")
                 || normalizedPath.contains("/third_party/")
                 || normalizedPath.contains("/node_modules/")
-            let hasLibraryBanner = matches(#"(?i)\b(jquery|lodash|bootstrap|angular|react|vue|moment)\b[^\n]{0,100}\bv?\d+(?:\.\d+)+"#, banner)
-            let isVersionedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment|jsrender)[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
-            let isNamedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment|jsrender)(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
-            if isVersionedLibraryFile || (isNamedLibraryFile && (isVendoredPath || hasLibraryBanner)) || (isVendoredPath && hasLibraryBanner) {
+            let hasLibraryBanner = matches(#"(?i)\b(jquery|jsrender|datepicker|lodash|bootstrap|angular|react|vue|moment)\b[^\n]{0,100}\bv?\d+(?:\.\d+)+"#, banner)
+            let isVersionedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment|jsrender|datepicker)[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
+            let isNamedLibraryFile = matches(#"(?i)^(jquery|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment|jsrender|datepicker)(?:\.min)?\.(?:js|mjs|cjs)$"#, file.lastPathComponent)
+            if isVersionedLibraryFile || (isNamedLibraryFile && (isVendoredPath || hasLibraryBanner)) {
                 return []
             }
         }
@@ -2304,7 +2357,12 @@ final class NativeSecurityScanner {
         let statements = logicalLines(codeLines)
         var findings = checkJavaDocumentBuilderXXE(lines: lines, codeLines: codeLines, file: file, displayPath: displayPath)
         findings += checkJavaNullPointerDereference(lines: lines, codeLines: codeLines, file: file, displayPath: displayPath)
-        findings += checkContextualSourceFlows(lines: lines, codeLines: statements, displayPath: displayPath)
+        findings += checkContextualSourceFlows(
+            lines: lines,
+            codeLines: statements,
+            displayPath: displayPath,
+            suffix: file.pathExtension.lowercased()
+        )
         let document = codeLines.joined(separator: "\n")
         let suffix = file.pathExtension.lowercased()
         var safeDateFormatValuesBeforeLine = Array(repeating: Set<String>(), count: statements.count)
@@ -2428,8 +2486,9 @@ final class NativeSecurityScanner {
             if !hasSanitizer && matches(#"(?i)\.innerHTML\s*=.*(location|document\.URL|request|params)"#, line) {
                 findings.append(finding("code.xss-dom-sink", "high", "code", "DOM XSS 위험 sink", displayPath, lineNumber, rawLine, "신뢰할 수 없는 입력을 HTML로 직접 삽입하지 말고 escaping 또는 textContent를 사용하세요."))
             }
-            if matches(#"(?i)(execute|query)\s*\(.*(SELECT|INSERT|UPDATE|DELETE).*(\+|f"|%\s)"#, line)
-                && !matches(#"(?i)\b(execute|executemany|query|prepareStatement|createQuery)\s*\(\s*[furb]*[\"'][^\"']*(\?|%s|:\w+|\$\d+)[^\"']*[\"']\s*,"#, line) {
+            if (matches(#"(?i)(?:execute|executemany|executescript|executeQuery|executeUpdate|executeLargeUpdate|addBatch|query|raw|prepareStatement|createQuery|createNativeQuery|createSQLQuery|batchUpdate|SqlCommand|ExecuteSqlRaw|ExecuteSqlRawAsync|ExecuteSqlCommand|FromSqlRaw|FromSqlRawAsync|SqlQueryRaw|mysqli_(?:query|real_query|multi_query|prepare)|(?:->|::)\s*(?:query|exec|prepare)|(?:jdbcTemplate|namedParameterJdbcTemplate)\s*\.\s*update)\s*\(.*(SELECT|INSERT|UPDATE|DELETE|MERGE).*(\+|f"|%\s|\.\s*\$)"#, line)
+                || matches(#"(?i)\.\s*CommandText\s*(?:\+?=).*(SELECT|INSERT|UPDATE|DELETE|MERGE|WHERE).*(\+|f"|%\s)"#, line))
+                && !matches(#"(?i)(?:\b(?:execute|executemany|query|prepareStatement|createQuery|createNativeQuery|createSQLQuery|batchUpdate|SqlCommand|ExecuteSqlRaw|ExecuteSqlRawAsync|ExecuteSqlCommand|FromSqlRaw|FromSqlRawAsync|SqlQueryRaw)\b|(?:->|::)\s*(?:query|exec|prepare)|(?:jdbcTemplate|namedParameterJdbcTemplate)\s*\.\s*update)\s*\(\s*[furb]*[\"'][^\"']*(\?|%s|:\w+|@\w+|\$\d+)[^\"']*[\"']\s*,"#, line) {
                 findings.append(finding("code.sql-dynamic-query", "high", "code", "동적 SQL 쿼리 구성", displayPath, lineNumber, rawLine, "파라미터 바인딩 또는 ORM 안전 API를 사용하세요."))
             }
             if matches(#"(?i)(os\.system|subprocess\.[A-Za-z_]+|exec\().*(shell\s*=\s*True|\+|request|params)"#, line)

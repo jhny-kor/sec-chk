@@ -196,6 +196,7 @@ SCENARIO_STRATEGIES = {
     "matrix",
     "timing",
     "state",
+    "http-methods",
     "upload",
 }
 ORACLE_KEYS = {
@@ -217,6 +218,8 @@ ACCESS_EXPECTATION_KEYS = {
     "body_not_contains",
     "headers",
     "state_unchanged",
+    "state_resource",
+    "state_account",
 }
 
 
@@ -498,6 +501,19 @@ def _validate_resources(raw: object, origins: Sequence[str]) -> list[dict[str, o
             "read_only": read_only,
             "state_change_free": bool(resource.get("state_change_free", False)),
         })
+    resource_ids = {str(item["id"]) for item in result}
+    for resource in result:
+        for actor, expectation in resource["access"].items():
+            if not isinstance(expectation, dict) or "state_resource" not in expectation:
+                continue
+            state_resource = _string(
+                expectation["state_resource"],
+                f"resources.{resource['id']}.access.{actor}.state_resource",
+            )
+            if state_resource not in resource_ids:
+                raise ProfileError(
+                    f"resources.{resource['id']}.access.{actor}.state_resource references undeclared resource {state_resource!r}"
+                )
     return result
 
 
@@ -610,6 +626,10 @@ def _validate_access_expectation(value: object, label: str) -> None:
                 raise ProfileError(f"{label}.headers must map names to expectations")
             if isinstance(expectation, dict):
                 _reject_unknown(expectation, {"equals", "contains", "absent"}, f"{label}.headers.{name}")
+    if "state_resource" in value:
+        _string(value["state_resource"], f"{label}.state_resource")
+    if "state_account" in value:
+        _string(value["state_account"], f"{label}.state_account")
 
 
 def _validate_steps(raw: object, resource_ids: set[str], label: str, *, allow_empty: bool = False) -> list[dict[str, object]]:
@@ -1804,6 +1824,7 @@ class ScenarioRunner:
         step: Mapping[str, object],
         response: Mapping[str, object],
         baseline: Mapping[str, object] | None,
+        snapshots: Mapping[str, Mapping[str, object]] | None = None,
     ) -> tuple[bool, bool, bool, list[str]]:
         assertions = step.get("assertions", [])
         if not assertions:
@@ -1850,11 +1871,13 @@ class ScenarioRunner:
                     evidence.append("assertion:body_not_regex:invalid_pattern")
                     continue
             elif kind in {"state_unchanged", "state_unchanged_after"}:
-                if baseline is None:
+                snapshot_name = assertion.get("snapshot", assertion.get("baseline"))
+                expected = snapshots.get(str(snapshot_name)) if snapshot_name and snapshots else baseline
+                if expected is None:
                     complete = False
                     evidence.append("assertion:state_unchanged:baseline_missing")
                     continue
-                passed = response.get("digest") == baseline.get("digest")
+                passed = response.get("digest") == expected.get("digest")
             elif kind in {"response_time_max_ms", "response_time_not_greater_than"}:
                 passed = float(response.get("elapsed_ms", 0.0)) <= float(assertion.get("max_ms", assertion.get("value")))
             elif kind in {"response_time_delta_max_ms", "response_time_not_delta"}:
@@ -1919,6 +1942,7 @@ class ScenarioRunner:
         run_cleanup = list(scenario.get("cleanup", [])) if include_cleanup else []
         try:
             baseline: dict[str, object] | None = None
+            snapshots: dict[str, dict[str, object]] = {}
             last_response: dict[str, object] | None = None
             assertion_seen = False
             assertions_complete = True
@@ -1932,9 +1956,10 @@ class ScenarioRunner:
                     baseline is None and str(step.get("id")) == "baseline"
                 )
                 self._capture(scenario_id, step, response)
-                seen, failed, complete, evidence = self._assertions(step, response, baseline)
+                seen, failed, complete, evidence = self._assertions(step, response, baseline, snapshots)
                 if snapshot_after_assertions:
                     baseline = response
+                snapshots[str(step.get("id", ""))] = response
                 assertion_seen = assertion_seen or seen
                 assertions_complete = assertions_complete and complete
                 violation = violation or failed
@@ -1964,9 +1989,10 @@ class ScenarioRunner:
                         raise ProfileError("mutation must identify a declared resource")
                     response = requester(scenario_id, step)
                     last_response = response
-                    seen, failed, complete, evidence = self._assertions(step, response, baseline)
+                    seen, failed, complete, evidence = self._assertions(step, response, baseline, snapshots)
                     if step.get("state_snapshot"):
                         baseline = response
+                    snapshots[str(step.get("id", ""))] = response
                     mutation_seen = mutation_seen or seen
                     assertions_complete = assertions_complete and complete
                     mutation_failed = mutation_failed or failed
@@ -1979,7 +2005,7 @@ class ScenarioRunner:
             oracle = scenario.get("oracle", {})
             if isinstance(oracle, dict) and oracle and last_response is not None:
                 oracle_step = {"assertions": _oracle_assertions(oracle)}
-                seen, failed, complete, evidence = self._assertions(oracle_step, last_response, baseline)
+                seen, failed, complete, evidence = self._assertions(oracle_step, last_response, baseline, snapshots)
                 assertion_seen = assertion_seen or seen
                 assertions_complete = assertions_complete and complete
                 violation = violation or failed
@@ -2007,23 +2033,7 @@ class ScenarioRunner:
             result["status"] = "NOT_SCANNED" if not result["executed"] else "NEEDS_REVIEW"
             result["reason_code"] = type(exc).__name__.lower()
         finally:
-            cleanup_errors = []
-            cleanup_deadline = time.monotonic() + min(
-                float(self.network.limits["cleanup_seconds"]),
-                self.network.remaining_timeout(),
-            )
-            for step in run_cleanup:
-                remaining_cleanup = cleanup_deadline - time.monotonic()
-                if remaining_cleanup <= 0:
-                    cleanup_errors.append("cleanup_timeout")
-                    break
-                try:
-                    cleanup_step = copy.deepcopy(step)
-                    requested_timeout = float(cleanup_step.get("timeout") or remaining_cleanup)
-                    cleanup_step["timeout"] = min(requested_timeout, remaining_cleanup)
-                    requester(scenario_id, cleanup_step)
-                except Exception as exc:  # cleanup evidence must affect the final status
-                    cleanup_errors.append(type(exc).__name__.lower())
+            cleanup_errors = self._cleanup(scenario_id, run_cleanup, requester)
             result["cleanup_completed"] = not cleanup_errors
             if cleanup_errors:
                 result["cleanup_error"] = cleanup_errors[0]
@@ -2036,6 +2046,187 @@ class ScenarioRunner:
 
     def run(self, scenario: Mapping[str, object]) -> dict[str, object]:
         return self._run_with_requester(scenario, self._request)
+
+    def _cleanup(self, scenario_id: str, steps: Sequence[Mapping[str, object]], requester: Any) -> list[str]:
+        errors: list[str] = []
+        deadline = time.monotonic() + min(
+            float(self.network.limits["cleanup_seconds"]),
+            self.network.remaining_timeout(),
+        )
+        for raw_step in steps:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                errors.append("cleanup_timeout")
+                break
+            try:
+                step = copy.deepcopy(raw_step)
+                step["timeout"] = min(float(step.get("timeout") or remaining), remaining)
+                requester(scenario_id, step)
+            except Exception as exc:  # cleanup evidence must affect the final status
+                errors.append(type(exc).__name__.lower())
+        return errors
+
+    @staticmethod
+    def _scenario_assertion_types(scenario: Mapping[str, object]) -> set[str]:
+        kinds: set[str] = set()
+        for step in [*scenario.get("steps", []), *scenario.get("mutations", [])]:
+            if not isinstance(step, dict):
+                continue
+            for assertion in step.get("assertions", []):
+                if isinstance(assertion, dict):
+                    kinds.add(str(assertion.get("type", assertion.get("kind", ""))))
+        oracle = scenario.get("oracle", {})
+        if isinstance(oracle, dict):
+            kinds.update(
+                str(item.get("type", item.get("kind", "")))
+                for item in oracle.get("assertions", [])
+                if isinstance(item, dict)
+            )
+            if "response_time_delta_max_ms" in oracle:
+                kinds.add("response_time_delta_max_ms")
+            if oracle.get("state_unchanged"):
+                kinds.add("state_unchanged")
+        return kinds
+
+    def run_timing(self, scenario: Mapping[str, object]) -> dict[str, object]:
+        result = self.run(scenario)
+        kinds = self._scenario_assertion_types(scenario)
+        has_baseline = any(
+            isinstance(step, dict) and (step.get("state_snapshot") or str(step.get("id")) == "baseline")
+            for step in scenario.get("steps", [])
+        )
+        if result["status"] == "PASS" and (
+            not has_baseline or not kinds.intersection({"response_time_delta_max_ms", "response_time_not_delta"})
+        ):
+            result["status"] = "NEEDS_REVIEW"
+            result["reason_code"] = "timing_baseline_oracle_missing"
+            result["coverage"] = {"required": 1, "completed": 0}
+        return result
+
+    def run_state(self, scenario: Mapping[str, object]) -> dict[str, object]:
+        state_changing = any(
+            isinstance(step, dict) and str(step.get("method", "GET")).upper() not in NON_MUTATING_METHODS
+            for step in scenario.get("mutations", [])
+        )
+        if state_changing and not scenario.get("cleanup"):
+            return _scenario_not_run(scenario, "NOT_SCANNED", "state_cleanup_not_declared")
+        result = self.run(scenario)
+        kinds = self._scenario_assertion_types(scenario)
+        has_baseline = any(
+            isinstance(step, dict) and (step.get("state_snapshot") or str(step.get("id")) == "baseline")
+            for step in scenario.get("steps", [])
+        )
+        if result["status"] == "PASS" and (
+            not scenario.get("mutations")
+            or not has_baseline
+            or not kinds.intersection({"state_unchanged", "state_unchanged_after"})
+        ):
+            result["status"] = "NEEDS_REVIEW"
+            result["reason_code"] = "state_contract_incomplete"
+            result["coverage"] = {"required": 1, "completed": 0}
+        return result
+
+    def run_upload(self, scenario: Mapping[str, object]) -> dict[str, object]:
+        if not scenario.get("cleanup"):
+            return _scenario_not_run(scenario, "NOT_SCANNED", "upload_cleanup_not_declared")
+        all_steps = [*scenario.get("steps", []), *scenario.get("mutations", [])]
+        upload_indexes: list[int] = []
+        for index, step in enumerate(all_steps):
+            if not isinstance(step, dict) or step.get("body_type") != "multipart":
+                continue
+            body = step.get("body")
+            file_part = body.get("file") if isinstance(body, dict) else None
+            content = file_part.get("content") if isinstance(file_part, dict) else None
+            if not isinstance(content, str) or not content.startswith("KODA-INERT-CANARY"):
+                return _scenario_not_run(scenario, "NOT_SCANNED", "unsafe_upload_canary")
+            upload_indexes.append(index)
+        if not upload_indexes:
+            return _scenario_not_run(scenario, "NOT_SCANNED", "upload_canary_missing")
+        result = self.run(scenario)
+        has_verification = any(
+            index > upload_indexes[0]
+            and isinstance(step, dict)
+            and str(step.get("method", "GET")).upper() in READ_ONLY_METHODS
+            and bool(step.get("assertions"))
+            for index, step in enumerate(all_steps)
+        )
+        if result["status"] == "PASS" and not has_verification:
+            result["status"] = "NEEDS_REVIEW"
+            result["reason_code"] = "upload_contract_incomplete"
+            result["coverage"] = {"required": 1, "completed": 0}
+        return result
+
+    def run_http_methods(self, scenario: Mapping[str, object]) -> dict[str, object]:
+        result = _scenario_not_run(scenario, "NEEDS_REVIEW", "method_probe_not_declared")
+        result["executed"] = False
+        result["cleanup_completed"] = True
+        result["coverage"] = {"required": 0, "completed": 0}
+        scenario_id = str(scenario["id"])
+        try:
+            for template in scenario.get("steps", []):
+                if not isinstance(template, dict):
+                    continue
+                resource = self.resources[str(template["resource"])]
+                for method in resource.get("probe_methods", []):
+                    if method not in NON_MUTATING_METHODS and not (self.network.scopes & ACTIVE_SCOPES):
+                        raise NetworkPolicyError("active scope is required for state-changing method probes")
+                    if method not in NON_MUTATING_METHODS and not scenario.get("cleanup"):
+                        raise NetworkPolicyError("cleanup is required for state-changing method probes")
+                    step = copy.deepcopy(template)
+                    step.update({"method": method, "body": None, "body_type": "", "assertions": []})
+                    response = self._request(scenario_id, step)
+                    status = int(response["status"])
+                    result["executed"] = True
+                    result["coverage"]["required"] += 1
+                    result["surfaces_tested"].append(str(resource["id"]))
+                    allowed = {str(item).upper() for item in resource.get("methods", [])}
+                    if "GET" in allowed:
+                        allowed.add("HEAD")
+                    allow_header = next(
+                        (str(value) for key, value in response["headers"].items() if key.lower() == "allow"),
+                        "",
+                    )
+                    advertised = {item.strip().upper() for item in allow_header.split(",") if item.strip()}
+                    unexpected_advertised = advertised - allowed - {"OPTIONS"}
+                    if method == "OPTIONS" and 200 <= status < 400 and not unexpected_advertised:
+                        result["coverage"]["completed"] += 1
+                        if result["status"] != "VULNERABLE":
+                            result["status"] = "PASS"
+                            result["reason_code"] = "options_response_allowed"
+                        label = f"method:{resource['id']}:{method}:allowed"
+                    elif method == "OPTIONS" and unexpected_advertised:
+                        result["status"] = "VULNERABLE"
+                        result["reason_code"] = "unexpected_method_advertised"
+                        label = f"method:{resource['id']}:{method}:unexpected-advertisement"
+                    elif 200 <= status < 400:
+                        result["status"] = "VULNERABLE"
+                        result["reason_code"] = "forbidden_method_accepted"
+                        label = f"method:{resource['id']}:{method}:accepted"
+                    elif status in {401, 403, 405, 501}:
+                        result["coverage"]["completed"] += 1
+                        if result["status"] != "VULNERABLE":
+                            result["status"] = "PASS"
+                            result["reason_code"] = "forbidden_methods_rejected"
+                        label = f"method:{resource['id']}:{method}:rejected"
+                    else:
+                        if result["status"] != "VULNERABLE":
+                            result["status"] = "NEEDS_REVIEW"
+                            result["reason_code"] = "method_response_ambiguous"
+                        label = f"method:{resource['id']}:{method}:ambiguous"
+                    result["evidence_ids"].append(self._evidence(scenario_id, label))
+        except (ProfileError, NetworkPolicyError, BudgetExceeded, TypeError, ValueError, re.error) as exc:
+            result["status"] = "NOT_SCANNED" if not result["executed"] else "NEEDS_REVIEW"
+            result["reason_code"] = type(exc).__name__.lower()
+        cleanup_errors = self._cleanup(scenario_id, scenario.get("cleanup", []), self._request)
+        if cleanup_errors:
+            result["cleanup_completed"] = False
+            result["cleanup_error"] = cleanup_errors[0]
+            if result["status"] != "VULNERABLE":
+                result["status"] = "NEEDS_REVIEW"
+                result["reason_code"] = "cleanup_incomplete"
+        result["surfaces_tested"] = sorted(set(result["surfaces_tested"]))
+        result["evidence_ids"] = list(dict.fromkeys(result["evidence_ids"]))
+        return result
 
     @staticmethod
     def _access_expectation(value: object) -> tuple[str, set[int] | None, list[str], list[str], dict[str, object]]:
@@ -2113,12 +2304,32 @@ class ScenarioRunner:
                 if not actors or any(actor not in access for actor in actors):
                     raise ProfileError(f"resource {resource['id']} has incomplete actor access expectations")
                 for actor in actors:
+                    expectation = access[actor]
+                    state_oracle_requested = isinstance(expectation, dict) and bool(expectation.get("state_unchanged"))
+                    state_before: dict[str, object] | None = None
+                    state_step: dict[str, object] | None = None
+                    if state_oracle_requested and expectation.get("state_resource"):
+                        state_step = {
+                            "resource": expectation["state_resource"],
+                            "method": "GET",
+                            "account": expectation.get("state_account", "" if actor == "anonymous" else actor),
+                            "headers": {},
+                            "query": {},
+                            "body": None,
+                            "body_type": "",
+                            "delay_seconds": 0,
+                        }
+                        state_before = self._request(str(scenario["id"]), state_step)
                     step = copy.deepcopy(template)
                     step["account"] = "" if actor == "anonymous" else actor
                     response = self._request(str(scenario["id"]), step)
-                    expectation = access[actor]
                     matches, forbidden_access = self._access_matches(response, expectation)
-                    state_oracle_requested = isinstance(expectation, dict) and bool(expectation.get("state_unchanged"))
+                    state_changed = False
+                    state_complete = not state_oracle_requested
+                    if state_before is not None and state_step is not None:
+                        state_after = self._request(str(scenario["id"]), state_step)
+                        state_changed = state_before.get("digest") != state_after.get("digest")
+                        state_complete = True
                     result["executed"] = True
                     result["coverage"]["required"] += 1
                     result["surfaces_tested"].append(str(resource["id"]))
@@ -2127,7 +2338,10 @@ class ScenarioRunner:
                     if forbidden_access:
                         result["status"] = "VULNERABLE"
                         result["reason_code"] = "access_matrix_forbidden_access"
-                    elif state_oracle_requested:
+                    elif state_changed:
+                        result["status"] = "VULNERABLE"
+                        result["reason_code"] = "access_matrix_state_changed"
+                    elif state_oracle_requested and not state_complete:
                         result["status"] = "NEEDS_REVIEW"
                         result["reason_code"] = "access_matrix_state_oracle_requires_baseline"
                     elif matches:
@@ -2138,22 +2352,7 @@ class ScenarioRunner:
         except (ProfileError, NetworkPolicyError, BudgetExceeded, TypeError, ValueError, re.error) as exc:
             result["status"] = "NOT_SCANNED" if not result["executed"] else "NEEDS_REVIEW"
             result["reason_code"] = type(exc).__name__.lower()
-        cleanup_errors: list[str] = []
-        cleanup_deadline = time.monotonic() + min(
-            float(self.network.limits["cleanup_seconds"]),
-            self.network.remaining_timeout(),
-        )
-        for cleanup_step in scenario.get("cleanup", []):
-            remaining_cleanup = cleanup_deadline - time.monotonic()
-            if remaining_cleanup <= 0:
-                cleanup_errors.append("cleanup_timeout")
-                break
-            try:
-                step = copy.deepcopy(cleanup_step)
-                step["timeout"] = min(float(step.get("timeout") or remaining_cleanup), remaining_cleanup)
-                self._request(str(scenario["id"]), step)
-            except Exception as exc:
-                cleanup_errors.append(type(exc).__name__.lower())
+        cleanup_errors = self._cleanup(str(scenario["id"]), scenario.get("cleanup", []), self._request)
         if cleanup_errors:
             result["cleanup_completed"] = False
             result["cleanup_error"] = cleanup_errors[0]
@@ -3099,6 +3298,14 @@ def run_web_audit(
                 item = _zap_scenario_result(scenario, strategy, zap_result, zap_findings, capabilities)
             elif strategy in {"access-control", "authorization", "matrix"}:
                 item = scenario_runner.run_access_matrix(scenario)
+            elif strategy == "timing":
+                item = scenario_runner.run_timing(scenario)
+            elif strategy == "state":
+                item = scenario_runner.run_state(scenario)
+            elif strategy == "http-methods":
+                item = scenario_runner.run_http_methods(scenario)
+            elif strategy == "upload":
+                item = scenario_runner.run_upload(scenario)
             elif strategy == "passive":
                 item = scenario_runner._run_with_requester(scenario, scenario_runner._request, include_mutations=False, include_cleanup=False)
                 if not passive_completed and item["status"] == "PASS":
@@ -3106,10 +3313,6 @@ def run_web_audit(
                     item["reason_code"] = "passive_strategy_not_completed"
             else:
                 item = scenario_runner.run(scenario)
-            if strategy == "upload" and not scenario.get("cleanup"):
-                item["status"] = "NEEDS_REVIEW"
-                item["reason_code"] = "upload_cleanup_not_declared"
-                item["cleanup_completed"] = False
             item["strategy"] = strategy
             strategy_results.append(item)
         scenario_results.append(_combine_strategy_results(scenario, strategy_results))
