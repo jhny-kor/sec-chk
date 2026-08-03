@@ -91,6 +91,24 @@ XML_PARSER_API = (
     r"(Document" r"BuilderFactory|SAX" r"ParserFactory|Xml" r"ReaderSettings|Xml" r"Document)"
 )
 
+_SQL_CALL_NAMES = (
+    r"execute|executemany|executescript|executeQuery|executeUpdate|executeLargeUpdate|executeBatch|addBatch|"
+    r"query|raw|prepareStatement|createQuery|createNativeQuery|createSQLQuery|batchUpdate|"
+    r"SqlCommand|ExecuteReader|ExecuteScalar|ExecuteNonQuery|ExecuteReaderAsync|ExecuteScalarAsync|ExecuteNonQueryAsync|"
+    r"ExecuteSqlRaw|ExecuteSqlRawAsync|ExecuteSqlCommand|FromSqlRaw|FromSqlRawAsync|SqlQueryRaw|"
+    r"mysqli_query|mysqli_real_query|mysqli_multi_query|mysqli_prepare|mysqli_execute_query|"
+    r"mysqli_stmt_execute|pg_query|pg_send_query|pg_query_params"
+)
+_SQL_CALL_SINK = (
+    rf"(?:\b(?:{_SQL_CALL_NAMES})\b|(?:->|::)\s*(?:query|exec|prepare|execute)\b|"
+    r"\b(?:jdbcTemplate|namedParameterJdbcTemplate)\s*\.\s*update\b)"
+)
+_SQL_CONTEXT_SINK = re.compile(
+    rf"(?:{_SQL_CALL_SINK}(?=\s*\()|\.\s*CommandText\b(?=\s*(?:\+?=)))",
+    re.IGNORECASE,
+)
+_SQL_SINK_TOKENS = ("execute", "query", "raw", "prepare", "commandtext", "sqlcommand", "batch", "jdbc")
+
 CODE_PATTERN_RULES = (
     CodePatternRule(
         "code.xss-dom-sink",
@@ -109,8 +127,8 @@ CODE_PATTERN_RULES = (
         "Potential SQL injection through dynamic query",
         "high",
         re.compile(
-            r"\b(execute|executemany|query|raw|prepareStatement|createQuery)\s*\("
-            r"[^#\n;]*(SELECT|INSERT|UPDATE|DELETE|WHERE)[^#\n;]*(\+|%\s|\{|\$\{|\.format\()",
+            rf"(?:{_SQL_CALL_SINK}\s*\(|\.\s*CommandText\s*(?:\+?=))"
+            r"[^#\n;]*(SELECT|INSERT|UPDATE|DELETE|MERGE|WHERE)[^#\n;]*(\+|%\s|\{|\$\{|\.format\(|\.\s*\$)",
             re.IGNORECASE,
         ),
         "SQL text appears to be assembled dynamically before execution.",
@@ -1187,7 +1205,7 @@ _SANITIZERS = re.compile(
 )
 
 _CONTEXT_SINKS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("code.sql-dynamic-query", re.compile(r"\b(execute|executemany|query|raw|prepareStatement|createQuery)\s*\(", re.IGNORECASE)),
+    ("code.sql-dynamic-query", _SQL_CONTEXT_SINK),
     ("code.xss-dom-sink", re.compile(r"\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|dangerouslySetInnerHTML)\b", re.IGNORECASE)),
     ("code.command-injection", re.compile(r"\b(os\.system|os\.popen|subprocess\.(?:run|call|Popen|check_output)|child_process\.(?:exec|execSync)|shell_exec|passthru|Runtime\.getRuntime\(\)\.exec)\s*\(", re.IGNORECASE)),
     # Bare `open(` or an explicit filesystem module only: `self.parent.open()`
@@ -1224,18 +1242,29 @@ _STRING_LITERAL = re.compile(r"(['\"`])(?:\\.|(?!\1).)*?\1")
 # Only interpolated expressions stay. A bare label inside a literal is prose:
 # `"shlex: token="` is a debug caption, not a credential reaching the log.
 _LITERAL_KEEP = re.compile(r"\$\{[^}]*\}|\{[^{}]*\}")
+_PHP_LITERAL_VARIABLE = re.compile(r"(?<!\\)\$[A-Za-z_]\w*")
 
 
-def _mask_literal_prose(line: str) -> str:
+def _mask_literal_prose(line: str, *, keep_php_variables: bool = False) -> str:
     def replace(match: re.Match[str]) -> str:
-        kept = " ".join(item.group(0) for item in _LITERAL_KEEP.finditer(match.group(0)))
+        literal = match.group(0)
+        kept_items = [item.group(0) for item in _LITERAL_KEEP.finditer(literal)]
+        if keep_php_variables and match.group(1) != "'":
+            kept_items.extend(item.group(0) for item in _PHP_LITERAL_VARIABLE.finditer(literal))
+        kept = " ".join(kept_items)
         return f'"{kept}"'
 
     return _STRING_LITERAL.sub(replace, line)
 
 
 def _contains_name(expression: str, names: set[str]) -> bool:
-    return any(re.search(rf"\b{re.escape(name)}\b", expression) for name in names)
+    return any(
+        re.search(
+            rf"(?<![\w$]){re.escape(name)}(?![\w$])" if name.startswith("$") else rf"\b{re.escape(name)}\b",
+            expression,
+        )
+        for name in names
+    )
 
 
 def _without_sanitizer_calls(expression: str) -> str:
@@ -1284,9 +1313,22 @@ def _without_sanitizer_calls(expression: str) -> str:
     return output
 
 
-def _has_unsanitized_taint(expression: str, tainted: set[str]) -> bool:
+def _has_unsanitized_taint(
+    expression: str,
+    tainted: set[str],
+    *,
+    keep_php_variables: bool = False,
+) -> bool:
     remaining = _without_sanitizer_calls(expression)
-    return bool(_UNTRUSTED.search(remaining) or _contains_name(remaining, tainted))
+    untrusted = _UNTRUSTED.search(remaining)
+    if not (untrusted or _contains_name(remaining, tainted)):
+        return False
+    literal_starts = [index for quote in ('"', "'", "`") if (index := remaining.find(quote)) >= 0]
+    first_literal = min(literal_starts, default=-1)
+    if first_literal < 0 or (untrusted and untrusted.start() < first_literal):
+        return True
+    masked = _mask_literal_prose(remaining, keep_php_variables=keep_php_variables)
+    return bool(_UNTRUSTED.search(masked) or _contains_name(masked, tainted))
 
 
 def _safe_command_arguments(line: str) -> bool:
@@ -1299,11 +1341,53 @@ def _safe_command_arguments(line: str) -> bool:
 def _safe_sql_binding(line: str) -> bool:
     return bool(
         re.search(
-            r"\b(execute|executemany|query|prepareStatement|createQuery)\s*\(\s*[furb]*[\"'][^\"']*(?:\?|%s|:\w+|\$\d+)[^\"']*[\"']\s*,",
+            rf"{_SQL_CALL_SINK}\s*\(\s*[furb]*[\"'][^\"']*(?:\?|%s|:\w+|@\w+|\$\d+)[^\"']*[\"']\s*,",
+            line,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"\bmysqli_execute_query\s*\(\s*[^,]+,\s*[\"'][^\"']*\?[^\"']*[\"']\s*,",
+            line,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"\bpg_query_params\s*\(\s*[^,]+,\s*[\"'][^\"']*\$\d+[^\"']*[\"']\s*,",
             line,
             re.IGNORECASE,
         )
     )
+
+
+def _safe_prepared_assignment(expression: str, tainted: set[str]) -> bool:
+    prepare = re.search(
+        r"(?:\b(?:prepareStatement|mysqli_prepare)\b|(?:->|::)\s*prepare\b)\s*\(",
+        expression,
+        re.IGNORECASE,
+    )
+    if not prepare:
+        return False
+    arguments = _call_arguments(expression, prepare.end() - 1)
+    if arguments is None or _has_unsanitized_taint(arguments, tainted, keep_php_variables=True):
+        return False
+    return bool(re.search(r"[\"'][^\"']*(?:\?|%s|:\w+|@\w+|\$\d+)[^\"']*[\"']", arguments))
+
+
+def _executes_safe_prepared_statement(line: str, safe_statements: set[str]) -> bool:
+    receiver = re.search(
+        r"(?P<name>\$?[A-Za-z_][\w$]*)\s*(?:->|\.)\s*"
+        r"(?:execute|executeQuery|executeUpdate|executeLargeUpdate|executeBatch|"
+        r"ExecuteReader|ExecuteScalar|ExecuteNonQuery|ExecuteReaderAsync|ExecuteScalarAsync|ExecuteNonQueryAsync)\s*\(",
+        line,
+        re.IGNORECASE,
+    )
+    if receiver and receiver.group("name") in safe_statements:
+        return True
+    function_receiver = re.search(
+        r"\bmysqli_stmt_execute\s*\(\s*(?P<name>\$?[A-Za-z_][\w$]*)",
+        line,
+        re.IGNORECASE,
+    )
+    return bool(function_receiver and function_receiver.group("name") in safe_statements)
 
 
 def _dateutil_format_variable_is_safe(
@@ -1570,18 +1654,24 @@ def _contextual_dataflow_findings(path: Path, lines: list[str], code_lines: list
     a review candidate instead of being promoted to a violation.
     """
     findings: list[Finding] = []
+    suffix = path.suffix.lower()
     tainted: set[str] = set()
     sanitized: set[str] = set()
+    safe_prepared_statements: set[str] = set()
 
     for line_number, code_line in enumerate(code_lines, start=1):
         line = code_line.strip()
         if not line or _is_comment(line):
             continue
-
         assignment = _ASSIGNMENT.match(line)
         if assignment:
             name, expression = assignment.groups()
-            if _has_unsanitized_taint(expression, tainted):
+            if suffix == ".php":
+                if "prepare" in expression.lower() and _safe_prepared_assignment(expression, tainted):
+                    safe_prepared_statements.add(name)
+                else:
+                    safe_prepared_statements.discard(name)
+            if _has_unsanitized_taint(expression, tainted, keep_php_variables=suffix == ".php"):
                 tainted.add(name)
                 sanitized.discard(name)
             elif _SANITIZERS.search(expression):
@@ -1591,11 +1681,16 @@ def _contextual_dataflow_findings(path: Path, lines: list[str], code_lines: list
                 tainted.discard(name)
                 sanitized.discard(name)
 
-        reaches_sink = _has_unsanitized_taint(line, tainted)
+        reaches_sink = _has_unsanitized_taint(line, tainted, keep_php_variables=suffix == ".php")
         if not reaches_sink:
             continue
 
+        lowered_line = line.lower()
         for rule_id, sink in _CONTEXT_SINKS:
+            if rule_id == "code.sql-dynamic-query" and not any(
+                token in lowered_line for token in _SQL_SINK_TOKENS
+            ):
+                continue
             match = sink.search(line)
             if not match:
                 continue
@@ -1610,12 +1705,17 @@ def _contextual_dataflow_findings(path: Path, lines: list[str], code_lines: list
             # untrusted value has to be an argument of that call, otherwise
             # `ctx.save()` next to unrelated request handling reads as a flow.
             arguments = _call_arguments(line, match.end())
-            if arguments is not None and not _has_unsanitized_taint(arguments, tainted):
+            if arguments is not None and not _has_unsanitized_taint(
+                arguments,
+                tainted,
+                keep_php_variables=suffix == ".php",
+            ):
                 continue
             if rule_id == "code.command-injection" and _safe_command_arguments(line):
                 continue
-            if rule_id == "code.sql-dynamic-query" and _safe_sql_binding(line):
-                continue
+            if rule_id == "code.sql-dynamic-query":
+                if _safe_sql_binding(line) or _executes_safe_prepared_statement(line, safe_prepared_statements):
+                    continue
             if rule_id == "code.api-mass-assignment" and not _REQUEST_BODY.search(arguments or line):
                 continue
             rule = _RULE_BY_ID[rule_id]
@@ -1943,22 +2043,20 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
         banner = "\n".join(lines[:5])[:2000]
         is_dependency_path = bool(parts.intersection({"node_modules", "vendor", "vendors", "thirdparty", "third_party"}))
         has_library_banner = bool(re.search(
-            r"(?i)\b(jquery|lodash|bootstrap|angular|react|vue|moment)\b[^\n]{0,100}\bv?\d+(?:\.\d+)+",
+            r"(?i)\b(jquery|jsrender|datepicker|lodash|bootstrap|angular|react|vue|moment)\b[^\n]{0,100}\bv?\d+(?:\.\d+)+",
             banner,
         ))
         versioned_library_file = re.match(
-            r"(?i)^(jquery|jsrender|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
+            r"(?i)^(jquery|jsrender|datepicker|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
             r"[._-]?v?\d+(?:\.\d+)*(?:\.min)?\.(?:js|mjs|cjs)$",
             path.name,
         )
         named_library_file = re.match(
-            r"(?i)^(jquery|jsrender|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
+            r"(?i)^(jquery|jsrender|datepicker|lodash|bootstrap|angular|react(?:\.production)?|vue(?:\.runtime)?|moment)"
             r"(?:\.min)?\.(?:js|mjs|cjs)$",
             path.name,
         )
-        if versioned_library_file or (named_library_file and (is_dependency_path or has_library_banner)) or (
-            is_dependency_path and has_library_banner
-        ):
+        if versioned_library_file or (named_library_file and (is_dependency_path or has_library_banner)):
             return []
 
     suffix = path.suffix.lower()
