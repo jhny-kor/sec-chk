@@ -1061,7 +1061,10 @@ def _code_view(lines: list[str], suffix: str) -> list[str]:
                     quote = None
                 index += 1
                 continue
-            triple = next((token for token in triples if raw_line.startswith(token, index)), None)
+            triple = next(
+                (token for token in triples if raw_line.startswith(token, index)),
+                None,
+            ) if triples and current in {'"', "'"} else None
             if triple is not None:
                 end = raw_line.find(triple, index + len(triple))
                 if end < 0:
@@ -1071,16 +1074,16 @@ def _code_view(lines: list[str], suffix: str) -> list[str]:
                 output.append(raw_line[index : end + len(triple)])
                 index = end + len(triple)
                 continue
-            if any(raw_line.startswith(token, index) for token in line_tokens):
+            if line_tokens and raw_line.startswith(line_tokens, index):
                 break
-            if block_open and raw_line.startswith(block_open, index):
+            if block_open and current == block_open[0] and raw_line.startswith(block_open, index):
                 end = raw_line.find(block_close, index + len(block_open))
                 if end < 0:
                     open_block = block_close
                     break
                 index = end + len(block_close)
                 continue
-            if html_comments and raw_line.startswith("<!--", index):
+            if html_comments and current == "<" and raw_line.startswith("<!--", index):
                 end = raw_line.find("-->", index + 4)
                 if end < 0:
                     open_block = "-->"
@@ -1152,6 +1155,15 @@ def _java_xml_factory_is_hardened(factory: str, configuration_lines: list[str]) 
 
 
 _RULE_BY_ID = {rule.rule_id: rule for rule in CODE_PATTERN_RULES}
+_LINE_RULES = {
+    extension: tuple(
+        rule
+        for rule in CODE_PATTERN_RULES
+        if extension in rule.extensions and rule.pattern.pattern != r"(?!)"
+    )
+    for extension in CODE_EXTENSIONS | CODE_FILENAMES
+}
+_COOKIE_MARKER = re.compile(r"cookie", re.IGNORECASE)
 _ASSIGNMENT = re.compile(
     r"^\s*(?:(?:const|let|var|final)\s+)?"
     r"(?:(?:[A-Za-z_$][\w$<>\[\].,?]*\s+))?"
@@ -1830,9 +1842,14 @@ def _sw49_semantic_findings(path: Path, lines: list[str], statements: list[str])
                 re.I,
             )
         }
+        global_shared_names = {
+            name
+            for name in shared_names
+            if re.search(rf"\bglobal\s+{re.escape(name)}\b", document, re.I)
+        }
         for i, line in enumerate(statements):
-            for name in shared_names:
-                if re.search(rf"\bglobal\s+{re.escape(name)}\b", document, re.I) and re.search(
+            for name in global_shared_names:
+                if re.search(
                     rf"\b{re.escape(name)}\s*=\s*[^;]*(?:session|request)",
                     line,
                     re.I,
@@ -1961,12 +1978,13 @@ def check_file(path: Path, target: TargetConfig) -> list[Finding]:
         seen_locations.add((finding.rule_id, finding.line))
     document = "\n".join(code_lines)
     filename = path.name
+    line_rules = _LINE_RULES.get(filename if filename in CODE_FILENAMES else suffix, ())
     for line_number, code_line in enumerate(statements, start=1):
         line = code_line.strip()
         if not line or _is_comment(line):
             continue
-        for rule in CODE_PATTERN_RULES:
-            if suffix not in rule.extensions and filename not in rule.extensions:
+        for rule in line_rules:
+            if rule.rule_id == "code.persistent-sensitive-cookie" and not _COOKIE_MARKER.search(line):
                 continue
             if (
                 rule.rule_id == "code.xml-external-entity"
