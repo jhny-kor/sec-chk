@@ -39,7 +39,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Baseline SBOM verification | No | Yes | Yes | Yes |
 | Host posture scan | No | Yes | Yes | No |
 | Live web posture or ZAP baseline | Yes | Yes | Yes | No, by design |
-| Profile-driven 21-control web audit | Direct/native lane only | Full build | Shared engine | No, by design |
+| Profile-driven 21-control web audit | No; use shared engine from source | Full build | Shared engine | No, by design |
 
 The Python engine can run from source on any OS. The macOS column above refers only to the native app.
 

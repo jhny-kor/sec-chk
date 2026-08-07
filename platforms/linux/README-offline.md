@@ -189,9 +189,8 @@ koda jar-scan \
   --fail-on high --fail-on-kev
 ~~~
 
-Use `--language ko` or `--language en` to fix the report language. When omitted,
-HTML opens in Korean with a Korean/English switch and Markdown is generated in
-Korean. Vulnerabilities for the same library and installed version are merged
+Java HTML and Markdown reports are currently generated in Korean; `--language`
+accepts only `ko`. Vulnerabilities for the same library and installed version are merged
 into one row, and `Final` is the candidate version rechecked against the same
 Grype database.
 

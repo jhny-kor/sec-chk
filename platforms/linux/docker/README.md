@@ -110,9 +110,11 @@ ssh -L 9876:127.0.0.1:9876 user0@<server-ip>
 ```
 
 직접 접속이 승인된 경우에만 `KODA_DASHBOARD_BIND=0.0.0.0`을 명시적으로
-지정합니다. 대시보드 네트워크는 전용 브리지에 IP masquerade를 비활성화해
-컨테이너 발신 트래픽을 차단합니다. (`--internal` 네트워크는 포트 공개까지
-차단하므로 사용하지 않습니다.)
+지정합니다. 래퍼가 `koda-dashboard` 전용 브리지를 새로 만들 때는 IP
+masquerade를 비활성화해 컨테이너 발신 트래픽을 차단합니다. 같은 이름의 기존
+네트워크가 있으면 래퍼가 재사용하므로 사용 전
+`com.docker.network.bridge.enable_ip_masquerade` 옵션을 확인해야 합니다.
+(`--internal` 네트워크는 포트 공개까지 차단하므로 사용하지 않습니다.)
 
 ### `security-sbom-dependecy` 포털 연결 버튼
 

@@ -13,9 +13,10 @@ disabled at runtime.
 | Docker bundle | A Linux x86_64 host with Docker already installed | Docker Engine; no host package installation |
 | Windows installer plus data zip | Windows desktop or server workflows | The KODA installer and a separately refreshed vulnerability-data zip |
 
-Every package should carry the scanner, Syft, Grype, the local Grype database,
-NVD JSON feeds, and CISA KEV data. Verify checksums before moving a bundle into a
-closed network.
+Each delivery set must carry the scanner, Syft, Grype, the local Grype database,
+NVD JSON feeds, and CISA KEV data. The Windows set supplies vulnerability data in
+the separate data zip listed above. Verify checksums before moving a delivery set
+into a closed network.
 
 ## Common scan
 
@@ -32,8 +33,8 @@ python3 -m security_scanner jar-scan \
   --fail-on high --fail-on-kev
 ```
 
-Use `--language en` for a fixed English report. If omitted, HTML opens in Korean
-with a Korean/English switch and Markdown is Korean. Findings are grouped by
+Java HTML and Markdown reports are currently generated in Korean; `--language`
+accepts only `ko`. Findings are grouped by
 library and installed version; `Final` is the lowest candidate with no matching
 vulnerability in the same Grype database as of its database date.
 Repeat `--target` to combine multiple deployment roots into the same archive
@@ -50,7 +51,7 @@ and SBOM verification output as release evidence.
 gate cannot be evaluated safely. Grype and Syft never download data during the
 scan.
 
-## Language switch
+## Related documentation
 
 - [English documentation index](../README.en.md)
 - [Korean offline delivery overview](offline-delivery.md)

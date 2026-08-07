@@ -1,10 +1,13 @@
 # KODA Report Contract
 
-KODA can have different scanners per platform, but report consumers should not care which scanner produced the finding. Linux, Windows, CI, and server flows use the shared Python engine. The macOS app uses the native Swift scanner. Both lanes must keep this contract stable.
+Linux, Windows, CI, and server flows use the shared Python engine. The macOS app
+uses the native Swift scanner. Consumers must select the contract for the
+artifact they read; the fields below describe findings from shared-engine
+`scan --format json` output.
 
 ## Finding Fields
 
-Every JSON finding uses these keys:
+Every `scan --format json` finding uses these keys:
 
 | Field | Required | Notes |
 | --- | --- | --- |
@@ -20,9 +23,34 @@ Every JSON finding uses these keys:
 | `recommendation` | yes | Remediation guidance. Empty string is allowed. |
 | `resource` | yes | Stable host/resource identifier. Empty string for file-backed findings. |
 | `reachable` | yes | Empty string, `reachable`, `unreachable`, or `unknown`. |
+| `verification_status` | yes | `confirmed` or `needs_review`. Unknown imported values fail closed to `needs_review`. |
+| `verification_note` | yes | Reason for the deterministic verification state. Empty string when not needed. |
 | `triage_verdict` | yes | Empty string, `likely_true`, `likely_false`, or `uncertain`. |
 | `triage_confidence` | yes | Number from 0 to 1, or `null`. |
 | `triage_note` | yes | Short triage note. Empty string when not triaged. |
+| `analyzer` | yes | Analyzer identity, such as `koda-local` or an approved external analyzer. |
+| `analyzer_version` | yes | Analyzer version when known. |
+| `analyzer_rule_id` | yes | Original external analyzer rule ID when applicable. |
+| `cwe_ids` | yes | CWE identifiers associated with the evidence. Empty array when unavailable. |
+| `evidence_kind` | yes | Evidence type, such as `direct` or `dataflow`. |
+| `trace` | yes | Ordered evidence trace steps. Empty array when unavailable. |
+| `evidence_id` | yes | Stable evidence identifier when assigned. |
+| `issue_key` | yes | Stable issue correlation key when assigned. |
+| `standard_mappings` | yes | Selected standard/category mappings for the rule. Empty array when unmapped. |
+
+File findings with a line number also include an additive `source_context`
+object. Consumers must tolerate additive fields.
+
+## Other JSON artifacts
+
+- `release-package` writes a compact `scan-findings.json` with core finding,
+  verification, and analyzer-provenance fields. It does not include
+  `target`, `resource`, reachability/AI-triage fields, `standard_mappings`, or
+  `source_context`.
+- `web-audit` results use the separate 21-control status/coverage/evidence
+  contract documented in [WEB_AUDIT.md](security/WEB_AUDIT.md).
+- Java archive and SBOM-verification JSON files have workflow-specific schemas;
+  use the [Java runbook](security/java-sbom-vulnerability-scan.en.md).
 
 ## Categories
 
@@ -36,22 +64,23 @@ Current production categories:
 - `screen_quality`
 - `host`
 
-Reserved categories for the next platform work:
-
-- `action_flow`
-
 `web` is used by authorized web posture scans and should keep the same finding field shape.
 
 ## Platform Rules
 
 - macOS Swift and shared Python implementations may differ internally.
-- `rule_id`, `category`, `severity`, and JSON key names must not differ by platform.
+- Shared fields such as `rule_id`, `category`, and `severity` keep the same
+  meaning across platform lanes, but artifact-specific schemas are not identical.
 - Severity values are lowercase and ordered as: `info`, `low`, `medium`, `high`, `critical`.
 - CI gates must use `severity`, not localized labels or UI text.
 - Report additions should be additive. Do not rename or remove existing keys without a migration.
 
 ## Verification
 
-The shared Python contract is locked by `tests/test_report_contract.py::ReportContractTests.test_json_report_preserves_platform_contract_fields`.
+The shared Python serializer is `security_scanner.reporting._finding_payload`.
+Run `tests.test_source_analysis`, `tests.test_sw49_standards`, and
+`tests.test_settings_and_exports` after changing finding serialization or report
+exports.
 
-When changing the macOS Swift scanner output, verify that its exported findings can be mapped to the same fields before changing report consumers.
+When changing the macOS Swift scanner output, verify the consumer's actual export
+format rather than assuming byte-for-byte parity with shared-engine scan JSON.

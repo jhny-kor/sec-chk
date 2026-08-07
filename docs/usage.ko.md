@@ -29,9 +29,8 @@ python3 -m security_scanner sbom-verify --target /deploy/apps --sbom approved.cd
 아카이브·컴포넌트·취약점·SBOM을 중복 제거하여 하나의 라이브러리 메인/상세 리포트로
 생성합니다.
 
-JAR 보고서는 `--language ko` 또는 `--language en`으로 고정할 수 있습니다.
-옵션을 생략하면 HTML은 한국어로 열리고 `한국어`/`English` 전환 버튼을
-표시하며 Markdown은 한국어로 생성됩니다. 취약점은 라이브러리·설치 버전별로
+JAR 보고서는 현재 HTML과 Markdown 모두 한국어로 생성되며 `--language`는
+`ko`만 지원합니다. 취약점은 라이브러리·설치 버전별로
 통합되고 `Fixed`와 Grype DB 재검증 결과인 `Final`이 함께 표시됩니다.
 
 소스코드 분석은 `--standard`로 등록된 기준을 하나 선택해야 합니다. 예를 들어

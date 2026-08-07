@@ -15,8 +15,8 @@ python -m security_scanner jar-scan `
   --fail-on high --fail-on-kev
 ```
 
-`--language ko|en`은 HTML과 Markdown을 고정합니다. 생략하면 HTML은 한국어로
-열리고 `한국어`/`English` 전환 버튼을 표시하며 Markdown은 한국어입니다.
+JAR 보고서는 현재 HTML과 Markdown 모두 한국어로 생성되며 `--language`는
+`ko`만 지원합니다.
 `--target`은 반복 지정할 수 있으며, 지정한 폴더들을 하나의 라이브러리
 메인/상세 리포트와 SBOM으로 통합합니다.
 
