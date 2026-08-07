@@ -1,9 +1,9 @@
 # KODA 문서
 
-언어: [한국어](README.md) · [English](README.en.md)
+한국어 문서 인덱스입니다.
 
 KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 고르면 됩니다.
-제품 개요와 플랫폼 선택은 [영문 루트 README](../README.md), 실제 명령 전체는
+제품 개요와 플랫폼 선택은 [한국어 루트 README](../README.md), 실제 명령 전체는
 [CLI 및 로컬 사용법](usage.ko.md)에 있습니다.
 
 ## 기능과 구현 구조

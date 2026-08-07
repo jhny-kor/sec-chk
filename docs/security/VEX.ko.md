@@ -25,4 +25,3 @@ VEX 상태는 원본 취약점의 존재를 삭제하지 않고, 검토 결과�
 변경합니다.
 
 - [한국어 보안 문서 인덱스](../README.md#보안-점검연동-security)
-- [English VEX tracking](VEX.md)

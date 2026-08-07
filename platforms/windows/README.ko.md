@@ -39,4 +39,3 @@ koda jar-scan ^
 ```
 
 - [한국어 문서 인덱스](../../docs/README.md)
-- [English Windows installer guide](README.md)

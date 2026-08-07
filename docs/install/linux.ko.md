@@ -19,4 +19,3 @@ JAR 보고서는 현재 HTML과 Markdown 모두 한국어로 생성되며 `--lan
 메인/상세 리포트와 SBOM으로 통합합니다.
 
 - [한국어 문서 인덱스](../README.md)
-- [English Linux install](linux.md)

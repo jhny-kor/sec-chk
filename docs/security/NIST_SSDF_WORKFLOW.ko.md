@@ -10,4 +10,3 @@
 - 릴리스 provenance와 서명 보관
 
 - [한국어 보안 문서 인덱스](../README.md#보안-점검연동-security)
-- [English NIST SSDF workflow](NIST_SSDF_WORKFLOW.md)

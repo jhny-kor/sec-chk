@@ -53,4 +53,3 @@ KODA가 구현한 정적 룰 매핑 범위이며 전체 SAST 또는 공식 준�
 받은 대상에서만 사용하고, ZAP 활성 모드에는 `--authorize-active`를 지정하세요.
 
 - [한국어 문서 인덱스](README.md)
-- [English CLI and local usage](usage.md)

@@ -24,4 +24,3 @@
 5. 사용자가 조치할 수 있는 시점에 권고 또는 릴리스 노트를 게시합니다.
 
 - [한국어 문서 인덱스](docs/README.md)
-- [English security policy](SECURITY.md)

@@ -18,4 +18,3 @@ API 키 환경변수가 비었거나 SBOM 파일이 없거나 프로젝트 이�
 전달하세요.
 
 - [한국어 보안 문서 인덱스](../README.md#보안-점검연동-security)
-- [English Dependency-Track guide](DEPENDENCY_TRACK.md)

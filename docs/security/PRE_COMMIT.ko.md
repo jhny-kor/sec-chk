@@ -10,4 +10,3 @@ Hook 설치는 대상 저장소의 `.git/hooks`를 변경합니다. 적용 전�
 백업 정책을 확인하고, CI에서는 동일한 `--fail-on` 기준을 별도로 실행하세요.
 
 - [한국어 보안 문서 인덱스](../README.md#보안-점검연동-security)
-- [English pre-commit security gate](PRE_COMMIT.md)

@@ -20,4 +20,3 @@ KODA는 제3자 광고 SDK를 사용하지 않고 앱·웹사이트 간 사용�
 이용하세요.
 
 - [한국어 문서 인덱스](docs/README.md)
-- [English privacy policy](PRIVACY.md)

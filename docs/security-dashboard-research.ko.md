@@ -15,4 +15,3 @@
 기준으로 확인합니다.
 
 - [한국어 문서 인덱스](README.md)
-- [English dashboard research](security-dashboard-research.md)

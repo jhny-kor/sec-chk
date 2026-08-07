@@ -13,4 +13,3 @@ python3 -m security_scanner zap-run \
 사용하세요. 결과는 대상·권한·실행 시각과 함께 보관합니다.
 
 - [한국어 보안 문서 인덱스](../README.md#보안-점검연동-security)
-- [English ZAP baseline guide](ZAP_BASELINE.md)

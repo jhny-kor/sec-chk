@@ -13,4 +13,3 @@ Java 아카이브 메뉴는 앱에 포함된 오프라인 helper, Syft, Grype, N
 호출하면 해당 언어로 고정된 HTML을 생성합니다.
 
 - [한국어 문서 인덱스](../README.md)
-- [English macOS install](macos.md)

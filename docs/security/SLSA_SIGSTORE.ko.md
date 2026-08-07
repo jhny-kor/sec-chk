@@ -7,4 +7,3 @@ Sigstore/cosign 또는 조직의 서명 시스템으로 산출물을 서명합�
 빌드 출처를 검증하세요.
 
 - [한국어 보안 문서 인덱스](../README.md#보안-점검연동-security)
-- [English SLSA and Sigstore guardrails](SLSA_SIGSTORE.md)

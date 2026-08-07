@@ -42,4 +42,3 @@ HTML과 Markdown은 현재 한국어로 생성되며 `--language`는 `ko`만 지
 [폐쇄망 배포 개요](../../docs/install/offline-delivery.md)를 참고하세요.
 
 - [한국어 문서 인덱스](../../docs/README.md)
-- [English Linux offline distribution](README-offline.md)

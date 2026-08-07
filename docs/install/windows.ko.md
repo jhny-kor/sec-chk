@@ -38,4 +38,3 @@ koda scan --target C:\src\project --standard sw-dev-security-49 ^
 준수 판정을 의미하지 않습니다.
 
 - [한국어 문서 인덱스](../README.md)
-- [English Windows install](windows.md)
