@@ -17,12 +17,13 @@ SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
 if str(SHARED_PYTHON) not in sys.path:
     sys.path.insert(0, str(SHARED_PYTHON))
 
-from security_scanner.models import Finding
+from security_scanner.models import DependencyComponent, Finding
 from security_scanner.reporting import (
     build_rule_catalog,
     filter_disabled_rules,
     PdfExportError,
     render_html,
+    render_html_pair,
     render_html_pair_zip_from_payload,
     render_hwpx,
     render_markdown_from_payload,
@@ -142,12 +143,80 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(set(archive.namelist()), {"report.html", "report-detail.html"})
             main = archive.read("report.html").decode("utf-8")
             detail = archive.read("report-detail.html").decode("utf-8")
-            self.assertIn("source-main-guide-open", main)
+            self.assertNotIn("source-main-guide-open", main)
             self.assertIn('href="report-detail.html"', main)
             self.assertIn("상세 보고서 더보기", main)
-            self.assertIn("source-detail-guide-open", detail)
+            self.assertNotIn("source-detail-guide-open", detail)
             self.assertNotIn('href="report.html"', detail)
             self.assertIn("owasp-asvs-5", detail)
+
+    def test_html_export_matches_cli_pair_context(self) -> None:
+        finding = Finding(
+            rule_id="code.weak-hash",
+            category="code",
+            severity="high",
+            title="Weak hash",
+            path=Path("app.py"),
+            target="src",
+            line=4,
+            recommendation="Use SHA-256.",
+        )
+        component = DependencyComponent(
+            name="requests",
+            ecosystem="PyPI",
+            version="2.32.0",
+            path=Path("requirements.txt"),
+            target="src",
+            line=1,
+        )
+        payload = {
+            "findings": [{**SAMPLE_PAYLOAD["findings"][1], "severity": "high", "target": "src", "line": 4}],
+            "summary": {
+                "by_target": {"src": 1},
+                "target_paths": {"src": "/tmp/project"},
+            },
+            "components": [{
+                "name": "requests",
+                "ecosystem": "PyPI",
+                "version": "2.32.0",
+                "path": "requirements.txt",
+                "target": "src",
+                "line": 1,
+                "scope": "required",
+            }],
+            "scan": {
+                "kind": "source",
+                "path": "/tmp/project",
+                "standard": "owasp-asvs-5",
+                "standard_category": "all",
+                "scanned_categories": ["code"],
+                "warnings": ["example warning"],
+                "enable_osv": True,
+            },
+            "source_analysis": {"analyzed_languages": ["Python"]},
+        }
+        with patch("security_scanner.reporting._generated_at", return_value=("2026-08-07T00:00:00+00:00", "2026-08-07 00:00:00 UTC")):
+            expected_main, expected_detail = render_html_pair(
+                [finding],
+                target_names=("src",),
+                target_paths={"src": "/tmp/project"},
+                language="ko",
+                detail_href="report-detail.html",
+                summary_href=None,
+                components=(component,),
+                warnings=("example warning",),
+                scan_path="/tmp/project",
+                kind="source",
+                standard="owasp-asvs-5",
+                standard_category="all",
+                enable_osv=True,
+                scanned_categories=("code",),
+                source_analysis=payload["source_analysis"],
+            )
+            data = render_html_pair_zip_from_payload(payload, "ko")
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            self.assertEqual(archive.read("report.html").decode("utf-8"), expected_main)
+            self.assertEqual(archive.read("report-detail.html").decode("utf-8"), expected_detail)
 
     def test_hwpx_is_valid_zip_with_hwp_mimetype(self) -> None:
         data = render_hwpx(SAMPLE_PAYLOAD, "ko")

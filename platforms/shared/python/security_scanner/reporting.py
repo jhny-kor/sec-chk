@@ -104,7 +104,7 @@ def _json_safe(value: object) -> object:
 TRANSLATIONS = {
     "en": {
         "html_lang": "en",
-        "title": "Local Security Dashboard",
+        "title": "KODA",
         "generated": "Generated",
         "risk_score": "Risk score",
         "targets": "Targets",
@@ -155,10 +155,10 @@ TRANSLATIONS = {
         "download_xlsx": "Excel (xlsx)",
         "download_hwpx": "Hangul (hwpx)",
         "download_pdf": "PDF",
-        "download_html": "HTML (main + detail)",
+        "download_html": "HTML (CLI summary + detail)",
         "download_report_empty": "Run a scan first to download a report.",
         "download_future_title": "Format support notice",
-        "download_future_support": "Markdown, Hangul, and Excel export will be provided in a future update. Use PDF export for a file download now.",
+        "download_future_support": "The selected format uses the current findings and standard. If it is unavailable, use the CLI report export.",
         "download_notice_close": "Close",
         "sbom_unavailable": "No dependency components available for SBOM.",
         "osv_toggle": "OSV/CVE + KEV/EPSS lookup",
@@ -342,7 +342,7 @@ TRANSLATIONS = {
     },
     "ko": {
         "html_lang": "ko",
-        "title": "로컬 보안 대시보드",
+        "title": "KODA",
         "generated": "생성 시각",
         "risk_score": "위험 점수",
         "targets": "점검 대상",
@@ -393,10 +393,10 @@ TRANSLATIONS = {
         "download_xlsx": "엑셀 (xlsx)",
         "download_hwpx": "한글 (hwpx)",
         "download_pdf": "PDF",
-        "download_html": "HTML (메인 + 상세)",
+        "download_html": "HTML (CLI 요약 + 상세)",
         "download_report_empty": "먼저 점검을 실행한 뒤 결과를 다운로드하세요.",
         "download_future_title": "형식 지원 안내",
-        "download_future_support": "마크다운·한글·엑셀 다운로드는 추후 업데이트에서 지원할 예정입니다. 현재는 PDF 다운로드를 이용해 주세요.",
+        "download_future_support": "선택한 기준과 현재 결과를 반영해 내보냅니다. 형식을 사용할 수 없으면 CLI 보고서 내보내기를 이용하세요.",
         "download_notice_close": "닫기",
         "sbom_unavailable": "SBOM으로 내보낼 의존성 컴포넌트가 없습니다.",
         "osv_toggle": "OSV/CVE + KEV/EPSS 조회",
@@ -1671,19 +1671,68 @@ def _finding_from_payload(item: dict[str, object]) -> Finding:
     )
 
 
+def _payload_report_context(
+    payload: dict[str, object],
+    findings: list[Finding],
+) -> tuple[tuple[str, ...], dict[str, str], tuple[DependencyComponent, ...], dict[str, object]]:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
+    raw_targets = summary.get("by_target")
+    target_names = (
+        tuple(str(target) for target in raw_targets if str(target).strip())
+        if isinstance(raw_targets, dict) and raw_targets
+        else tuple(sorted({finding.target for finding in findings if finding.target}))
+    )
+    raw_paths = summary.get("target_paths")
+    target_paths = (
+        {str(target): str(path) for target, path in raw_paths.items()}
+        if isinstance(raw_paths, dict)
+        else {}
+    )
+    raw_components = payload.get("components")
+    components: list[DependencyComponent] = []
+    if isinstance(raw_components, list):
+        for item in raw_components:
+            if not isinstance(item, dict):
+                continue
+            line = item.get("line")
+            components.append(
+                DependencyComponent(
+                    name=str(item.get("name") or ""),
+                    ecosystem=str(item.get("ecosystem") or ""),
+                    version=str(item.get("version") or ""),
+                    path=Path(str(item.get("path") or ".")),
+                    target=str(item.get("target") or ""),
+                    line=int(line) if isinstance(line, int) and not isinstance(line, bool) else None,
+                    scope=str(item.get("scope") or "required"),
+                    source=str(item.get("source") or ""),
+                    purl=str(item.get("purl") or ""),
+                )
+            )
+    return target_names, target_paths, tuple(components), scan
+
+
 def render_markdown_from_payload(payload: dict[str, object], language: str = "ko") -> str:
     findings = [_finding_from_payload(item) for item in _payload_findings(payload, language)]
-    target_names = tuple(sorted({finding.target for finding in findings if finding.target}))
-    mappings = payload.get("rule_mappings")
+    target_names, target_paths, _, scan = _payload_report_context(payload, findings)
+    standard = str(scan.get("standard") or DEFAULT_STANDARD)
+    standard_category = str(scan.get("standard_category") or DEFAULT_STANDARD_CATEGORY)
+    mappings = _rule_mappings_for_findings(findings, standard, standard_category)
     report = render_markdown(
         findings,
         target_names,
         language,
-        standard_mappings=mappings if isinstance(mappings, dict) else None,
+        target_paths=target_paths,
+        standard_mappings=mappings,
         source_analysis=payload.get("source_analysis"),
     )
-    sw49 = _payload_sw49(payload)
-    if sw49:
+    if standard == "sw-dev-security-49":
+        sw49 = _payload_sw49(payload) or sw49_payload(
+            findings,
+            tuple(str(item) for item in scan.get("scanned_categories", ()) if str(item).strip()),
+            standard_category,
+            payload.get("source_analysis"),
+        )
         report = report.rstrip("\n") + "\n" + "\n".join(_sw49_markdown_lines(sw49, language)) + "\n"
     web_audit = payload.get("web_audit")
     if isinstance(web_audit, dict):
@@ -1722,21 +1771,24 @@ def _web_audit_markdown_escape(value: str) -> str:
 def render_html_pair_zip_from_payload(payload: dict[str, object], language: str = "ko") -> bytes:
     """Export the dashboard findings as a linked main/detail HTML pair."""
     findings = [_finding_from_payload(item) for item in _payload_findings(payload, language)]
-    target_names = tuple(sorted({finding.target for finding in findings if finding.target}))
-    scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
+    target_names, target_paths, components, scan = _payload_report_context(payload, findings)
     standard = str(scan.get("standard") or DEFAULT_STANDARD)
     standard_category = str(scan.get("standard_category") or DEFAULT_STANDARD_CATEGORY)
+    raw_warnings = scan.get("warnings")
+    warnings = tuple(str(item) for item in raw_warnings if str(item).strip()) if isinstance(raw_warnings, (list, tuple)) else ()
     main_html, detail_html = render_html_pair(
         findings,
         target_names=target_names,
+        target_paths=target_paths,
         language=language,
         detail_href="report-detail.html",
         summary_href=None,
-        scan_path=str(scan.get("path") or ""),
+        components=components,
+        scan_path=str(scan.get("path") or ", ".join(target_paths.values())),
         kind=str(scan.get("kind") or "source"),
         standard=standard,
         standard_category=standard_category,
-        warnings=tuple(str(item) for item in scan.get("warnings", ()) if str(item).strip()),
+        warnings=warnings,
         enable_osv=bool(scan.get("enable_osv", False)),
         scanned_categories=tuple(str(item) for item in scan.get("scanned_categories", ()) if str(item).strip()),
         source_analysis=payload.get("source_analysis"),
@@ -2267,17 +2319,6 @@ def render_html_pair(
     main_html = main_html.replace(
         'class="koda-main-classification-badge"',
         'class="koda-main-classification-badge" style="order:2"',
-    ).replace(
-        'class="standards-guide-button" type="button" style="',
-        'class="standards-guide-button" type="button" style="order:1;',
-    )
-    main_html = re.sub(
-        r'(<div class="koda-main-brand">.*?)(<span class="koda-main-classification-badge"[^>]*>대외 비공개</span>)'
-        r'(<button id="source-main-guide-open"[^>]*>안내</button>)',
-        r'\1\3\2',
-        main_html,
-        count=1,
-        flags=re.DOTALL,
     )
     main_html = main_html.replace(
         '<main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span>',
@@ -2331,15 +2372,6 @@ def _render_html_payload(payload: dict[str, object], language: str, *, summary_h
     labels = _labels(language)
     json_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     replacements = _html_replacements(labels, json_payload)
-    scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
-    guide_button, guide_dialog, guide_script = _standards_guide_markup(
-        language,
-        "source-detail-guide",
-        str(scan.get("standard") or DEFAULT_STANDARD),
-    )
-    replacements["__INITIAL_STANDARDS_GUIDE_BUTTON__"] = guide_button
-    replacements["__INITIAL_STANDARDS_GUIDE_DIALOG__"] = guide_dialog
-    replacements["__INITIAL_STANDARDS_GUIDE_SCRIPT__"] = guide_script
     # Main and detail reports are independent artifacts.  Do not inject a
     # cross-page back link; the caller can open either file directly.
     replacements["__INITIAL_SUMMARY_LINK_HTML__"] = ""
@@ -2378,86 +2410,6 @@ def _sbom_tracker_link_markup(language: str) -> str:
         f'href="{html.escape(url, quote=True)}" target="_blank" '
         f'rel="noopener noreferrer">{html.escape(label)}</a>'
     )
-
-
-_STANDARDS_GUIDE_COPY = {
-    "local": (
-        "KODA Local Rule Categories",
-        "KODA의 로컬 보안 규칙 모음으로, 선택된 파일·폴더 점검 범위의 발견 패턴을 설명합니다.",
-        "KODA's local rule set describing detected patterns within the selected file and folder scope.",
-    ),
-    "owasp-top-10-2025": (
-        "OWASP Top 10:2025",
-        "OWASP가 정리한 2025년 웹 애플리케이션 주요 위험 범주입니다.",
-        "OWASP's 2025 risk categories for the most important web application threats.",
-    ),
-    "owasp-proactive-controls": (
-        "OWASP Proactive Controls",
-        "OWASP가 개발자에게 제시하는 예방 중심의 안전한 설계·코딩 실천 항목입니다.",
-        "OWASP's prevention-focused secure design and coding practices for developers.",
-    ),
-    "owasp-asvs-5": (
-        "OWASP ASVS 5.0",
-        "OWASP의 웹 애플리케이션 보안 검증 요구사항으로, 구현된 보안 통제를 점검합니다.",
-        "OWASP application security verification requirements for checking implemented controls.",
-    ),
-    "cwe-top-25-2025": (
-        "CWE Top 25:2025",
-        "MITRE가 발표한 위험도가 높은 소프트웨어 약점 우선순위 목록입니다.",
-        "MITRE's prioritized list of dangerous software weaknesses.",
-    ),
-    "sw-dev-security-49": (
-        "행정안전부 소프트웨어 개발보안 49",
-        "행정안전부의 소프트웨어 개발보안 49개 보안약점 기준과 점검 항목입니다.",
-        "The Korean Ministry of the Interior and Safety's 49 software development security weaknesses.",
-    ),
-    "sw-dev-security-7-types": (
-        "행정안전부 소프트웨어 보안 7가지 유형",
-        "행정안전부의 소프트웨어 보안약점을 7개 유형으로 분류한 기준입니다.",
-        "The Korean Ministry of the Interior and Safety's seven software security weakness types.",
-    ),
-    "kisa-secure-coding-guide": (
-        "KISA 소프트웨어 보안약점 진단가이드 2021",
-        "한국인터넷진흥원(KISA)의 안전한 소프트웨어 개발과 보안약점 진단 기준입니다.",
-        "KISA's 2021 guide for secure software development and weakness diagnosis.",
-    ),
-}
-
-
-def _standards_guide_markup(language: str, prefix: str, standard_id: str = DEFAULT_STANDARD) -> tuple[str, str, str]:
-    """Return a source-report standards guide that works without a JS dialog API."""
-    is_ko = language == "ko"
-    button_text = "안내" if is_ko else "Guide"
-    title = "분석 기준 안내" if is_ko else "Analysis standards guide"
-    close = "닫기" if is_ko else "Close"
-    selected = _STANDARDS_GUIDE_COPY.get(standard_id)
-    if selected:
-        label, ko_description, en_description = selected
-        rows = ((label, ko_description if is_ko else en_description),)
-    else:
-        rows = (
-            (
-                "MITRE CWE",
-                "CWE-89, CWE-798 등은 탐지된 문제의 원인 유형과 영향 범주를 나타내는 약점 분류입니다."
-                if is_ko
-                else "CWE-89, CWE-798, and others classify the cause and impact category of each weakness.",
-            ),
-        )
-    rows_html = "".join(
-        f'<li class="standards-guide-item" style="display:grid;gap:4px;padding:10px 12px;border:1px solid #e1e8f2;border-radius:10px;background:#f8fafc">'
-        f'<strong class="standards-guide-name" style="display:block">{html.escape(label)}</strong>'
-        f'<span class="standards-guide-description" style="display:block;color:#60708a">{html.escape(description)}</span></li>'
-        for label, description in rows
-    )
-    button = f'<button id="{prefix}-open" class="standards-guide-button" type="button" style="min-height:36px;padding:0 12px;border:1px solid #b8cdf1;border-radius:999px;color:#0b3b89;background:#edf4ff;cursor:pointer;font-weight:800">{html.escape(button_text)}</button>'
-    dialog = (
-        f'<dialog id="{prefix}" class="standards-guide-dialog" style="width:min(680px,calc(100% - 28px));padding:0;border:0;border-radius:18px;box-shadow:0 24px 80px rgba(15,35,64,.28);color:#10233f">'
-        f'<div class="standards-guide-head" style="display:flex;justify-content:space-between;gap:16px;align-items:center;padding:18px 21px;border-bottom:1px solid #dbe4ef"><h2 style="margin:0;font-size:20px">{html.escape(title)}</h2>'
-        f'<button id="{prefix}-close" type="button" style="min-height:34px;padding:0 10px;border:1px solid #dbe4ef;border-radius:8px;background:#fff;cursor:pointer">{html.escape(close)}</button></div>'
-        f'<ul style="display:grid;gap:10px;margin:0;padding:18px 21px 22px;list-style:none">{rows_html}</ul></dialog>'
-    )
-    script = f'''<script>(function(){{const dialog=document.getElementById("{prefix}"),open=document.getElementById("{prefix}-open"),close=document.getElementById("{prefix}-close");function show(){{if(typeof dialog.showModal==="function")dialog.showModal();else dialog.setAttribute("open","");}}function hide(){{if(typeof dialog.close==="function")dialog.close();else dialog.removeAttribute("open");}}open.addEventListener("click",show);close.addEventListener("click",hide);}})();</script>'''
-    return button, dialog, script
 
 
 def _source_sw49_table_markup(payload: dict[str, object], language: str) -> str:
@@ -2625,12 +2577,11 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
         f'<th scope="col">{html.escape(header)}<span class="column-resizer" role="separator" aria-orientation="vertical" aria-label="열 너비 조절" title="열 너비 조절" tabindex="0" data-column-index="{index}"></span></th>'
         for index, header in enumerate(table_headers)
     )
-    guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-main-guide", standard_id)
     sw49_table = _source_sw49_table_markup(payload, language)
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 :root{{color-scheme:light;--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--bg:#f4f7fb;--surface:#fff;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:linear-gradient(145deg,#eef5ff,var(--bg) 45%);color:var(--ink);font:15px/1.55 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1120px;margin:0 auto;padding:clamp(24px,6vw,72px) 24px}}.koda-main-brand{{display:flex;align-items:center;gap:12px;margin-bottom:26px;color:var(--muted);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}}.koda-main-classification-badge{{display:inline-flex;align-items:center;min-height:38px;margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius:0;color:#b42318;background:none;font-size:13px;font-weight:900;letter-spacing:.06em;white-space:nowrap}}.koda-main-mark{{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#fff;background:linear-gradient(145deg,#1368e8,#0b3b89);font-weight:900;font-size:18px}}.koda-main-hero{{padding:34px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#0b2853,#1676f3);box-shadow:0 18px 48px rgba(15,35,64,.15)}}.koda-main-hero p{{margin:0 0 10px;color:#b9d7ff;font-size:12px;font-weight:800;letter-spacing:.1em}}h1{{margin:0;font-size:clamp(30px,5vw,52px);line-height:1.05;letter-spacing:-.045em}}.koda-main-intro{{margin:18px 0 0;max-width:680px;color:#d9e8ff}}.koda-main-meta{{display:grid;gap:8px;margin-top:22px;color:#d9e8ff}}.koda-main-meta b{{color:#fff}}.koda-main-cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}}.koda-main-card{{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 8px 20px rgba(15,35,64,.05)}}.koda-main-card span{{display:block;color:var(--muted);font-size:12px;font-weight:750}}.koda-main-card--critical span{{color:var(--critical)}}.koda-main-card--high span{{color:var(--high)}}.koda-main-card--medium span{{color:var(--medium)}}.koda-main-card--low span{{color:var(--low)}}.koda-main-card strong{{display:block;margin-top:8px;color:var(--ink);font-size:30px;letter-spacing:-.04em}}.koda-main-note{{margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#fff;color:var(--muted)}}.source-summary-panel{{overflow:hidden;margin-top:18px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,35,64,.06)}}.source-summary-head{{padding:20px 22px 14px;border-bottom:1px solid var(--line)}}.source-summary-head h2{{margin:0;font-size:20px}}.source-summary-head p{{margin:5px 0 0;color:var(--muted)}}.source-summary-wrap{{overflow:auto}}.source-summary-table{{width:{table_width}px;min-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}}.source-summary-table th{{position:relative;padding:11px 13px;background:#f6f8fb;color:#4a5b73;text-align:left;font-size:11px;letter-spacing:.04em}}.source-summary-table td{{padding:13px;border-top:1px solid #e7edf4;vertical-align:top;overflow-wrap:anywhere}}.source-summary-table th:not(:last-child),.source-summary-table td:not(:last-child){{border-right:1px solid #e7edf4}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}code{{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#0b3b89}}footer{{margin-top:24px;color:var(--muted);font-size:12px}}@media(max-width:820px){{.koda-main-cards{{grid-template-columns:repeat(3,1fr)}}.koda-main-hero{{padding:26px 22px}}}}@media(max-width:520px){{.koda-main-cards{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:360px){{.koda-main-cards{{grid-template-columns:1fr}}}}
 main{{max-width:1560px;padding:28px}}.detail-cta{{display:flex;justify-content:flex-end;margin-top:18px}}.detail-cta a{{display:inline-flex;align-items:center;gap:10px;min-height:48px;padding:0 20px;border:1px solid #0b3b89;border-radius:13px;color:#fff;background:linear-gradient(135deg,#1368e8,#0b3b89);box-shadow:0 12px 24px rgba(19,104,232,.24);text-decoration:none;font-weight:850;transition:transform .16s ease,box-shadow .16s ease}}.detail-cta a:hover{{transform:translateY(-2px);box-shadow:0 16px 30px rgba(19,104,232,.3)}}.detail-cta a:focus-visible{{outline:3px solid #8ec5ff;outline-offset:3px}}
-</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비공개">대외 비공개</span>{guide_button}</div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(languages_text)}</b> {html.escape(analyzed_languages_text) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{sw49_table}<div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div>{guide_dialog}<footer>KODA · {html.escape(generated_at)}</footer></main>{guide_script}</body></html>'''
+</style></head><body><main><div class="koda-main-brand"><span class="koda-main-mark">K</span><span>Korean On-Device Auditor</span><span class="koda-main-classification-badge" title="대외 비공개">대외 비공개</span></div><section class="koda-main-hero"><p>{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1><div class="koda-main-intro">{html.escape(intro)}</div><div class="koda-main-meta"><span><b>{html.escape(target_text)}</b> {html.escape(str(target_names)) or "—"}</span><span><b>{html.escape(languages_text)}</b> {html.escape(analyzed_languages_text) or "—"}</span><span><b>{html.escape(standard_text)}</b> {html.escape(standard_label)} · {html.escape(category_text)} {html.escape(category_label)}</span><span><b>{html.escape(generated_text)}</b> {html.escape(generated_at) or "—"}</span></div></section><section class="koda-main-cards">{cards_html}</section><div class="koda-main-note">{html.escape(priority)}</div><section class="source-summary-panel"><div class="source-summary-head"><h2>{html.escape(summary_heading)}</h2><p>{html.escape(summary_intro)}</p></div><div class="source-summary-wrap"><table class="source-summary-table" style="width:{table_width}px">{colgroup}<thead><tr>{resizable_headers}</tr></thead><tbody>{table_rows}</tbody></table></div></section>{sw49_table}<div class="detail-cta"><a href="{html.escape(detail_href, quote=True)}">상세 보고서 더보기 <span aria-hidden="true">→</span></a></div><footer>KODA · {html.escape(generated_at)}</footer></main></body></html>'''
 
 
 def _source_report_findings(payload: dict[str, object], language: str) -> list[dict[str, object]]:
@@ -2822,11 +2773,10 @@ def _render_html_detail(payload: dict[str, object], language: str) -> str:
     empty = "탐지된 취약점이 없습니다." if is_ko else "No findings were detected."
     cards_html = "".join(cards) or f'<p class="empty">{empty}</p>'
     options = "".join(f'<option value="{html.escape(value, quote=True)}">{html.escape(value)}</option>' for value in location_options)
-    guide_button, guide_dialog, guide_script = _standards_guide_markup(language, "source-detail-guide", str(scan.get("standard") or DEFAULT_STANDARD))
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 main{{max-width:1560px!important;padding:28px!important}}.language-buttons{{display:none!important}}
 :root{{--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f7fb;color:var(--ink);font:15px/1.6 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:auto;padding:32px 22px 64px}}.report-head{{display:flex;align-items:center;gap:12px;margin-bottom:20px}}.report-head h1{{margin:0;font-size:clamp(28px,5vw,46px)}}.external-classification-badge{{margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius: 0;color:#b42318;background: none;font-weight:900}}.toolbar{{display:grid;grid-template-columns:1fr 170px 220px auto;gap:10px;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fff}}input,select{{min-height:40px;border:1px solid #cbd6e5;border-radius:9px;padding:0 11px;background:#fff}}.finding{{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(15,35,64,.05)}}.finding[hidden]{{display:none}}.finding header{{display:flex;justify-content:space-between;gap:14px}}.finding h2{{margin:14px 0 4px;font-size:22px}}.finding h3{{margin:18px 0 6px;font-size:14px}}.location,.unavailable,.standards{{color:var(--muted)}}.standards{{white-space:pre-line}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}pre,.source-context{{overflow:auto;padding:14px;border-radius:10px;background:#0d1b2e;color:#dce8f8}}pre{{white-space:pre-wrap}}.source-code-line{{display:grid;grid-template-columns:48px 1fr;gap:12px;padding:2px 8px}}.source-code-line span{{color:#7890ad;text-align:right}}.source-code-line code{{color:inherit;white-space:pre}}.source-code-line--focus{{background:#46350e;outline:1px solid #d6a514}}@media(max-width:760px){{.toolbar{{grid-template-columns:1fr}}.report-head{{align-items:flex-start;flex-wrap:wrap}}.external-classification-badge{{margin-left:0}}}}
-</style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>KODA · STATIC ANALYSIS · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비공개</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select>{guide_button}</div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section>{guide_dialog}</main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script>{guide_script}</body></html>'''
+</style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>KODA · STATIC ANALYSIS · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비공개</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select></div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section></main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script></body></html>'''
 
 
 def _format_main_count(value: object) -> str:
@@ -3338,14 +3288,13 @@ HTML_TEMPLATE = """<!doctype html>
 
     .header-side {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 14px;
     }
 
     .topbar-actions {
       display: inline-flex;
-      flex-direction: column;
-      align-items: flex-end;
+      align-items: center;
       gap: 8px;
       flex-wrap: wrap;
     }
@@ -3363,6 +3312,13 @@ HTML_TEMPLATE = """<!doctype html>
       flex: 0 0 auto;
     }
 
+    .settings-icon {
+      display: inline-block;
+      font-size: 1.45em;
+      line-height: .7;
+      vertical-align: -0.08em;
+    }
+
     .topbar-action-link {
       display: inline-flex;
       align-items: center;
@@ -3370,18 +3326,55 @@ HTML_TEMPLATE = """<!doctype html>
       text-decoration: none;
     }
 
-    .external-classification-badge {
+    .topbar-menu {
+      position: relative;
+      display: inline-block;
+      flex: 0 0 auto;
+    }
+
+    .topbar-menu > summary {
+      position: relative;
       display: inline-flex;
       align-items: center;
-      min-height: 40px;
-      padding: 8px 16px;
-      border: 2px solid #ef4444;
-      border-radius: 0;
-      color: #ff6b6b;
-      background: none;
-      font-size: 13px;
-      font-weight: 900;
-      letter-spacing: .06em;
+      justify-content: center;
+      cursor: pointer;
+      list-style: none;
+      white-space: nowrap;
+      padding-right: 28px;
+    }
+
+    .topbar-menu > summary::-webkit-details-marker { display: none; }
+    .topbar-menu > summary::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: 12px;
+      width: 6px;
+      height: 6px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: translateY(-50%) rotate(45deg);
+    }
+
+    .topbar-menu-list {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 20;
+      display: grid;
+      gap: 6px;
+      min-width: 190px;
+      padding: 8px;
+      border: 1px solid rgba(203, 213, 225, 0.42);
+      border-radius: 8px;
+      background: #111827;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.24);
+    }
+
+    .topbar-menu-list button {
+      width: 100%;
+      min-width: 0;
+      text-align: left;
       white-space: nowrap;
     }
 
@@ -3518,6 +3511,10 @@ HTML_TEMPLATE = """<!doctype html>
       gap: 10px;
       align-items: center;
       margin-top: 10px;
+      padding: 12px;
+      border: 1px solid var(--border, #dbe4ef);
+      border-radius: 12px;
+      background: #f8fafc;
     }
 
     .scan-web-form .scan-note {
@@ -3592,12 +3589,17 @@ HTML_TEMPLATE = """<!doctype html>
       border-radius: 6px;
       padding: 8px;
       margin: 0;
+      background: #eef6ff;
     }
     .scan-web-headers {
       grid-column: span 1;
       display: flex;
       flex-direction: column;
       gap: 4px;
+    }
+    .scan-web-headers-wide {
+      grid-column: span 2;
+      width: min(600px, 100%);
     }
     .scan-web-textareas {
       grid-column: 1 / -1;
@@ -3610,6 +3612,13 @@ HTML_TEMPLATE = """<!doctype html>
     .scan-web-options textarea {
       width: 100%;
       box-sizing: border-box;
+    }
+    #web-api-spec {
+      height: 37px;
+      min-height: 37px;
+    }
+    #zap-options-content {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .scan-actions {
@@ -3843,7 +3852,7 @@ HTML_TEMPLATE = """<!doctype html>
     }
 
     details {
-      max-width: 520px;
+      max-width: 1040px;
     }
 
     summary {
@@ -4017,14 +4026,14 @@ HTML_TEMPLATE = """<!doctype html>
       min-width: 54px;
       font-size: 18px;
       line-height: 1;
+      background: #fff;
+      border-color: #cbd5e1;
+      color: #334155;
     }
-    #settings-collapse-all {
-      background: #9a3412;
-      border-color: #9a3412;
-    }
-    #settings-expand-all {
-      background: #0f766e;
-      border-color: #0f766e;
+    #settings-collapse-all:hover,
+    #settings-expand-all:hover {
+      background: #f1f5f9;
+      color: #0f172a;
     }
     .settings-tab {
       cursor: pointer;
@@ -4047,7 +4056,7 @@ HTML_TEMPLATE = """<!doctype html>
     #settings-disable-all { margin-left: auto; }
     .settings-groups {
       display: grid;
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 14px;
       width: 100%;
     }
@@ -4063,6 +4072,38 @@ HTML_TEMPLATE = """<!doctype html>
       cursor: pointer;
       font-weight: 700;
       font-size: 15px;
+    }
+    .settings-group--quality {
+      grid-column: 1 / -1;
+    }
+    .settings-rule-list {
+      display: grid;
+    }
+    .settings-group--quality .settings-rule-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: 14px;
+    }
+    .settings-group-summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .settings-group-toggle {
+      width: auto;
+      min-height: 28px;
+      margin-left: auto;
+      padding: 3px 10px;
+      border: 1px solid var(--border, #cbd5e1);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted, #64748b);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .settings-group-toggle:hover {
+      background: #f1f5f9;
+      color: var(--ink, #0f172a);
     }
     .settings-rule {
       display: flex;
@@ -4280,6 +4321,7 @@ HTML_TEMPLATE = """<!doctype html>
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .filters, .scan-form, .scan-standard-form { grid-template-columns: 1fr 1fr; }
       .scan-web-options-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .settings-groups { grid-template-columns: 1fr; }
       .scan-actions { align-items: stretch; }
       .standards-help { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
@@ -4291,13 +4333,16 @@ HTML_TEMPLATE = """<!doctype html>
     @media (max-width: 640px) {
       .shell { width: min(100% - 20px, 1440px); }
       .topbar { align-items: flex-start; flex-direction: column; padding: 16px 0; gap: 8px; }
-      .header-side { width: 100%; padding-top: 34px; flex-wrap: wrap; }
-      .topbar-actions { position: absolute; top: 16px; right: 0; }
+      .header-side { width: 100%; flex-wrap: wrap; }
+      .topbar-actions { position: static; }
       .language-toggle { position: static; }
       .meta { text-align: left; white-space: normal; }
       .metrics, .filters, .scan-form, .scan-standard-form, .scan-web-form { grid-template-columns: 1fr; }
       .scan-web-options-content { grid-template-columns: 1fr; }
+      #zap-options-content { grid-template-columns: 1fr; }
+      .settings-group--quality .settings-rule-list { grid-template-columns: 1fr; }
       .scan-web-headers, .scan-web-login { grid-column: 1 / -1; }
+      .scan-web-headers-wide { width: 100%; }
       .scan-web-textareas { grid-template-columns: 1fr; }
       .scan-actions { display: grid; grid-template-columns: 1fr; }
       .standard-head { grid-template-columns: 1fr; }
@@ -4314,16 +4359,22 @@ HTML_TEMPLATE = """<!doctype html>
       </div>
       <div class="header-side">
         <div class="topbar-actions">
-          <span class="external-classification-badge" title="대외 비공개">대외 비공개</span>
           <div class="language-toggle" role="group" aria-label="Language">
             <button id="lang-ko" type="button">KO</button>
             <button id="lang-en" type="button">EN</button>
           </div>
           __INITIAL_SUMMARY_LINK_HTML__
           __INITIAL_SSBOM_TRACKER_LINK_HTML__
-          __INITIAL_STANDARDS_GUIDE_BUTTON__
           <button id="help-toggle" class="topbar-action" type="button">__INITIAL_HELP__</button>
-          <button id="settings-toggle" class="topbar-action" type="button">⚙ 설정</button>
+          <details id="prevention-kit-menu" class="topbar-menu">
+            <summary id="prevention-kit-toggle" class="topbar-action">__INITIAL_PREVENTION_KIT_TITLE__</summary>
+            <div class="topbar-menu-list" role="menu">
+              <button id="prevention-apply-toolkit" type="button" role="menuitem">__INITIAL_PREVENTION_APPLY_TOOLKIT__</button>
+              <button id="prevention-install-hook" type="button" role="menuitem">__INITIAL_PREVENTION_INSTALL_HOOK__</button>
+              <button id="prevention-create-ignore" type="button" role="menuitem">__INITIAL_PREVENTION_CREATE_IGNORE__</button>
+            </div>
+          </details>
+          <button id="settings-toggle" class="topbar-action" type="button"><span class="settings-icon" aria-hidden="true">⚙</span> 설정</button>
         </div>
         <div class="meta">
           <div id="generated-line"></div>
@@ -4382,7 +4433,7 @@ HTML_TEMPLATE = """<!doctype html>
             <label><span id="web-login-user-label"></span> <input id="web-login-user" autocomplete="off"></label>
             <label><span id="web-login-pass-label"></span> <input id="web-login-pass" type="password" autocomplete="off"></label>
           </fieldset>
-          <label class="scan-web-headers"><span id="web-headers-label"></span>
+          <label class="scan-web-headers scan-web-headers-wide"><span id="web-headers-label"></span>
             <textarea id="web-headers" rows="2" autocomplete="off"></textarea>
           </label>
           </div>
@@ -4395,11 +4446,12 @@ HTML_TEMPLATE = """<!doctype html>
         <input id="zap-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
         <details class="scan-web-options">
           <summary id="zap-options-label"></summary>
-          <div class="scan-web-options-content">
+          <div id="zap-options-content" class="scan-web-options-content">
+          <button id="zap-options-select-all" class="scan-option-select-all" type="button"></button>
           <label class="scan-web-check"><input id="zap-ajax" type="checkbox"> <span id="zap-ajax-label"></span></label>
+          <label class="scan-web-check"><input id="zap-merge" type="checkbox"> <span id="zap-merge-label"></span></label>
           <label class="scan-web-check"><input id="zap-active" type="checkbox"> <span id="zap-active-label"></span></label>
-          <label class="scan-web-check span-all"><input id="zap-authorized" type="checkbox"> <span id="zap-authorized-label"></span></label>
-          <label class="scan-web-check span-all"><input id="zap-merge" type="checkbox"> <span id="zap-merge-label"></span></label>
+          <label class="scan-web-check"><input id="zap-authorized" type="checkbox"> <span id="zap-authorized-label"></span></label>
           <div class="scan-web-textareas">
           <label class="scan-web-headers"><span id="zap-include-label"></span>
             <textarea id="zap-include" rows="2" autocomplete="off"></textarea>
@@ -4418,13 +4470,6 @@ HTML_TEMPLATE = """<!doctype html>
         </details>
         <button id="zap-scan-run" type="button">__INITIAL_ZAP_SCAN_NOW__</button>
         <span id="zap-scan-note" class="scan-note"></span>
-      </div>
-      <div class="scan-prevention-form">
-        <span id="prevention-kit-title" class="scan-web-title">__INITIAL_PREVENTION_KIT_TITLE__</span>
-        <button id="prevention-apply-toolkit" type="button">__INITIAL_PREVENTION_APPLY_TOOLKIT__</button>
-        <button id="prevention-install-hook" type="button">__INITIAL_PREVENTION_INSTALL_HOOK__</button>
-        <button id="prevention-create-ignore" type="button">__INITIAL_PREVENTION_CREATE_IGNORE__</button>
-        <span id="prevention-kit-note" class="scan-note"></span>
       </div>
       <div class="scan-standard-form">
         <label class="scan-select">
@@ -4473,7 +4518,6 @@ HTML_TEMPLATE = """<!doctype html>
         <p id="download-notice-body" class="download-notice-body"></p>
         <button id="download-notice-close" type="button" class="download-dialog-cancel"></button>
       </dialog>
-      __INITIAL_STANDARDS_GUIDE_DIALOG__
       <div id="scan-status" class="scan-status">__INITIAL_SCAN_STATUS_IDLE__</div>
     </section>
 
@@ -4713,6 +4757,25 @@ HTML_TEMPLATE = """<!doctype html>
       byId("web-options-select-all").setAttribute("aria-pressed", String(allChecked));
     }
 
+    function renderZapOptionSelectAllLabel() {
+      const activeLabels = labels();
+      const container = byId("zap-options-content");
+      const checkboxes = [...container.querySelectorAll(".scan-web-check input[type='checkbox']")];
+      const allChecked = checkboxes.length > 0 && checkboxes.every((input) => input.checked);
+      setText("zap-options-select-all", allChecked ? activeLabels.web_clear_all : activeLabels.web_select_all);
+      byId("zap-options-select-all").setAttribute("aria-pressed", String(allChecked));
+    }
+
+    function renderSettingsToggle() {
+      const button = byId("settings-toggle");
+      if (state.view === "settings") {
+        setText("settings-toggle", labels().dashboard);
+      } else {
+        button.innerHTML = `<span class="settings-icon" aria-hidden="true">⚙</span> ${escapeText(labels().settings)}`;
+      }
+      button.setAttribute("aria-pressed", state.view === "settings" ? "true" : "false");
+    }
+
     function showDownloadNotice() {
       const activeLabels = labels();
       setText("download-notice-title", activeLabels.download_future_title);
@@ -4851,12 +4914,12 @@ HTML_TEMPLATE = """<!doctype html>
       setText("zap-merge-label", activeLabels.zap_merge);
       setText("zap-include-label", activeLabels.zap_include_label);
       setText("zap-exclude-label", activeLabels.zap_exclude_label);
+      renderZapOptionSelectAllLabel();
       setText("zap-login-legend-label", activeLabels.zap_login_legend);
       setText("zap-login-url-label", activeLabels.web_login_url);
       setText("zap-login-user-label", activeLabels.web_login_user);
       setText("zap-login-pass-label", activeLabels.web_login_pass);
-      setText("prevention-kit-title", activeLabels.prevention_kit_title);
-      setText("prevention-kit-note", activeLabels.prevention_kit_note);
+      setText("prevention-kit-toggle", activeLabels.prevention_kit_title);
       setText("prevention-apply-toolkit", activeLabels.prevention_apply_toolkit);
       setText("prevention-install-hook", activeLabels.prevention_install_hook);
       setText("prevention-create-ignore", activeLabels.prevention_create_ignore);
@@ -5010,7 +5073,7 @@ HTML_TEMPLATE = """<!doctype html>
         if (state.category !== "all" && finding.category !== state.category) return false;
         if (state.target !== "all" && finding.target !== state.target) return false;
         if (state.location !== "all" && finding.path !== state.location) return false;
-        if (state.resultStandard !== "all" && !(ruleMappings()[finding.rule_id] || []).some((mapping) => mapping.standard_id === state.resultStandard)) return false;
+        if (state.resultStandard !== "all" && state.resultStandard !== "local" && !(ruleMappings()[finding.rule_id] || []).some((mapping) => mapping.standard_id === state.resultStandard)) return false;
         if (!query) return true;
         return [finding.title, finding.rule_id, categoryLabel(finding.category), finding.path, targetDisplay(finding.target), finding.evidence, finding.recommendation]
           .join(" ")
@@ -5139,8 +5202,7 @@ HTML_TEMPLATE = """<!doctype html>
       byId("settings-view").hidden = !isSettings;
       setText("help-toggle", isHelp ? labels().dashboard : labels().help);
       byId("help-toggle").setAttribute("aria-pressed", isHelp ? "true" : "false");
-      setText("settings-toggle", isSettings ? labels().dashboard : `⚙ ${labels().settings}`);
-      byId("settings-toggle").setAttribute("aria-pressed", isSettings ? "true" : "false");
+      renderSettingsToggle();
       if (isSettings) {
         renderSettings();
       }
@@ -5182,9 +5244,12 @@ HTML_TEMPLATE = """<!doctype html>
             </label>
           </div>`;
         }).join("");
-        return `<details class="settings-group" open>
-          <summary>${escapeText(group.label)} (${group.rules.length})</summary>
-          ${rules}
+        const allEnabled = group.rules.length > 0 && group.rules.every((rule) => !state.disabledRules.has(rule.id));
+        const groupClass = group.kind === "quality" ? " settings-group--quality" : "";
+        const toggleLabel = allEnabled ? activeLabels.settings_disable_all : activeLabels.settings_reset;
+        return `<details class="settings-group${groupClass}" data-group-key="${escapeText(group.key)}" open>
+          <summary class="settings-group-summary"><span>${escapeText(group.label)} (${group.rules.length})</span><button class="settings-group-toggle" type="button" data-group-key="${escapeText(group.key)}">${escapeText(toggleLabel)}</button></summary>
+          <div class="settings-rule-list">${rules}</div>
         </details>`;
       }).join("");
 
@@ -5197,6 +5262,21 @@ HTML_TEMPLATE = """<!doctype html>
             state.disabledRules.add(ruleId);
           }
           saveDisabledRules();
+        });
+      });
+      byId("settings-groups").querySelectorAll(".settings-group-toggle").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const group = (state.settingsCatalog.groups || []).find((item) => item.key === button.getAttribute("data-group-key"));
+          if (!group) return;
+          const allEnabled = group.rules.length > 0 && group.rules.every((rule) => !state.disabledRules.has(rule.id));
+          group.rules.forEach((rule) => {
+            if (allEnabled) state.disabledRules.add(rule.id);
+            else state.disabledRules.delete(rule.id);
+          });
+          saveDisabledRules();
+          renderSettings();
         });
       });
     }
@@ -5739,6 +5819,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     async function runPreventionAction(action) {
       const activeLabels = labels();
+      byId("prevention-kit-menu").open = false;
       const path = byId("scan-path").value.trim();
       if (!path) {
         state.scanStatus = activeLabels.prevention_need_folder;
@@ -5880,6 +5961,12 @@ HTML_TEMPLATE = """<!doctype html>
       checkboxes.forEach((input) => { input.checked = !allChecked; });
       renderWebOptionSelectAllLabel();
     });
+    byId("zap-options-select-all").addEventListener("click", () => {
+      const checkboxes = [...byId("zap-options-content").querySelectorAll(".scan-web-check input[type='checkbox']")];
+      const allChecked = checkboxes.length > 0 && checkboxes.every((input) => input.checked);
+      checkboxes.forEach((input) => { input.checked = !allChecked; });
+      renderZapOptionSelectAllLabel();
+    });
     byId("web-url").addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         runWebScan();
@@ -5970,7 +6057,6 @@ HTML_TEMPLATE = """<!doctype html>
 
     render();
   </script>
-  __INITIAL_STANDARDS_GUIDE_SCRIPT__
 </body>
 </html>
 """

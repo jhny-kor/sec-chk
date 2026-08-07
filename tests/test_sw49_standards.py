@@ -620,6 +620,28 @@ cursor.execute(query)
             with self.subTest(filename=filename):
                 self.assertNotIn("code.sql-dynamic-query", self._rule_ids(filename, source))
 
+    def test_mybatis_literal_substitution_is_reviewed_and_bound_values_are_safe(self) -> None:
+        vulnerable = """\
+<mapper namespace="example.Mapper">
+  <select id="selectItems">
+    SELECT MAX(DECODE(CRITM_ID, #{item}, CRITM_VAL)) AS ${item}
+  </select>
+</mapper>
+"""
+        finding = next(
+            item for item in self._scan("Mapper.xml", vulnerable)
+            if item.rule_id == "code.sql-dynamic-query"
+        )
+        self.assertEqual(finding.line, 3)
+        self.assertEqual(finding.verification_status, "needs_review")
+
+        safe = """\
+<mapper namespace="example.Mapper">
+  <select id="selectItems">SELECT * FROM items WHERE item_id = #{item}</select>
+</mapper>
+"""
+        self.assertNotIn("code.sql-dynamic-query", self._rule_ids("Mapper.xml", safe))
+
     def test_multiline_xss_flow_is_confirmed_and_sanitized_flow_is_safe(self) -> None:
         vulnerable = """\
 const html = location.hash;
@@ -642,6 +664,40 @@ element.innerHTML = safe + tainted;
 """
         finding = next(item for item in self._scan("a.js", mixed) if item.rule_id == "code.xss-dom-sink")
         self.assertEqual(finding.verification_status, "confirmed")
+
+    def test_jsp_unescaped_output_is_detected_without_flagging_trusted_el(self) -> None:
+        direct = '<div><%= request.getParameter("name") %></div>\n'
+        finding = next(
+            item for item in self._scan("view.jsp", direct)
+            if item.rule_id == "code.xss-dom-sink"
+        )
+        self.assertEqual(finding.verification_status, "confirmed")
+
+        el = '<div>${param.name}</div>\n'
+        finding = next(
+            item for item in self._scan("view.jsp", el)
+            if item.rule_id == "code.xss-dom-sink"
+        )
+        self.assertEqual(finding.verification_status, "confirmed")
+
+        scriptlet_sink = """\
+<script>
+var vsStrParam = "<%= vsStrParam %>";
+document.write(vsStrParam);
+</script>
+"""
+        finding = next(
+            item for item in self._scan("view.jsp", scriptlet_sink)
+            if item.rule_id == "code.xss-dom-sink"
+        )
+        self.assertEqual(finding.verification_status, "needs_review")
+
+        safe = """\
+<c:out value="${param.name}" />
+<link rel="stylesheet" href="${thirdPartyURL}/style.css" />
+<script>var value = "<%= Encode.forJavaScript(vsStrParam) %>";</script>
+"""
+        self.assertNotIn("code.xss-dom-sink", self._rule_ids("view.jsp", safe))
 
     def test_command_argument_array_without_shell_is_not_confirmed(self) -> None:
         safe = 'subprocess.run(["ping", "--", request.args["host"]], shell=False, check=True)\n'
@@ -1395,6 +1451,34 @@ class Sw49SemanticRuleTests(unittest.TestCase):
             self._rules(".java", "void first() { Connection in = getConnection(url); in.close(); }\nvoid second() { Connection in = getConnection(url); use(in); }"),
         )
 
+    def test_c02_release_covers_exception_paths_and_url_connections(self) -> None:
+        vulnerable_writer = """\
+try {
+    FileWriter renameFile = new FileWriter(path, true);
+    Scanner scanner = new Scanner(tempFile, "UTF-8");
+    PrintWriter out = new PrintWriter(renameFile, true);
+    out.println(value);
+    out.close();
+} catch (Exception e) {
+    throw e;
+}
+"""
+        self.assertIn("code.improper-resource-release", self._rules(".java", vulnerable_writer))
+
+        vulnerable_connection = "HttpURLConnection conn = (HttpURLConnection) url.openConnection();\nconn.getInputStream();"
+        self.assertIn("code.improper-resource-release", self._rules(".java", vulnerable_connection))
+
+        safe_connection = """\
+HttpURLConnection conn = null;
+try {
+    conn = (HttpURLConnection) url.openConnection();
+    use(conn);
+} finally {
+    if (conn != null) conn.disconnect();
+}
+"""
+        self.assertNotIn("code.improper-resource-release", self._rules(".java", safe_connection))
+
     def test_c03_use_after_free_and_reset_or_reassign(self) -> None:
         self.assertIn("code.use-after-free", self._rules(".c", "int *p = malloc(4);\nfree(p);\nreturn *p;"))
         self.assertNotIn("code.use-after-free", self._rules(".c", "int *p = malloc(4);\nfree(p);\np = NULL;\nreturn 0;"))
@@ -1479,6 +1563,32 @@ class Sw49SemanticRuleTests(unittest.TestCase):
                 self.assertIn(rule_id, self._rules(suffix, positive))
                 self.assertNotIn(rule_id, self._rules(suffix, negative))
 
+    def test_authorization_candidate_requires_an_endpoint_and_sensitive_mutation(self) -> None:
+        vulnerable = """\
+@PostMapping("/users/update")
+@ResponseBody
+public BaseMap updateUser(@RequestBody BaseMap params, HttpSession session) {
+    return userDao.update(params);
+}
+"""
+        self.assertIn("code.authorization-check-missing", self._rules(".java", vulnerable))
+
+        service_only = """\
+public BaseMap updateUser(BaseMap params) {
+    return userDao.update(params);
+}
+"""
+        self.assertNotIn("code.authorization-check-missing", self._rules(".java", service_only))
+
+        protected = """\
+@PreAuthorize("hasRole('ADMIN')")
+@PostMapping("/users/update")
+public BaseMap updateUser(@RequestBody BaseMap params) {
+    return userDao.update(params);
+}
+"""
+        self.assertNotIn("code.authorization-check-missing", self._rules(".java", protected))
+
     def test_a02_covers_managed_runtime_apis_from_the_guide(self) -> None:
         servlet_socket = (
             "class Handler extends HttpServlet {\n"
@@ -1509,6 +1619,15 @@ class Sw49SemanticRuleTests(unittest.TestCase):
         self.assertNotIn(
             "code.broad-exception-handler",
             self._rules(".py", "try:\n    process()\nexcept ValueError as exc:\n    raise exc"),
+        )
+        self.assertNotIn(
+            "code.broad-exception-handler",
+            self._rules(
+                ".java",
+                "try { process(); } catch (Exception e) {\n"
+                "  throw new BusinessException(\"failed\", e);\n"
+                "}",
+            ),
         )
 
     def test_s12_requires_sensitive_persistent_cookie(self) -> None:

@@ -99,9 +99,8 @@ The supported profiles include `owasp-asvs-5`, `owasp-proactive-controls`,
 its issuer/release date, and use `--standard-category` to narrow a profile to
 one category.
 
-Add `--language ko` or `--language en` to fix the report language. When omitted,
-the HTML report opens in Korean and includes a Korean/English toggle; Markdown is
-generated in Korean. Findings are grouped by library and installed version, with
+Java HTML and Markdown reports are currently generated in Korean; `--language`
+accepts only `ko`. Findings are grouped by library and installed version, with
 `Fixed` advisory candidates and a DB-verified `Final` candidate when available.
 
 Without the data package `jar-scan` still runs on Grype alone, but reports carry

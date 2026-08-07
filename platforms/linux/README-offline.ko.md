@@ -28,9 +28,8 @@ bash install.sh
   --fail-on high --fail-on-kev
 ```
 
-HTML은 `--language`를 생략하면 한국어로 열리고 `한국어`/`English` 전환
-버튼을 표시합니다. `--language ko|en`을 지정하면 HTML과 Markdown이 해당
-언어로 고정됩니다. `Final`은 현재 번들 Grype DB 기준으로 취약점이 없는
+HTML과 Markdown은 현재 한국어로 생성되며 `--language`는 `ko`만 지원합니다.
+`Final`은 현재 번들 Grype DB 기준으로 취약점이 없는
 것을 확인한 최종 조치 후보입니다.
 
 소스 취약점은 `koda scan --target /deploy/source --format html --output reports/source.html`로

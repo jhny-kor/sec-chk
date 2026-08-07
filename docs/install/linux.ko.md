@@ -13,8 +13,8 @@ python3 -m security_scanner jar-scan \
   --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json
 ```
 
-언어를 생략하면 HTML은 한국어로 열리고 `한국어`/`English` 전환 버튼을
-표시합니다. `--language ko|en`을 지정하면 해당 언어로 고정됩니다.
+JAR 보고서는 현재 HTML과 Markdown 모두 한국어로 생성되며 `--language`는
+`ko`만 지원합니다.
 `--target`은 반복 지정할 수 있으며, 여러 폴더의 결과를 하나의 라이브러리
 메인/상세 리포트와 SBOM으로 통합합니다.
 

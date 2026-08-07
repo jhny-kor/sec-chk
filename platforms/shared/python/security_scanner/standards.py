@@ -498,11 +498,11 @@ def _text(en: str, ko: str) -> dict[str, str]:
 
 LOCAL_STANDARD = SecurityStandard(
     DEFAULT_STANDARD,
-    {"en": "Local Rule Categories", "ko": "로컬 룰 종류"},
+    {"en": "All", "ko": "전체"},
     (
         StandardCategory(
             DEFAULT_STANDARD_CATEGORY,
-            {"en": "All local security checks", "ko": "모든 로컬 보안 점검"},
+            {"en": "All", "ko": "전체"},
             scanner_categories=DEFAULT_CATEGORIES,
         ),
         StandardCategory(

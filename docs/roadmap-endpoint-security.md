@@ -7,7 +7,7 @@
 
 > 목적: KODA를 "소스코드/레포 스캐너"에서 **설치된 컴퓨터(엔드포인트)의 보안 상태를 점검하는 도구**로 확장한다.
 > 상태: 계획(Planning). 이 문서는 추후 구현의 기준 로드맵이다.
-> 최종 갱신: 2026-06-07
+> 계획 기록: 2026-06-07 · 현재 구현 정정: 2026-08-07
 
 ---
 
@@ -135,7 +135,12 @@ platforms/shared/python/security_scanner/
 - [ ] **Windows 실측 검증** → `docs/windows-host-verification.md` 참조 (별도 트랙).
 - [ ] (후속) macOS XProtect 시그니처 최신성, 리스닝 포트/원격접속(SSH·화면공유) — admin/정확도 이슈로 후순위.
 
-macOS `host-scan` 현재 6개 항목 점검: SIP·FileVault·Gatekeeper(A) + Application Firewall·Stealth(C) + Auto Security Updates(E).
+공통 Python 엔진의 macOS `host-scan`은 현재 9개 항목을 점검합니다: 기존
+6개(SIP·FileVault·Gatekeeper, Application Firewall·Stealth, Auto Security
+Updates)에 자동 로그인·게스트 계정·화면 잠금이 추가되었습니다. Windows
+`host-scan`은 BitLocker·Defender·Secure Boot·방화벽 프로파일·자동 로그인·게스트
+계정·화면 잠금 7개 프로브를 구현했지만 실제 Windows 장치 검증은 완료되지
+않았습니다.
 
 ### Phase 2 — B 소프트웨어 최신성 — 🟡 진행 (2026-06-07)
 - [x] 설치 앱 인벤토리 수집 `inventory.py` (macOS `system_profiler -json`, Windows 레지스트리 Uninstall). 오프라인, 386개 수집 확인.
@@ -152,7 +157,7 @@ macOS `host-scan` 현재 6개 항목 점검: SIP·FileVault·Gatekeeper(A) + App
 
 ### macOS — Swift 네이티브 앱에 host posture 추가 — ✅ (2026-06-07)
 > 방침: macOS는 **Swift 네이티브 KODA 앱**(`platforms/macos/app/KODA`)으로 구동된다. host posture는 별도 Python 앱/창이 아니라 **기존 Swift 앱의 네이티브 스캐너에 직접 추가**한다. PyInstaller/pywebview 방향은 폐기(되돌림).
-- [x] `NativeSecurityScanner.swift`에 `scanHost()` + 읽기전용 `Process` 러너 추가. 점검 6종(SIP·FileVault·Gatekeeper·Application Firewall·Stealth·자동 보안 업데이트), 각 프로브 실패는 경고로 격리.
+- [x] `NativeSecurityScanner.swift`에 `scanHost()` + 읽기전용 `Process` 러너 추가. 네이티브 앱도 공통 Python 엔진과 같은 macOS 점검 9종(기존 6종 + 자동 로그인·게스트 계정·화면 잠금)을 실행하며, 각 프로브 실패는 경고로 격리.
 - [x] `category="host"` 라벨(ko/en) 추가 — 기존 리포트(HTML/MD/PDF/점수)에 그대로 통합.
 - [x] `ScannerBridge.swift`: `runHostScan(language:)` + `runHostScanCommand()` — 기존 리포트/점수 스냅샷 파이프라인 재사용(타깃 선택 불필요).
 - [x] `ContentView.swift`: 메뉴에 "이 컴퓨터 점검 (호스트 보안)" 버튼 추가(OSV 조회 옆). `AppLanguage.runHostScanTitle`(ko/en).
