@@ -589,8 +589,8 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
             # Seeds (an API spec or --seed) are scanned even without --crawl, at
             # depth 0 (no link-following) unless --crawl is also given.
-            max_pages=None if (args.crawl or seeds) else 1,
-            max_depth=None if args.crawl else 0,
+            max_pages=args.max_pages if (args.crawl or seeds) else 1,
+            max_depth=args.max_depth if args.crawl else 0,
             delay=args.delay,
             opener=opener,
             extra_headers=extra_headers or None,
@@ -772,6 +772,13 @@ def _positive_float(value: str) -> float:
     return parsed
 
 
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be zero or positive")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="local-security-scan",
@@ -941,6 +948,8 @@ def build_parser() -> argparse.ArgumentParser:
     web_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
     web_scan.add_argument("--timeout", type=float, default=15.0, help="per-request timeout in seconds")
     web_scan.add_argument("--crawl", action="store_true", help="follow same-host links and scan sub-pages")
+    web_scan.add_argument("--max-pages", type=_positive_int, default=50, help="maximum URLs to process while crawling (default 50)")
+    web_scan.add_argument("--max-depth", type=_nonnegative_int, default=3, help="maximum same-host link depth while crawling (default 3)")
     web_scan.add_argument(
         "--render",
         action="store_true",

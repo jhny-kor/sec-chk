@@ -6,6 +6,7 @@ import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
@@ -63,6 +64,14 @@ class LinkAndHostTests(unittest.TestCase):
         # A placeholder-looking generic value should not fire.
         text = 'password = "changeme"'
         self.assertEqual(web._scan_text_for_secrets(text, "http://s.test/a.js", "s.test"), [])
+
+    def test_asset_fetch_failure_is_counted(self):
+        with patch("security_scanner.web._read_asset", return_value=None):
+            routes, findings, failed, limited = web._scan_assets(
+                "http://s.test/", '<script src="/app.js"></script>', web.build_auth_opener(), {}, 1,
+                set(), 20, "s.test", extract_routes=True, scan_secrets=True,
+            )
+        self.assertEqual((routes, findings, failed, limited), (set(), [], 1, False))
 
     def test_analyze_body_tier2(self):
         html = ('<script src="http://cdn.x/a.js"></script>'
@@ -280,8 +289,37 @@ class LiveCrawlTests(unittest.TestCase):
         self.assertEqual(private["skip_reason"], "redirected to login page; protected content was not scanned")
 
     def test_max_pages_caps_crawl(self):
-        _findings, _warnings, pages = web.crawl_web(self.base + "/", max_pages=2, max_depth=3, delay=0)
+        _findings, warnings, pages = web.crawl_web(self.base + "/", max_pages=2, max_depth=3, delay=0)
         self.assertEqual(pages, 2)
+        self.assertTrue(any("max_pages=2" in warning for warning in warnings))
+
+    def test_response_body_read_obeys_wall_clock_budget(self):
+        class SlowBody:
+            headers = {"Content-Type": "text/html"}
+
+            def read1(self, _amount):
+                return b"x"
+
+            read = read1
+
+        with patch("security_scanner.web.time.monotonic", side_effect=[0.0, 0.04, 0.08]):
+            with self.assertRaises(TimeoutError):
+                web._read_safe_body(SlowBody(), 10, timeout=0.05)
+
+    def test_response_body_over_limit_fails_closed(self):
+        class OversizedBody:
+            def __init__(self):
+                self.remaining = 11
+
+            def read1(self, amount):
+                size = min(amount, self.remaining)
+                self.remaining -= size
+                return b"x" * size
+
+            read = read1
+
+        with self.assertRaises(web.ResponseBodyLimitError):
+            web._read_bounded_body(OversizedBody(), 10, timeout=1)
 
     def test_check_web_is_single_page(self):
         findings, warnings = web.check_web(self.base + "/")

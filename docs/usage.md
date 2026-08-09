@@ -202,6 +202,19 @@ The default `web-scan` performs a bounded posture check. `--crawl`, `--render`,
 `--discover-assets`, `--capture-network`, `--interact`, `--scan-js-secrets`,
 `--ingest-sitemap`, and `--probe-paths` increase the requests or discovery scope.
 
+`--crawl` defaults to 50 pages and depth 3; use `--max-pages` and `--max-depth`
+to adjust those budgets. KODA deduplicates URLs and applies a separate request
+safety limit. Page, depth, or request limits, body-read limits, and rendering
+failures are reported as warnings with unscanned coverage rather than hidden as
+PASS. `--timeout` is a per-request connection/idle-read limit, not a strict
+wall-clock limit for the complete scan.
+
+The local dashboard's Select all control is scoped to web-scan options and does
+not change ZAP options. It includes active verification, so use it only on an
+authorized target. The dashboard automatically forwards its loopback session
+token before an active scan. Direct API clients must send the `X-KODA-Session`
+value returned by `/api/health` together with the exact loopback `Origin`.
+
 ```bash
 # Bounded posture scan
 python3 -m security_scanner web-scan --url https://example.com --format markdown

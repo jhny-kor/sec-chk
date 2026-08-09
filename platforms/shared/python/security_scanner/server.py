@@ -157,8 +157,9 @@ def web_scan_payload(
     min_severity: str = "info",
     timeout: float = 15.0,
     crawl: bool = False,
-    max_pages: int | None = None,
-    max_depth: int | None = None,
+    # ponytail: bounded interactive default; CLI flags cover larger authorized sites.
+    max_pages: int | None = 50,
+    max_depth: int | None = 3,
     delay: float = 0.3,
     render: bool = False,
     discover_assets: bool = False,
@@ -671,7 +672,10 @@ def _handler(language: str):
                     _string_value(request, "url"),
                     language=_choice_value(request, "language", {"en", "ko"}, language),
                     min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "info"),
+                    timeout=_bounded_float(request.get("timeout"), default=10.0, low=0.5, high=30.0),
                     crawl=bool(request.get("crawl")),
+                    max_pages=_bounded_int(request.get("max_pages"), default=50, low=1, high=500),
+                    max_depth=_bounded_int(request.get("max_depth"), default=3, low=0, high=10),
                     delay=_bounded_float(request.get("delay"), default=0.3, low=0.0, high=10.0),
                     render=bool(request.get("render")),
                     discover_assets=bool(request.get("discover_assets")),
@@ -882,6 +886,7 @@ def _handler(language: str):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("X-KODA-Session", getattr(self.server, "koda_session_token", ""))
             self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -903,6 +908,7 @@ def _handler(language: str):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-KODA-Session")
+            self.send_header("Access-Control-Expose-Headers", "X-KODA-Session")
             self.send_header("Vary", "Origin")
 
     return DashboardHandler

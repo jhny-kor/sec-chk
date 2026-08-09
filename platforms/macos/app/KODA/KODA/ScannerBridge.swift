@@ -295,8 +295,12 @@ final class ScannerBridge: ObservableObject {
                 if let snapshot = result.scoreSnapshot {
                     recordScoreSnapshot(snapshot)
                 }
-                setStatus(ko: "점검 완료: \(output.path)", en: "Scan complete: \(output.path)")
-                statusColor = .green
+                let hasWarnings = result.reportItems.first?.warnings.isEmpty == false
+                setStatus(
+                    ko: hasWarnings ? "점검 완료(확인 필요): \(output.path)" : "점검 완료: \(output.path)",
+                    en: hasWarnings ? "Scan complete (review warnings): \(output.path)" : "Scan complete: \(output.path)"
+                )
+                statusColor = hasWarnings ? .orange : .green
             } else {
                 setStatus(ko: result.messageKO, en: result.messageEN)
                 statusColor = .red
@@ -4291,7 +4295,10 @@ private enum NativeWebScanner {
     /// `crawl_web` / `login` parameters so both platforms behave the same.
     struct Options {
         var crawl = false
-        var delay: TimeInterval = 0.3
+        var delay: TimeInterval = 0.1
+        // ponytail: bounded native UI crawl; expose budgets only if 50/3 is routinely insufficient.
+        var maxPages = 50
+        var maxDepth = 3
         var loginURL = ""
         var username = ""
         var password = ""
@@ -4378,20 +4385,34 @@ private enum NativeWebScanner {
         var tlsCheckedHosts: Set<String> = []
         var hostProbed: Set<String> = []
         var queue: [(url: URL, depth: Int)] = [(seed, 0)]
+        var queued: Set<String> = [canonical(seed)]
+        func enqueue(_ url: URL, depth: Int) {
+            let key = canonical(url)
+            guard !queued.contains(key) else { return }
+            queued.insert(key)
+            queue.append((url, depth))
+        }
         // E: enqueue caller-supplied same-host seeds (known routes / sitemap / API paths).
         for seedPath in options.seeds {
             if let resolved = URL(string: seedPath, relativeTo: seed)?.absoluteURL, sameHost(seed, resolved.absoluteString) {
-                queue.append((resolved, 0))
+                enqueue(resolved, depth: 0)
             }
         }
         var pagesScanned = 0
+        var processedURLs = 0
+        let maxAttempts = options.maxPages * 2
+        var queueIndex = 0
+        var depthLimited = false
         var assetsSeen: Set<String> = []  // A: JS bundles already scraped (global budget)
+        var assetFailures = 0
+        var assetLimitReached = false
+        var activeTargetsProbed = 0
         let renderer: WebPageRenderer? = options.render && !appStoreReadOnly ? await WebPageRenderer() : nil
 
         if options.ingestSitemap {
             for url in await ingestSitemaps(seed: seed, session: session, options: options, jar: jar, timeout: timeout)
             where sameHost(seed, url) {
-                if let u = URL(string: url) { queue.append((u, 0)) }
+                if let u = URL(string: url) { enqueue(u, depth: 0) }
             }
         }
         if options.probePaths {
@@ -4401,11 +4422,13 @@ private enum NativeWebScanner {
             }
         }
 
-        while !queue.isEmpty {
-            let (current, depth) = queue.removeFirst()
+        while queueIndex < queue.count, pagesScanned < options.maxPages, processedURLs < maxAttempts {
+            let (current, depth) = queue[queueIndex]
+            queueIndex += 1
             let key = canonical(current)
             if visited.contains(key) { continue }
             visited.insert(key)
+            processedURLs += 1
 
             if pagesScanned > 0, options.delay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(options.delay * 1_000_000_000))
@@ -4430,6 +4453,7 @@ private enum NativeWebScanner {
                     collected.append(contentsOf: analyzeBody(url: page.finalURL, html: page.body))
                 }
                 if options.active && !appStoreReadOnly, !(URLComponents(url: page.finalURL, resolvingAgainstBaseURL: false)?.queryItems ?? []).isEmpty {
+                    activeTargetsProbed += 1
                     collected.append(contentsOf: await activeProbe(url: page.finalURL, session: session, options: options, jar: jar, timeout: timeout))
                 }
                 if (options.compareUnauth || !options.secondaryHeaders.isEmpty), !isStaticAsset(page.finalURL.absoluteString) {
@@ -4482,7 +4506,7 @@ private enum NativeWebScanner {
                     }
                     if (options.discoverAssets || options.scanJsSecrets), !page.body.isEmpty {
                         // A + secret scan: fetch same-host JS bundles once.
-                        let (routes, secretFindings) = await scanAssets(
+                        let (routes, secretFindings, failures, limitReached) = await scanAssets(
                             pageURL: page.finalURL,
                             html: page.body,
                             session: session,
@@ -4493,12 +4517,41 @@ private enum NativeWebScanner {
                         )
                         links.formUnion(routes)
                         collected.append(contentsOf: secretFindings)
+                        assetFailures += failures
+                        assetLimitReached = assetLimitReached || limitReached
                     }
-                    for link in links where sameHost(seed, link) && !isStaticAsset(link) && !visited.contains(canonical(link)) {
-                        if let linkURL = URL(string: link) { queue.append((linkURL, depth + 1)) }
+                    let crawlable = links.filter { sameHost(seed, $0) && !isStaticAsset($0) }
+                    if depth < options.maxDepth {
+                        for link in crawlable {
+                            if let linkURL = URL(string: link) { enqueue(linkURL, depth: depth + 1) }
+                        }
+                    } else if crawlable.contains(where: { !queued.contains(canonical($0)) }) {
+                        depthLimited = true
                     }
                 }
             }
+        }
+
+        if queueIndex < queue.count {
+            let limit = pagesScanned >= options.maxPages
+                ? "최대 \(options.maxPages)페이지"
+                : "요청 안전 한도 \(maxAttempts)개 URL"
+            warnings.append("웹 크롤이 \(limit)에서 중단되어 \(queue.count - queueIndex)개 URL이 미점검 상태입니다.")
+        }
+        if depthLimited {
+            warnings.append("웹 크롤이 최대 깊이 \(options.maxDepth)에 도달하여 더 깊은 같은 호스트 링크는 미점검 상태입니다.")
+        }
+        if assetFailures > 0 {
+            warnings.append("웹 점검이 JavaScript 자산 \(assetFailures)개를 읽지 못해 해당 자산의 경로·시크릿 검사가 미점검 상태입니다.")
+        }
+        if assetLimitReached {
+            warnings.append("웹 점검이 JavaScript 자산 한도 \(options.maxAssets)개에 도달해 나머지 자산은 미점검 상태입니다.")
+        }
+        if options.active && !appStoreReadOnly {
+            if activeTargetsProbed == 0 {
+                warnings.append("능동 검증을 실행할 쿼리 매개변수 URL이 없어 XSS/SQLi/리다이렉트 검증을 수행하지 못했습니다.")
+            }
+            warnings.append("네이티브 능동 검증은 URL 쿼리 매개변수만 확인하며 HTML 폼은 제출하지 않습니다.")
         }
 
         return (sortBySeverity(dedupe(collected)), warnings, pagesScanned)
@@ -4771,20 +4824,28 @@ private enum NativeWebScanner {
         jar: CookieJar,
         assetsSeen: inout Set<String>,
         timeout: TimeInterval
-    ) async -> (routes: Set<String>, findings: [NativeFinding]) {
+    ) async -> (routes: Set<String>, findings: [NativeFinding], failedAssets: Int, limitReached: Bool) {
         var srcs: [String] = []
         for tag in allTags("script", html) {
             if let src = attribute("src", in: tag) { srcs.append(src) }
         }
         var routes: Set<String> = []
         var findings: [NativeFinding] = []
+        var failedAssets = 0
+        var limitReached = false
         for src in srcs {
-            if assetsSeen.count >= options.maxAssets { break }
             guard let assetURL = URL(string: src, relativeTo: pageURL)?.absoluteURL else { continue }
             let key = assetURL.absoluteString
             if !sameHost(pageURL, key) || assetsSeen.contains(key) { continue }
+            if assetsSeen.count >= options.maxAssets {
+                limitReached = true
+                break
+            }
             assetsSeen.insert(key)
-            guard let text = await readAsset(session: session, url: assetURL, options: options, jar: jar, timeout: timeout) else { continue }
+            guard let text = await readAsset(session: session, url: assetURL, options: options, jar: jar, timeout: timeout) else {
+                failedAssets += 1
+                continue
+            }
             if options.discoverAssets, let re = routeLiteralRegex {
                 let ns = text as NSString
                 for match in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
@@ -4799,7 +4860,7 @@ private enum NativeWebScanner {
                 findings.append(contentsOf: scanTextForSecrets(text, assetURL: key))
             }
         }
-        return (routes, findings)
+        return (routes, findings, failedAssets, limitReached)
     }
 
     // --- 1: JS-bundle secret scanning ---------------------------------------
@@ -4859,8 +4920,11 @@ private enum NativeWebScanner {
         applyAuthHeaders(to: &request, jar: jar, options: options)
         do {
             let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) else { return nil }
-            return String(decoding: data.prefix(2 * 1024 * 1024), as: UTF8.self)
+            let limit = 2 * 1024 * 1024
+            guard let http = response as? HTTPURLResponse,
+                  (200..<400).contains(http.statusCode),
+                  data.count <= limit else { return nil }
+            return String(decoding: data, as: UTF8.self)
         } catch {
             return nil
         }
@@ -5864,6 +5928,8 @@ private final class WebScanTLSDelegate: NSObject, URLSessionDelegate, URLSession
 private final class WebPageRenderer: NSObject, WKNavigationDelegate {
     private let webView: WKWebView
     private var loadContinuation: CheckedContinuation<Bool, Never>?
+    private var activeNavigation: WKNavigation?
+    private var timeoutTask: Task<Void, Never>?
 
     // Installed at document start on every navigation: records SPA router pushes
     // (D) and fetch/XHR request URLs (C) into page globals we read after load.
@@ -5912,10 +5978,21 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
 
         let loaded = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             loadContinuation = cont
-            webView.load(request)
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                resume(false)  // no-op if navigation already finished
+            guard let navigation = webView.load(request) else {
+                loadContinuation = nil
+                cont.resume(returning: false)
+                return
+            }
+            activeNavigation = navigation
+            timeoutTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                } catch {
+                    return
+                }
+                guard activeNavigation === navigation else { return }
+                webView.stopLoading()
+                resume(false, navigation: navigation)
             }
         }
         guard loaded else { return ([], await currentCookies()) }
@@ -5972,20 +6049,26 @@ private final class WebPageRenderer: NSObject, WKNavigationDelegate {
         }
     }
 
-    private func resume(_ ok: Bool) {
-        guard let cont = loadContinuation else { return }
+    private func resume(_ ok: Bool, navigation: WKNavigation?) {
+        guard let navigation,
+              activeNavigation === navigation,
+              let cont = loadContinuation else { return }
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        activeNavigation = nil
         loadContinuation = nil
         cont.resume(returning: ok)
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { resume(true) }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { resume(false) }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { resume(false) }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { resume(true, navigation: navigation) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { resume(false, navigation: navigation) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { resume(false, navigation: navigation) }
 }
 
 /// Accessory form for the web-scan alert: URL plus optional crawl and login
 /// controls. Reads back into `NativeWebScanner.Options` for the scan.
 private final class WebScanAccessoryView: NSView {
+    private let language: AppLanguage
     private let urlField = NSTextField()
     private let selectAllButton = NSButton(title: "", target: nil, action: nil)
     private let crawlCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -6021,6 +6104,7 @@ private final class WebScanAccessoryView: NSView {
     }
 
     init(language: AppLanguage) {
+        self.language = language
         super.init(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
         let ko = language == .ko
         urlField.placeholderString = "https://example.com"
@@ -6037,6 +6121,17 @@ private final class WebScanAccessoryView: NSView {
         probeCheck.title = ko ? "민감 경로 프로브 (/.env, /.git ...)" : "Probe sensitive paths (/.env, /.git ...)"
         activeCheck.title = ko ? "능동 검증 (XSS/SQLi/리다이렉트 — 권한 대상만)" : "Active verify (XSS/SQLi/redirect — authorized only)"
         compareUnauthCheck.title = ko ? "접근통제 점검: 비인증과 비교" : "Access-control check: compare vs unauthenticated"
+        selectAllButton.identifier = NSUserInterfaceItemIdentifier("web-scan.select-all")
+        for (check, identifier) in [
+            (crawlCheck, "crawl"), (renderCheck, "render"), (assetsCheck, "assets"),
+            (networkCheck, "network"), (interactCheck, "interact"), (secretsCheck, "secrets"),
+            (sitemapCheck, "sitemap"), (probeCheck, "probe"), (activeCheck, "active"),
+            (compareUnauthCheck, "compare-unauth"),
+        ] {
+            check.identifier = NSUserInterfaceItemIdentifier("web-scan.\(identifier)")
+            check.target = self
+            check.action = #selector(optionSelectionChanged(_:))
+        }
         secondaryField.placeholderString = ko ? "두 번째 계정 쿠키 (계정 간 IDOR/BOLA)" : "Second account cookie (cross-account IDOR/BOLA)"
         loginURLField.placeholderString = ko ? "로그인 폼 URL (선택)" : "Login form URL (optional)"
         userField.placeholderString = ko ? "아이디" : "Username"
@@ -6129,7 +6224,20 @@ private final class WebScanAccessoryView: NSView {
     }
 
     @objc private func selectAllOptions(_ sender: NSButton) {
-        optionChecks.forEach { $0.state = .on }
+        let select = optionChecks.contains { $0.state != .on }
+        optionChecks.forEach { $0.state = select ? .on : .off }
+        updateSelectAllTitle()
+    }
+
+    @objc private func optionSelectionChanged(_ sender: NSButton) {
+        updateSelectAllTitle()
+    }
+
+    private func updateSelectAllTitle() {
+        let allSelected = optionChecks.allSatisfy { $0.state == .on }
+        selectAllButton.title = language == .ko
+            ? (allSelected ? "전체 해제" : "전체 선택")
+            : (allSelected ? "Clear all" : "Select all")
     }
 
     private static func parseHeaders(_ raw: String) -> [String: String] {

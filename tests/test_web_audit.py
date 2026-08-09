@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from security_scanner.web_audit import (
     ApprovalError,
+    BudgetExceeded,
     NetworkContext,
     ProfileError,
     ScenarioRunner,
@@ -24,6 +25,7 @@ from security_scanner.web_audit import (
     build_approval_request,
     canonical_json,
     _finding_payload,
+    _read_bounded,
     run_web_audit,
     validate_profile,
     verify_approval,
@@ -228,6 +230,15 @@ class _MethodHandler(BaseHTTPRequestHandler):
 
 
 class WebAuditTests(unittest.TestCase):
+    def test_response_body_deadline_fails_closed(self) -> None:
+        class SlowBody:
+            def read1(self, _amount):
+                return b"x"
+
+        with patch("security_scanner.web_audit.time.monotonic", side_effect=[0.0, 0.04, 0.08]):
+            with self.assertRaises(BudgetExceeded):
+                _read_bounded(SlowBody(), 10, timeout=0.05)
+
     def test_all_declared_strategies_are_executed(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), _FixtureHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

@@ -34,8 +34,9 @@ The app preloads the rule catalog in the background before the Settings sheet is
 opened and reuses the cached catalog. App Sandbox cannot reliably establish the
 result of system commands such as `fdesetup`, `csrutil`, and `defaults`. In that
 case KODA reports all nine host items, including FileVault, automatic login, and
-screen lock, as `Unverified` instead of manufacturing PASS or FAIL results, and links to
-the corresponding System Settings pane.
+screen lock, as `Unverified` instead of manufacturing PASS or FAIL results. It
+opens the corresponding System Settings pane where supported; SIP uses command
+and Recovery guidance instead.
 
 - FileVault: System Settings > Privacy & Security > FileVault
 - Automatic login and Guest User: System Settings > Users & Groups
@@ -49,10 +50,12 @@ the corresponding System Settings pane.
 
 Select all toggles only the ten website-scan options and leaves ZAP settings
 separate. It includes active XSS, SQL injection, and redirect verification, so use
-it only against an authorized target. The native crawl defaults to 50 pages,
-depth 3, and at most 100 URL attempts. URLs left uncovered by a budget or WebKit
-rendering failure remain explicit warnings. The App Store build keeps the native
-scan to its GET/HEAD read-only boundary.
+it only against an authorized target. The native crawl defaults to 50 pages and
+depth 3, with at most 100 crawl-frontier URL attempts. Active, asset, and host
+probe requests are separate from that frontier budget. Native active verification
+only covers URL query parameters; it does not submit HTML forms. Budget, asset
+read, and WebKit rendering gaps remain explicit warnings. The App Store build
+keeps the native scan to its GET/HEAD read-only boundary.
 
 ## Run Python Dashboard Helper
 

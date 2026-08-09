@@ -55,6 +55,10 @@ _USER_FIELD_RE = re.compile(r"user|email|login|\bid\b|userid|username", re.IGNOR
 _PASS_FIELD_RE = re.compile(r"pass|pwd", re.IGNORECASE)
 
 
+class ResponseBodyLimitError(Exception):
+    """The response exceeded the scanner's safe inspection size."""
+
+
 def check_web(
     url: str,
     *,
@@ -161,34 +165,55 @@ def crawl_web(
     host_probed: set[str] = set()
     visited: set[str] = set()
     queue: deque[tuple[str, int]] = deque([(seed_url, 0)])
+    queued = {_canonical(seed_url)}
     # E: enqueue caller-supplied same-host seeds (known routes / sitemap / API paths).
     for seed in seeds:
         absolute = urllib.parse.urljoin(seed_url, seed)
-        if _is_allowed_origin(absolute, allowed):
+        key = _canonical(absolute)
+        if _is_allowed_origin(absolute, allowed) and key not in queued:
             queue.append((absolute, 0))
+            queued.add(key)
     pages_scanned = 0
+    processed_urls = 0
+    max_attempts = None if max_pages is None else max_pages * 2
+    depth_limited = False
     render_warned = False
     assets_seen: set[str] = set()  # A: JS bundles already scraped (global budget)
+    asset_failures = 0
+    asset_limit_reached = False
 
     if ingest_sitemap:
         for url in _ingest_sitemaps(seed_url, opener, headers, timeout):
-            if _is_allowed_origin(url, allowed):
+            key = _canonical(url)
+            if _is_allowed_origin(url, allowed) and key not in queued:
                 queue.append((url, 0))
+                queued.add(key)
     if probe_paths:
         collected.extend(_probe_sensitive_paths(seed_url, opener, headers, timeout, target))
         collected.extend(_probe_graphql(seed_url, opener, headers, timeout, target))
 
-    while queue and (max_pages is None or pages_scanned < max_pages):
+    while (
+        queue
+        and (max_pages is None or pages_scanned < max_pages)
+        and (max_attempts is None or processed_urls < max_attempts)
+    ):
         current, depth = queue.popleft()
         canonical = _canonical(current)
         if canonical in visited:
             continue
         visited.add(canonical)
+        processed_urls += 1
 
         if pages_scanned and delay:
             time.sleep(delay)
 
-        fetched = _fetch(opener, current, headers, timeout, allowed, network_context=network_context)
+        try:
+            fetched = _fetch(opener, current, headers, timeout, allowed, network_context=network_context)
+        except ResponseBodyLimitError as exc:
+            warnings.append(f"Web scan left {current} unscanned: {exc}")
+            if page_results is not None:
+                page_results.append(_page_result(current, current, 0, "", True, "", False, str(exc)))
+            continue
         if fetched is None:
             # Only the seed's unreachability is worth a finding; sub-pages degrade
             # to a warning so one dead link never dominates the report.
@@ -292,47 +317,65 @@ def crawl_web(
             collected.extend(_http_methods_probe(final_url, opener, headers, timeout, target))
             collected.extend(_host_header_probe(final_url, headers, timeout, target, opener=opener))
 
-        if max_depth is None or depth < max_depth:
-            candidates: set[str] = set()
-            link_source = body
-            if render:
-                rendered, extra_urls, browser_cookies, render_error = _render_page(
-                    final_url,
-                    timeout=timeout,
-                    extra_headers=headers,
-                    capture_network=capture_network,
-                    interact=interact,
-                    max_clicks=max_clicks,
-                    cookies=_opener_cookies(opener),
-                    network_context=network_context,
-                )
-                if rendered is not None:
-                    # Rendered DOM is a superset of the raw HTML for link discovery.
-                    link_source = rendered
-                    # Sync any cookie the SPA rotated back into the jar so later
-                    # stdlib requests keep the fresh session (bidirectional sync).
-                    _merge_browser_cookies(opener, browser_cookies)
-                    candidates.update(extra_urls)  # C/D: network + interaction URLs
-                elif render_error and not render_warned:
-                    warnings.append(render_error)
-                    render_warned = True
-            if link_source:
-                candidates.update(_extract_links(final_url, link_source))
-            if (discover_assets or scan_js_secrets) and body:
-                # A: mine same-host JS bundles for routes and/or leaked secrets.
-                routes, secret_findings = _scan_assets(
-                    final_url, body, opener, headers, timeout, assets_seen, max_assets, target,
-                    extract_routes=discover_assets, scan_secrets=scan_js_secrets,
-                )
-                candidates.update(routes)
-                collected.extend(secret_findings)
-            for link in candidates:
-                if (
-                    _is_allowed_origin(link, allowed)
-                    and not _is_static_asset(link)
-                    and _canonical(link) not in visited
-                ):
+        candidates: set[str] = set()
+        link_source = body
+        if render:
+            rendered, extra_urls, browser_cookies, render_error = _render_page(
+                final_url,
+                timeout=timeout,
+                extra_headers=headers,
+                capture_network=capture_network,
+                interact=interact,
+                max_clicks=max_clicks,
+                cookies=_opener_cookies(opener),
+                network_context=network_context,
+            )
+            if rendered is not None:
+                # Rendered DOM is a superset of the raw HTML for link discovery.
+                link_source = rendered
+                # Sync any cookie the SPA rotated back into the jar so later
+                # stdlib requests keep the fresh session (bidirectional sync).
+                _merge_browser_cookies(opener, browser_cookies)
+                candidates.update(extra_urls)  # C/D: network + interaction URLs
+            elif render_error and not render_warned:
+                warnings.append(render_error)
+                render_warned = True
+        if link_source:
+            candidates.update(_extract_links(final_url, link_source))
+        if (discover_assets or scan_js_secrets) and body:
+            # A: mine same-host JS bundles for routes and/or leaked secrets.
+            routes, secret_findings, failed_assets, limit_reached = _scan_assets(
+                final_url, body, opener, headers, timeout, assets_seen, max_assets, target,
+                extract_routes=discover_assets, scan_secrets=scan_js_secrets,
+            )
+            candidates.update(routes)
+            collected.extend(secret_findings)
+            asset_failures += failed_assets
+            asset_limit_reached = asset_limit_reached or limit_reached
+        for link in candidates:
+            key = _canonical(link)
+            if _is_allowed_origin(link, allowed) and not _is_static_asset(link) and key not in queued:
+                if max_depth is None or depth < max_depth:
                     queue.append((link, depth + 1))
+                    queued.add(key)
+                elif max_depth > 0:
+                    depth_limited = True
+
+    if queue and max_pages is not None:
+        limit = f"max_pages={max_pages}" if pages_scanned >= max_pages else f"request safety limit={max_attempts}"
+        warnings.append(f"Web crawl stopped at {limit}; {len(queue)} queued URL(s) remain unscanned.")
+    if depth_limited:
+        warnings.append(
+            f"Web crawl reached max_depth={max_depth}; deeper same-host links remain unscanned."
+        )
+    if asset_failures:
+        warnings.append(
+            f"Web scan could not inspect {asset_failures} JavaScript asset(s); route and secret coverage is incomplete."
+        )
+    if asset_limit_reached:
+        warnings.append(
+            f"Web scan reached max_assets={max_assets}; remaining JavaScript assets were not inspected."
+        )
 
     findings = _dedupe_findings(collected)
     findings.sort(key=lambda finding: finding.sort_key())
@@ -800,6 +843,7 @@ def _cors_acao(
             response_headers = response.headers
     except urllib.error.HTTPError as exc:
         response_headers = exc.headers
+        exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
     if response_headers is None:
@@ -969,6 +1013,7 @@ def _http_methods_probe(
             allow = response.headers.get("Allow", "")
     except urllib.error.HTTPError as exc:
         allow = exc.headers.get("Allow", "") if exc.headers else ""
+        exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return []
     methods = {method.strip().upper() for method in allow.split(",") if method.strip()}
@@ -1011,13 +1056,15 @@ def _host_header_probe(
     try:
         with opener.open(request, timeout=timeout) as response:
             location = response.headers.get("Location", "")
-            body = response.read(4096).decode("utf-8", "replace")
+            body = _read_bounded_body(response, 4096, timeout).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         location = exc.headers.get("Location", "") if exc.headers else ""
         try:
-            body = exc.read(4096).decode("utf-8", "replace")
+            body = _read_bounded_body(exc, 4096, timeout).decode("utf-8", "replace")
         except Exception:
             body = ""
+        finally:
+            exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return []
     if _HOST_PROBE in location or _HOST_PROBE in body:
@@ -1114,7 +1161,7 @@ def _fetch(
             with current_opener.open(request, timeout=request_timeout) as response:
                 header_items = list(response.headers.items())
                 set_cookies = response.headers.get_all("Set-Cookie") or []
-                return response.geturl(), response.status, response.headers.get("Content-Type") or "", header_items, set_cookies, _read_safe_body(response, _response_limit(current_opener))
+                return response.geturl(), response.status, response.headers.get("Content-Type") or "", header_items, set_cookies, _read_safe_body(response, _response_limit(current_opener), request_timeout)
         except urllib.error.HTTPError as exc:
             header_items = list(exc.headers.items()) if exc.headers else []
             set_cookies = exc.headers.get_all("Set-Cookie") if exc.headers else []
@@ -1130,7 +1177,15 @@ def _fetch(
                 exc.close()
                 current_url = next_url
                 continue
-            return exc.geturl() if hasattr(exc, "geturl") else current_url, exc.code, content_type or "", header_items, set_cookies, _read_safe_body(exc, _response_limit(current_opener))
+            final_url = exc.geturl() if hasattr(exc, "geturl") else current_url
+            status = exc.code
+            try:
+                body = _read_safe_body(exc, _response_limit(current_opener), request_timeout)
+            except (socket.timeout, OSError):
+                return None
+            finally:
+                exc.close()
+            return final_url, status, content_type or "", header_items, set_cookies, body
         except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
             return None
     return current_url, 0, "", [], [], b""
@@ -1148,11 +1203,39 @@ def _response_limit(opener: urllib.request.OpenerDirector) -> int:
     return _MAX_BODY_BYTES
 
 
-def _read_safe_body(response, max_bytes: int = _MAX_BODY_BYTES) -> bytes:
+def _read_safe_body(response, max_bytes: int = _MAX_BODY_BYTES, timeout: float = 15.0) -> bytes:
     content_type = (response.headers.get("Content-Type") or "").lower()
     if "html" not in content_type and not content_type.startswith("text/"):
         return b""
-    return response.read(max_bytes)
+    return _read_bounded_body(response, max_bytes, timeout)
+
+
+def _read_bounded_body(response, max_bytes: int, timeout: float) -> bytes:
+    deadline = time.monotonic() + max(0.01, timeout)
+    read = getattr(response, "read1", response.read)
+    chunks: list[bytes] = []
+    remaining = max_bytes
+    while remaining > 0:
+        if time.monotonic() >= deadline:
+            raise socket.timeout("response body read exceeded the time budget")
+        try:
+            chunk = read(min(65_536, remaining))
+        except (socket.timeout, OSError) as exc:
+            raise socket.timeout("response body read exceeded the time budget") from exc
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    if remaining == 0:
+        if time.monotonic() >= deadline:
+            raise socket.timeout("response body read exceeded the time budget")
+        try:
+            extra = read(1)
+        except (socket.timeout, OSError) as exc:
+            raise socket.timeout("response body read exceeded the time budget") from exc
+        if extra:
+            raise ResponseBodyLimitError(f"response body exceeds the {max_bytes}-byte inspection limit")
+    return b"".join(chunks)
 
 
 def _without_credentials(headers: Mapping[str, str]) -> dict[str, str]:
@@ -1420,8 +1503,8 @@ def _read_asset(
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
-            return response.read(_response_limit(opener)).decode("utf-8", "replace")
-    except (urllib.error.HTTPError, urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
+            return _read_bounded_body(response, _response_limit(opener), timeout).decode("utf-8", "replace")
+    except (ResponseBodyLimitError, urllib.error.HTTPError, urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
 
 
@@ -1437,29 +1520,34 @@ def _scan_assets(
     *,
     extract_routes: bool,
     scan_secrets: bool,
-) -> tuple[set[str], list[Finding]]:
+) -> tuple[set[str], list[Finding], int, bool]:
     """Fetch same-host JS bundles once and mine them for routes (A) and secrets.
 
     Fetches each not-yet-seen same-host ``<script src>`` (bounded by
     ``max_assets`` across the whole crawl). ``extract_routes`` pulls quoted path
     literals (dropping framework/asset noise); ``scan_secrets`` runs the shared
-    secret rules over the bundle text. Returns ``(routes, findings)``.
+    secret rules over the bundle text. Returns routes, findings, failed count,
+    and whether the global asset limit left work unscanned.
     """
 
     parser = _parse_html(page_url, body)
     if parser is None:
-        return set(), []
+        return set(), [], 0, False
     routes: set[str] = set()
     findings: list[Finding] = []
+    failed_assets = 0
+    limit_reached = False
     for src in parser.scripts:
-        if len(assets_seen) >= max_assets:
-            break
         asset_url = urllib.parse.urldefrag(urllib.parse.urljoin(page_url, src)).url
         if not _same_host(page_url, asset_url) or asset_url in assets_seen:
             continue
+        if len(assets_seen) >= max_assets:
+            limit_reached = True
+            break
         assets_seen.add(asset_url)
         text = _read_asset(opener, asset_url, headers, timeout)
         if text is None:
+            failed_assets += 1
             continue
         if extract_routes:
             for path in _ROUTE_LITERAL_RE.findall(text):
@@ -1468,7 +1556,7 @@ def _scan_assets(
                 routes.add(urllib.parse.urljoin(page_url, path))
         if scan_secrets:
             findings.extend(_scan_text_for_secrets(text, asset_url, target))
-    return routes, findings
+    return routes, findings, failed_assets, limit_reached
 
 
 def _scan_text_for_secrets(text: str, asset_url: str, target: str) -> list[Finding]:
@@ -1637,9 +1725,15 @@ def _probe_graphql(
         request = urllib.request.Request(url, data=_GRAPHQL_INTROSPECTION, headers=post_headers, method="POST")
         try:
             with opener.open(request, timeout=timeout) as response:
-                body = response.read(8192).decode("utf-8", "replace")
+                body = _read_bounded_body(response, 8192, timeout).decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
-            body = exc.read(8192).decode("utf-8", "replace") if exc.fp else ""
+            try:
+                try:
+                    body = _read_bounded_body(exc, 8192, timeout).decode("utf-8", "replace") if exc.fp else ""
+                except (socket.timeout, OSError):
+                    continue
+            finally:
+                exc.close()
         except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
             continue
         if '"__schema"' in body or ('"queryType"' in body and '"data"' in body):
@@ -1665,9 +1759,12 @@ def _fetch_meta(
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
-            return response.status, response.read(4096).decode("utf-8", "replace")
+            return response.status, _read_bounded_body(response, 4096, timeout).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
-        return exc.code, ""
+        try:
+            return exc.code, ""
+        finally:
+            exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
 
@@ -1906,12 +2003,14 @@ def _submit_form(
         request = urllib.request.Request(action_url + sep + encoded, headers=dict(headers), method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
-            return response.read(_response_limit(opener)).decode("utf-8", "replace")
+            return _read_bounded_body(response, _response_limit(opener), timeout).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         try:
-            return exc.read(_response_limit(opener)).decode("utf-8", "replace")
+            return _read_bounded_body(exc, _response_limit(opener), timeout).decode("utf-8", "replace")
         except Exception:
             return None
+        finally:
+            exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
 
@@ -1929,13 +2028,15 @@ def _probe_body(
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
     try:
         with opener.open(request, timeout=timeout) as response:
-            return response.read(_response_limit(opener)).decode("utf-8", "replace")
+            return _read_bounded_body(response, _response_limit(opener), timeout).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         # A 500 with a SQL error in the body is exactly what we want to inspect.
         try:
-            return exc.read(_response_limit(opener)).decode("utf-8", "replace")
+            return _read_bounded_body(exc, _response_limit(opener), timeout).decode("utf-8", "replace")
         except Exception:
             return None
+        finally:
+            exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
 
@@ -1948,7 +2049,10 @@ def _probe_location(
         with opener.open(request, timeout=timeout) as response:
             return response.headers.get("Location")
     except urllib.error.HTTPError as exc:
-        return exc.headers.get("Location") if exc.headers else None
+        try:
+            return exc.headers.get("Location") if exc.headers else None
+        finally:
+            exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError):
         return None
 
@@ -2210,7 +2314,7 @@ def login(
     try:
         with opener.open(request, timeout=timeout) as response:
             page_url = response.geturl()
-            body = response.read(_response_limit(opener)).decode("utf-8", "replace")
+            body = _read_bounded_body(response, _response_limit(opener), timeout).decode("utf-8", "replace")
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
         if result is not None:
             result.update({"status": "failed", "message": "Login page could not be loaded."})
@@ -2251,11 +2355,18 @@ def login(
     try:
         with opener.open(post, timeout=timeout) as response:
             final_url = response.geturl()
-            response_body = _read_safe_body(response, _response_limit(opener)).decode("utf-8", "replace")
+            response_body = _read_safe_body(response, _response_limit(opener), timeout).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         final_url = exc.geturl() if hasattr(exc, "geturl") else action_url
-        response_body = _read_safe_body(exc, _response_limit(opener)).decode("utf-8", "replace")
-        exc.close()
+        try:
+            try:
+                response_body = _read_safe_body(exc, _response_limit(opener), timeout).decode("utf-8", "replace")
+            except (socket.timeout, OSError) as read_error:
+                if result is not None:
+                    result.update({"status": "failed", "message": "Login response timed out."})
+                return [f"Login response timed out ({action_url}): {read_error}"], []
+        finally:
+            exc.close()
     except (urllib.error.URLError, ssl.SSLError, socket.timeout, OSError) as exc:
         if result is not None:
             result.update({"status": "failed", "message": "Login request failed."})
