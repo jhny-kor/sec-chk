@@ -299,6 +299,25 @@ final class NativeSecurityScanner {
     /// Mirrors the Python `host-scan` posture checks. Each probe degrades to a
     /// warning if its command is unavailable so one failure never aborts the run.
     func scanHost() -> NativeScanResult {
+        if Self.isSandboxed {
+            let findings = [
+                Self.hostFinding(
+                    "host.macos.sandbox-limited", "info",
+                    "App Store 앱에서는 호스트 보안 상태를 자동 확정하지 않습니다",
+                    resource: "macos/sandbox",
+                    evidence: "App Sandbox 활성 — 시스템 명령 결과를 PASS/FAIL 근거로 사용하지 않음",
+                    recommendation: "각 항목의 '해당 설정 열기'에서 현재 값을 직접 확인하세요."
+                ),
+            ] + Self.sandboxUnverifiedFindings()
+            return NativeScanResult(
+                findings: findings,
+                warnings: ["App Sandbox에서는 시스템 보안 상태를 신뢰성 있게 조회할 수 없어 모든 호스트 항목을 미확인으로 표시했습니다."],
+                targetCount: 1,
+                scannedFileCount: 0,
+                generatedAt: Date()
+            )
+        }
+
         var posture: [NativeFinding] = []
         var warnings: [String] = []
 
@@ -315,21 +334,6 @@ final class NativeSecurityScanner {
         posture.append(contentsOf: Self.checkScreenLock(warnings: &warnings))
 
         var findings: [NativeFinding] = []
-
-        // #2 App Sandbox: read-only system commands are blocked under the Mac App
-        // Store sandbox. Surface this clearly instead of silently returning nothing.
-        if Self.isSandboxed {
-            findings.append(Self.hostFinding(
-                "host.macos.sandbox-limited", "info",
-                "샌드박스 환경: 일부 호스트 점검이 제한될 수 있습니다",
-                resource: "macos/sandbox",
-                evidence: "App Sandbox 활성",
-                recommendation: "전체 호스트 점검은 비샌드박스(직접 배포) 빌드에서 실행하세요. system 명령(csrutil/fdesetup 등)은 샌드박스에서 차단됩니다."
-            ))
-            if posture.allSatisfy({ $0.severity == "info" }) && warnings.count >= posture.count {
-                warnings.append("샌드박스 제약으로 일부 항목을 확인하지 못했을 수 있습니다.")
-            }
-        }
 
         // #3 Posture drift: compare against the saved baseline before overwriting it.
         let drift = Self.driftFindings(current: posture)
@@ -376,9 +380,86 @@ final class NativeSecurityScanner {
         )
     }
 
-    /// Run a read-only command and capture trimmed stdout. Returns nil if the
-    /// command could not run (missing binary, sandbox denial, non-zero exit with
-    /// no output), so callers can skip the check rather than emit a false result.
+    private static func unverifiedHostFinding(
+        _ ruleID: String,
+        _ title: String,
+        resource: String,
+        recommendation: String
+    ) -> NativeFinding {
+        var finding = hostFinding(
+            ruleID,
+            "info",
+            title,
+            resource: resource,
+            evidence: "App Sandbox에서 시스템 상태를 신뢰성 있게 조회할 수 없어 판정하지 않았습니다.",
+            recommendation: recommendation
+        )
+        finding.verificationStatus = "unverified"
+        finding.verificationNote = "App Sandbox 제한"
+        return finding
+    }
+
+    private static func sandboxUnverifiedFindings() -> [NativeFinding] {
+        [
+            unverifiedHostFinding(
+                "host.macos.filevault-unverified",
+                "FileVault 디스크 암호화 상태 미확인",
+                resource: "macos/filevault",
+                recommendation: "시스템 설정 > 개인정보 보호 및 보안 > FileVault에서 현재 상태를 확인하세요."
+            ),
+            unverifiedHostFinding(
+                "host.macos.sip-unverified",
+                "시스템 무결성 보호(SIP) 상태 미확인",
+                resource: "macos/system-integrity-protection",
+                recommendation: "터미널에서 csrutil status로 확인하세요. 변경이 필요하면 macOS 복구 모드에서 조치해야 합니다."
+            ),
+            unverifiedHostFinding(
+                "host.macos.gatekeeper-unverified",
+                "Gatekeeper 상태 미확인",
+                resource: "macos/gatekeeper",
+                recommendation: "시스템 설정 > 개인정보 보호 및 보안 > 보안에서 허용된 앱 출처를 확인하세요."
+            ),
+            unverifiedHostFinding(
+                "host.macos.firewall-unverified",
+                "응용프로그램 방화벽 상태 미확인",
+                resource: "macos/application-firewall",
+                recommendation: "시스템 설정 > 네트워크 > 방화벽에서 현재 상태를 확인하세요."
+            ),
+            unverifiedHostFinding(
+                "host.macos.firewall-stealth-unverified",
+                "방화벽 스텔스 모드 상태 미확인",
+                resource: "macos/firewall-stealth-mode",
+                recommendation: "시스템 설정 > 네트워크 > 방화벽 > 옵션에서 스텔스 모드를 확인하세요."
+            ),
+            unverifiedHostFinding(
+                "host.macos.auto-security-updates-unverified",
+                "자동 업데이트 상태 미확인",
+                resource: "macos/automatic-security-updates",
+                recommendation: "시스템 설정 > 일반 > 소프트웨어 업데이트 > 자동 업데이트와 개인정보 보호 및 보안 > 백그라운드 보안 개선을 확인하세요."
+            ),
+            unverifiedHostFinding(
+                "host.macos.auto-login-unverified",
+                "자동 로그인 상태 미확인",
+                resource: "macos/automatic-login",
+                recommendation: "시스템 설정 > 사용자 및 그룹 > 자동 로그인에서 '끔'인지 확인하세요. FileVault가 켜져 있으면 자동 로그인은 비활성화됩니다."
+            ),
+            unverifiedHostFinding(
+                "host.macos.guest-account-unverified",
+                "게스트 계정 상태 미확인",
+                resource: "macos/guest-account",
+                recommendation: "시스템 설정 > 사용자 및 그룹 > 게스트 사용자에서 로그인을 허용하지 않도록 설정하세요."
+            ),
+            unverifiedHostFinding(
+                "host.macos.screen-lock-unverified",
+                "화면 잠금 암호 요구 상태 미확인",
+                resource: "macos/screen-lock",
+                recommendation: "시스템 설정 > 잠금 화면 > 화면 보호기 시작 또는 디스플레이 꺼짐 후 암호 요구를 '즉시'로 설정하세요."
+            ),
+        ]
+    }
+
+    /// Run a read-only command and capture its successful output. Failed commands
+    /// are never returned as posture evidence.
     private static func runReadOnlyCommand(_ executablePath: String, _ arguments: [String]) -> String? {
         guard FileManager.default.isExecutableFile(atPath: executablePath) else { return nil }
         let process = Process()
@@ -398,10 +479,13 @@ final class NativeSecurityScanner {
         process.waitUntilExit()
         let out = (String(data: outData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let err = (String(data: errData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if out.isEmpty && process.terminationStatus != 0 {
-            return err.isEmpty ? nil : err
-        }
-        return out
+        return acceptedCommandOutput(stdout: out, stderr: err, terminationStatus: process.terminationStatus)
+    }
+
+    static func acceptedCommandOutput(stdout: String, stderr: String, terminationStatus: Int32) -> String? {
+        guard terminationStatus == 0 else { return nil }
+        let output = stdout.isEmpty ? stderr : stdout
+        return output.isEmpty ? nil : output
     }
 
     private static func checkSystemIntegrityProtection(warnings: inout [String]) -> [NativeFinding] {
@@ -409,14 +493,19 @@ final class NativeSecurityScanner {
             warnings.append("SIP 상태를 확인할 수 없습니다.")
             return []
         }
-        if output.lowercased().contains("enabled") {
+        let lowered = output.lowercased()
+        if lowered.contains("system integrity protection status: enabled") {
             return [hostFinding("host.macos.sip-enabled", "info", "시스템 무결성 보호(SIP)가 켜져 있습니다", resource: "macos/system-integrity-protection", evidence: output)]
         }
-        return [hostFinding(
-            "host.macos.sip-disabled", "high", "시스템 무결성 보호(SIP)가 꺼져 있습니다",
-            resource: "macos/system-integrity-protection", evidence: output,
-            recommendation: "복구 모드에서 'csrutil enable'을 실행한 뒤 재부팅하세요."
-        )]
+        if lowered.contains("system integrity protection status: disabled") {
+            return [hostFinding(
+                "host.macos.sip-disabled", "high", "시스템 무결성 보호(SIP)가 꺼져 있습니다",
+                resource: "macos/system-integrity-protection", evidence: output,
+                recommendation: "macOS 복구 모드에서 'csrutil enable'을 실행한 뒤 재부팅하세요. 시스템 설정에서는 변경할 수 없습니다."
+            )]
+        }
+        warnings.append("SIP 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     private static func checkFileVault(warnings: inout [String]) -> [NativeFinding] {
@@ -424,14 +513,19 @@ final class NativeSecurityScanner {
             warnings.append("FileVault 상태를 확인할 수 없습니다.")
             return []
         }
-        if output.lowercased().contains("filevault is on") {
+        let lowered = output.lowercased()
+        if lowered.contains("filevault is on") {
             return [hostFinding("host.macos.filevault-on", "info", "FileVault 디스크 암호화가 켜져 있습니다", resource: "macos/filevault", evidence: output)]
         }
-        return [hostFinding(
-            "host.macos.filevault-off", "high", "FileVault 디스크 암호화가 꺼져 있습니다",
-            resource: "macos/filevault", evidence: output,
-            recommendation: "시스템 설정 > 개인정보 보호 및 보안 > FileVault에서 켜고 복구 키를 안전하게 보관하세요."
-        )]
+        if lowered.contains("filevault is off") {
+            return [hostFinding(
+                "host.macos.filevault-off", "high", "FileVault 디스크 암호화가 꺼져 있습니다",
+                resource: "macos/filevault", evidence: output,
+                recommendation: "시스템 설정 > 개인정보 보호 및 보안 > FileVault에서 켜고 복구 키를 안전하게 보관하세요."
+            )]
+        }
+        warnings.append("FileVault 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     private static func checkGatekeeper(warnings: inout [String]) -> [NativeFinding] {
@@ -439,14 +533,19 @@ final class NativeSecurityScanner {
             warnings.append("Gatekeeper 상태를 확인할 수 없습니다.")
             return []
         }
-        if output.lowercased().contains("assessments enabled") {
+        let lowered = output.lowercased()
+        if lowered.contains("assessments enabled") {
             return [hostFinding("host.macos.gatekeeper-enabled", "info", "Gatekeeper 검사가 켜져 있습니다", resource: "macos/gatekeeper", evidence: output)]
         }
-        return [hostFinding(
-            "host.macos.gatekeeper-disabled", "high", "Gatekeeper 검사가 꺼져 있습니다",
-            resource: "macos/gatekeeper", evidence: output,
-            recommendation: "시스템 설정 > 개인정보 보호 및 보안에서 Gatekeeper를 다시 켜세요. (macOS 15 Sequoia 이상에서는 'spctl --master-enable'이 더 이상 지원되지 않으며, 대규모 적용은 MDM 구성 프로파일을 사용하세요.)"
-        )]
+        if lowered.contains("assessments disabled") {
+            return [hostFinding(
+                "host.macos.gatekeeper-disabled", "high", "Gatekeeper 검사가 꺼져 있습니다",
+                resource: "macos/gatekeeper", evidence: output,
+                recommendation: "시스템 설정 > 개인정보 보호 및 보안 > 보안에서 허용된 앱 출처를 확인하세요. macOS 15 이상에서는 MDM 구성 프로파일로 관리할 수 있습니다."
+            )]
+        }
+        warnings.append("Gatekeeper 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     private static func checkApplicationFirewall(warnings: inout [String]) -> [NativeFinding] {
@@ -455,109 +554,165 @@ final class NativeSecurityScanner {
             return []
         }
         let lowered = output.lowercased()
-        if lowered.contains("state = 1") || lowered.contains("state = 2") || (lowered.contains("enabled") && !lowered.contains("disabled")) {
+        if lowered.contains("state = 1") || lowered.contains("state = 2") {
             return [hostFinding("host.macos.firewall-enabled", "info", "응용프로그램 방화벽이 켜져 있습니다", resource: "macos/application-firewall", evidence: output)]
         }
-        return [hostFinding(
-            "host.macos.firewall-disabled", "medium", "응용프로그램 방화벽이 꺼져 있습니다",
-            resource: "macos/application-firewall", evidence: output,
-            recommendation: "시스템 설정 > 네트워크 > 방화벽에서 방화벽을 켜세요."
-        )]
+        if lowered.contains("state = 0") {
+            return [hostFinding(
+                "host.macos.firewall-disabled", "medium", "응용프로그램 방화벽이 꺼져 있습니다",
+                resource: "macos/application-firewall", evidence: output,
+                recommendation: "시스템 설정 > 네트워크 > 방화벽에서 방화벽을 켜세요."
+            )]
+        }
+        warnings.append("응용프로그램 방화벽 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     private static func checkFirewallStealthMode(warnings: inout [String]) -> [NativeFinding] {
         guard let output = runReadOnlyCommand("/usr/libexec/ApplicationFirewall/socketfilterfw", ["--getstealthmode"]) else {
+            warnings.append("방화벽 스텔스 모드 상태를 확인할 수 없습니다.")
             return []
         }
-        if output.lowercased().contains("stealth mode is on") || output.lowercased().contains("enabled") {
+        let lowered = output.lowercased()
+        if lowered.contains("stealth mode is on") {
             return [hostFinding("host.macos.firewall-stealth-enabled", "info", "방화벽 스텔스 모드가 켜져 있습니다", resource: "macos/firewall-stealth-mode", evidence: output)]
         }
-        return [hostFinding(
-            "host.macos.firewall-stealth-disabled", "low", "방화벽 스텔스 모드가 꺼져 있습니다",
-            resource: "macos/firewall-stealth-mode", evidence: output,
-            recommendation: "시스템 설정 > 네트워크 > 방화벽 > 옵션에서 스텔스 모드를 켜세요."
-        )]
+        if lowered.contains("stealth mode is off") {
+            return [hostFinding(
+                "host.macos.firewall-stealth-disabled", "low", "방화벽 스텔스 모드가 꺼져 있습니다",
+                resource: "macos/firewall-stealth-mode", evidence: output,
+                recommendation: "시스템 설정 > 네트워크 > 방화벽 > 옵션에서 스텔스 모드를 켜세요."
+            )]
+        }
+        warnings.append("방화벽 스텔스 모드 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     private static func checkAutomaticSecurityUpdates(warnings: inout [String]) -> [NativeFinding] {
         let domain = "/Library/Preferences/com.apple.SoftwareUpdate"
-        // CIS Apple macOS software-update controls (1.x): automatic check, download,
-        // macOS-update install, and security responses/system files must all be on.
-        let keys = ["AutomaticCheckEnabled", "AutomaticDownload", "AutomaticallyInstallMacOSUpdates", "ConfigDataInstall", "CriticalUpdateInstall"]
-        var states: [(String, String)] = []
+        let scheduled = runReadOnlyCommand("/usr/sbin/softwareupdate", ["--schedule"])
+        let scheduledState: Bool?
+        if scheduled?.lowercased().contains("turned on") == true {
+            scheduledState = true
+        } else if scheduled?.lowercased().contains("turned off") == true {
+            scheduledState = false
+        } else {
+            scheduledState = nil
+        }
+
+        let keys = ["AutomaticDownload", "AutomaticallyInstallMacOSUpdates", "ConfigDataInstall", "CriticalUpdateInstall"]
+        var states: [(String, Bool?)] = [("AutomaticCheckEnabled", scheduledState)]
         for key in keys {
-            states.append((key, runReadOnlyCommand("/usr/bin/defaults", ["read", domain, key]) ?? "unset"))
+            let raw = runReadOnlyCommand("/usr/bin/defaults", ["read", domain, key])?.lowercased()
+            let state: Bool?
+            switch raw {
+            case "1", "true", "yes": state = true
+            case "0", "false", "no": state = false
+            default: state = nil
+            }
+            states.append((key, state))
         }
-        if states.allSatisfy({ $0.1 == "unset" }) {
-            warnings.append("자동 업데이트 설정을 확인할 수 없습니다.")
-            return []
-        }
-        let evidence = states.map { "\($0.0)=\($0.1)" }.joined(separator: ", ")
-        let disabled = states.filter { $0.1 != "1" }.map { $0.0 }
-        if disabled.isEmpty {
+
+        let evidence = states.map { "\($0.0)=\($0.1.map { $0 ? "1" : "0" } ?? "unverified")" }.joined(separator: ", ")
+        let disabled = states.compactMap { $0.1 == false ? $0.0 : nil }
+        let unverified = states.compactMap { $0.1 == nil ? $0.0 : nil }
+        if disabled.isEmpty && unverified.isEmpty {
             return [hostFinding("host.macos.auto-security-updates-enabled", "info", "CIS 자동 업데이트 설정이 모두 켜져 있습니다", resource: "macos/automatic-security-updates", evidence: evidence)]
         }
+        if disabled.isEmpty {
+            warnings.append("일부 자동 업데이트 설정을 확인할 수 없습니다: \(unverified.joined(separator: ", "))")
+            return []
+        }
+
+        let labels = [
+            "AutomaticCheckEnabled": "업데이트 자동 확인",
+            "AutomaticDownload": "새 업데이트 다운로드",
+            "AutomaticallyInstallMacOSUpdates": "macOS 업데이트 설치",
+            "ConfigDataInstall": "시스템 데이터 파일 설치",
+            "CriticalUpdateInstall": "보안 업데이트 설치",
+        ]
+        let disabledLabels = disabled.map { labels[$0] ?? $0 }.joined(separator: ", ")
         return [hostFinding(
-            "host.macos.auto-security-updates-disabled", "medium", "자동 업데이트 설정이 완전히 켜져 있지 않습니다",
+            "host.macos.auto-security-updates-disabled", "medium", "일부 자동 업데이트 옵션이 꺼져 있습니다",
             resource: "macos/automatic-security-updates", evidence: evidence,
-            recommendation: "시스템 설정 > 일반 > 소프트웨어 업데이트 > 자동 업데이트에서 모든 자동 업데이트 옵션을 켜세요. (미설정: \(disabled.joined(separator: ", ")))"
+            recommendation: "시스템 설정 > 일반 > 소프트웨어 업데이트 > 자동 업데이트에서 다음 항목을 켜세요: \(disabledLabels). macOS 26에서는 개인정보 보호 및 보안 > 백그라운드 보안 개선의 자동 설치도 확인하세요."
         )]
     }
 
     // MARK: - Account & lock controls (#1)
 
     private static func checkAutomaticLogin(warnings: inout [String]) -> [NativeFinding] {
-        // The key only exists when automatic login is configured; a nil/empty read
-        // means it is off.
-        let value = runReadOnlyCommand("/usr/bin/defaults", ["read", "/Library/Preferences/com.apple.loginwindow", "autoLoginUser"])
-        if let user = value, !user.isEmpty {
+        guard let output = runReadOnlyCommand("/usr/sbin/sysadminctl", ["-autologin", "status"]) else {
+            warnings.append("자동 로그인 상태를 확인할 수 없습니다.")
+            return []
+        }
+        let lowered = output.lowercased()
+        if lowered.contains("automatic login is disabled") {
+            return [hostFinding("host.macos.auto-login-disabled", "info", "자동 로그인이 꺼져 있습니다", resource: "macos/automatic-login", evidence: output)]
+        }
+        if lowered.contains("automatic login is enabled") {
             return [hostFinding(
                 "host.macos.auto-login-enabled", "high",
                 "자동 로그인이 켜져 있습니다",
-                resource: "macos/automatic-login", evidence: "autoLoginUser=\(user)",
-                recommendation: "시스템 설정 > 잠금 화면 > 자동 로그인을 '꺼짐'으로 설정하세요. 분실/도난 시 잠금 없이 접근됩니다."
+                resource: "macos/automatic-login", evidence: output,
+                recommendation: "시스템 설정 > 사용자 및 그룹 > 자동 로그인을 '끔'으로 설정하세요. 분실 또는 도난 시 잠금 없이 접근될 수 있습니다."
             )]
         }
-        return [hostFinding("host.macos.auto-login-disabled", "info", "자동 로그인이 꺼져 있습니다", resource: "macos/automatic-login", evidence: "autoLoginUser unset")]
+        warnings.append("자동 로그인 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     private static func checkGuestAccount(warnings: inout [String]) -> [NativeFinding] {
-        guard let value = runReadOnlyCommand("/usr/bin/defaults", ["read", "/Library/Preferences/com.apple.loginwindow", "GuestEnabled"]) else {
-            return [hostFinding("host.macos.guest-account-disabled", "info", "게스트 계정이 비활성화되어 있습니다", resource: "macos/guest-account", evidence: "GuestEnabled unset")]
+        guard let output = runReadOnlyCommand("/usr/sbin/sysadminctl", ["-guestAccount", "status"]) else {
+            warnings.append("게스트 계정 상태를 확인할 수 없습니다.")
+            return []
         }
-        if value.trimmingCharacters(in: .whitespaces) == "1" {
+        let lowered = output.lowercased()
+        if lowered.contains("guest account") && lowered.contains("disabled") {
+            return [hostFinding("host.macos.guest-account-disabled", "info", "게스트 계정이 비활성화되어 있습니다", resource: "macos/guest-account", evidence: output)]
+        }
+        if lowered.contains("guest account") && lowered.contains("enabled") {
             return [hostFinding(
                 "host.macos.guest-account-enabled", "medium",
                 "게스트 계정이 활성화되어 있습니다",
-                resource: "macos/guest-account", evidence: "GuestEnabled=1",
-                recommendation: "시스템 설정 > 사용자 및 그룹에서 게스트 사용자를 끄세요."
+                resource: "macos/guest-account", evidence: output,
+                recommendation: "시스템 설정 > 사용자 및 그룹 > 게스트 사용자에서 이 컴퓨터 로그인을 허용하지 않도록 설정하세요."
             )]
         }
-        return [hostFinding("host.macos.guest-account-disabled", "info", "게스트 계정이 비활성화되어 있습니다", resource: "macos/guest-account", evidence: "GuestEnabled=\(value)")]
+        warnings.append("게스트 계정 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     private static func checkScreenLock(warnings: inout [String]) -> [NativeFinding] {
-        guard let value = runReadOnlyCommand("/usr/bin/defaults", ["-currentHost", "read", "com.apple.screensaver", "askForPassword"]) else {
-            // Setting moved/absent on some macOS versions; do not assert a result.
+        guard let output = runReadOnlyCommand("/usr/sbin/sysadminctl", ["-screenLock", "status"]) else {
             warnings.append("화면 잠금 비밀번호 설정을 확인할 수 없습니다.")
             return []
         }
-        // CIS 2.10.2/2.11.2: password required AND askForPasswordDelay 0-5s (immediate).
-        let delayRaw = runReadOnlyCommand("/usr/bin/defaults", ["-currentHost", "read", "com.apple.screensaver", "askForPasswordDelay"])
-        let askOn = value.trimmingCharacters(in: .whitespaces) == "1"
-        let delayText = delayRaw?.trimmingCharacters(in: .whitespaces) ?? ""
-        let delaySeconds = Double(delayText)
-        let delayOK = delaySeconds.map { $0 >= 0 && $0 <= 5 } ?? false
-        let evidence = "askForPassword=\(value.trimmingCharacters(in: .whitespaces)), askForPasswordDelay=\(delayText.isEmpty ? "unset" : delayText)"
-        if askOn && delayOK {
-            return [hostFinding("host.macos.screen-lock-enabled", "info", "화면 잠금 후 5초 이내 비밀번호를 요구합니다", resource: "macos/screen-lock", evidence: evidence)]
+        let lowered = output.lowercased()
+        let marker = "screenlock delay is "
+        var delaySeconds: Double?
+        if let range = lowered.range(of: marker) {
+            let suffix = lowered[range.upperBound...]
+            if let token = suffix.split(whereSeparator: { $0.isWhitespace }).first {
+                let number = String(token).trimmingCharacters(in: CharacterSet(charactersIn: "0123456789.-").inverted)
+                delaySeconds = Double(number)
+            }
         }
-        return [hostFinding(
-            "host.macos.screen-lock-disabled", "medium",
-            "잠금 후 비밀번호 요구가 없거나 5초를 초과합니다",
-            resource: "macos/screen-lock", evidence: evidence,
-            recommendation: "시스템 설정 > 잠금 화면에서 '화면 보호기 시작 또는 디스플레이 꺼짐 후 암호 요구'를 '즉시(0~5초)'로 설정하세요."
-        )]
+        let isImmediate = lowered.contains("screenlock delay is immediate")
+        let isOff = lowered.contains("screenlock is off") || lowered.contains("screenlock disabled")
+        if isImmediate || delaySeconds.map({ $0 >= 0 && $0 <= 5 }) == true {
+            return [hostFinding("host.macos.screen-lock-enabled", "info", "화면 잠금 후 즉시 비밀번호를 요구합니다", resource: "macos/screen-lock", evidence: output)]
+        }
+        if isOff || delaySeconds.map({ $0 > 5 }) == true {
+            return [hostFinding(
+                "host.macos.screen-lock-disabled", "medium",
+                "잠금 후 비밀번호 요구가 꺼져 있거나 5초를 초과합니다",
+                resource: "macos/screen-lock", evidence: output,
+                recommendation: "시스템 설정 > 잠금 화면에서 '화면 보호기 시작 또는 디스플레이 꺼짐 후 암호 요구'를 '즉시'로 설정하세요."
+            )]
+        }
+        warnings.append("화면 잠금 응답을 해석할 수 없습니다: \(output)")
+        return []
     }
 
     // MARK: - Posture drift (#3)
@@ -565,7 +720,7 @@ final class NativeSecurityScanner {
     private static var baselineURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
-        return base.appendingPathComponent("KODA", isDirectory: true).appendingPathComponent("host-posture-baseline.json")
+        return base.appendingPathComponent("KODA", isDirectory: true).appendingPathComponent("host-posture-baseline-v2.json")
     }
 
     /// Map of resource identifier -> severity from the previous host scan.
@@ -3781,10 +3936,14 @@ private extension NativeSecurityScanner {
     }
 
     func verificationLabel(_ finding: NativeFinding, language: AppLanguage) -> String {
-        if finding.verificationStatus == "needs_review" {
+        switch finding.verificationStatus {
+        case "needs_review":
             return language == .ko ? "검토 필요" : "Needs review"
+        case "unverified":
+            return language == .ko ? "미확인" : "Unverified"
+        default:
+            return language == .ko ? "문맥 확인" : "Context confirmed"
         }
-        return language == .ko ? "문맥 확인" : "Context confirmed"
     }
 
     func renderSeverityBars(_ counts: [String: Int], language: AppLanguage) -> String {

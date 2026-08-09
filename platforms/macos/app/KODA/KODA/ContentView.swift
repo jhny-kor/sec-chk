@@ -66,6 +66,9 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 860, minHeight: 640)
+        .task {
+            await RuleCatalog.preload()
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(language: $language) {
                 showSettings = false
@@ -2291,7 +2294,7 @@ private struct RemediationFindingCard: View {
                 Button {
                     openSettings(pane)
                 } label: {
-                    Label(language == .ko ? "설정 열기" : "Open Settings", systemImage: "gearshape")
+                    Label(language == .ko ? "해당 설정 열기" : "Open This Setting", systemImage: "gearshape")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -2311,7 +2314,7 @@ private struct RemediationFindingCard: View {
     /// Returns nil for non-host findings (no one-click target).
     private var settingsPane: String? {
         guard finding.ruleID.hasPrefix("host.macos.") else { return nil }
-        if finding.ruleID.contains("filevault") || finding.ruleID.contains("sip") || finding.ruleID.contains("gatekeeper") {
+        if finding.ruleID.contains("filevault") || finding.ruleID.contains("gatekeeper") {
             return "com.apple.settings.PrivacySecurity.extension"
         }
         if finding.ruleID.contains("firewall") {
@@ -2320,7 +2323,10 @@ private struct RemediationFindingCard: View {
         if finding.ruleID.contains("auto-security-updates") {
             return "com.apple.Software-Update-Settings.extension"
         }
-        if finding.ruleID.contains("auto-login") || finding.ruleID.contains("screen-lock") {
+        if finding.ruleID.contains("auto-login") {
+            return "com.apple.Users-Groups-Settings.extension"
+        }
+        if finding.ruleID.contains("screen-lock") {
             return "com.apple.Lock-Screen-Settings.extension"
         }
         if finding.ruleID.contains("guest-account") {

@@ -58,6 +58,12 @@ enum RuleCatalog {
     static func groups(language: AppLanguage) -> [RuleCatalogGroup] {
         allGroups[language.rawValue] ?? allGroups["ko"] ?? []
     }
+
+    static func preload() async {
+        await Task.detached(priority: .utility) {
+            _ = allGroups
+        }.value
+    }
 }
 
 struct SettingsView: View {
@@ -151,8 +157,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 560, minHeight: 520)
         .task(id: language) {
-            isLoading = true
-            groups.removeAll(keepingCapacity: true)
+            if groups.isEmpty { isLoading = true }
             let rawLanguage = language.rawValue
             let loadedGroups = await Task.detached(priority: .userInitiated) {
                 RuleCatalog.groups(language: AppLanguage(rawValue: rawLanguage) ?? .ko)

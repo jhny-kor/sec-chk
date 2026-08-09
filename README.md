@@ -37,7 +37,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Dashboard | Native app | WebView2 desktop window | `koda serve` | Loopback-bound dashboard |
 | Offline JAR/WAR/EAR SBOM and vulnerability scan | Yes | Yes | Yes | Yes |
 | Baseline SBOM verification | No | Yes | Yes | Yes |
-| Host posture scan | No | Yes | Yes | No |
+| Host posture scan | Limited; App Sandbox reports system-only checks as Unverified | Yes | Yes | No |
 | Live web posture or ZAP baseline | Yes | Yes | Yes | No, by design |
 | Profile-driven 21-control web audit | No; use shared engine from source | Full build | Shared engine | No, by design |
 
