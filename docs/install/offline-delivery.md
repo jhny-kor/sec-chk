@@ -78,10 +78,26 @@ cap-drop ALL, CPU/메모리/PID 제한으로 실행됩니다. 대상 JAR은 읽�
 ./koda-docker audit --target /jeus/domains/domain1/applications \
   --baseline approved/production-sbom.cdx.json --reports reports/production
 
-./koda-docker dashboard start   # 기본 127.0.0.1:8765
+./koda-docker dashboard start   # 단독 로컬 호환성 확인용
 ```
 
 상세: [platforms/linux/docker/README.md](../../platforms/linux/docker/README.md)
+
+### KODA + KODA SBOM Tracker 통합본
+
+로그인·계정·권한·분석 회차 화면을 운영하려면 두 제품을 묶은 단일 압축파일을
+사용합니다. Tracker가 계정과 현재 브라우저 세션을 관리하고 KODA는 자체 프로젝트
+역할과 관리자 전용 점검 설정을 적용합니다. 동일 오리진의 `/`와 `/koda/`를
+사용하므로 한쪽 로그아웃이 양쪽에 함께 반영됩니다.
+
+```bash
+KODA_TRACKER_BUNDLE=/path/to/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
+  bash platforms/linux/package-suite-offline.sh
+```
+
+생성된 `koda-suite-offline-x86_64-<version>.tar.gz` 하나와 `.sha256`을 반입합니다.
+설치 절차는 [통합 폐쇄망 설치 가이드](../../platforms/linux/suite/README.ko.md)를
+따릅니다. 압축파일에는 실제 비밀번호나 API 키를 넣지 않습니다.
 
 ## 2. Linux tarball (호스트 직접 설치)
 

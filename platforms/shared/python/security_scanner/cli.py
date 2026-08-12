@@ -139,9 +139,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "serve":
+        # Linux is the portal deployment; desktop/local app keeps the legacy dashboard.
+        if sys.platform.startswith("linux") and not getattr(args, "legacy_dashboard", False):
+            from .linux_portal import serve_portal
+            return serve_portal(args.host, args.port, args.language, getattr(args, "db", None))
+        if sys.platform.startswith("linux") and args.host not in {"127.0.0.1", "::1", "localhost"}:
+            print("Legacy dashboard is restricted to a loopback host on Linux.", file=sys.stderr)
+            return 2
         from .server import serve_dashboard
-
         return serve_dashboard(args.host, args.port, args.language)
+
+    if args.command == "portal-bootstrap":
+        from .portal_store import PortalStore
+        try:
+            PortalStore(args.db).bootstrap(args.tracker_user_id)
+        except ValueError as exc:
+            print(f"Portal bootstrap error: {exc}", file=sys.stderr)
+            return 2
+        print(f"Enabled portal system administrator: {args.tracker_user_id}")
+        return 0
 
     if args.command == "app":
         from .app import run_app
@@ -589,8 +605,8 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
             # Seeds (an API spec or --seed) are scanned even without --crawl, at
             # depth 0 (no link-following) unless --crawl is also given.
-            max_pages=None if (args.crawl or seeds) else 1,
-            max_depth=None if args.crawl else 0,
+            max_pages=args.max_pages if (args.crawl or seeds) else 1,
+            max_depth=args.max_depth if args.crawl else 0,
             delay=args.delay,
             opener=opener,
             extra_headers=extra_headers or None,
@@ -772,6 +788,13 @@ def _positive_float(value: str) -> float:
     return parsed
 
 
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be zero or positive")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="local-security-scan",
@@ -941,6 +964,8 @@ def build_parser() -> argparse.ArgumentParser:
     web_scan.add_argument("--fail-on", choices=SEVERITIES, help="exit 1 when findings meet or exceed severity")
     web_scan.add_argument("--timeout", type=float, default=15.0, help="per-request timeout in seconds")
     web_scan.add_argument("--crawl", action="store_true", help="follow same-host links and scan sub-pages")
+    web_scan.add_argument("--max-pages", type=_positive_int, default=50, help="maximum URLs to process while crawling (default 50)")
+    web_scan.add_argument("--max-depth", type=_nonnegative_int, default=3, help="maximum same-host link depth while crawling (default 3)")
     web_scan.add_argument(
         "--render",
         action="store_true",
@@ -1041,6 +1066,13 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1", help="host interface to bind")
     serve.add_argument("--port", type=int, default=8765, help="port to bind")
     serve.add_argument("--language", choices=("en", "ko"), default="ko", help="initial dashboard language")
+    serve.add_argument("--portal", action="store_true", help="run the authenticated Linux portal")
+    serve.add_argument("--legacy-dashboard", action="store_true", help="keep the unauthenticated local dashboard (development only)")
+    serve.add_argument("--db", default=os.environ.get("KODA_PORTAL_DB", "koda-portal.sqlite3"), help="portal SQLite database")
+
+    bootstrap = subparsers.add_parser("portal-bootstrap", help="explicitly enable the first portal administrator")
+    bootstrap.add_argument("--tracker-user-id", required=True, help="Tracker UUID")
+    bootstrap.add_argument("--db", default=os.environ.get("KODA_PORTAL_DB", "koda-portal.sqlite3"), help="portal SQLite database")
 
     app = subparsers.add_parser("app", help="run the dashboard like a local desktop app")
     app.add_argument("--host", default="127.0.0.1", help="host interface to bind")

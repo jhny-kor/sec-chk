@@ -4401,7 +4401,7 @@ HTML_TEMPLATE = """<!doctype html>
         <input id="web-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
         <details class="scan-web-options">
           <summary id="web-crawl-options-label"></summary>
-          <div class="scan-web-options-content">
+          <div id="web-options-content" class="scan-web-options-content">
           <button id="web-options-select-all" class="scan-option-select-all" type="button"></button>
           <label class="scan-web-check"><input id="web-crawl" type="checkbox"> <span id="web-crawl-enable-label"></span></label>
           <label class="scan-web-check"><input id="web-render" type="checkbox"> <span id="web-render-enable-label"></span></label>
@@ -4751,7 +4751,7 @@ HTML_TEMPLATE = """<!doctype html>
 
     function renderWebOptionSelectAllLabel() {
       const activeLabels = labels();
-      const checkboxes = [...document.querySelectorAll(".scan-web-check input[type='checkbox']")];
+      const checkboxes = [...byId("web-options-content").querySelectorAll(".scan-web-check input[type='checkbox']")];
       const allChecked = checkboxes.length > 0 && checkboxes.every((input) => input.checked);
       setText("web-options-select-all", allChecked ? activeLabels.web_clear_all : activeLabels.web_select_all);
       byId("web-options-select-all").setAttribute("aria-pressed", String(allChecked));
@@ -5653,14 +5653,23 @@ HTML_TEMPLATE = """<!doctype html>
       render();
 
       try {
+        const headers = { "Content-Type": "application/json" };
+        if (byId("web-active").checked) {
+          const health = await fetch(apiEndpoint("/api/health"));
+          const session = health.headers.get("X-KODA-Session");
+          if (session) headers["X-KODA-Session"] = session;
+        }
         const response = await fetch(apiEndpoint("/api/web-scan"), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             url,
             language: state.language,
             min_severity: "info",
+            timeout: 10,
             crawl: byId("web-crawl").checked,
+            max_pages: 50,
+            max_depth: 3,
             render: byId("web-render").checked,
             discover_assets: byId("web-discover-assets").checked,
             capture_network: byId("web-capture-network").checked,
@@ -5689,9 +5698,11 @@ HTML_TEMPLATE = """<!doctype html>
         state.scanRunning = false;
         const pages = nextPayload.pages_scanned;
         const scanned = pages ? ` (${pages} ${labels().web_pages_scanned})` : "";
-      state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}${scanned}`;
-      state.scannedPages = nextPayload.scanned_pages || [];
-        state.scanStatusClass = "ok";
+        const scanWarnings = (nextPayload.scan && nextPayload.scan.warnings) || [];
+        const warning = scanWarnings.length ? ` — ${scanWarnings[0]}` : "";
+        state.scanStatus = `${labels().scan_status_done}: ${nextPayload.scan.path || url}${scanned}${warning}`;
+        state.scannedPages = nextPayload.scanned_pages || [];
+        state.scanStatusClass = scanWarnings.length ? "error" : "ok";
         applyPayload(nextPayload);
       } catch (error) {
         state.scanRunning = false;
@@ -5956,10 +5967,13 @@ HTML_TEMPLATE = """<!doctype html>
       runPreventionAction("ignore");
     });
     byId("web-options-select-all").addEventListener("click", () => {
-      const checkboxes = [...document.querySelectorAll(".scan-web-check input[type='checkbox']")];
+      const checkboxes = [...byId("web-options-content").querySelectorAll(".scan-web-check input[type='checkbox']")];
       const allChecked = checkboxes.length > 0 && checkboxes.every((input) => input.checked);
       checkboxes.forEach((input) => { input.checked = !allChecked; });
       renderWebOptionSelectAllLabel();
+    });
+    byId("web-options-content").querySelectorAll(".scan-web-check input[type='checkbox']").forEach((input) => {
+      input.addEventListener("change", renderWebOptionSelectAllLabel);
     });
     byId("zap-options-select-all").addEventListener("click", () => {
       const checkboxes = [...byId("zap-options-content").querySelectorAll(".scan-web-check input[type='checkbox']")];

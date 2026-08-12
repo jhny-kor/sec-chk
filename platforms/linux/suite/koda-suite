@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+# One entry point for the combined KODA + KODA SBOM Tracker air-gap release.
+set -euo pipefail
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+default_prefix="${KODA_SUITE_PREFIX:-${HOME:-$PWD}/koda-suite}"
+install_tmp=""
+
+cleanup_install_tmp() {
+  [[ -z "$install_tmp" || ! -d "$install_tmp" ]] || rm -rf "$install_tmp"
+}
+trap cleanup_install_tmp EXIT
+
+usage() {
+  cat <<'EOF'
+Usage:
+  koda-suite verify
+  koda-suite install --env-file FILE [--prefix DIR]
+  koda-suite start [--prefix DIR]
+  koda-suite status [--prefix DIR]
+  koda-suite stop [--prefix DIR]
+
+The install command verifies, installs, and starts both products. A production
+Tracker env file with real secrets and a least-privilege Dependency-Track API
+key is required and is never stored in the release archive.
+EOF
+}
+
+fail() { echo "error: $*" >&2; exit 2; }
+
+verify_release() {
+  local metadata_file="$script_dir/metadata.env"
+  [[ -f "$script_dir/manifest.sha256" ]] || fail "manifest.sha256 is missing."
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$script_dir" && sha256sum --check --quiet manifest.sha256)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "$script_dir" && shasum -a 256 -c manifest.sha256 >/dev/null)
+  else
+    fail "sha256sum is required on the Linux server."
+  fi
+  [[ -f "$metadata_file" ]] || fail "metadata.env is missing."
+  [[ -f "$script_dir/compose.integration.yaml" && -f "$script_dir/gateway/gateway.conf.template" ]] \
+    || fail "gateway integration files are missing."
+  for required in \
+    'AUTHORITY=tracker' 'AUTH_CONTRACT_VERSION=1' \
+    'AUTH_COOKIE_NAME=__Host-koda_session' 'AUTH_COOKIE_SCHEMA_VERSION=2' \
+    'TRACKER_SESSION_ENDPOINT=/api/v1/auth/session' 'KODA_BASE_PATH=/koda/' \
+    'GATEWAY_AUTH_MODE=auth_request' 'KODA_PORTAL_SCHEMA_VERSION=1' \
+    'KODA_RBAC_CATALOG_VERSION=koda-rbac-v1'; do
+    grep -qx "$required" "$metadata_file" || fail "metadata contract entry is missing: $required"
+  done
+  grep -qx 'TARGET_PLATFORM=linux/amd64' "$metadata_file" \
+    || fail "release is not linux/amd64."
+  grep -qx 'DISTRIBUTION_SCOPE=internal-only' "$metadata_file" \
+    || fail "release is not marked internal-only."
+  KODA_BUNDLE="$(metadata_value "$metadata_file" KODA_BUNDLE)"
+  TRACKER_BUNDLE="$(metadata_value "$metadata_file" TRACKER_BUNDLE)"
+  TRACKER_VULNERABILITY_BUNDLE="$(metadata_value "$metadata_file" TRACKER_VULNERABILITY_BUNDLE)"
+  case "$TRACKER_VULNERABILITY_BUNDLE" in
+    included|absent) ;;
+    *) fail "invalid Tracker vulnerability bundle state: $TRACKER_VULNERABILITY_BUNDLE" ;;
+  esac
+  for payload in "$KODA_BUNDLE" "$TRACKER_BUNDLE"; do
+    case "$payload" in
+      bundles/*.tar.gz) ;;
+      *) fail "invalid payload path in metadata.env: $payload" ;;
+    esac
+    [[ "$payload" != *'/../'* && "$payload" != *'//'* ]] \
+      || fail "unsafe payload path in metadata.env: $payload"
+  done
+  [[ -f "$script_dir/$KODA_BUNDLE" ]] || fail "KODA payload is missing."
+  [[ -f "$script_dir/$TRACKER_BUNDLE" ]] || fail "Tracker payload is missing."
+  echo "KODA Suite release integrity OK"
+}
+
+metadata_value() {
+  local file="$1" key="$2" count
+  count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$count" == 1 ]] || fail "metadata.env must contain exactly one $key entry."
+  sed -n "s/^${key}=//p" "$file"
+}
+
+require_runtime() {
+  case "$(uname -m)" in
+    x86_64|amd64) ;;
+    *) fail "this release requires Linux x86_64; host is $(uname -m)." ;;
+  esac
+  for command_name in docker python3 tar sha256sum flock realpath; do
+    command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is required."
+  done
+  docker info >/dev/null 2>&1 || fail "cannot reach the Docker daemon."
+  docker compose version >/dev/null 2>&1 || fail "the Docker Compose plugin is required."
+}
+
+safe_extract() {
+  local archive="$1" destination="$2"
+  python3 - "$archive" <<'PY'
+import posixpath
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], "r:gz") as archive:
+    for member in archive.getmembers():
+        name = member.name
+        normalized = posixpath.normpath(name)
+        if name.startswith("/") or normalized == ".." or normalized.startswith("../"):
+            raise SystemExit(f"unsafe archive path: {name}")
+        if member.issym() or member.islnk():
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(normalized), member.linkname))
+            if member.linkname.startswith("/") or target == ".." or target.startswith("../"):
+                raise SystemExit(f"unsafe archive link: {name} -> {member.linkname}")
+PY
+  mkdir -p "$destination"
+  tar -xzf "$archive" -C "$destination"
+}
+
+env_value() {
+  local file="$1" key="$2" fallback="$3" value
+  value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); gsub(/^[[:space:]\047\"]+|[[:space:]\047\"]+$/, ""); value=$0 } END { print value }' "$file")"
+  printf '%s\n' "${value:-$fallback}"
+}
+
+wait_http() {
+  local url="$1" expected="${2:-}" timeout="${3:-60}"
+  python3 - "$url" "$expected" "$timeout" <<'PY'
+import html
+import sys
+import time
+import urllib.error
+import urllib.request
+
+url, expected, timeout = sys.argv[1], sys.argv[2], int(sys.argv[3])
+deadline = time.monotonic() + timeout
+last = "no response"
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            body = response.read().decode("utf-8", "replace")
+            if 200 <= response.status < 400 and (not expected or expected in body or html.escape(expected, quote=True) in body):
+                print(f"OK {url}")
+                raise SystemExit(0)
+            last = f"HTTP {response.status}, expected content missing"
+    except (OSError, urllib.error.URLError) as error:
+        last = str(error)
+    time.sleep(2)
+raise SystemExit(f"health check failed: {url}: {last}")
+PY
+}
+
+runtime_values() {
+  local env_file="$1"
+  public_port="${PUBLIC_HTTP_PORT:-$(env_value "$env_file" PUBLIC_HTTP_PORT 8088)}"
+  koda_port="${KODA_PORT:-$(env_value "$env_file" KODA_PORT 8765)}"
+  koda_bind="${KODA_DASHBOARD_BIND:-$(env_value "$env_file" KODA_DASHBOARD_BIND 127.0.0.1)}"
+  tracker_url="${KODA_SSBOM_TRACKER_URL:-$(env_value "$env_file" KODA_SSBOM_TRACKER_URL "http://127.0.0.1:$public_port/?page=runs")}"
+  gateway_scheme="${GATEWAY_PUBLIC_SCHEME:-$(env_value "$env_file" GATEWAY_PUBLIC_SCHEME https)}"
+  tracker_env="${TRACKER_ENVIRONMENT:-$(env_value "$env_file" TRACKER_ENVIRONMENT production)}"
+  tracker_secure_cookies="${TRACKER_SECURE_COOKIES:-$(env_value "$env_file" TRACKER_SECURE_COOKIES true)}"
+  [[ "$koda_bind" == 127.0.0.1 || "$koda_bind" == ::1 ]] || fail "KODA direct port must remain loopback-only."
+  if [[ "$tracker_env" != development ]]; then
+    [[ "$gateway_scheme" == https && "$tracker_secure_cookies" == true ]] \
+      || fail "production requires HTTPS gateway scheme and secure Tracker cookies."
+  fi
+}
+
+gateway_start() {
+  local prefix="$1" env_file="$prefix/tracker/.env"
+  [[ -f "$prefix/tracker/compose.integration.yaml" && -f "$prefix/tracker/gateway/gateway.conf.template" ]] \
+    || fail "gateway integration files are missing; refusing to expose a direct KODA port."
+  docker compose --project-directory "$prefix/tracker" --env-file "$env_file" \
+    -f "$prefix/tracker/compose.yaml" -f "$prefix/tracker/compose.airgap.yaml" \
+    -f "$prefix/tracker/compose.integration.yaml" up -d --no-build --pull never gateway
+}
+
+start_dashboard() {
+  local prefix="$1" env_file="$prefix/tracker/.env"
+  runtime_values "$env_file"
+  "$prefix/koda/koda-docker" dashboard stop >/dev/null
+  KODA_PORT="$koda_port" \
+  KODA_DASHBOARD_BIND="$koda_bind" \
+  KODA_PUBLISH_DASHBOARD=0 \
+  KODA_PORTAL_DATA_DIR="$prefix/data/koda-portal" \
+  KODA_SSBOM_TRACKER_URL="$tracker_url" \
+    "$prefix/koda/koda-docker" dashboard start
+}
+
+runtime_health() {
+  local prefix="$1" env_file="$prefix/tracker/.env" masquerade
+  runtime_values "$env_file"
+  wait_http "http://127.0.0.1:$public_port/healthz" "" 30
+  wait_http "http://127.0.0.1:$public_port/koda/live" "" 30
+  wait_http "http://127.0.0.1:$public_port/api/v1/healthz" "" 30
+  wait_http "http://127.0.0.1:$public_port/dependency-track/" "Dependency-Track" 60
+  wait_http "http://127.0.0.1:$public_port/dependency-track/api/version" "version" 60
+  masquerade="$(docker network inspect -f '{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}' koda-dashboard 2>/dev/null || true)"
+  [[ "$masquerade" == false ]] || fail "KODA dashboard network egress guard is not disabled."
+  echo "Suite:   ${gateway_scheme}://<server>:${public_port}/"
+}
+
+parse_prefix() {
+  prefix="$default_prefix"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --prefix) prefix="${2:-}"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) fail "unknown option: $1" ;;
+    esac
+  done
+}
+
+install_suite() {
+  local env_file="" prefix="$default_prefix" koda_root tracker_inner_vuln_bundle
+  local tracker_install_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --env-file) env_file="${2:-}"; shift 2 ;;
+      --prefix) prefix="${2:-}"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) fail "unknown option: $1" ;;
+    esac
+  done
+  [[ -n "$env_file" && -f "$env_file" ]] || fail "install requires --env-file FILE."
+  env_file="$(CDPATH= cd -- "$(dirname -- "$env_file")" && pwd)/$(basename -- "$env_file")"
+  verify_release
+  require_runtime
+
+  install_tmp="$(mktemp -d "${TMPDIR:-/tmp}/koda-suite.XXXXXX")"
+  safe_extract "$script_dir/$KODA_BUNDLE" "$install_tmp/koda"
+  safe_extract "$script_dir/$TRACKER_BUNDLE" "$install_tmp/tracker"
+  koda_root="$(find "$install_tmp/koda" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+  [[ -n "$koda_root" && -x "$koda_root/install.sh" ]] || fail "invalid KODA payload."
+  [[ -x "$install_tmp/tracker/scripts/install-airgap.sh" ]] || fail "invalid Tracker payload."
+  tracker_inner_vuln_bundle="$(metadata_value "$install_tmp/tracker/metadata.env" VULNERABILITY_BUNDLE)"
+  [[ "$tracker_inner_vuln_bundle" == "$TRACKER_VULNERABILITY_BUNDLE" ]] \
+    || fail "Tracker vulnerability bundle metadata mismatch."
+
+  tracker_install_args=(
+    "$script_dir/$TRACKER_BUNDLE"
+    "$prefix/tracker"
+    --env-file "$env_file"
+  )
+  case "$TRACKER_VULNERABILITY_BUNDLE" in
+    included)
+      [[ -d "$install_tmp/tracker/vulnerability-data" \
+          && ! -L "$install_tmp/tracker/vulnerability-data" ]] \
+        || fail "included Tracker vulnerability data is missing or unsafe."
+      [[ -f "$prefix/metadata.env" ]] \
+        || tracker_install_args+=(--import-vuln-bundle)
+      ;;
+    absent)
+      [[ ! -e "$install_tmp/tracker/vulnerability-data" \
+          && ! -L "$install_tmp/tracker/vulnerability-data" ]] \
+        || fail "unexpected Tracker vulnerability data in release."
+      ;;
+  esac
+
+  # Validate all secrets and Compose wiring before loading either product.
+  "$install_tmp/tracker/scripts/preflight-airgap.sh" "$env_file"
+  "$koda_root/install.sh" --prefix "$prefix/koda"
+  "$install_tmp/tracker/scripts/install-airgap.sh" "${tracker_install_args[@]}"
+
+  mkdir -p "$prefix/config"
+  install -m 0644 "$script_dir/compose.integration.yaml" "$prefix/tracker/compose.integration.yaml"
+  mkdir -p "$prefix/tracker/gateway"
+  install -m 0644 "$script_dir/gateway/gateway.conf.template" "$prefix/tracker/gateway/gateway.conf.template"
+  install -m 0755 "$script_dir/koda-suite" "$prefix/koda-suite"
+  cp "$script_dir/README.ko.md" "$script_dir/metadata.env" "$prefix/"
+  cp "$script_dir/config/koda-suite.env.example" "$prefix/config/"
+  start_dashboard "$prefix"
+  gateway_start "$prefix"
+  runtime_health "$prefix"
+  echo "installed and started: $prefix"
+}
+
+start_suite() {
+  parse_prefix "$@"
+  require_runtime
+  [[ -x "$prefix/tracker/scripts/start-airgap.sh" && -x "$prefix/koda/koda-docker" ]] \
+    || fail "suite is not installed at $prefix."
+  "$prefix/tracker/scripts/start-airgap.sh" "$prefix/tracker/.env"
+  start_dashboard "$prefix"
+  gateway_start "$prefix"
+  runtime_health "$prefix"
+}
+
+status_suite() {
+  parse_prefix "$@"
+  require_runtime
+  [[ -f "$prefix/tracker/.env" && -x "$prefix/koda/koda-docker" ]] \
+    || fail "suite is not installed at $prefix."
+  "$prefix/koda/koda-docker" dashboard status
+  docker compose --env-file "$prefix/tracker/.env" \
+    -f "$prefix/tracker/compose.yaml" -f "$prefix/tracker/compose.airgap.yaml" \
+    -f "$prefix/tracker/compose.integration.yaml" ps
+  runtime_health "$prefix"
+}
+
+stop_suite() {
+  parse_prefix "$@"
+  require_runtime
+  [[ -f "$prefix/tracker/.env" && -x "$prefix/koda/koda-docker" ]] \
+    || fail "suite is not installed at $prefix."
+  "$prefix/koda/koda-docker" dashboard stop
+  docker compose --env-file "$prefix/tracker/.env" \
+    -f "$prefix/tracker/compose.yaml" -f "$prefix/tracker/compose.airgap.yaml" \
+    -f "$prefix/tracker/compose.integration.yaml" stop
+  echo "suite stopped; named volumes were preserved"
+}
+
+case "${1:-}" in
+  verify) shift; [[ $# -eq 0 ]] || fail "verify takes no options."; verify_release ;;
+  install) shift; install_suite "$@" ;;
+  start) shift; start_suite "$@" ;;
+  status) shift; status_suite "$@" ;;
+  stop) shift; stop_suite "$@" ;;
+  -h|--help|"") usage ;;
+  *) fail "unknown command: $1" ;;
+esac

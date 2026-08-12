@@ -83,6 +83,8 @@ def scan_directory_payload(
     enable_osv: bool = False,
     include_host: bool = False,
     disabled_rules: tuple[str, ...] = (),
+    allow_file: bool = False,
+    display_path: str | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -101,7 +103,7 @@ def scan_directory_payload(
     target_path = expand_path(path_value, base_dir or Path.cwd())
     if not target_path.exists():
         raise ValueError(f"Path does not exist: {target_path}")
-    if not target_path.is_dir():
+    if not target_path.is_dir() and not (allow_file and target_path.is_file()):
         raise ValueError(f"Path is not a directory: {target_path}")
 
     target = TargetConfig(
@@ -109,7 +111,7 @@ def scan_directory_payload(
         path=target_path,
         categories=scanner_categories,
         max_file_size_bytes=max_file_size_bytes,
-        discover_projects=discover_projects,
+        discover_projects=discover_projects and target_path.is_dir(),
         discovery_depth=discovery_depth,
     )
     source_only = standard_selection.standard == "sw-dev-security-49"
@@ -133,14 +135,15 @@ def scan_directory_payload(
     findings = filter_disabled_rules(findings, disabled_rules)
     effective_targets = scanner.effective_targets or config.targets
     target_names = tuple(item.name for item in effective_targets)
-    target_paths = {item.name: str(item.path) for item in effective_targets}
-    return build_dashboard_payload(
+    target_paths = {item.name: display_path or str(item.path) for item in effective_targets}
+    payload = build_dashboard_payload(
         findings,
         target_names,
         language,
         target_paths=target_paths,
         warnings=tuple(scanner.warnings),
-        scan_path=str(target_path),
+        scan_path=display_path or str(target_path),
+        kind="upload" if display_path else "directory",
         standard=standard_selection.standard,
         standard_category=standard_selection.category,
         components=scanner.components,
@@ -148,6 +151,17 @@ def scan_directory_payload(
         scanned_categories=scanner_categories,
         source_analysis=scan_result.source_analysis,
     )
+    return _replace_upload_path(payload, str(target_path.resolve()), display_path) if display_path else payload
+
+
+def _replace_upload_path(value: Any, private_path: str, public_path: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _replace_upload_path(item, private_path, public_path) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_upload_path(item, private_path, public_path) for item in value]
+    if isinstance(value, str):
+        return value.replace(private_path, public_path)
+    return value
 
 
 def web_scan_payload(
@@ -157,8 +171,9 @@ def web_scan_payload(
     min_severity: str = "info",
     timeout: float = 15.0,
     crawl: bool = False,
-    max_pages: int | None = None,
-    max_depth: int | None = None,
+    # ponytail: bounded interactive default; CLI flags cover larger authorized sites.
+    max_pages: int | None = 50,
+    max_depth: int | None = 3,
     delay: float = 0.3,
     render: bool = False,
     discover_assets: bool = False,
@@ -671,7 +686,10 @@ def _handler(language: str):
                     _string_value(request, "url"),
                     language=_choice_value(request, "language", {"en", "ko"}, language),
                     min_severity=_choice_value(request, "min_severity", set(SEVERITIES), "info"),
+                    timeout=_bounded_float(request.get("timeout"), default=10.0, low=0.5, high=30.0),
                     crawl=bool(request.get("crawl")),
+                    max_pages=_bounded_int(request.get("max_pages"), default=50, low=1, high=500),
+                    max_depth=_bounded_int(request.get("max_depth"), default=3, low=0, high=10),
                     delay=_bounded_float(request.get("delay"), default=0.3, low=0.0, high=10.0),
                     render=bool(request.get("render")),
                     discover_assets=bool(request.get("discover_assets")),
@@ -882,6 +900,7 @@ def _handler(language: str):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("X-KODA-Session", getattr(self.server, "koda_session_token", ""))
             self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -903,6 +922,7 @@ def _handler(language: str):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-KODA-Session")
+            self.send_header("Access-Control-Expose-Headers", "X-KODA-Session")
             self.send_header("Vary", "Origin")
 
     return DashboardHandler

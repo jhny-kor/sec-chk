@@ -157,13 +157,13 @@ Updates)에 자동 로그인·게스트 계정·화면 잠금이 추가되었습
 
 ### macOS — Swift 네이티브 앱에 host posture 추가 — ✅ (2026-06-07)
 > 방침: macOS는 **Swift 네이티브 KODA 앱**(`platforms/macos/app/KODA`)으로 구동된다. host posture는 별도 Python 앱/창이 아니라 **기존 Swift 앱의 네이티브 스캐너에 직접 추가**한다. PyInstaller/pywebview 방향은 폐기(되돌림).
-- [x] `NativeSecurityScanner.swift`에 `scanHost()` + 읽기전용 `Process` 러너 추가. 네이티브 앱도 공통 Python 엔진과 같은 macOS 점검 9종(기존 6종 + 자동 로그인·게스트 계정·화면 잠금)을 실행하며, 각 프로브 실패는 경고로 격리.
+- [x] `NativeSecurityScanner.swift`에 `scanHost()` + 읽기전용 `Process` 러너 추가. 비샌드박스 실행은 macOS 점검 9종(기존 6종 + 자동 로그인·게스트 계정·화면 잠금)을 엄격한 성공 출력만으로 판정합니다. 제한된 실행 권한에서는 시스템 명령 오류를 OFF/활성으로 오인하지 않고 9개 항목을 `미확인`으로 반환합니다.
 - [x] `category="host"` 라벨(ko/en) 추가 — 기존 리포트(HTML/MD/PDF/점수)에 그대로 통합.
 - [x] `ScannerBridge.swift`: `runHostScan(language:)` + `runHostScanCommand()` — 기존 리포트/점수 스냅샷 파이프라인 재사용(타깃 선택 불필요).
 - [x] `ContentView.swift`: 메뉴에 "이 컴퓨터 점검 (호스트 보안)" 버튼 추가(OSV 조회 옆). `AppLanguage.runHostScanTitle`(ko/en).
 - [x] 절대경로 사용(`/usr/bin/csrutil`,`/usr/bin/fdesetup`,`/usr/sbin/spctl`,`/usr/libexec/ApplicationFirewall/socketfilterfw`,`/usr/bin/defaults`).
-- [ ] xcodebuild 컴파일/실행 검증 (진행 중).
-- 주의(후속): KODA.entitlements는 App Sandbox 활성. 서명·샌드박스 강제 시 system 바이너리 subprocess가 제한될 수 있음(기존 ZAP-docker 기능과 동일 제약). MAS 배포 시 entitlement/대체 API 검토 필요.
+- [x] 2026-08-09 Release 빌드·Apple Development 서명·`/Applications/KODA.app` 설치·실행 및 deep codesign 검증 완료.
+- 주의(후속): KODA.entitlements는 제한된 실행 권한을 사용합니다. 시스템 상태를 자동 확정할 수 없는 경우 `미확인`과 설정 조치 경로를 제공합니다. 앱 내부에서 실제 값을 자동 확정하려면 별도의 권한 있는 helper/XPC 경로가 필요합니다.
 
 ### macOS PyInstaller 레인 — 참고만(host posture는 Swift로 이관)
 - PyInstaller 레인(`build-koda-app.command`)은 레거시 실험용. `--collect-submodules security_scanner`만 유지(지연 임포트 모듈 번들). 엔트리포인트는 원복(`sec-chk-app.py`).

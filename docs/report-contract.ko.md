@@ -30,7 +30,7 @@ Swift 스캐너를 사용합니다. 소비자는 읽는 산출물의 계약을 �
 - `release-package`의 `scan-findings.json`은 핵심 finding·검증·분석기 근거
   필드만 기록합니다. `target`, `resource`, 도달 가능성/AI 분류,
   `standard_mappings`, `source_context`는 포함하지 않습니다.
-- `web-audit`은 [승인된 웹 점검 사용법](usage.ko.md#승인된-웹-점검)의 21개 항목별
+- `web-audit`은 [WEB_AUDIT.ko.md](security/WEB_AUDIT.ko.md)의 21개 항목별
   상태·coverage·evidence 계약을 사용합니다.
 - Java 아카이브와 SBOM 검증 JSON은 워크플로 전용 스키마를 사용하므로
   [Java 런북](security/java-sbom-vulnerability-scan.md)을 따릅니다.

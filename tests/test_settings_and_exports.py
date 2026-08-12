@@ -443,6 +443,49 @@ class ZapScanTests(unittest.TestCase):
 
 
 class WebAuditRouteTests(unittest.TestCase):
+    @patch("security_scanner.server.web_scan_payload", return_value={"ok": True})
+    def test_active_web_scan_uses_session_and_bounded_defaults(self, scan_payload) -> None:
+        server = create_dashboard_server(port=0)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            html = response.read().decode("utf-8")
+            self.assertIn('id="web-options-content"', html)
+            self.assertIn('byId("web-options-content").querySelectorAll', html)
+            self.assertIn('fetch(apiEndpoint("/api/health"))', html)
+            self.assertIn("max_pages: 50", html)
+
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request("GET", "/api/health")
+            response = connection.getresponse()
+            session = response.getheader("X-KODA-Session")
+            response.read()
+            self.assertTrue(session)
+
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+            connection.request(
+                "POST",
+                "/api/web-scan",
+                body=json.dumps({"url": "https://example.com", "crawl": True, "active": True}),
+                headers={
+                    "Content-Type": "application/json",
+                    "Origin": f"http://127.0.0.1:{server.server_port}",
+                    "X-KODA-Session": session,
+                },
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            response.read()
+            kwargs = scan_payload.call_args.kwargs
+            self.assertEqual((kwargs["timeout"], kwargs["max_pages"], kwargs["max_depth"]), (10.0, 50, 3))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     def test_web_audit_plan_requires_loopback_origin_and_session(self) -> None:
         server = create_dashboard_server(port=0)
         thread = threading.Thread(target=server.serve_forever)

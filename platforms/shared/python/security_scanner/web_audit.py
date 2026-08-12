@@ -1419,9 +1419,11 @@ class OastClient:
         )
         try:
             with self.opener.open(request, timeout=timeout) as response:
-                body = _read_bounded(response, int(self.network.limits["max_response_bytes"]))
+                body = _read_bounded(response, int(self.network.limits["max_response_bytes"]), timeout)
         except urllib.error.HTTPError as exc:
-            raise NetworkPolicyError(f"OAST control-plane returned HTTP {exc.code}") from exc
+            code = exc.code
+            exc.close()
+            raise NetworkPolicyError(f"OAST control-plane returned HTTP {code}") from exc
         except (urllib.error.URLError, OSError, ssl.SSLError, socket.timeout, NetworkPolicyError) as exc:
             raise NetworkPolicyError(f"OAST control-plane request failed: {type(exc).__name__}") from exc
         try:
@@ -1582,11 +1584,22 @@ def _response_digest(status: int, headers: Mapping[str, str], body: bytes) -> st
     return hashlib.sha256(canonical_json({"status": status, "headers": normalized_headers, "body": hashlib.sha256(body).hexdigest()})).hexdigest()
 
 
-def _read_bounded(response: object, max_bytes: int) -> bytes:
-    reader = getattr(response, "read", None)
+def _read_bounded(response: object, max_bytes: int, timeout: float | None = None) -> bytes:
+    reader = getattr(response, "read1", None) or getattr(response, "read", None)
     if not callable(reader):
         raise NetworkPolicyError("response body is not readable")
-    body = reader(max_bytes + 1)
+    deadline = None if timeout is None else time.monotonic() + max(0.01, timeout)
+    chunks: list[bytes] = []
+    remaining = max_bytes + 1
+    while remaining > 0:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise BudgetExceeded("response body read exceeded the time budget")
+        chunk = reader(min(65_536, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    body = b"".join(chunks)
     if len(body) > max_bytes:
         raise BudgetExceeded("response exceeds the profile limit")
     return body
@@ -1713,14 +1726,17 @@ class ScenarioRunner:
         try:
             with self.opener.open(request, timeout=timeout) as response:
                 response_headers = {str(key): str(value) for key, value in response.headers.items()}
-                body_bytes = _read_bounded(response, int(self.network.limits["max_response_bytes"]))
+                body_bytes = _read_bounded(response, int(self.network.limits["max_response_bytes"]), timeout)
                 status = int(response.status)
                 final_url = str(response.geturl())
         except urllib.error.HTTPError as exc:
-            response_headers = {str(key): str(value) for key, value in (exc.headers.items() if exc.headers else [])}
-            body_bytes = _read_bounded(exc, int(self.network.limits["max_response_bytes"]))
-            status = int(exc.code)
-            final_url = str(exc.geturl())
+            try:
+                response_headers = {str(key): str(value) for key, value in (exc.headers.items() if exc.headers else [])}
+                body_bytes = _read_bounded(exc, int(self.network.limits["max_response_bytes"]), timeout)
+                status = int(exc.code)
+                final_url = str(exc.geturl())
+            finally:
+                exc.close()
         except (urllib.error.URLError, OSError, ssl.SSLError, socket.timeout, NetworkPolicyError) as exc:
             raise NetworkPolicyError(f"scenario request failed: {type(exc).__name__}") from exc
         body_text = body_bytes.decode("utf-8", "replace")
@@ -3091,7 +3107,7 @@ def _perform_authentication(
     user_field = str(auth.get("user_field") or "username")
     pass_field = str(auth.get("pass_field") or "password")
     body = json.dumps({user_field: username, pass_field: password}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    headers = {"User-Agent": "KODA-web-scanner (+https://github.com/jhny-kor/koda)", **extra_headers, "Content-Type": "application/json"}
+    headers = {"User-Agent": "KODA-web-scanner (+https://gitlab.aigov.go.kr/y2kthr/koda)", **extra_headers, "Content-Type": "application/json"}
     request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
     timeout = min(float(network.limits["timeout_seconds"]), network.remaining_timeout())
     if timeout <= 0:
@@ -3102,10 +3118,13 @@ def _perform_authentication(
     try:
         with opener.open(request, timeout=timeout) as response:
             status = int(response.status)
-            response_body = _read_bounded(response, int(network.limits["max_response_bytes"]))
+            response_body = _read_bounded(response, int(network.limits["max_response_bytes"]), timeout)
     except urllib.error.HTTPError as exc:
-        status = int(exc.code)
-        response_body = _read_bounded(exc, int(network.limits["max_response_bytes"]))
+        try:
+            status = int(exc.code)
+            response_body = _read_bounded(exc, int(network.limits["max_response_bytes"]), timeout)
+        finally:
+            exc.close()
     except (urllib.error.URLError, OSError, ssl.SSLError, socket.timeout, NetworkPolicyError) as exc:
         return extra_headers, [f"web-audit authentication was not completed: {type(exc).__name__}"], [], {
             "status": "NOT_SCANNED", "method": method, "reason_code": "auth_request_failed",
