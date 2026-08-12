@@ -5,6 +5,10 @@
 # versions.txt, manifest.sha256, and image/koda-offline-amd64.tar.
 set -euo pipefail
 
+# Prevent macOS extended attributes from becoming `._*` AppleDouble entries
+# that Linux/Python tar readers treat as extra release roots.
+export COPYFILE_DISABLE=1
+
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(CDPATH= cd -- "$script_dir/../.." && pwd)"
 dist_dir="${KODA_LINUX_DIST_DIR:-$repo_root/dist/linux}"

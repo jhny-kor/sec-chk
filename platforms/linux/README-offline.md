@@ -28,32 +28,25 @@ directory:
 KODA_PREFIX=/srv/koda KODA_BIN_DIR=/usr/local/bin bash platforms/linux/install.sh
 ```
 
-## Web Dashboard
+## Authenticated Linux Portal
 
-Start the dashboard for another workstation on the closed network:
-
-```bash
-koda serve --host 0.0.0.0 --port 8765
-```
-
-Then open:
+For a server-facing UI, use the combined KODA + KODA SBOM Tracker suite. Tracker
+owns the account and session; KODA owns independent project roles and
+administrator-only rule settings. Both products are served from one HTTPS
+origin:
 
 ```text
-http://<server-ip>:8765/security-dashboard.html
+https://<server>/          # KODA SBOM Tracker
+https://<server>/koda/     # KODA
 ```
 
-Use `koda serve` without `--host` for same-server loopback access only.
+See [`suite/README.ko.md`](suite/README.ko.md) for the combined air-gapped
+archive. Do not publish KODA's port 8765. `koda serve --legacy-dashboard --host
+127.0.0.1` remains available only for local compatibility testing.
 
-The installer and package include the Playwright Chromium renderer. Confirm the
-server is healthy before handing the dashboard to an operator:
-
-```bash
-curl --fail http://127.0.0.1:8765/api/health
-```
-
-After a completed scan, **보고서 → PDF** downloads a PDF file directly; it does
-not open a print dialog. Do not omit Chromium when building an offline bundle:
-`install.sh` and `package.sh` fail if the renderer cannot be staged.
+The installer and package include the Playwright Chromium renderer. Do not omit
+Chromium when building an offline bundle: `install.sh` and `package.sh` fail if
+the renderer cannot be staged.
 
 ## Build An Offline Tarball
 

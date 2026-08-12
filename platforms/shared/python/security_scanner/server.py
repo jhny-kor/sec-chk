@@ -83,6 +83,8 @@ def scan_directory_payload(
     enable_osv: bool = False,
     include_host: bool = False,
     disabled_rules: tuple[str, ...] = (),
+    allow_file: bool = False,
+    display_path: str | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -101,7 +103,7 @@ def scan_directory_payload(
     target_path = expand_path(path_value, base_dir or Path.cwd())
     if not target_path.exists():
         raise ValueError(f"Path does not exist: {target_path}")
-    if not target_path.is_dir():
+    if not target_path.is_dir() and not (allow_file and target_path.is_file()):
         raise ValueError(f"Path is not a directory: {target_path}")
 
     target = TargetConfig(
@@ -109,7 +111,7 @@ def scan_directory_payload(
         path=target_path,
         categories=scanner_categories,
         max_file_size_bytes=max_file_size_bytes,
-        discover_projects=discover_projects,
+        discover_projects=discover_projects and target_path.is_dir(),
         discovery_depth=discovery_depth,
     )
     source_only = standard_selection.standard == "sw-dev-security-49"
@@ -133,14 +135,15 @@ def scan_directory_payload(
     findings = filter_disabled_rules(findings, disabled_rules)
     effective_targets = scanner.effective_targets or config.targets
     target_names = tuple(item.name for item in effective_targets)
-    target_paths = {item.name: str(item.path) for item in effective_targets}
-    return build_dashboard_payload(
+    target_paths = {item.name: display_path or str(item.path) for item in effective_targets}
+    payload = build_dashboard_payload(
         findings,
         target_names,
         language,
         target_paths=target_paths,
         warnings=tuple(scanner.warnings),
-        scan_path=str(target_path),
+        scan_path=display_path or str(target_path),
+        kind="upload" if display_path else "directory",
         standard=standard_selection.standard,
         standard_category=standard_selection.category,
         components=scanner.components,
@@ -148,6 +151,17 @@ def scan_directory_payload(
         scanned_categories=scanner_categories,
         source_analysis=scan_result.source_analysis,
     )
+    return _replace_upload_path(payload, str(target_path.resolve()), display_path) if display_path else payload
+
+
+def _replace_upload_path(value: Any, private_path: str, public_path: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _replace_upload_path(item, private_path, public_path) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_upload_path(item, private_path, public_path) for item in value]
+    if isinstance(value, str):
+        return value.replace(private_path, public_path)
+    return value
 
 
 def web_scan_payload(

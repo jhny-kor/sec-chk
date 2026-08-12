@@ -22,6 +22,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | --- | --- |
 | Install the native macOS app | [Mac App Store](https://apps.apple.com/kr/app/koda/id6770264012?mt=12) or [macOS install guide](docs/install/macos.md) |
 | Run KODA on Linux | [Linux install and operation guide](docs/install/linux.md) |
+| Deploy KODA and KODA SBOM Tracker together in an air-gapped network | [Combined Linux suite guide](platforms/linux/suite/README.ko.md) |
 | Build or install the Windows desktop app | [Windows install guide](docs/install/windows.md) |
 | Scan JAR/WAR/EAR files on an offline server | [Offline Java SBOM and vulnerability runbook](docs/security/java-sbom-vulnerability-scan.en.md) |
 | Choose an air-gapped delivery method | [Offline delivery overview](docs/install/offline-delivery.en.md) |
@@ -34,7 +35,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Capability | macOS app | Windows installer | Linux host package | Linux Docker package |
 | --- | --- | --- | --- | --- |
 | Local source, configuration, dependency, and quality scan | Yes | Yes | Yes | Yes |
-| Dashboard | Native app | WebView2 desktop window | `koda serve` | Loopback-bound dashboard |
+| Dashboard | Native app | WebView2 desktop window | Authenticated `/koda/` portal | Authenticated `/koda/` portal behind the suite gateway |
 | Offline JAR/WAR/EAR SBOM and vulnerability scan | Yes | Yes | Yes | Yes |
 | Baseline SBOM verification | No | Yes | Yes | Yes |
 | Host posture scan | Limited; App Sandbox reports system-only checks as Unverified | Yes | Yes | No |
@@ -54,7 +55,10 @@ export PYTHONPATH="$PWD/platforms/shared/python"
 python3 -m security_scanner app
 ```
 
-This starts the local dashboard at `http://127.0.0.1:8765` (loopback only; nothing leaves your machine).
+This starts the cross-platform local app at `http://127.0.0.1:8765` (loopback
+only; nothing leaves your machine). A Linux server uses the authenticated
+`/koda/` portal instead: KODA SBOM Tracker owns the account and session, while
+KODA applies its own project roles and administrator-only rule settings.
 
 To scan your own project, copy the example config, point `targets[].path` at your project folder, and run a scan:
 
@@ -93,7 +97,7 @@ The [English documentation index](docs/README.en.md) is the complete map. The [K
 | Topic | Document |
 | --- | --- |
 | CLI commands, configuration, reports, CI, and auto-fix | [CLI and local usage](docs/usage.md) |
-| Closed-network Docker, Linux, and Windows delivery | [Offline delivery overview](docs/install/offline-delivery.en.md) |
+| Closed-network Docker, Linux, Windows, and combined Tracker delivery | [Offline delivery overview](docs/install/offline-delivery.en.md) |
 | macOS, Linux, and Windows installation | [Install guides](docs/README.en.md#installation-and-delivery) |
 | Java SBOM, pre-commit, Dependency-Track, ZAP, VEX, and supply-chain guidance | [Security integration docs](docs/README.en.md#security-integrations) |
 | Approval-gated web controls, profiles, OAST, and package limits | [Web audit runbook](docs/security/WEB_AUDIT.md) |

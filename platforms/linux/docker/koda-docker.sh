@@ -26,6 +26,7 @@ Usage:
   koda-docker audit --target DIR --baseline SBOM --reports DIR [extra jar-scan args]
   koda-docker dashboard start [--reports DIR] [--port PORT] [--bind ADDRESS]
   koda-docker dashboard status | logs [-f] | stop
+  koda-docker dashboard bootstrap --tracker-user-id UUID
 
 Path arguments (--target/--sbom/--baseline-sbom read-only, --output-dir/--output
 read-write) are bind-mounted automatically at the same absolute path.
@@ -39,6 +40,8 @@ Environment:
   KODA_ALLOW_CONCURRENT set 1 to allow parallel scans
   KODA_PORT             dashboard host port, default 8765
   KODA_DASHBOARD_BIND   dashboard bind address, default 127.0.0.1
+  KODA_PORTAL_DATA_DIR  durable portal database/input directory
+  KODA_PUBLISH_DASHBOARD set 0 when a gateway reaches the private Docker network
   KODA_SSBOM_TRACKER_URL optional http(s) URL shown as an SBOM Tracker button
   KODA_DOCKER_EXTRA_ARGS extra docker run options, whitespace-separated
 EOF
@@ -187,6 +190,7 @@ dashboard_start() {
   local reports=""
   local bind="${KODA_DASHBOARD_BIND:-127.0.0.1}"
   local port="${KODA_PORT:-8765}"
+  local portal_data="${KODA_PORTAL_DATA_DIR:-$script_dir/data/portal}"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --reports) reports="${2:-}"; shift 2 ;;
@@ -223,7 +227,16 @@ dashboard_start() {
   for opt in "${run_opts[@]}"; do
     [ "$opt" = "--rm" ] || filtered+=("$opt")
   done
-  filtered+=(-p "$bind:$port:8765")
+  if [ "${KODA_PUBLISH_DASHBOARD:-1}" = 1 ]; then
+    filtered+=(-p "$bind:$port:8765")
+  fi
+  mkdir -p "$portal_data"
+  portal_data="$(realpath "$portal_data")"
+  filtered+=(
+    -v "$portal_data:/var/lib/koda:rw"
+    -e KODA_PORTAL_DB=/var/lib/koda/portal.sqlite3
+    -e KODA_PORTAL_INPUT_DIR=/var/lib/koda/inputs
+  )
   if [ -n "${KODA_SSBOM_TRACKER_URL:-}" ]; then
     filtered+=(-e "KODA_SSBOM_TRACKER_URL=${KODA_SSBOM_TRACKER_URL}")
   fi
@@ -238,8 +251,11 @@ dashboard_start() {
   fi
   docker run "${docker_opts[@]}" "$image" \
     serve --host 0.0.0.0 --port 8765 >/dev/null
-  echo "dashboard started: http://$bind:$port/security-dashboard.html"
-  echo "remote access: ssh -L $port:127.0.0.1:$port <user>@<server>"
+  if [ "${KODA_PUBLISH_DASHBOARD:-1}" = 1 ]; then
+    echo "dashboard started: http://$bind:$port/koda/"
+  else
+    echo "dashboard started on private Docker network: $dashboard_network"
+  fi
 }
 
 case "${1:-}" in
@@ -260,8 +276,15 @@ case "${1:-}" in
           --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
         ;;
       logs) shift; docker logs ${1:+"$1"} "$dashboard_name" ;;
+      bootstrap)
+        shift
+        [[ "${1:-}" == --tracker-user-id && -n "${2:-}" && $# == 2 ]] \
+          || { echo "Usage: koda-docker dashboard bootstrap --tracker-user-id UUID" >&2; exit 2; }
+        docker exec "$dashboard_name" /opt/koda/bin/koda portal-bootstrap \
+          --tracker-user-id "$2" --db /var/lib/koda/portal.sqlite3
+        ;;
       stop) docker rm -f "$dashboard_name" >/dev/null 2>&1 && echo "dashboard stopped" || echo "dashboard not running" ;;
-      *) echo "Usage: koda-docker dashboard start|status|logs|stop" >&2; exit 2 ;;
+      *) echo "Usage: koda-docker dashboard start|status|logs|bootstrap|stop" >&2; exit 2 ;;
     esac
     ;;
   serve)

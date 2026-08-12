@@ -14,6 +14,7 @@ build/
 *.egg-info/
 .build/
 dist/macos/
+/dist/linux/
 xcuserdata/
 *.xcuserstate
 .omc/

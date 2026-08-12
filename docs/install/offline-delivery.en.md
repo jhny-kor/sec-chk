@@ -55,3 +55,12 @@ scan.
 
 - [English documentation index](../README.en.md)
 - [Korean offline delivery overview](offline-delivery.md)
+
+## Combined KODA + KODA SBOM Tracker suite
+
+Use the combined suite when the closed-network server needs authenticated KODA
+screens, shared Tracker accounts and logout, independent KODA project roles,
+and analysis-round history. Transfer the generated
+`koda-suite-offline-x86_64-<version>.tar.gz` plus its `.sha256`; see the
+[combined suite guide](../../platforms/linux/suite/README.ko.md). The archive
+does not contain real passwords or API keys.

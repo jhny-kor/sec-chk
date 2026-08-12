@@ -21,7 +21,8 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 | --- | --- | --- |
 | 내 프로젝트의 코드·설정·의존성을 점검 | 로컬 HTML/JSON/SARIF/SBOM 보고서와 선택형 CI 게이트 | [CLI 및 로컬 사용법](usage.ko.md) |
 | macOS 앱을 설치 | 네이티브 KODA 앱 또는 Python 대시보드 도우미 | [macOS 설치](install/macos.ko.md) |
-| Linux 서버에서 실행 | 사용자 경로에 설치되는 CLI·대시보드·배포 게이트 | [Linux 설치·운영](install/linux.ko.md) |
+| Linux 서버에서 실행 | 사용자 경로 CLI 또는 Tracker 계정 기반 인증 포털·배포 게이트 | [Linux 설치·운영](install/linux.ko.md) |
+| KODA와 SBOM Tracker를 폐쇄망에 함께 설치 | 계정·로그아웃을 공유하고 사이트별 권한을 분리한 동일 오리진 포털 | [통합 폐쇄망 설치](../platforms/linux/suite/README.ko.md) |
 | 폐쇄망 JAR/WAR/EAR를 점검 | 오프라인 SBOM·취약점·KEV·승인 SBOM 비교 결과 | [폐쇄망 배포 개요](install/offline-delivery.md) |
 | Windows 데스크톱 앱을 설치 | KODA 설치본과 별도 취약점 데이터 갱신 경로 | [Windows 설치](install/windows.ko.md) |
 | 승인된 웹 서비스의 보안 상태를 점검 | 웹·ZAP 보고서. 능동 점검은 명시적 권한 필요 | [CLI 및 로컬 사용법](usage.ko.md#승인된-웹-점검) |
@@ -33,6 +34,7 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 | [offline-delivery.md](install/offline-delivery.md) | 폐쇄망 배포 개요 — Docker 전달물 / Linux tarball / Windows 설치본+데이터 zip 비교, 점검 파이프라인, 종료 코드, 빌드 옵션 |
 | [macos.ko.md](install/macos.ko.md) | macOS 설치 (App Store 앱 및 스크립트 설치) |
 | [linux.ko.md](install/linux.ko.md) | Linux 설치·운영 가이드 (호스트 설치, 대시보드, Docker 전달물) |
+| [통합 폐쇄망 설치](../platforms/linux/suite/README.ko.md) | KODA + KODA SBOM Tracker 단일 압축파일 설치, 공유 로그인, 사이트별 권한, 운영 명령 |
 | [windows.ko.md](install/windows.ko.md) | Windows 설치본 빌드·설치 및 취약점 데이터 패키지 연결 |
 | [vuln-data-refresh.md](install/vuln-data-refresh.md) | Windows 취약점 데이터(`koda-vuln-data-<date>.zip`) 현행화 절차 |
 | [usage.ko.md](usage.ko.md) | 공통 Python CLI 사용법 — 설정, 보고서, CI, 자동 교정과 권한 있는 네트워크 점검 |
@@ -41,6 +43,8 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 [platforms/linux/docker/README.md](../platforms/linux/docker/README.md),
 Linux 오프라인 배포 계층 설명은
 [platforms/linux/README-offline.ko.md](../platforms/linux/README-offline.ko.md)에 있습니다.
+Linux 포털을 운영할 때는 8765 포트를 직접 공개하지 말고 통합 gateway의
+`/koda/` 경로를 사용합니다.
 
 ## 보안 점검·연동 (`security/`)
 

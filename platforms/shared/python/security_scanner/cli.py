@@ -139,9 +139,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "serve":
+        # Linux is the portal deployment; desktop/local app keeps the legacy dashboard.
+        if sys.platform.startswith("linux") and not getattr(args, "legacy_dashboard", False):
+            from .linux_portal import serve_portal
+            return serve_portal(args.host, args.port, args.language, getattr(args, "db", None))
+        if sys.platform.startswith("linux") and args.host not in {"127.0.0.1", "::1", "localhost"}:
+            print("Legacy dashboard is restricted to a loopback host on Linux.", file=sys.stderr)
+            return 2
         from .server import serve_dashboard
-
         return serve_dashboard(args.host, args.port, args.language)
+
+    if args.command == "portal-bootstrap":
+        from .portal_store import PortalStore
+        try:
+            PortalStore(args.db).bootstrap(args.tracker_user_id)
+        except ValueError as exc:
+            print(f"Portal bootstrap error: {exc}", file=sys.stderr)
+            return 2
+        print(f"Enabled portal system administrator: {args.tracker_user_id}")
+        return 0
 
     if args.command == "app":
         from .app import run_app
@@ -1050,6 +1066,13 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1", help="host interface to bind")
     serve.add_argument("--port", type=int, default=8765, help="port to bind")
     serve.add_argument("--language", choices=("en", "ko"), default="ko", help="initial dashboard language")
+    serve.add_argument("--portal", action="store_true", help="run the authenticated Linux portal")
+    serve.add_argument("--legacy-dashboard", action="store_true", help="keep the unauthenticated local dashboard (development only)")
+    serve.add_argument("--db", default=os.environ.get("KODA_PORTAL_DB", "koda-portal.sqlite3"), help="portal SQLite database")
+
+    bootstrap = subparsers.add_parser("portal-bootstrap", help="explicitly enable the first portal administrator")
+    bootstrap.add_argument("--tracker-user-id", required=True, help="Tracker UUID")
+    bootstrap.add_argument("--db", default=os.environ.get("KODA_PORTAL_DB", "koda-portal.sqlite3"), help="portal SQLite database")
 
     app = subparsers.add_parser("app", help="run the dashboard like a local desktop app")
     app.add_argument("--host", default="127.0.0.1", help="host interface to bind")

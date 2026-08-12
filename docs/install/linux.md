@@ -100,45 +100,33 @@ koda scan --target /deploy/app --format json --fail-on high
 koda host-scan --format json --min-severity info
 ```
 
-## Web Dashboard
+## Authenticated Linux portal
 
-On a headless or closed-network Linux server, start the dashboard server:
+The Linux server UI is served at `/koda/` behind the KODA + SBOM Tracker suite
+gateway. Tracker owns the shared account/session while KODA keeps independent
+project roles and administrator-only scan-rule settings. Use the offline suite
+instructions in `platforms/linux/suite/README.ko.md`; do not publish port 8765.
 
 ```bash
-koda serve --host 0.0.0.0 --port 8765
+./koda-suite install --env-file ./koda-suite.env
+# after the Tracker account has logged in once and its UUID is known:
+$HOME/koda-suite/koda/koda-docker dashboard bootstrap --tracker-user-id <TRACKER-UUID>
 ```
 
-Open it from an allowed workstation:
+Open both products at the same HTTPS origin:
 
 ```text
-http://<server-ip>:8765/security-dashboard.html
+https://<server>/          # KODA SBOM Tracker
+https://<server>/koda/     # KODA security portal
 ```
 
-For local-only access on the same server, keep the default loopback binding:
+`koda serve` starts the authenticated Linux portal. The old unauthenticated
+dashboard remains available only for local development and Windows-compatible
+testing:
 
 ```bash
-koda serve
+koda serve --legacy-dashboard --host 127.0.0.1
 ```
-
-Keep the server bound to `127.0.0.1` when only the local operator needs it. Use
-`0.0.0.0` only behind a trusted firewall or reverse proxy. If a firewall is
-required for a workstation on the same network, open only the chosen TCP port:
-
-```bash
-sudo ufw allow from <workstation-ip> to any port 8765 proto tcp
-```
-
-Check the service before opening the UI:
-
-```bash
-curl --fail http://127.0.0.1:8765/api/health
-```
-
-Open `http://127.0.0.1:8765/security-dashboard.html` (or the server address
-when using `--host 0.0.0.0`). Choose a folder, run **보안 점검** or **품질점검**,
-and wait for the status to become complete. The web scan form can crawl same-host
-sub-pages; enable rendering, network capture, route discovery, or active checks
-only for systems you are authorized to test.
 
 ### Download and apply the report
 
@@ -253,19 +241,17 @@ Grype DB, and configures `koda jar-scan` to use them automatically. The
 operator can still override the paths with `KODA_SYFT_BIN`, `KODA_GRYPE_BIN`,
 `KODA_NVD_DATA`, `KODA_CISA_KEV`, and `GRYPE_DB_CACHE_DIR`.
 
-For an offline smoke test, start the dashboard on loopback and verify both the
-health endpoint and a PDF export from a completed sample scan before promoting
-the tarball:
+For a local compatibility smoke test, start the legacy dashboard on loopback
+and verify the health endpoint and a PDF export from a completed sample scan
+before promoting the tarball:
 
 ```bash
-koda serve --host 127.0.0.1 --port 8765
+koda serve --legacy-dashboard --host 127.0.0.1 --port 8765
 curl --fail http://127.0.0.1:8765/api/health
 ```
 
 Stop the foreground server with `Ctrl+C`. For a long-running service, run KODA
-under the platform's service manager with a dedicated unprivileged account,
-`WorkingDirectory` set to the application directory, and loopback binding
-unless remote access is explicitly required.
+through the combined suite gateway. Do not expose the standalone port.
 
 ## Docker Closed-Network Deliverable
 

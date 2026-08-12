@@ -83,7 +83,13 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 `KODA_PIDS_LIMIT`(256), `KODA_TMPFS_SIZE`(512m). 추가 docker 옵션은
 `KODA_DOCKER_EXTRA_ARGS`(공백 구분)로 제한적으로 전달합니다.
 
-## 대시보드
+## 인증 Linux 포털
+
+운영 화면은 [KODA + KODA SBOM Tracker 통합본](../suite/README.ko.md)의 동일
+오리진 `/koda/` 경로를 사용합니다. 통합본에서는 `KODA_PUBLISH_DASHBOARD=0`으로
+8765 포트를 게시하지 않고 gateway가 전용 Docker 네트워크로만 접근합니다.
+
+아래 단독 실행은 로컬 개발·호환성 확인용입니다.
 
 ```bash
 "$KODA_CLI" dashboard start [--reports /home/user0/projects/koda/reports]
@@ -106,7 +112,7 @@ KODA_PORT=9876 "$KODA_CLI" dashboard start
 
 ```bash
 ssh -L 9876:127.0.0.1:9876 user0@<server-ip>
-# http://127.0.0.1:9876/security-dashboard.html
+# http://127.0.0.1:9876/koda/login
 ```
 
 직접 접속이 승인된 경우에만 `KODA_DASHBOARD_BIND=0.0.0.0`을 명시적으로
@@ -116,13 +122,12 @@ masquerade를 비활성화해 컨테이너 발신 트래픽을 차단합니다. 
 `com.docker.network.bridge.enable_ip_masquerade` 옵션을 확인해야 합니다.
 (`--internal` 네트워크는 포트 공개까지 차단하므로 사용하지 않습니다.)
 
-### `security-sbom-dependecy` 포털 연결 버튼
+### KODA SBOM Tracker 통합
 
-`security-sbom-dependecy`의 웹 포털을 나중에 같은 폐쇄망 서버에 올릴 때는
-브라우저가 열 수 있는 URL을 `KODA_SSBOM_TRACKER_URL`로 지정합니다. 기본값은
-비어 있어 버튼이 표시되지 않으며, 설정하면 대시보드 상단에 `SBOM Tracker
-열기` 버튼형 링크가 나타납니다. 링크는 새 탭에서 열리고 `http`/`https`만
-허용됩니다.
+운영에서는 별도 연결 버튼 대신 통합 gateway를 사용합니다. Tracker가 계정과
+세션을 관리하고 KODA는 전달받은 UUID에 자체 승인·프로젝트 역할을 적용합니다.
+한쪽 로그아웃은 Tracker의 현재 브라우저 세션을 폐기하므로 양쪽에 함께
+적용됩니다.
 
 포털의 `compose.yaml` 기본 공개 포트가 `8088`이므로 같은 서버에서 다음처럼
 연결할 수 있습니다.
@@ -141,7 +146,7 @@ export KODA_SSBOM_TRACKER_URL=http://127.0.0.1:8088/
 ssh -L 9876:127.0.0.1:9876 -L 8088:127.0.0.1:8088 user0@<server-ip>
 ```
 
-사용자 PC의 브라우저에서 `http://127.0.0.1:9876/security-dashboard.html`을
+사용자 PC의 브라우저에서 `http://127.0.0.1:9876/koda/login`을
 열면 버튼으로 `http://127.0.0.1:8088/` 포털을 새 탭에서 열 수 있습니다. 서버
 호스트명이 브라우저에서 직접 해석되는 환경이면 `http://tracker.internal/`처럼
 그 주소를 지정하십시오. 이 기능은 브라우저 이동 링크이며, KODA가 Tracker의

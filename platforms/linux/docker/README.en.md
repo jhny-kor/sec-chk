@@ -75,7 +75,14 @@ paths read-only and mounts `--output-dir` or the parent of `--output` read-write
 Scans run one at a time by default. Set `KODA_ALLOW_CONCURRENT=1` only when the
 host can support parallel scan I/O.
 
-## Dashboard
+## Authenticated Linux portal
+
+Production uses the combined suite at `/koda/`; see
+[`../suite/README.ko.md`](../suite/README.ko.md). The suite does not publish port
+8765 and reaches KODA only through its private Docker network. Tracker owns the
+shared account/session, while KODA keeps its own project roles.
+
+The following standalone mode is for local compatibility testing only.
 
 ```bash
 "$KODA_CLI" dashboard start --reports /home/user0/projects/koda/reports
