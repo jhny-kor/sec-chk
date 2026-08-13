@@ -22,7 +22,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | --- | --- |
 | Install the native macOS app | [Mac App Store](https://apps.apple.com/kr/app/koda/id6770264012?mt=12) or [macOS install guide](docs/install/macos.md) |
 | Run KODA on Linux | [Linux install and operation guide](docs/install/linux.md) |
-| Deploy KODA and KODA SBOM Tracker together in an air-gapped network | [Combined Linux suite guide](platforms/linux/suite/README.ko.md) |
+| Deploy KODA, KODA SBOM Tracker, and Dependency-Track together in an air-gapped network | [Combined Linux suite guide](platforms/linux/suite/README.ko.md) |
 | Build or install the Windows desktop app | [Windows install guide](docs/install/windows.md) |
 | Scan JAR/WAR/EAR files on an offline server | [Offline Java SBOM and vulnerability runbook](docs/security/java-sbom-vulnerability-scan.en.md) |
 | Choose an air-gapped delivery method | [Offline delivery overview](docs/install/offline-delivery.en.md) |
@@ -41,6 +41,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Host posture scan | Limited; App Sandbox reports system-only checks as Unverified | Yes | Yes | No |
 | Live web posture or ZAP baseline | Yes | Yes | Yes | No, by design |
 | Profile-driven 21-control web audit | No; use shared engine from source | Full build | Shared engine | No, by design |
+| NIS-SBOM 1.0 CSV export | No | Shared dashboard and CLI | Authenticated portal and CLI | Authenticated portal and CLI |
 
 The Python engine can run from source on any OS. The macOS column above refers only to the native app.
 
@@ -71,6 +72,28 @@ python3 -m security_scanner scan --config my-config.json
 The HTML report is written to `reports/security-dashboard.html`.
 
 Use a narrow target before scanning large folders. Normal scans are read-only. `fix --apply`, prevention-template generation, and authorized web or ZAP scans can change files or contact a target; see [CLI and local usage](docs/usage.md) before using them.
+
+## NIS-SBOM export and closed-network suite
+
+The shared Windows/Linux engine exports the 20 basic SBOM fields described by
+the 2024 joint [SW Supply Chain Security Guideline 1.0](https://www.krcert.or.kr/kr/bbs/view.do?bbsId=B0000127&menuNo=205021&nttId=71432&pageIndex=1)
+as UTF-8 CSV. Choose **NIS-SBOM 1.0 (CSV)** in the Windows shared dashboard or
+in a completed Linux portal analysis round, or use either CLI form:
+
+```bash
+koda scan --target /path/to/project --format nis-sbom --output reports/koda-nis-sbom-1.0.csv
+koda jar-scan --target /deploy/apps --sbom-format nis-1.0 --output-dir reports/java-scan
+```
+
+This is format support for evidence exchange, not NIS certification or a
+compliance decision. Fields that KODA cannot establish from scanned evidence
+remain empty.
+
+For an air-gapped Linux x86_64 server, `package-suite-offline.sh` wraps the
+verified KODA and Tracker payloads—including Tracker's Dependency-Track
+services—into one archive. The installed `koda-suite` command starts one gateway
+with Tracker at `/`, KODA at `/koda/`, and Dependency-Track at
+`/dependency-track/`; see the [combined suite guide](platforms/linux/suite/README.ko.md).
 
 ## Capabilities and architecture
 

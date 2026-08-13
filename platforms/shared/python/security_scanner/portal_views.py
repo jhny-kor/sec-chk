@@ -84,9 +84,15 @@ def run_page(run: dict, *, admin: bool) -> str:
     result = run.get("result") or {}
     findings = result.get("findings", []) if isinstance(result, dict) else []
     rows = "".join(f"<tr><td>{esc(f.get('severity',''))}</td><td>{esc(f.get('rule_id',''))}</td><td>{esc(f.get('title',''))}</td></tr>" for f in findings[:500])
+    sbom = ""
+    if run["status"] == "completed":
+        available = bool((result.get("nis_sbom") or {}).get("rows") or result.get("components")) if isinstance(result, dict) else False
+        disabled = "" if available else " disabled"
+        note = "" if available else "<p class='muted'>SBOM으로 내보낼 의존성 컴포넌트가 없습니다.</p>"
+        sbom = f"<section><h2>SBOM 다운로드</h2><form method='get' action='/koda/api/v1/runs/{esc(run['run_id'])}/sbom'><label for='sbom-format'>생성 형식</label><select id='sbom-format' name='format'><option value='cyclonedx'>CycloneDX 1.6 (JSON)</option><option value='nis-sbom'>국정원 NIS-SBOM 1.0 (CSV)</option></select> <button type='submit'{disabled}>다운로드</button></form>{note}</section>"
     return page(
         f"분석 #{run['round_number']}",
-        f"<section><p>상태: <strong>{esc(run['status'])}</strong></p><p>기준: {esc(run['standard'])} / {esc(run['standard_category'])}</p><p>정책 버전: {esc(run['policy_version'])}</p><p class='error'>{esc(run.get('error') or '')}</p></section><section><h2>결과 ({len(findings)})</h2><table><tr><th>심각도</th><th>규칙</th><th>제목</th></tr>{rows}</table></section><details><summary>불변 실행 스냅샷</summary><pre>{esc(json.dumps(run['snapshot'], ensure_ascii=False, indent=2))}</pre></details>",
+        f"<section><p>상태: <strong>{esc(run['status'])}</strong></p><p>기준: {esc(run['standard'])} / {esc(run['standard_category'])}</p><p>정책 버전: {esc(run['policy_version'])}</p><p class='error'>{esc(run.get('error') or '')}</p></section>{sbom}<section><h2>결과 ({len(findings)})</h2><table><tr><th>심각도</th><th>규칙</th><th>제목</th></tr>{rows}</table></section><details><summary>불변 실행 스냅샷</summary><pre>{esc(json.dumps(run['snapshot'], ensure_ascii=False, indent=2))}</pre></details>",
         admin=admin,
     )
 

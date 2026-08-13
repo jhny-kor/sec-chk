@@ -172,6 +172,14 @@ gateway_start() {
     -f "$prefix/tracker/compose.integration.yaml" up -d --no-build --pull never gateway
 }
 
+suite_compose() {
+  local prefix="$1"
+  shift
+  docker compose --project-directory "$prefix/tracker" --env-file "$prefix/tracker/.env" \
+    -f "$prefix/tracker/compose.yaml" -f "$prefix/tracker/compose.airgap.yaml" \
+    -f "$prefix/tracker/compose.integration.yaml" "$@"
+}
+
 start_dashboard() {
   local prefix="$1" env_file="$prefix/tracker/.env"
   runtime_values "$env_file"
@@ -185,7 +193,7 @@ start_dashboard() {
 }
 
 runtime_health() {
-  local prefix="$1" env_file="$prefix/tracker/.env" masquerade
+  local prefix="$1" env_file="$prefix/tracker/.env" masquerade port_bindings
   runtime_values "$env_file"
   wait_http "http://127.0.0.1:$public_port/healthz" "" 30
   wait_http "http://127.0.0.1:$public_port/koda/live" "" 30
@@ -194,6 +202,9 @@ runtime_health() {
   wait_http "http://127.0.0.1:$public_port/dependency-track/api/version" "version" 60
   masquerade="$(docker network inspect -f '{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}' koda-dashboard 2>/dev/null || true)"
   [[ "$masquerade" == false ]] || fail "KODA dashboard network egress guard is not disabled."
+  port_bindings="$(docker inspect -f '{{json .HostConfig.PortBindings}}' koda-dashboard 2>/dev/null || true)"
+  [[ "$port_bindings" == null || "$port_bindings" == '{}' ]] \
+    || fail "KODA dashboard has a directly published host port: $port_bindings"
   echo "Suite:   ${gateway_scheme}://<server>:${public_port}/"
 }
 
@@ -277,9 +288,9 @@ start_suite() {
   require_runtime
   [[ -x "$prefix/tracker/scripts/start-airgap.sh" && -x "$prefix/koda/koda-docker" ]] \
     || fail "suite is not installed at $prefix."
-  "$prefix/tracker/scripts/start-airgap.sh" "$prefix/tracker/.env"
+  "$prefix/tracker/scripts/preflight-airgap.sh" "$prefix/tracker/.env"
   start_dashboard "$prefix"
-  gateway_start "$prefix"
+  suite_compose "$prefix" up -d --no-build --pull never
   runtime_health "$prefix"
 }
 
@@ -289,9 +300,7 @@ status_suite() {
   [[ -f "$prefix/tracker/.env" && -x "$prefix/koda/koda-docker" ]] \
     || fail "suite is not installed at $prefix."
   "$prefix/koda/koda-docker" dashboard status
-  docker compose --env-file "$prefix/tracker/.env" \
-    -f "$prefix/tracker/compose.yaml" -f "$prefix/tracker/compose.airgap.yaml" \
-    -f "$prefix/tracker/compose.integration.yaml" ps
+  suite_compose "$prefix" ps
   runtime_health "$prefix"
 }
 
@@ -300,10 +309,8 @@ stop_suite() {
   require_runtime
   [[ -f "$prefix/tracker/.env" && -x "$prefix/koda/koda-docker" ]] \
     || fail "suite is not installed at $prefix."
+  suite_compose "$prefix" stop
   "$prefix/koda/koda-docker" dashboard stop
-  docker compose --env-file "$prefix/tracker/.env" \
-    -f "$prefix/tracker/compose.yaml" -f "$prefix/tracker/compose.airgap.yaml" \
-    -f "$prefix/tracker/compose.integration.yaml" stop
   echo "suite stopped; named volumes were preserved"
 }
 

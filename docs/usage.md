@@ -9,6 +9,7 @@ This guide covers the shared Python engine used by Linux, Windows, CI, and serve
 | Scan a repository before review or release | `scan --target . --standard owasp-asvs-5 --format html --output reports/source.html` | A summary HTML page plus a linked detail page for source, configuration, dependencies, secrets, and prevention gaps. |
 | Run a repeatable CI gate | `scan --changed-only --base origin/main --format sarif --fail-on high` | Changed-file scan, SARIF output, and a nonzero exit code at the chosen severity. |
 | Create an offline Java inventory | `jar-scan --target /deploy/apps [--target /deploy/worker-apps]` | CycloneDX, vulnerability, HTML, Markdown, and scan-metadata artifacts from all supplied roots. |
+| Export the joint-guideline SBOM columns | `scan --target . --format nis-sbom --output reports/koda-nis-sbom-1.0.csv` | UTF-8 CSV with the 20 NIS-SBOM 1.0 basic fields; unavailable values remain empty. |
 | Compare a deployment to an approved baseline | `sbom-verify --target /deploy/apps --sbom approved.cdx.json` | Archive, version, PURL, and optional SHA-256 mismatch evidence. |
 | Check the current workstation | `host-scan --format json --min-severity info` | Opt-in host posture findings; network enrichment remains separately opt-in. |
 | Check a website you are authorized to test | `web-scan --url https://example.com` | Headers, TLS, cookie, CORS, and coverage findings. |
@@ -79,6 +80,7 @@ python3 -m security_scanner scan --target . --standard sw-dev-security-49 --form
 python3 -m security_scanner scan --config scanner_config.example.json --fail-on high
 python3 -m security_scanner scan --target . --format sarif --output reports/results.sarif
 python3 -m security_scanner scan --target . --format cyclonedx --output reports/sbom.cdx.json
+python3 -m security_scanner scan --target . --format nis-sbom --output reports/koda-nis-sbom-1.0.csv
 
 # Optional external dependency intelligence
 python3 -m security_scanner scan --target . --enable-osv --format html
@@ -90,6 +92,7 @@ python3 -m security_scanner scan --target . --changed-only --base origin/main --
 
 # Offline Java archive scan and deployed-SBOM verification
 python3 -m security_scanner jar-scan --target /deploy/apps --target /deploy/worker-apps --output-dir reports/java-scan --fail-on high --fail-on-kev
+python3 -m security_scanner jar-scan --target /deploy/apps --sbom-format nis-1.0 --output-dir reports/java-scan
 python3 -m security_scanner sbom-verify --target /deploy/apps --sbom reports/approved-sbom.cdx.json --output-dir reports/sbom-verification --strict-hash --fail-on-mismatch
 ```
 
@@ -169,9 +172,30 @@ python3 -m security_scanner scan --help
 | `json` | Scanner-native structured report. |
 | `sarif` | SARIF 2.1.0 for static-analysis consumers. |
 | `cyclonedx` | CycloneDX JSON SBOM from supported dependency manifests. |
+| `nis-sbom` | UTF-8 CSV using the NIS-SBOM 1.0 20-field column set. |
 | `cyclonedx-vex` | CycloneDX VEX draft; vulnerabilities remain `in_triage` until human review. |
 
 See the [report contract](report-contract.md) for output fields.
+
+### NIS-SBOM 1.0 CSV
+
+KODA follows the 20 basic SBOM fields described in the 2024 joint
+[SW Supply Chain Security Guideline 1.0](https://www.krcert.or.kr/kr/bbs/view.do?bbsId=B0000127&menuNo=205021&nttId=71432&pageIndex=1):
+`SBOM Standard`, `SBOM Type`, `CycloneDXNo.`, `SPDX Doc. ID`, `SBOM ID`,
+`Product Name`, `Product Version`, `Component Name`, `Component Alias`,
+`Component Version`, `Component Supplier Name`, `Component Hash`,
+`Component Path`, `SBOM Author Name`, `Unique Identifier`,
+`Dependency Relationship`, `Timestamp`, `License Name·Version`, `Vul. DB`, and
+`Vul. Info`.
+
+The Windows desktop shared dashboard exposes this as **NIS-SBOM 1.0 (CSV)**
+next to the SBOM download button. The authenticated Linux portal exposes the
+same choice on each completed analysis-round page. `scan --format nis-sbom`
+writes the requested CSV directly; `jar-scan --sbom-format nis-1.0` additionally
+writes `server-sbom.nis.csv` beside the normal Java reports and CycloneDX SBOM.
+KODA preserves all 20 columns and leaves fields empty when the scan evidence
+does not establish a value. This exporter is format support, not NIS
+certification or a formal compliance determination.
 
 ## CI
 

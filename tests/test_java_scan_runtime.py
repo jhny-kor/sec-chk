@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import stat
 import subprocess
@@ -82,6 +84,29 @@ class JavaScanRuntimeTests(unittest.TestCase):
 
             self.assertEqual(result.exit_code, 0)
             self.assertTrue((output / "server-sbom.cdx.json").is_file())
+            self.assertEqual(json.loads((output / "server-sbom.cdx.json").read_text(encoding="utf-8"))["specVersion"], "1.6")
+
+    def test_java_scan_can_write_nis_sbom(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jar = root / "demo-1.2.3.jar"
+            output = root / "reports"
+            _write_jar(jar, {"META-INF/maven/org.example/demo/pom.properties": "groupId=org.example\nartifactId=demo\nversion=1.2.3\n"})
+
+            result = run_java_scan(JavaScanOptions(target=jar, output_dir=output, builtin_only=True, no_grype=True, sbom_format="nis-1.0"))
+
+            self.assertEqual(result.exit_code, 0)
+            nis_path = output / "server-sbom.nis.csv"
+            raw_nis = nis_path.read_bytes()
+            self.assertTrue(raw_nis.startswith(b"\xef\xbb\xbf"))
+            self.assertIn(b"\r\n", raw_nis)
+            self.assertNotIn(b"\r\r\n", raw_nis)
+            rows = list(csv.DictReader(io.StringIO(nis_path.read_text(encoding="utf-8-sig"))))
+            self.assertEqual(rows[0]["SBOM Standard"], "NIS 1.0")
+            self.assertEqual(rows[0]["SBOM Type"], "Deployed")
+            self.assertEqual(rows[0]["Component Name"], "demo")
+            self.assertEqual(rows[0]["Component Supplier Name"], "org.example")
+            self.assertRegex(rows[0]["Component Hash"], r"^alg : SHA-256\ncontent : [0-9a-f]{64}$")
 
     def test_default_scan_reads_all_archive_entries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

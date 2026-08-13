@@ -101,7 +101,9 @@ PREFIX="$HOME/koda-suite" # 사용자 지정 설치 경로라면 같은 값으�
 ```
 
 `stop`은 컨테이너만 멈추며 PostgreSQL, Dependency-Track, SBOM 원본과 취약점
-데이터의 Docker named volume은 삭제하지 않습니다.
+데이터의 Docker named volume은 삭제하지 않습니다. `start`, `status`, `stop`은 모두
+같은 기본·폐쇄망·통합 Compose 파일 조합을 사용하므로 재기동 후에도 KODA는 호스트
+포트를 직접 게시하지 않고 통합 게이트웨이로만 접근됩니다.
 
 ## 스캔과 SBOM 전달
 

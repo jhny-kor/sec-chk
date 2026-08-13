@@ -55,6 +55,7 @@ PYTHONPATH=platforms/shared/python python3 -m security_scanner jar-scan \
   --grype-bin /opt/koda/tools/grype \
   --nvd-data /opt/koda/vuln-data/nvd \
   --cisa-kev /opt/koda/vuln-data/known_exploited_vulnerabilities.json \
+  --sbom-format nis-1.0 \
   --fail-on high --fail-on-kev
 ~~~
 
@@ -107,18 +108,43 @@ gateway. Tracker owns the shared account/session while KODA keeps independent
 project roles and administrator-only scan-rule settings. Use the offline suite
 instructions in `platforms/linux/suite/README.ko.md`; do not publish port 8765.
 
+On a connected build host, wrap the verified KODA Docker and Tracker air-gap
+payloads—including Dependency-Track—into one archive:
+
 ```bash
+KODA_TRACKER_BUNDLE=/path/to/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
+  bash platforms/linux/package-suite-offline.sh
+```
+
+Transfer the generated `koda-suite-offline-x86_64-<version>.tar.gz` and its
+`.sha256` file to the closed-network Linux x86_64 server, verify and extract it,
+then install and start all services through the one launcher:
+
+```bash
+sha256sum -c koda-suite-offline-x86_64-<version>.tar.gz.sha256
+tar -xzf koda-suite-offline-x86_64-<version>.tar.gz
+cd koda-suite-offline-x86_64-<version>
+cp config/koda-suite.env.example ./koda-suite.env
+chmod 600 ./koda-suite.env
+# replace every change-me value with the approved closed-network setting
+./koda-suite verify
 ./koda-suite install --env-file ./koda-suite.env
 # after the Tracker account has logged in once and its UUID is known:
 $HOME/koda-suite/koda/koda-docker dashboard bootstrap --tracker-user-id <TRACKER-UUID>
 ```
 
-Open both products at the same HTTPS origin:
+The gateway's default host port is `8088`. Production must terminate TLS before
+the gateway and preserve the HTTPS origin. The public reverse proxy exposes:
 
 ```text
-https://<server>/          # KODA SBOM Tracker
-https://<server>/koda/     # KODA security portal
+https://<server>/                    # KODA SBOM Tracker
+https://<server>/koda/               # KODA security portal
+https://<server>/dependency-track/   # Dependency-Track
 ```
+
+Use `./koda-suite start|status|stop` for the installed suite. The launcher
+keeps KODA's port 8765 private and verifies the three gateway routes before
+reporting healthy status.
 
 `koda serve` starts the authenticated Linux portal. The old unauthenticated
 dashboard remains available only for local development and Windows-compatible
@@ -128,7 +154,24 @@ testing:
 koda serve --legacy-dashboard --host 127.0.0.1
 ```
 
-### Download and apply the report
+### Download NIS-SBOM and apply the report
+
+On a completed analysis-round page, select **국정원 NIS-SBOM 1.0 (CSV)** under
+**SBOM 다운로드**. The authenticated endpoint returns
+`koda-round-<number>-nis-sbom-1.0.csv`; only a user with access to that project
+can download it. The CSV preserves the 20 basic fields described in the 2024
+joint [SW Supply Chain Security Guideline 1.0](https://www.krcert.or.kr/kr/bbs/view.do?bbsId=B0000127&menuNo=205021&nttId=71432&pageIndex=1).
+Fields not established by scanned evidence remain empty. This is format support,
+not NIS certification or a compliance determination.
+
+The CLI equivalent is:
+
+```bash
+koda scan --target /deploy/app --format nis-sbom \
+  --output reports/koda/koda-nis-sbom-1.0.csv
+koda jar-scan --target /deploy/apps --sbom-format nis-1.0 \
+  --output-dir reports/java-scan
+```
 
 After a scan finds at least one item, select **보고서** and choose a format. The
 PDF option downloads `koda-report[-standard].pdf` as a file; it does not invoke

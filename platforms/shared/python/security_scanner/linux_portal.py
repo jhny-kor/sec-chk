@@ -104,13 +104,15 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
     class Handler(BaseHTTPRequestHandler):
         server_version = "KODA-Portal/1"
 
-        def _send(self, status, raw, content_type):
+        def _send(self, status, raw, content_type, headers=None):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(raw)
 
@@ -271,6 +273,47 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 except KeyError:
                     return self._json(404, {"code": "not_found"})
                 return self._json(200, run) if self._project(identity, run["project_id"]) else self._json(404, {"code": "not_found"})
+            match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/sbom", path)
+            if match:
+                try:
+                    run = store.run(match.group(1))
+                except KeyError:
+                    return self._json(404, {"code": "not_found"})
+                if not self._project(identity, run["project_id"], "project.view"):
+                    return self._json(404, {"code": "not_found"})
+                if run["status"] != "completed":
+                    return self._json(409, {"code": "run_not_completed"})
+                sbom_format = parse_qs(parsed.query).get("format", ["nis-sbom"])[0]
+                result = run.get("result") or {}
+                if sbom_format == "nis-sbom":
+                    from .sbom import render_nis_sbom_rows
+
+                    nis = result.get("nis_sbom") or {}
+                    rows = nis.get("rows") if isinstance(nis, dict) else None
+                    if not rows:
+                        rows = [
+                            {
+                                "Component Name": component.get("name", ""),
+                                "Component Version": component.get("version", ""),
+                                "Component Path": component.get("path", ""),
+                                "Unique Identifier": component.get("purl", ""),
+                            }
+                            for component in result.get("components", [])
+                            if isinstance(component, dict)
+                        ]
+                    if not rows:
+                        return self._json(409, {"code": "sbom_unavailable"})
+                    raw = render_nis_sbom_rows(rows, product_name=f"KODA analysis round {run['round_number']}").encode("utf-8")
+                    filename = f"koda-round-{run['round_number']}-nis-sbom-1.0.csv"
+                    return self._send(200, raw, "text/csv; charset=utf-8", {"Content-Disposition": f'attachment; filename="{filename}"'})
+                if sbom_format == "cyclonedx":
+                    sbom = result.get("sbom")
+                    if not isinstance(sbom, dict) or not sbom.get("components"):
+                        return self._json(409, {"code": "sbom_unavailable"})
+                    raw = (json.dumps(sbom, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                    filename = f"koda-round-{run['round_number']}-cyclonedx-1.6.json"
+                    return self._send(200, raw, "application/vnd.cyclonedx+json; charset=utf-8", {"Content-Disposition": f'attachment; filename="{filename}"'})
+                return self._json(422, {"code": "unsupported_sbom_format"})
             if path.startswith("/koda/admin"):
                 if not admin:
                     return self._html(403, page("권한 없음", "<p>시스템 관리자만 접근할 수 있습니다.</p>"))

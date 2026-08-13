@@ -58,6 +58,7 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 "$KODA_CLI" jar-scan \
   --target /jeus/domains/domain1/applications \
   --target /jeus/domains/domain2/applications \
+  --sbom-format nis-1.0 \
   --output-dir /home/user0/projects/koda/reports/java-scan
 
 # 승인 SBOM과 실제 배포 파일 비교
@@ -76,6 +77,12 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 
 종료 코드: `0` 기준 통과, `1` 취약점/SBOM 불일치, `2` 입력·도구·실행 오류.
 
+`--sbom-format nis-1.0`은 기존 `server-sbom.cdx.json`과 함께
+`server-sbom.nis.csv`를 생성합니다. CSV는 2024년 합동
+[SW 공급망 보안 가이드라인 1.0](https://www.krcert.or.kr/kr/bbs/view.do?bbsId=B0000127&menuNo=205021&nttId=71432&pageIndex=1)의
+기본 20개 필드를 유지하고, 점검으로 확인하지 못한 값은 비워 둡니다. 이는
+형식 지원이며 국정원 인증이나 준수 판정이 아닙니다.
+
 기본적으로 한 번에 하나의 스캔만 실행됩니다(flock). 병렬 실행이 꼭 필요하면
 `KODA_ALLOW_CONCURRENT=1`을 지정하십시오.
 
@@ -88,6 +95,9 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 운영 화면은 [KODA + KODA SBOM Tracker 통합본](../suite/README.ko.md)의 동일
 오리진 `/koda/` 경로를 사용합니다. 통합본에서는 `KODA_PUBLISH_DASHBOARD=0`으로
 8765 포트를 게시하지 않고 gateway가 전용 Docker 네트워크로만 접근합니다.
+완료된 분석 회차에서는 **SBOM 다운로드**에서
+**국정원 NIS-SBOM 1.0 (CSV)**를 선택할 수 있습니다. 프로젝트 접근 권한이 있는
+로그인 사용자에게만 `koda-round-<회차>-nis-sbom-1.0.csv`를 반환합니다.
 
 아래 단독 실행은 로컬 개발·호환성 확인용입니다.
 
@@ -124,13 +134,30 @@ masquerade를 비활성화해 컨테이너 발신 트래픽을 차단합니다. 
 
 ### KODA SBOM Tracker 통합
 
-운영에서는 별도 연결 버튼 대신 통합 gateway를 사용합니다. Tracker가 계정과
+운영에서는 KODA·Tracker·Dependency-Track을 한 압축파일로 묶은 통합 gateway를
+사용합니다. 연결된 빌드 PC에서 검증된 두 전달물을 다음처럼 포장합니다.
+
+```bash
+KODA_TRACKER_BUNDLE=/path/to/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
+  bash platforms/linux/package-suite-offline.sh
+```
+
+폐쇄망 Linux x86_64 서버에서는 압축 해제 후 `./koda-suite verify`,
+`config/koda-suite.env.example`을 권한 `600`의 `koda-suite.env`로 복사해 실제
+운영값을 입력하고 `./koda-suite install --env-file ./koda-suite.env`을 실행합니다. 이후
+`koda-suite start|status|stop`이 세 서비스를 함께 관리합니다. Tracker가 계정과
 세션을 관리하고 KODA는 전달받은 UUID에 자체 승인·프로젝트 역할을 적용합니다.
 한쪽 로그아웃은 Tracker의 현재 브라우저 세션을 폐기하므로 양쪽에 함께
 적용됩니다.
 
-포털의 `compose.yaml` 기본 공개 포트가 `8088`이므로 같은 서버에서 다음처럼
-연결할 수 있습니다.
+기본 gateway 호스트 포트는 `8088`입니다. 운영 환경에서는 TLS reverse proxy
+뒤의 동일 HTTPS 오리진으로 `/`(Tracker), `/koda/`(KODA),
+`/dependency-track/`(Dependency-Track)을 제공합니다. KODA의 8765 포트는
+호스트에 게시하지 않습니다.
+
+아래 별도 포트 연결은 통합본이 아닌 단독 호환성 확인용입니다. 포털의
+`compose.yaml` 기본 공개 포트가 `8088`이므로 같은 서버에서 다음처럼 연결할 수
+있습니다.
 
 ```bash
 # security-sbom-dependecy가 http://127.0.0.1:8088/ 에서 동작하는 경우

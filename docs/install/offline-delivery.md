@@ -1,11 +1,12 @@
 # KODA 폐쇄망 배포 개요
 
 폐쇄망 서버에서 JAR/WAR/EAR SBOM·취약점 점검을 실행하기 위한 배포물과 설치
-흐름을 정리합니다. 세 가지 전달 방식이 있으며 모두 같은 스캐너 엔진
+흐름을 정리합니다. 네 가지 전달 방식이 있으며 모두 같은 스캐너 엔진
 (`platforms/shared/python/security_scanner/`)을 사용합니다.
 
 | 방식 | 대상 | 반입 파일 | 데이터 위치 |
 | --- | --- | --- | --- |
+| KODA 통합본 | Docker Engine이 있는 Linux x86_64 | 1개 (tar.gz) | Docker 이미지와 설치 후 named volume |
 | Docker 전달물 | Docker Engine이 있는 Linux x86_64 | 1개 (tar.gz) | 이미지 내부 |
 | Linux tarball | Python 3.10+ 있는 Linux x86_64 | 1개 (tar.gz) | 설치 폴더 내부 |
 | Windows 설치본 + 데이터 zip | Windows 10/11 | 2개 (exe + zip) | 설치 폴더 옆 `vuln-data\` |
@@ -23,13 +24,17 @@ JAR/WAR/EAR
   → Grype 로컬 DB 매칭으로 CVE 추출
   → NVD 결합 (CVSS·CWE·설명 보강)
   → CISA KEV 결합 (실제 악용 여부)
-  → HTML·JSON·Markdown 보고서
+  → HTML·JSON·Markdown 보고서 + CycloneDX/NIS-SBOM
 ```
 
 * 최초 취약점 매칭은 **Grype DB** 기준입니다. NVD·CISA만으로 직접 판정하지
   않습니다.
 * KNVD 자료는 사용하지 않습니다.
 * Grype 자동 DB 업데이트는 비활성화된 상태로 실행됩니다.
+* NIS-SBOM 1.0 CSV는 2024년 합동
+  [SW 공급망 보안 가이드라인 1.0](https://www.krcert.or.kr/kr/bbs/view.do?bbsId=B0000127&menuNo=205021&nttId=71432&pageIndex=1)의
+  기본 20개 필드 형식을 유지하며, 점검 근거로 확인하지 못한 값은 비워 둡니다.
+  이는 형식 지원이며 국정원 인증이나 준수 판정이 아닙니다.
 
 ### 운영 게이트와 종료 코드
 
@@ -83,7 +88,7 @@ cap-drop ALL, CPU/메모리/PID 제한으로 실행됩니다. 대상 JAR은 읽�
 
 상세: [platforms/linux/docker/README.md](../../platforms/linux/docker/README.md)
 
-### KODA + KODA SBOM Tracker 통합본
+### KODA + KODA SBOM Tracker + Dependency-Track 통합본
 
 로그인·계정·권한·분석 회차 화면을 운영하려면 두 제품을 묶은 단일 압축파일을
 사용합니다. Tracker가 계정과 현재 브라우저 세션을 관리하고 KODA는 자체 프로젝트
@@ -96,8 +101,33 @@ KODA_TRACKER_BUNDLE=/path/to/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
 ```
 
 생성된 `koda-suite-offline-x86_64-<version>.tar.gz` 하나와 `.sha256`을 반입합니다.
-설치 절차는 [통합 폐쇄망 설치 가이드](../../platforms/linux/suite/README.ko.md)를
-따릅니다. 압축파일에는 실제 비밀번호나 API 키를 넣지 않습니다.
+Tracker 전달물에 포함된 Dependency-Track·PostgreSQL·포털 이미지도 같은 통합
+압축파일에 들어갑니다. 압축파일에는 실제 비밀번호나 API 키를 넣지 않습니다.
+
+```bash
+sha256sum -c koda-suite-offline-x86_64-<version>.tar.gz.sha256
+tar -xzf koda-suite-offline-x86_64-<version>.tar.gz
+cd koda-suite-offline-x86_64-<version>
+cp config/koda-suite.env.example ./koda-suite.env
+chmod 600 ./koda-suite.env
+# change-me 값을 실제 폐쇄망 운영값으로 교체
+./koda-suite verify
+./koda-suite install --env-file ./koda-suite.env
+./koda-suite status
+```
+
+기본 gateway 호스트 포트는 `8088`이며 운영 환경은 그 앞에서 TLS를 종료하고
+HTTPS 오리진을 유지해야 합니다. 외부 reverse proxy 기준 경로는 다음과 같습니다.
+
+```text
+https://<서버주소>/                    # KODA SBOM Tracker
+https://<서버주소>/koda/               # KODA
+https://<서버주소>/dependency-track/   # Dependency-Track
+```
+
+이후에는 설치 경로의 `koda-suite start|status|stop`으로 세 서비스를 함께
+관리합니다. 상세 절차는
+[통합 폐쇄망 설치 가이드](../../platforms/linux/suite/README.ko.md)를 따릅니다.
 
 ## 2. Linux tarball (호스트 직접 설치)
 
@@ -116,6 +146,7 @@ bash install.sh                 # 기본 prefix /home/user0/koda
 # 실행
 /home/user0/koda/koda jar-scan --target /deploy/app \
   --target /deploy/worker-app \
+  --sbom-format nis-1.0 \
   --output-dir reports/java-scan --fail-on high --fail-on-kev
 ```
 
@@ -168,6 +199,7 @@ Expand-Archive koda-vuln-data-<date>.zip -DestinationPath $env:LOCALAPPDATA\KODA
 ```bat
 koda jar-scan --target D:\apps ^
   --target D:\worker-apps ^
+  --sbom-format nis-1.0 ^
   --output-dir reports --fail-on high --fail-on-kev
 ```
 
@@ -194,6 +226,7 @@ git 저장소에 대용량 전달물을 직접 커밋하지 마십시오. 상세
 
 | 명령 | 산출물 | 용도 |
 | --- | --- | --- |
+| `package-suite-offline.sh` | `dist/linux/koda-suite-offline-*.tar.gz` | KODA·Tracker·Dependency-Track 통합 전달물 |
 | `package-docker-offline.sh [--refresh]` | `dist/linux/koda-docker-offline-*.tar.gz` | Docker 전달물 |
 | `package-offline.sh [--refresh]` | `dist/linux/koda-linux-x86_64-*.tar.gz` | Linux tarball |
 | `package-offline.sh --vuln-data-only` | `dist/Windows/koda-vuln-data-<date>.zip` | Windows 데이터 |

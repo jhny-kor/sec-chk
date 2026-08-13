@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
 import os
 import subprocess
 import sys
-import tarfile
 import tempfile
 import urllib.parse
-import zipfile
 from contextlib import contextmanager
 from pathlib import Path
-from shutil import copyfileobj
 
+from .archive_input import prepare_input_target
 from .config import ConfigError, expand_path, load_config
 from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, ReportConfig, ScannerConfig, TargetConfig
 from .reporting import filter_by_min_severity, render_html_pair, render_report, write_report
@@ -26,23 +23,6 @@ from .standards import (
     resolve_standard_selection,
     source_standard_help,
 )
-
-ARCHIVE_SUFFIXES = (
-    ".zip",
-    ".jar",
-    ".war",
-    ".ear",
-    ".tar",
-    ".tgz",
-    ".tar.gz",
-    ".tbz",
-    ".tbz2",
-    ".tar.bz2",
-    ".txz",
-    ".tar.xz",
-    ".gz",
-)
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -82,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
                     fail_on_version_conflict=args.fail_on_version_conflict,
                     fail_on_untracked=args.fail_on_untracked,
                     strict_hash=args.strict_hash,
+                    sbom_format=args.sbom_format,
                 )
             )
         except (OSError, ValueError, RuntimeError) as exc:
@@ -834,7 +815,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--standard-category",
         help="optional category within --standard (for example sw-dev-security-49/input-validation-expression)",
     )
-    scan.add_argument("--format", choices=("markdown", "json", "html", "sarif", "cyclonedx", "cyclonedx-vex"), help="report format")
+    scan.add_argument("--format", choices=("markdown", "json", "html", "sarif", "cyclonedx", "nis-sbom", "cyclonedx-vex"), help="report format")
     scan.add_argument("--output", type=Path, help="report output path")
     scan.add_argument("--language", choices=("ko",), default="ko", help="report language (Korean only)")
     scan.add_argument("--min-severity", choices=SEVERITIES, help="minimum severity to include")
@@ -906,6 +887,7 @@ def build_parser() -> argparse.ArgumentParser:
     jar_scan.add_argument("--fail-on-kev", action="store_true", help="exit 1 when a CISA KEV match exists")
     jar_scan.add_argument("--no-grype", action="store_true", help="write SBOM and skip vulnerability comparison")
     jar_scan.add_argument("--builtin-only", action="store_true", help="skip Syft and use the built-in Java identifier")
+    jar_scan.add_argument("--sbom-format", choices=("cyclonedx-1.6", "nis-1.0"), default="cyclonedx-1.6", help="SBOM output: CycloneDX 1.6 JSON or NIS-SBOM 1.0 CSV")
     jar_scan.add_argument("--verify-sbom", action="store_true", help="compare the generated SBOM with deployed archives")
     jar_scan.add_argument("--baseline-sbom", help="approved baseline CycloneDX SBOM")
     jar_scan.add_argument("--fail-on-mismatch", action="store_true", help="with --verify-sbom, exit 1 for any mismatch")
@@ -1245,7 +1227,7 @@ def _config_from_cli(args: argparse.Namespace, *, archive_extract_root: Path | N
     targets = tuple(
         TargetConfig(
             name=Path(target).expanduser().name or target,
-            path=_prepare_input_target(expand_path(target, base_dir), archive_extract_root),
+            path=prepare_input_target(expand_path(target, base_dir), archive_extract_root),
             categories=categories,
             max_file_size_bytes=args.max_file_size or 524288,
             discover_projects=bool(args.discover_projects),
@@ -1352,85 +1334,6 @@ def _apply_overrides(
         source_analyzer_sandbox_wrapper=config.source_analyzer_sandbox_wrapper,
         source_analyzer_sandbox_config=config.source_analyzer_sandbox_config,
     )
-
-
-def _prepare_input_target(path: Path, archive_extract_root: Path | None) -> Path:
-    if not path.exists() or not path.is_file() or not _looks_like_archive(path):
-        return path
-    if archive_extract_root is None:
-        raise ConfigError("Archive input requires a temporary extraction directory")
-
-    target_dir = archive_extract_root / _archive_target_name(path)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        if zipfile.is_zipfile(path):
-            _extract_zip(path, target_dir)
-            return target_dir
-        if tarfile.is_tarfile(path):
-            _extract_tar(path, target_dir)
-            return target_dir
-        if path.suffix.lower() == ".gz":
-            _extract_gzip(path, target_dir)
-            return target_dir
-    except (OSError, tarfile.TarError, zipfile.BadZipFile, EOFError) as exc:
-        raise ConfigError(f"Could not extract archive target {path}: {exc}") from exc
-
-    raise ConfigError(f"Unsupported archive format: {path}")
-
-
-def _looks_like_archive(path: Path) -> bool:
-    name = path.name.lower()
-    return any(name.endswith(suffix) for suffix in ARCHIVE_SUFFIXES)
-
-
-def _archive_target_name(path: Path) -> str:
-    safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in path.name)
-    return f"{safe_name}.extracted"
-
-
-def _safe_destination(root: Path, member_name: str) -> Path:
-    destination = (root / member_name).resolve()
-    root_resolved = root.resolve()
-    if destination != root_resolved and root_resolved not in destination.parents:
-        raise ConfigError(f"Archive contains unsafe path: {member_name}")
-    return destination
-
-
-def _extract_zip(path: Path, target_dir: Path) -> None:
-    with zipfile.ZipFile(path) as archive:
-        for member in archive.infolist():
-            destination = _safe_destination(target_dir, member.filename)
-            if member.is_dir():
-                destination.mkdir(parents=True, exist_ok=True)
-                continue
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as source, destination.open("wb") as output:
-                copyfileobj(source, output)
-
-
-def _extract_tar(path: Path, target_dir: Path) -> None:
-    with tarfile.open(path) as archive:
-        for member in archive.getmembers():
-            destination = _safe_destination(target_dir, member.name)
-            if member.isdir():
-                destination.mkdir(parents=True, exist_ok=True)
-                continue
-            if not member.isfile():
-                continue
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            source = archive.extractfile(member)
-            if source is None:
-                continue
-            with source, destination.open("wb") as output:
-                copyfileobj(source, output)
-
-
-def _extract_gzip(path: Path, target_dir: Path) -> None:
-    output_name = path.name[:-3] if path.name.lower().endswith(".gz") else f"{path.name}.out"
-    destination = _safe_destination(target_dir, output_name)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "rb") as source, destination.open("wb") as output:
-        copyfileobj(source, output)
 
 
 def _has_failure(findings, fail_on: str) -> bool:

@@ -1,6 +1,8 @@
 import datetime as dt
 import base64
+import csv
 import hashlib
+import io
 import json
 import tempfile
 import threading
@@ -178,6 +180,46 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertEqual(self.request(f"/koda/api/v1/runs/{run['run_id']}", headers=self.headers(other, "other"))[0], 404)
         body = {"project_id": project, "expected_version": 0, "disabled_rules": []}
         self.assertEqual(self.request("/koda/api/v1/admin/rules", method="POST", payload=body, headers=self.headers())[0], 409)
+
+    def test_completed_run_downloads_authorized_nis_sbom_csv(self):
+        project = self.server.portal_store.create_project("NIS export", self.admin)
+        target = Path(self.tmp.name) / "dependency.txt"
+        target.write_text("package", encoding="utf-8")
+        input_id = self.server.portal_store.add_input(project, "dependency.txt", target, self.admin)
+        run = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        self.server.portal_store.complete_run(run["run_id"], result={
+            "findings": [],
+            "components": [{"name": "demo", "version": "1.2.3", "path": "requirements.txt", "purl": "pkg:pypi/demo@1.2.3"}],
+            "sbom": {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": [{"name": "demo", "version": "1.2.3"}]},
+            "nis_sbom": {"rows": [{"SBOM Standard": "NIS 1.0", "Product Name": "demo-app", "Component Name": "demo", "Component Version": "1.2.3"}]},
+        })
+
+        status, page = self.request(f"/koda/runs/{run['run_id']}", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("국정원 NIS-SBOM 1.0 (CSV)", page)
+        self.assertIn(f"/koda/api/v1/runs/{run['run_id']}/sbom", page)
+
+        request = urllib.request.Request(
+            self.base + f"/koda/api/v1/runs/{run['run_id']}/sbom?format=nis-sbom",
+            headers=self.headers(),
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw, headers = response.read(), response.headers
+            self.assertEqual(response.status, 200)
+        self.assertEqual(headers.get_content_type(), "text/csv")
+        self.assertEqual(headers.get_content_charset(), "utf-8")
+        self.assertEqual(headers["Content-Disposition"], 'attachment; filename="koda-round-1-nis-sbom-1.0.csv"')
+        self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+        self.assertEqual(rows[0]["SBOM Standard"], "NIS 1.0")
+        self.assertEqual(rows[0]["Component Name"], "demo")
+
+        unauthorized = {"X-KODA-Identity-Display": base64.urlsafe_b64encode(b"unknown").rstrip(b"=").decode()}
+        self.assertEqual(self.request(f"/koda/api/v1/runs/{run['run_id']}/sbom?format=nis-sbom", headers=unauthorized)[0], 401)
+        other = str(uuid.uuid4())
+        self.server.portal_store.ensure_subject(other, "other")
+        self.server.portal_store.set_subject(other, status="enabled", actor=self.admin)
+        self.assertEqual(self.request(f"/koda/api/v1/runs/{run['run_id']}/sbom?format=nis-sbom", headers=self.headers(other, "other"))[0], 404)
 
 
 if __name__ == "__main__":
