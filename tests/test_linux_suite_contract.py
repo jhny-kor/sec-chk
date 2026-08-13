@@ -20,6 +20,7 @@ class LinuxSuiteContractTests(unittest.TestCase):
         self.assertIn('/koda/live', self.launcher)
         self.assertIn('/api/v1/healthz', self.launcher)
         self.assertIn('/dependency-track/api/version', self.launcher)
+        self.assertIn('/dependency-track/static/config.json', self.launcher)
         self.assertIn('location ^~ /koda/', self.gateway)
         self.assertIn('location /api/', self.gateway)
         self.assertIn('location /dependency-track/', self.gateway)
@@ -45,6 +46,7 @@ class LinuxSuiteContractTests(unittest.TestCase):
         self.assertIn('"$tracker_verifier" "$tracker_bundle"', packager)
         self.assertIn('KODA_BUNDLE=bundles/', packager)
         self.assertIn('TRACKER_BUNDLE=bundles/', packager)
+        self.assertIn('single assignment per key', packager)
 
     def test_verify_command_accepts_intact_release_and_rejects_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

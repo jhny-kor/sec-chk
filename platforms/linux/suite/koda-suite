@@ -199,6 +199,7 @@ runtime_health() {
   wait_http "http://127.0.0.1:$public_port/koda/live" "" 30
   wait_http "http://127.0.0.1:$public_port/api/v1/healthz" "" 30
   wait_http "http://127.0.0.1:$public_port/dependency-track/" "Dependency-Track" 60
+  wait_http "http://127.0.0.1:$public_port/dependency-track/static/config.json" "API_BASE_URL" 60
   wait_http "http://127.0.0.1:$public_port/dependency-track/api/version" "version" 60
   masquerade="$(docker network inspect -f '{{index .Options "com.docker.network.bridge.enable_ip_masquerade"}}' koda-dashboard 2>/dev/null || true)"
   [[ "$masquerade" == false ]] || fail "KODA dashboard network egress guard is not disabled."

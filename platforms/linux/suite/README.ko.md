@@ -24,8 +24,10 @@ cd koda-suite-offline-x86_64-@SUITE_VERSION@
 ```
 
 운영 환경파일을 준비합니다. 예시의 모든 `change-me-*` 값을 실제 값으로 바꾸고,
-`DTRACK_API_BASE_URL`은 브라우저/서버가 접근할 수 있는
-`http://<서버주소>:8088/dependency-track/api` 형태로 지정합니다.
+`DTRACK_API_BASE_URL`은 브라우저가 접근할 수 있는 Dependency-Track base 주소인
+`http://<서버주소>:8088/dependency-track` 형태로 지정합니다. 프론트엔드가 여기에
+`/api`를 자동으로 붙이므로 `/dependency-track/api`까지 입력하면 안 됩니다.
+관리자 자동화용 `DTRACK_ADMIN_API_BASE_URL`만 `/dependency-track/api`를 포함합니다.
 `TRACKER_DEPENDENCY_TRACK_API_KEY`에는 Dependency-Track의 BOM 업로드·프로젝트
 생성·조회에 필요한 최소 권한 전용 키를 넣습니다.
 
@@ -104,6 +106,47 @@ PREFIX="$HOME/koda-suite" # 사용자 지정 설치 경로라면 같은 값으�
 데이터의 Docker named volume은 삭제하지 않습니다. `start`, `status`, `stop`은 모두
 같은 기본·폐쇄망·통합 Compose 파일 조합을 사용하므로 재기동 후에도 KODA는 호스트
 포트를 직접 게시하지 않고 통합 게이트웨이로만 접근됩니다.
+
+### 테스트 설치를 완전히 초기화할 때
+
+아래 명령은 계정·세션·프로젝트·SBOM·Dependency-Track DB·취약점 volume과 KODA
+포털 SQLite를 모두 삭제합니다. 다른 서비스가 있는 서버에서는 이 목록 외의
+`docker system prune`이나 전체 volume/image 삭제를 실행하지 않습니다.
+
+```bash
+PREFIX="$HOME/koda-suite"
+"$PREFIX/koda-suite" stop || true
+docker compose --project-directory "$PREFIX/tracker" --env-file "$PREFIX/tracker/.env" \
+  -f "$PREFIX/tracker/compose.yaml" \
+  -f "$PREFIX/tracker/compose.airgap.yaml" \
+  -f "$PREFIX/tracker/compose.integration.yaml" \
+  down --volumes --remove-orphans
+
+# 복구 가능하게 옆으로 보관한 뒤 새 설치에서만 삭제합니다.
+if [ -d "$PREFIX/data/koda-portal" ]; then
+  mv "$PREFIX/data/koda-portal" \
+    "$PREFIX/data/koda-portal.before-reset.$(date -u +%Y%m%dT%H%M%SZ)"
+fi
+
+docker image rm \
+  koda-offline:0.1.0 \
+  local/koda-sbom-portal-web:dev \
+  local/koda-sbom-portal-api:dev \
+  local/koda-sbom-portal-worker:dev \
+  dependencytrack/apiserver:5.0.3 \
+  dependencytrack/frontend:5.0.3 \
+  postgres:16.10-alpine \
+  nginx:1.29.1-alpine \
+  anchore/grype:v0.109.1 \
+  cyclonedx/cyclonedx-cli:0.30.0 \
+  alpine:3.22.1
+```
+
+`docker image rm`에서 “image is being used”가 나오면 해당 컨테이너가 아직 남은
+것이므로 먼저 `docker ps -a --format '{{.ID}} {{.Names}} {{.Image}}'`로 위 제품의
+컨테이너만 확인하고 `docker rm -f <확인한-ID>` 후 다시 실행합니다. 화면에 보이는
+다른 제품의 이미지와 `<none>` 이미지는 KODA와 관계가 확인되기 전에는 삭제하지
+않습니다. 새 설치는 통합 압축파일의 `./koda-suite install`만 사용합니다.
 
 ## 폐쇄망 부분 교체·백업·복원
 
