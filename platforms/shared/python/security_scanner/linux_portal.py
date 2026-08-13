@@ -149,7 +149,7 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 if api:
                     self._json(403, {"code": "subject_not_enabled", "status": subject["status"]})
                 else:
-                    self._html(403, page("접근 대기", "<p>관리자 승인 후 사용할 수 있습니다.</p>"))
+                    self._html(403, page("접근 대기", f"<p>관리자 승인 후 사용할 수 있습니다.</p><p>관리자에게 다음 계정 식별자를 전달하세요: <code>{esc(identity.subject_id)}</code></p>"))
                 return None
             return identity, subject
 
@@ -227,7 +227,7 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
             if path == "/koda/api/v1/me":
                 return self._json(200, {"subject_id": identity.subject_id, "display": identity.display, "status": subject["status"], "system_admin": bool(subject["system_admin"])})
             if subject["status"] != "enabled":
-                return self._json(403, {"code": "subject_not_enabled"}) if api else self._html(403, page("접근 대기", "<p>관리자 승인 후 사용할 수 있습니다.</p>"))
+                return self._json(403, {"code": "subject_not_enabled"}) if api else self._html(403, page("접근 대기", f"<p>관리자 승인 후 사용할 수 있습니다.</p><p>관리자에게 다음 계정 식별자를 전달하세요: <code>{esc(identity.subject_id)}</code></p>"))
             admin = self._admin(subject)
             projects = store.list_projects(identity.subject_id)
             if path in {"/koda", "/"}:

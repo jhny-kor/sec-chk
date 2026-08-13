@@ -1,6 +1,7 @@
 server {
     listen 8080;
     server_name ${GATEWAY_SERVER_NAME};
+    client_max_body_size 100m;
 
     location = /healthz {
         access_log off;
@@ -144,7 +145,10 @@ server {
     location /dependency-track/ {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_pass http://${DTRACK_FRONTEND_UPSTREAM}${DTRACK_BASE_PATH}/;
+        proxy_set_header X-Forwarded-Prefix ${DTRACK_BASE_PATH};
+        # The frontend serves /static/config.json at its container root.
+        # Strip the public prefix before proxying or this path returns 404.
+        proxy_pass http://${DTRACK_FRONTEND_UPSTREAM}/;
     }
     location / {
         proxy_set_header Host $host;

@@ -116,7 +116,13 @@ PY
 
 env_value() {
   local file="$1" key="$2" fallback="$3" value
-  value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); gsub(/^[[:space:]\047\"]+|[[:space:]\047\"]+$/, ""); value=$0 } END { print value }' "$file")"
+  # Keep parsing portable across mawk/gawk; escaped quote regexes emit
+  # warnings on Linux and add noise to every lifecycle command.
+  value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); value=$0 } END { print value }' "$file")"
+  value="${value#${value%%[![:space:]]*}}"
+  value="${value%${value##*[![:space:]]}}"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then value="${value:1:${#value}-2}"; fi
+  if [[ "$value" == \'*\' && "$value" == *\' ]]; then value="${value:1:${#value}-2}"; fi
   printf '%s\n' "${value:-$fallback}"
 }
 

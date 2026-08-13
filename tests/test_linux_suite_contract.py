@@ -24,6 +24,12 @@ class LinuxSuiteContractTests(unittest.TestCase):
         self.assertIn('location ^~ /koda/', self.gateway)
         self.assertIn('location /api/', self.gateway)
         self.assertIn('location /dependency-track/', self.gateway)
+        self.assertIn('proxy_pass http://${DTRACK_FRONTEND_UPSTREAM}/;', self.gateway)
+        self.assertNotIn('proxy_pass http://${DTRACK_FRONTEND_UPSTREAM}${DTRACK_BASE_PATH}/;', self.gateway)
+
+    def test_env_parser_is_quiet_on_linux_awk(self) -> None:
+        self.assertIn('value="$(awk -F= -v key="$key"', self.launcher)
+        self.assertNotIn('\\047\\"', self.launcher)
 
     def test_lifecycle_uses_one_integrated_offline_compose_contract(self) -> None:
         self.assertIn('suite_compose "$prefix" up -d --no-build --pull never', self.launcher)

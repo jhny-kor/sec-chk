@@ -68,6 +68,23 @@ PREFIX="$HOME/koda-suite"
 - SBOM Tracker: `https://<서버주소>:8088/`
 - Dependency-Track: `https://<서버주소>:8088/dependency-track/`
 
+화면 주소는 다음처럼 구분합니다.
+
+- `/`는 KODA-SBOM-Tracker입니다. Tracker에서 수정한 UI는 이 주소에서 확인합니다.
+- `/koda/`는 KODA 분석 포털입니다. 로그인 직후 `접근 대기`가 보이면 중앙 로그인은
+  성공했지만 KODA 프로젝트 승인이 아직 없는 상태입니다. 화면의 계정 UUID를
+  관리자에게 전달하고 위의 `dashboard bootstrap` 명령으로 승인합니다.
+- `/dependency-track/`는 Dependency-Track 화면입니다. 정적 설정 파일 404가 나오면
+  새 압축파일의 `install`을 반복하기보다 `./koda-suite status`와
+  `docker compose ... logs gateway dtrack-frontend`를 먼저 확인합니다.
+
+SBOM 업로드 기본 한도는 Tracker API와 게이트웨이 모두 100MiB입니다. 413이 계속되면
+앞단 TLS reverse proxy를 별도로 운영 중인 것이므로 그 프록시의 `client_max_body_size`
+또는 요청 본문 제한도 100MiB 이상으로 맞춰야 합니다.
+
+Tracker UI가 이전 화면으로 보이면 브라우저에서 `Ctrl+Shift+R`로 캐시를 비운 뒤
+`/`를 다시 엽니다.
+
 KODA 대시보드의 `SBOM Tracker 열기` 버튼은 기본적으로
 `http://127.0.0.1:8088/?page=runs`를 엽니다. 원격 브라우저가 서버 주소로 직접
 접속한다면 `koda-suite.env`의 `KODA_SSBOM_TRACKER_URL`을 그 주소로 바꿉니다.
