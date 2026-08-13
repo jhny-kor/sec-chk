@@ -105,6 +105,117 @@ PREFIX="$HOME/koda-suite" # 사용자 지정 설치 경로라면 같은 값으�
 같은 기본·폐쇄망·통합 Compose 파일 조합을 사용하므로 재기동 후에도 KODA는 호스트
 포트를 직접 게시하지 않고 통합 게이트웨이로만 접근됩니다.
 
+## 폐쇄망 부분 교체·백업·복원
+
+설치 디렉터리를 통째로 지우거나 내부 image tar를 골라 직접 설치하지 않습니다.
+응용프로그램·이미지를 바꿀 때는 새 통합 압축파일을 반입하여 같은 `--prefix`에
+덮어 설치합니다. 이 방식은 KODA 포털 디렉터리와 Tracker named volume을 보존합니다.
+
+| 대상 | 실제 저장 위치 | 교체·백업 방법 |
+| --- | --- | --- |
+| KODA·Tracker·Dependency-Track 응용프로그램/이미지 | Docker 이미지와 `$PREFIX/koda`, `$PREFIX/tracker` | 새 통합 압축파일의 SHA-256과 manifest를 검증한 뒤 같은 prefix에 `install` |
+| KODA 사용자 승인·프로젝트 권한·점검 정책·회차 | `$PREFIX/data/koda-portal` | Suite를 중지하고 디렉터리 전체를 tar로 백업·복원 |
+| Tracker 계정·역할·세션·서비스·업로드 회차·감사 기록 | `sbom_tracker` DB와 `tracker-artifacts` volume | Tracker `backup-system.sh`/`restore-system.sh` 사용 |
+| Dependency-Track 프로젝트·정책·분석 데이터 | `dtrack` DB와 `dtrack-data` volume | 같은 Tracker 전체 백업에 포함 |
+| Tracker Grype/NVD/KEV | `vuln-data` volume | 취약점 bundle만 검증·반입·롤백하거나 Tracker 전체 백업 사용 |
+| 운영 비밀번호·API 키·TLS 인증서 | `$PREFIX/tracker/.env`와 외부 TLS 종료기 | 릴리스와 분리하여 접근 제한된 암호화 매체에 백업 |
+| 원본 소스·SBOM·CLI 보고서 | 운영자가 지정한 호스트 경로 | Suite 백업 대상이 아니므로 해당 디렉터리를 별도 백업 |
+
+### 전체 운영 백업
+
+SQLite와 volume tar의 시점을 맞추려면 유지보수 창에 Suite를 중지한 뒤 백업합니다.
+Tracker 백업 스크립트는 필요한 동안 PostgreSQL만 기동합니다. 운영 `.env`는 기본
+백업에 포함되지 않으므로 릴리스 압축파일·SHA-256 파일과 함께 별도 암호화 매체에
+보관합니다.
+
+```bash
+PREFIX="$HOME/koda-suite"
+BACKUP_DIR="/media/koda-backup/$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$BACKUP_DIR"
+
+"$PREFIX/koda-suite" stop
+tar -C "$PREFIX/data" -czf "$BACKUP_DIR/koda-portal.tar.gz" koda-portal
+cp "$PREFIX/metadata.env" "$BACKUP_DIR/suite-metadata.env"
+(cd "$BACKUP_DIR" && \
+  sha256sum koda-portal.tar.gz suite-metadata.env > local-files.sha256)
+
+ENV_FILE="$PREFIX/tracker/.env" BACKUP_ROOT="$BACKUP_DIR/tracker" \
+  "$PREFIX/tracker/scripts/backup-system.sh"
+ENV_FILE="$PREFIX/tracker/.env" \
+  "$PREFIX/tracker/scripts/verify-backup.sh" \
+  "$BACKUP_DIR/tracker/<출력된-UTC-시각>"
+
+"$PREFIX/koda-suite" start
+"$PREFIX/koda-suite" status
+```
+
+Tracker 백업에는 두 PostgreSQL DB와 Tracker 첨부파일, Dependency-Track 데이터,
+Tracker 취약점 volume이 포함됩니다. KODA 포털 디렉터리, 운영 `.env`, TLS 인증서,
+호스트의 원본/보고서는 포함되지 않으므로 위처럼 각각 보관해야 전체 복원이
+가능합니다.
+
+### 응용프로그램·이미지 교체
+
+새 통합 압축파일을 별도 디렉터리에 풀고 무결성을 확인한 뒤 기존 prefix에 설치합니다.
+업데이트 전에 위 백업을 만들고, 정상 확인 전에는 이전 릴리스 압축파일과 Docker
+이미지를 삭제하거나 `docker system prune`을 실행하지 않습니다.
+
+```bash
+PREFIX="$HOME/koda-suite"
+cd /media/koda-release
+sha256sum -c koda-suite-offline-x86_64-<새버전>.tar.gz.sha256
+cd koda-suite-offline-x86_64-<새버전>
+./koda-suite verify
+./koda-suite install --env-file "$PREFIX/tracker/.env" --prefix "$PREFIX"
+./koda-suite status
+```
+
+기존 설치를 갱신할 때는 통합본에 취약점 데이터가 들어 있어도 자동 반입하지
+않습니다. `metadata.env`의 `TRACKER_VULNERABILITY_BUNDLE=included`를 확인한 뒤 아래
+`Tracker 취약점 데이터 저장과 갱신` 절차로 `$PREFIX/tracker/vulnerability-data`를
+명시적으로 검증·반입합니다. 특정 컨테이너만 임의 태그로 교체하면 manifest와
+Compose 고정 버전 계약이 깨지므로, 한 제품만 수정한 경우에도 새 통합본을 생성하여
+같은 절차로 반입합니다.
+
+### 데이터만 복원
+
+KODA 포털 데이터만 되돌릴 때는 백업 해시를 확인하고 현재 디렉터리를 즉시 삭제하지
+말고 옆으로 이동해 둡니다.
+
+```bash
+PREFIX="$HOME/koda-suite"
+BACKUP_DIR=/media/koda-backup/<UTC-시각>
+(cd "$BACKUP_DIR" && sha256sum -c local-files.sha256)
+
+"$PREFIX/koda-suite" stop
+mv "$PREFIX/data/koda-portal" \
+  "$PREFIX/data/koda-portal.before-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+tar -C "$PREFIX/data" -xzf "$BACKUP_DIR/koda-portal.tar.gz"
+"$PREFIX/koda-suite" start
+"$PREFIX/koda-suite" status
+```
+
+Tracker·Dependency-Track 데이터를 되돌릴 때는 백업 당시와 호환되는 릴리스와
+`.env`를 먼저 준비합니다. 복원 스크립트는 현재 DB와 named volume을 교체하고
+PostgreSQL만 기동한 상태로 끝나므로 Suite를 다시 시작해야 합니다.
+
+```bash
+PREFIX="$HOME/koda-suite"
+TRACKER_BACKUP=/media/koda-backup/<UTC-시각>/tracker/<UTC-시각>
+
+"$PREFIX/koda-suite" stop
+ENV_FILE="$PREFIX/tracker/.env" \
+  "$PREFIX/tracker/scripts/verify-backup.sh" "$TRACKER_BACKUP"
+ENV_FILE="$PREFIX/tracker/.env" \
+  "$PREFIX/tracker/scripts/restore-system.sh" "$TRACKER_BACKUP"
+"$PREFIX/koda-suite" start
+"$PREFIX/koda-suite" status
+```
+
+백업과 현재 `.env`의 `COMPOSE_PROJECT_NAME`, DB 이름, volume 이름이 다르면 임의로
+복원하지 않습니다. 계정·권한·점검 정책을 관리자 화면에서 대량 변경하기 전에도
+Tracker DB와 KODA 포털 디렉터리 중 해당 저장소를 먼저 백업합니다.
+
 ## 스캔과 SBOM 전달
 
 KODA CLI는 기존 명령을 그대로 사용합니다.
