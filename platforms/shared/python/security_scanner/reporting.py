@@ -1331,9 +1331,9 @@ RULE_TRANSLATIONS_KO = {
         "recommendation": "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요.",
     },
     "dependency.osv-known-vulnerability": {
-        "title": "OSV에 보고된 알려진 취약 의존성",
-        "description": "OSV가 이 정확한 의존성 버전에 대해 알려진 취약점을 보고했습니다.",
-        "recommendation": "OSV 상세 페이지를 확인한 뒤 업그레이드, 패치, 대체, 또는 보완 통제를 문서화하세요.",
+        "title": "알려진 취약 의존성",
+        "description": "취약점 데이터베이스가 이 정확한 의존성 버전의 알려진 취약점을 보고했습니다.",
+        "recommendation": "취약점 식별자를 확인한 뒤 업그레이드, 패치, 대체, 또는 보완 통제를 문서화하세요.",
     },
 }
 

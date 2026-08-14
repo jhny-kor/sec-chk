@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 import re
+import tempfile
 import threading
 import unittest
 import zipfile
@@ -19,6 +20,7 @@ SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
 if str(SHARED_PYTHON) not in sys.path:
     sys.path.insert(0, str(SHARED_PYTHON))
 
+from security_scanner.grype_adapter import GrypeMatch, GrypeResult
 from security_scanner.models import DependencyComponent, Finding
 from security_scanner.reporting import (
     build_rule_catalog,
@@ -32,7 +34,7 @@ from security_scanner.reporting import (
     render_pdf,
     render_xlsx,
 )
-from security_scanner.server import create_dashboard_server, zap_scan_payload
+from security_scanner.server import create_dashboard_server, scan_directory_payload, zap_scan_payload
 from security_scanner.sbom import NIS_SBOM_COLUMNS, render_nis_sbom
 
 SAMPLE_PAYLOAD = {
@@ -103,6 +105,26 @@ class DisabledRuleFilterTests(unittest.TestCase):
         findings = [self._finding("secret.aws-access-key")]
         self.assertEqual(filter_disabled_rules(findings, []), findings)
         self.assertEqual(filter_disabled_rules(findings, None), findings)
+
+
+class LocalVulnerabilityScanTests(unittest.TestCase):
+    def test_local_grype_findings_are_added_to_source_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            requirements = Path(directory) / "requirements.txt"
+            requirements.write_text("requests==2.19.1\n", encoding="utf-8")
+            match = GrypeMatch(
+                "CVE-2018-18074", ("CVE-2018-18074",), "requests", "2.19.1",
+                "pkg:pypi/requests@2.19.1", ("2.20.0",), "high", (), ("exact-direct-match",),
+            )
+            with patch("security_scanner.server.run_grype_purls", return_value=GrypeResult((match,), "", {}, "", False)) as grype:
+                payload = scan_directory_payload(
+                    str(requirements), allow_file=True, enable_local_vulnerabilities=True,
+                    grype_binary=Path("/opt/koda/tools/grype"),
+                )
+            self.assertEqual(grype.call_args.args[0], ("pkg:pypi/requests@2.19.1",))
+            finding = next(item for item in payload["findings_by_language"]["en"] if item["rule_id"] == "dependency.osv-known-vulnerability")
+            self.assertEqual((finding["severity"], finding["path"]), ("high", str(requirements.resolve())))
+            self.assertIn("CVE-2018-18074", finding["evidence"])
 
 
 class ExportTests(unittest.TestCase):

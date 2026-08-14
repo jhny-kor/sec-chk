@@ -142,6 +142,14 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_pass http://${DTRACK_APISERVER_UPSTREAM}/api/;
     }
+    location = /dependency-track/static/config.json {
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "no-store" always;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix ${DTRACK_BASE_PATH};
+        proxy_pass http://${DTRACK_FRONTEND_UPSTREAM}/static/config.json;
+    }
     location /dependency-track/ {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;

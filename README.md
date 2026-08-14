@@ -23,6 +23,7 @@ KODA keeps scans local by default. The native macOS app has its own Swift scanne
 | Install the native macOS app | [Mac App Store](https://apps.apple.com/kr/app/koda/id6770264012?mt=12) or [macOS install guide](docs/install/macos.md) |
 | Run KODA on Linux | [Linux install and operation guide](docs/install/linux.md) |
 | Deploy KODA, KODA SBOM Tracker, and Dependency-Track together in an air-gapped network | [Combined Linux suite guide](platforms/linux/suite/README.ko.md) |
+| Diagnose an air-gapped suite installation | [Closed-network troubleshooting guide](platforms/linux/suite/TROUBLESHOOTING.ko.md) |
 | Build or install the Windows desktop app | [Windows install guide](docs/install/windows.md) |
 | Scan JAR/WAR/EAR files on an offline server | [Offline Java SBOM and vulnerability runbook](docs/security/java-sbom-vulnerability-scan.en.md) |
 | Choose an air-gapped delivery method | [Offline delivery overview](docs/install/offline-delivery.en.md) |
@@ -94,6 +95,10 @@ verified KODA and Tracker payloads—including Tracker's Dependency-Track
 services—into one archive. The installed `koda-suite` command starts one gateway
 with Tracker at `/`, KODA at `/koda/`, and Dependency-Track at
 `/dependency-track/`; see the [combined suite guide](platforms/linux/suite/README.ko.md).
+The authenticated KODA portal keeps searchable project and analysis-round
+history, runs the bundled offline Grype database for exact manifest dependency
+versions, and exports the same HTML pair, PDF, Excel, HWPX, JSON, and Markdown
+report payload used by the shared Windows/Linux CLI renderer.
 
 ## Capabilities and architecture
 
@@ -121,6 +126,7 @@ The [English documentation index](docs/README.en.md) is the complete map. The [K
 | --- | --- |
 | CLI commands, configuration, reports, CI, and auto-fix | [CLI and local usage](docs/usage.md) |
 | Closed-network Docker, Linux, Windows, and combined Tracker delivery | [Offline delivery overview](docs/install/offline-delivery.en.md) |
+| Closed-network installation errors and recovery | [Air-gapped suite troubleshooting](platforms/linux/suite/TROUBLESHOOTING.ko.md) |
 | macOS, Linux, and Windows installation | [Install guides](docs/README.en.md#installation-and-delivery) |
 | Java SBOM, pre-commit, Dependency-Track, ZAP, VEX, and supply-chain guidance | [Security integration docs](docs/README.en.md#security-integrations) |
 | Approval-gated web controls, profiles, OAST, and package limits | [Web audit runbook](docs/security/WEB_AUDIT.md) |

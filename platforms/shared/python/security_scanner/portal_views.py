@@ -9,93 +9,146 @@ def esc(value: object) -> str:
 
 
 def script_json(value: object) -> str:
-    return json.dumps(value).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 def page(title: str, body: str, *, admin: bool = False) -> str:
-    admin_links = (
-        "<a href='/koda/admin/subjects'>계정</a><a href='/koda/admin/roles'>역할</a>"
-        "<a href='/koda/admin/rules'>점검 설정</a><a href='/koda/admin/audit'>감사</a>"
-        if admin else ""
-    )
+    admin_link = "<a data-nav='admin' href='/koda/admin/subjects'><span>⚙</span>관리자 설정</a>" if admin else ""
     return f"""<!doctype html><html lang='ko'><head><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width,initial-scale=1'><title>{esc(title)} · KODA</title>
 <style>
-:root{{--bg:#f5f7fb;--card:#fff;--ink:#172033;--line:#d8deea;--accent:#3157d5}}*{{box-sizing:border-box}}
-body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}}nav{{display:flex;gap:1rem;align-items:center;padding:.9rem 1.5rem;background:#111a2d;color:white;flex-wrap:wrap}}nav a{{color:white;text-decoration:none}}nav .brand{{display:flex;align-items:center;gap:.45rem}}nav button{{margin-left:auto}}main{{max-width:1180px;margin:2rem auto;padding:0 1rem}}section,.card{{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem;margin:1rem 0}}table{{width:100%;border-collapse:collapse}}th,td{{padding:.55rem;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}}label{{display:block;margin:.6rem 0}}input,select,textarea,button{{font:inherit;padding:.55rem;border:1px solid #aeb8cc;border-radius:6px}}button{{cursor:pointer;background:white}}button.primary{{background:var(--accent);color:white;border-color:var(--accent)}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem}}.muted{{color:#647089}}.error{{color:#a41424}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}@media(max-width:700px){{table{{display:block;overflow:auto}}}}
-</style><script>const json=async(url,options={{}})=>{{const r=await fetch(url,{{credentials:'include',...options,headers:{{'Content-Type':'application/json',...(options.headers||{{}})}}}});if(!r.ok)throw new Error((await r.json().catch(()=>({{}}))).detail||`HTTP ${{r.status}}`);return r.status===204?null:r.json()}};</script></head><body><nav><a class='brand' href='/koda/'><img src='/koda/assets/KODA.ico' width='28' height='28' alt='KODA'><strong>KODA</strong></a><a href='/koda/'>대시보드</a><a href='/koda/projects'>프로젝트</a><a href='/koda/runs'>분석 회차</a><a href='/koda/compare'>비교</a>{admin_links}<button id='logout' type='button'>로그아웃</button></nav>
-<main><h1>{esc(title)}</h1>{body}</main><script>
+:root{{--nav:#071d35;--nav2:#123957;--bg:#f5f7fa;--surface:#fff;--ink:#12233a;--muted:#66758a;--line:#dce3ea;--teal:#008f83;--teal2:#eaf8f6;--red:#d92d20;--orange:#ef6c00;--yellow:#d79b00;--blue:#2774c8;--green:#138a36}}
+*{{box-sizing:border-box}}html,body{{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}}
+button,input,select,textarea{{font:inherit}}a{{color:inherit}}.sidebar{{position:fixed;inset:0 auto 0 0;width:220px;background:var(--nav);color:#dce8f3;display:flex;flex-direction:column;z-index:10}}
+.brand{{height:92px;display:flex;align-items:center;gap:12px;padding:0 26px;color:#fff;text-decoration:none;font-size:24px;font-weight:800;letter-spacing:.02em;border-bottom:1px solid rgba(255,255,255,.08)}}.brand img{{width:34px;height:34px}}
+.side-nav{{display:flex;flex-direction:column;padding:18px 10px;gap:4px}}.side-nav a{{display:flex;align-items:center;gap:12px;color:#dce8f3;text-decoration:none;padding:12px 16px;border-radius:6px;font-weight:600}}.side-nav a span{{width:18px;text-align:center;color:#9fb7cc}}.side-nav a:hover,.side-nav a.active{{background:var(--nav2);color:#fff}}.side-nav a.active{{box-shadow:inset 3px 0 var(--teal)}}
+.side-bottom{{margin-top:auto;padding:18px 20px 24px;border-top:1px solid rgba(255,255,255,.09)}}.side-bottom button{{width:100%;background:transparent;color:#fff;border:0;text-align:left;padding:10px 4px;cursor:pointer}}
+.workspace{{min-height:100vh;margin-left:220px}}.topbar{{height:64px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 28px}}.topbar strong{{font-size:18px}}main{{max-width:1500px;margin:0 auto;padding:28px 32px 48px}}h1{{font-size:28px;line-height:1.2;margin:0 0 22px}}h2{{font-size:18px;margin:0}}h3{{font-size:15px;margin:0}}p{{margin:.4rem 0}}.muted{{color:var(--muted)}}.error{{color:var(--red)}}
+.panel{{background:var(--surface);border:1px solid var(--line);border-radius:8px}}.panel-head{{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}}.panel-body{{padding:20px}}
+.dashboard-top{{display:grid;grid-template-columns:minmax(380px,1.05fr) minmax(520px,1.95fr);gap:16px;margin-bottom:18px}}.start-panel{{display:flex;align-items:center;gap:22px;padding:24px}}.upload-mark{{width:120px;height:120px;border:1px dashed var(--teal);border-radius:8px;display:grid;place-items:center;color:var(--teal);font-size:46px;background:#fbfefe}}.start-copy{{flex:1}}.start-copy h2{{font-size:21px;margin-bottom:8px}}
+.stats{{display:grid;grid-template-columns:repeat(4,1fr)}}.stat{{min-height:120px;padding:22px;border-right:1px solid var(--line)}}.stat:last-child{{border:0}}.stat small{{color:var(--muted);font-weight:600}}.stat strong{{display:block;font-size:30px;margin-top:14px}}.stat.danger strong{{color:var(--red)}}.stat.high strong{{color:var(--orange)}}
+.button,button{{border:1px solid #b9c5d1;border-radius:6px;background:#fff;color:var(--ink);padding:9px 14px;text-decoration:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px}}.button.primary,button.primary{{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:700}}.button:focus,button:focus,input:focus,select:focus,textarea:focus{{outline:3px solid rgba(0,143,131,.18);outline-offset:1px}}
+.toolbar{{display:flex;align-items:center;gap:10px;flex-wrap:wrap}}input,select,textarea{{border:1px solid #b9c5d1;border-radius:6px;background:#fff;color:var(--ink);padding:9px 11px}}input[type=search]{{min-width:260px}}label{{display:block;font-weight:600}}label input,label select,label textarea{{display:block;width:100%;margin-top:7px}}textarea{{resize:vertical}}
+.table-wrap{{overflow:auto}}table{{width:100%;border-collapse:collapse}}th,td{{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}}th{{background:#f8fafc;color:#526277;font-size:12px}}tbody tr:hover{{background:#f5fbfa}}td.wrap{{white-space:normal}}code,.mono{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}
+.status{{display:inline-flex;align-items:center;gap:6px}}.status:before{{content:"";width:8px;height:8px;border-radius:50%;background:#7b8794}}.status-completed:before{{background:var(--green)}}.status-running:before,.status-queued:before{{background:var(--blue)}}.status-failed:before{{background:var(--red)}}
+.sev{{font-weight:700}}.sev-critical{{color:var(--red)}}.sev-high{{color:var(--orange)}}.sev-medium{{color:var(--yellow)}}.sev-low{{color:var(--blue)}}
+.form-grid{{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px}}.steps{{padding:26px}}.step{{padding:0 0 24px;margin-bottom:24px;border-bottom:1px solid var(--line)}}.step:last-child{{border-bottom:0;margin-bottom:0}}.step h2{{margin-bottom:14px}}.drop-zone{{border:1px dashed var(--teal);border-radius:8px;background:#fbfefe;padding:24px;text-align:center}}.drop-zone input{{max-width:100%}}.option-row{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}}.choice{{border:1px solid var(--line);border-radius:6px;padding:14px}}.choice:has(input:checked){{border-color:var(--teal);background:var(--teal2)}}.summary-list{{margin:0;padding:0;list-style:none}}.summary-list li{{padding:15px 0;border-bottom:1px solid var(--line)}}.summary-list li:last-child{{border:0}}.summary-list span{{display:block;color:var(--muted);font-size:12px}}.summary-list strong{{display:block;margin-top:4px;overflow-wrap:anywhere}}
+.project-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}}.project-card{{padding:18px;text-decoration:none}}.project-card h2{{margin-bottom:7px}}.project-card:hover{{border-color:var(--teal)}}
+.result-layout{{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(360px,.75fr);gap:16px}}.summary-strip{{display:grid;grid-template-columns:repeat(5,1fr);margin-bottom:16px}}.summary-strip div{{padding:16px;border-right:1px solid var(--line)}}.summary-strip div:last-child{{border:0}}.summary-strip strong{{display:block;font-size:24px;margin-top:3px}}.finding-row{{cursor:pointer}}.finding-row.selected{{background:var(--teal2)}}.inspector{{position:sticky;top:16px;align-self:start}}.inspector pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#0c1d2e;color:#e7f0f7;padding:14px;border-radius:6px;max-height:260px;overflow:auto}}.detail-section{{padding:16px 0;border-bottom:1px solid var(--line)}}
+.tabs{{display:flex;gap:22px;border-bottom:1px solid var(--line);padding:0 20px}}.tabs button{{border:0;border-radius:0;padding:14px 2px;background:transparent}}.tabs button.active{{color:var(--teal);box-shadow:inset 0 -2px var(--teal)}}
+.admin-subnav{{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}}details{{margin-top:16px}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}.empty{{padding:38px;text-align:center;color:var(--muted)}}
+@media(max-width:1000px){{.sidebar{{position:static;width:auto;min-height:auto}}.brand{{height:64px}}.side-nav{{flex-direction:row;overflow:auto}}.side-nav a{{white-space:nowrap}}.side-bottom{{display:none}}.workspace{{margin-left:0}}.dashboard-top,.form-grid,.result-layout{{grid-template-columns:1fr}}.stats{{grid-template-columns:repeat(2,1fr)}}.inspector{{position:static}}}}
+</style><script>const json=async(url,options={{}})=>{{const r=await fetch(url,{{credentials:'include',...options,headers:{{'Content-Type':'application/json',...(options.headers||{{}})}}}});if(!r.ok)throw new Error((await r.json().catch(()=>({{}}))).detail||`HTTP ${{r.status}}`);return r.status===204?null:r.json()}};</script></head><body>
+<aside class='sidebar'><a class='brand' href='/koda/'><img src='/koda/assets/KODA.ico' alt=''><span>KODA</span></a><nav class='side-nav'>
+<a data-nav='dashboard' href='/koda/'><span>▦</span>대시보드</a><a data-nav='new' href='/koda/scans/new'><span>＋</span>새 점검</a><a data-nav='runs' href='/koda/runs'><span>☷</span>점검 결과</a><a data-nav='compare' href='/koda/compare'><span>⇄</span>비교</a><a data-nav='projects' href='/koda/projects'><span>□</span>프로젝트</a>{admin_link}</nav>
+<div class='side-bottom'><button id='logout' type='button'>↪ &nbsp;로그아웃</button></div></aside><div class='workspace'><header class='topbar'><strong>{esc(title)}</strong></header><main><h1>{esc(title)}</h1>{body}</main></div>
+<script>
+const path=location.pathname;let key=path==='/koda/'||path==='/koda'?'dashboard':path.startsWith('/koda/scans/')?'new':path.startsWith('/koda/runs')?'runs':path.startsWith('/koda/compare')?'compare':path.startsWith('/koda/projects')?'projects':path.startsWith('/koda/admin')?'admin':'';document.querySelector(`[data-nav="${{key}}"]`)?.classList.add('active');
 document.querySelector('#logout')?.addEventListener('click',async()=>{{try{{const r=await fetch('/api/v1/auth/logout-current',{{method:'POST',credentials:'include',headers:{{'X-KODA-Logout':'current-browser'}}}});if(!r.ok)throw new Error(`HTTP ${{r.status}}`);location='/koda/login'}}catch(e){{alert('로그아웃하지 못했습니다: '+e.message)}}}});
 </script></body></html>"""
 
 
 def login_page(next_path: str = "/koda/") -> str:
     return f"""<!doctype html><html lang='ko'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>KODA 로그인</title>
-<style>body{{font:16px system-ui;background:#f3f6fb;margin:0}}main{{max-width:420px;margin:10vh auto;background:white;padding:2rem;border:1px solid #dce2ed;border-radius:12px}}.brand{{display:flex;align-items:center;gap:.6rem;margin-bottom:1.2rem}}label{{display:block;margin:1rem 0}}input:not([type=checkbox]),button{{width:100%;padding:.7rem;box-sizing:border-box}}.error{{color:#a41424}}</style></head><body><main><div class='brand'><img src='/koda/assets/KODA.ico' width='48' height='48' alt='KODA'><h1>KODA</h1></div><p>공유 계정으로 로그인합니다.</p>
+<style>body{{font:15px -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif;background:#f4f7fa;margin:0;color:#12233a}}main{{max-width:400px;margin:10vh auto;background:white;padding:34px;border:1px solid #dce3ea;border-radius:10px;box-shadow:0 16px 40px rgba(7,29,53,.08)}}.brand{{display:flex;align-items:center;gap:12px;margin-bottom:24px}}.brand img{{width:48px;height:48px}}h1{{margin:0;font-size:28px}}label{{display:block;margin:16px 0;font-weight:600}}input:not([type=checkbox]),button{{width:100%;padding:11px;box-sizing:border-box;border:1px solid #b9c5d1;border-radius:6px;font:inherit}}button{{background:#008f83;color:white;border-color:#008f83;font-weight:700;cursor:pointer}}.error{{color:#d92d20}}</style></head><body><main><div class='brand'><img src='/koda/assets/KODA.ico' alt=''><h1>KODA</h1></div><p>공유 계정으로 로그인합니다.</p>
 <form id='login'><label>계정<input name='username' autocomplete='username' required></label><label>비밀번호<input name='password' type='password' autocomplete='current-password' required></label><label><input name='useLdap' type='checkbox'> LDAP 계정</label><button>로그인</button><p id='message' class='error' role='alert'></p></form>
 <script>document.querySelector('#login').addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget),m=document.querySelector('#message');m.textContent='';const r=await fetch('/api/v1/auth/login',{{method:'POST',credentials:'include',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{username:f.get('username'),password:f.get('password'),useLdap:f.get('useLdap')==='on'}})}});if(r.ok)location={script_json(next_path)};else{{const x=await r.json().catch(()=>({{}}));m.textContent=x.detail||'로그인하지 못했습니다.'}}}});</script></main></body></html>"""
 
 
-def dashboard(identity, projects: list[dict], runs: int, *, admin: bool) -> str:
-    cards = "".join(
-        f"<section><h2><a href='/koda/projects/{esc(item['project_id'])}'>{esc(item['name'])}</a></h2><p class='muted'>{esc(item['project_id'])}</p></section>"
-        for item in projects
-    ) or "<p>접근 가능한 프로젝트가 없습니다.</p>"
-    return page(
-        "대시보드",
-        f"<p><strong>{esc(identity.display)}</strong>님, 로그인되었습니다.</p><div class='grid'><section><h2>프로젝트</h2><strong>{len(projects)}</strong></section><section><h2>분석 회차</h2><strong>{runs}</strong></section></div><h2>내 프로젝트</h2><div class='grid'>{cards}</div>",
-        admin=admin,
-    )
+def _severity_counts(runs: list[dict]) -> dict[str, int]:
+    counts = {key: 0 for key in ("critical", "high", "medium", "low", "info")}
+    for run in runs:
+        result = run.get("result") if isinstance(run.get("result"), dict) else {}
+        for finding in result.get("findings", []):
+            key = str(finding.get("severity", "info")).lower()
+            counts[key if key in counts else "info"] += 1
+    return counts
+
+
+def dashboard(identity, projects: list[dict], project_runs: list[tuple[dict, list[dict]]], *, admin: bool) -> str:
+    all_runs = [(project, run) for project, runs in project_runs for run in runs]
+    all_runs.sort(key=lambda item: item[1].get("created_at", ""), reverse=True)
+    completed = [run for _, run in all_runs if run.get("status") == "completed"]
+    counts = _severity_counts(completed)
+    rows = "".join(
+        f"<tr><td><a href='/koda/runs/{esc(run['run_id'])}'>#{run['round_number']}</a></td><td>{esc(project['name'])}</td><td>{esc(run.get('standard',''))} / {esc(run.get('standard_category',''))}</td><td><span class='status status-{esc(run.get('status',''))}'>{esc(run.get('status',''))}</span></td><td class='sev sev-critical'>{_severity_counts([run])['critical']}</td><td class='sev sev-high'>{_severity_counts([run])['high']}</td><td>{esc(run.get('created_at',''))}</td></tr>"
+        for project, run in all_runs[:8]
+    ) or "<tr><td colspan='7' class='empty'>아직 점검 결과가 없습니다.</td></tr>"
+    body = f"""
+<div class='dashboard-top'><section class='panel start-panel'><div class='upload-mark'>↑</div><div class='start-copy'><h2>새 보안점검</h2><p class='muted'>소스 폴더, 압축파일, JAR/WAR를 등록하여 보안과 품질을 점검합니다.</p><p><a class='button primary' href='/koda/scans/new'>점검 시작</a></p></div></section>
+<section class='panel stats'><div class='stat'><small>전체 점검</small><strong>{len(all_runs)}</strong></div><div class='stat'><small>완료</small><strong>{len(completed)}</strong></div><div class='stat danger'><small>심각</small><strong>{counts['critical']}</strong></div><div class='stat high'><small>높음</small><strong>{counts['high']}</strong></div></section></div>
+<section class='panel'><div class='panel-head'><div><h2>최근 점검 결과</h2><p class='muted'>{esc(identity.display)} 계정이 접근할 수 있는 프로젝트 기준</p></div><div class='toolbar'><input id='recent-search' type='search' placeholder='프로젝트, 기준 검색'><a class='button' href='/koda/runs'>전체 결과</a></div></div><div class='table-wrap'><table id='recent-table'><thead><tr><th>회차</th><th>프로젝트</th><th>점검 기준</th><th>상태</th><th>심각</th><th>높음</th><th>실행일</th></tr></thead><tbody>{rows}</tbody></table></div></section>
+<script>document.querySelector('#recent-search')?.addEventListener('input',e=>document.querySelectorAll('#recent-table tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(e.target.value.toLowerCase())))</script>"""
+    return page("대시보드", body, admin=admin)
+
+
+def new_scan_page(projects: list[dict], *, admin: bool) -> str:
+    available = [p for p in projects if p.get("can_scan")]
+    project_options = "".join(f"<option value='{esc(p['project_id'])}'>{esc(p['name'])}</option>" for p in available)
+    body = f"""<div class='form-grid'><section class='panel steps'><div class='step'><h2>1. 프로젝트 선택</h2><select id='project'>{project_options}</select></div>
+<div class='step'><h2>2. 입력 등록</h2><div class='drop-zone'><p><strong>소스 폴더·압축파일·JAR/WAR</strong></p><input id='file' type='file'><p id='file-note' class='muted'>최대 25 MiB</p><button id='upload' type='button'>선택 파일 등록</button></div><label>등록된 입력<select id='input'></select></label></div>
+<div class='step'><h2>3. 검사 기준 선택</h2><label>검사 기준<select id='standards'></select></label><label>범위(카테고리)<select id='category'></select></label></div>
+<div class='step'><h2>4. 점검 실행</h2><p class='muted'>사용자는 검사 기준과 범위만 선택합니다. 세부 규칙 활성화 여부는 관리자가 설정합니다.</p><button id='scan' class='primary' type='button'>▶ 점검 실행</button></div></section>
+<aside class='panel inspector'><div class='panel-head'><h2>실행 전 확인</h2></div><div class='panel-body'><ul class='summary-list'><li><span>프로젝트</span><strong id='sum-project'>—</strong></li><li><span>입력</span><strong id='sum-input'>—</strong></li><li><span>검사 기준</span><strong id='sum-standard'>—</strong></li><li><span>범위</span><strong id='sum-category'>—</strong></li><li><span>정책</span><strong>관리자 설정 최신 버전</strong></li></ul></div></aside></div>
+<script>
+const projects={script_json(available)},project=document.querySelector('#project'),input=document.querySelector('#input'),standardBox=document.querySelector('#standards'),category=document.querySelector('#category');let standards=[];
+function activeProject(){{return projects.find(x=>x.project_id===project.value)}}function renderInputs(){{const p=activeProject();input.innerHTML=(p?.inputs||[]).map(x=>`<option value="${{x.input_id}}">${{x.name}}</option>`).join('');document.querySelector('#sum-project').textContent=p?.name||'—';syncSummary()}}
+function activeStandard(){{return standards.find(x=>x.id===standardBox.value)}}function renderCategories(){{const s=activeStandard();category.innerHTML=(s?.categories||[]).filter(x=>x.supported).map(x=>`<option value="${{x.id}}">${{x.labels.ko||x.labels.en||x.id}}</option>`).join('');syncSummary()}}
+function syncSummary(){{document.querySelector('#sum-input').textContent=input.selectedOptions[0]?.textContent||'입력을 등록하세요';const s=activeStandard();document.querySelector('#sum-standard').textContent=s?.labels.ko||s?.labels.en||'—';document.querySelector('#sum-category').textContent=category.selectedOptions[0]?.textContent||'—'}}
+project?.addEventListener('change',renderInputs);input?.addEventListener('change',syncSummary);standardBox?.addEventListener('change',renderCategories);category?.addEventListener('change',syncSummary);
+json('/koda/api/v1/standards').then(x=>{{standards=x;standardBox.innerHTML=x.map(v=>`<option value="${{v.id}}">${{v.labels.ko||v.labels.en||v.id}}</option>`).join('');renderCategories()}});renderInputs();
+document.querySelector('#file')?.addEventListener('change',e=>{{const f=e.target.files[0];document.querySelector('#file-note').textContent=f?`${{f.name}} · ${{(f.size/1048576).toFixed(2)}} MiB`:'최대 25 MiB'}});
+document.querySelector('#upload')?.addEventListener('click',async()=>{{const f=document.querySelector('#file').files[0],p=activeProject();if(!f||!p)return alert('프로젝트와 파일을 선택하세요.');if(f.size>25*1024*1024)return alert('파일은 25 MiB 이하여야 합니다.');const bytes=new Uint8Array(await f.arrayBuffer());let s='';for(let i=0;i<bytes.length;i+=32768)s+=String.fromCharCode(...bytes.subarray(i,i+32768));try{{await json(`/koda/api/v1/projects/${{p.project_id}}/inputs`,{{method:'POST',body:JSON.stringify({{name:f.name,contentBase64:btoa(s)}})}});p.inputs=await json(`/koda/api/v1/projects/${{p.project_id}}/inputs`);renderInputs()}}catch(e){{alert(e.message)}}}});
+document.querySelector('#scan')?.addEventListener('click',async()=>{{const p=activeProject(),s=activeStandard();if(!p||!input.value||!s)return alert('프로젝트, 입력, 검사 기준을 확인하세요.');try{{const r=await json('/koda/api/v1/scans',{{method:'POST',body:JSON.stringify({{project_id:p.project_id,input_id:input.value,standard:s.id,standard_category:category.value}})}});location=`/koda/runs/${{r.run_id}}`}}catch(e){{alert(e.message)}}}});
+</script>"""
+    return page("새 점검", body if available else "<section class='panel empty'>점검 권한이 있는 프로젝트가 없습니다.</section>", admin=admin)
 
 
 def projects_page(projects: list[dict], *, admin: bool) -> str:
-    create = """
-<section><h2>프로젝트 만들기</h2><form id='create'><label>이름<input name='name' required maxlength='128'></label><button class='primary'>생성</button></form><script>document.querySelector('#create')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await json('/koda/api/v1/projects',{method:'POST',body:JSON.stringify({name:f.get('name')})});location.reload()}catch(x){alert(x.message)}})</script></section>""" if admin else ""
-    rows = "".join(f"<tr><td><a href='/koda/projects/{esc(p['project_id'])}'>{esc(p['name'])}</a></td><td>{esc(p['created_at'])}</td></tr>" for p in projects)
-    return page("프로젝트", create + f"<section><table><thead><tr><th>이름</th><th>생성</th></tr></thead><tbody>{rows}</tbody></table></section>", admin=admin)
+    create = "<form id='create' class='toolbar'><input name='name' placeholder='새 프로젝트 이름' required maxlength='128'><button class='primary'>프로젝트 생성</button></form>" if admin else ""
+    cards = "".join(f"<a class='panel project-card' href='/koda/projects/{esc(p['project_id'])}'><h2>{esc(p['name'])}</h2><p class='muted'>입력 {len(p.get('inputs', []))}개 · 점검 {len(p.get('runs', []))}회</p></a>" for p in projects) or "<div class='panel empty'>접근 가능한 프로젝트가 없습니다.</div>"
+    script = "<script>document.querySelector('#create')?.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await json('/koda/api/v1/projects',{method:'POST',body:JSON.stringify({name:f.get('name')})});location.reload()}catch(x){alert(x.message)}})</script>" if admin else ""
+    return page("프로젝트", f"<section class='panel'><div class='panel-head'><div><h2>점검 대상 관리</h2><p class='muted'>입력 파일과 회차별 결과를 프로젝트 단위로 보관합니다.</p></div>{create}</div><div class='panel-body project-grid'>{cards}</div></section>{script}", admin=admin)
 
 
 def project_page(project: dict, inputs: list[dict], runs: list[dict], *, can_upload: bool, can_scan: bool, admin: bool) -> str:
-    input_rows = "".join(f"<tr><td>{esc(i['name'])}</td><td><code>{esc(i['content_hash'][:16])}</code></td><td>{esc(i['created_at'])}</td></tr>" for i in inputs)
-    run_rows = "".join(f"<tr><td><a href='/koda/runs/{esc(r['run_id'])}'>#{r['round_number']}</a></td><td>{esc(r['standard'])}</td><td>{esc(r['status'])}</td></tr>" for r in runs)
-    upload = """
-<section><h2>입력 업로드</h2><form id='upload'><label>파일<input name='file' type='file' required></label><button class='primary'>업로드</button></form></section>""" if can_upload else ""
-    scan = """
-<section><h2>분석 시작</h2><form id='scan'><label>입력<select name='input_id' required>""" + "".join(f"<option value='{esc(i['input_id'])}'>{esc(i['name'])}</option>" for i in inputs) + """</select></label><label>검사 기준<select name='standard' id='standard'></select></label><label>기준 범위<select name='standard_category' id='category'></select></label><button class='primary'>분석</button></form></section>""" if can_scan and inputs else ""
-    script = f"""<script>
-const projectId={json.dumps(project['project_id'])};
-document.querySelector('#upload')?.addEventListener('submit',async e=>{{e.preventDefault();const f=e.currentTarget.file.files[0];if(!f)return;const bytes=new Uint8Array(await f.arrayBuffer());let s='';for(let i=0;i<bytes.length;i+=32768)s+=String.fromCharCode(...bytes.subarray(i,i+32768));try{{await json(`/koda/api/v1/projects/${{projectId}}/inputs`,{{method:'POST',body:JSON.stringify({{name:f.name,contentBase64:btoa(s)}})}});location.reload()}}catch(x){{alert(x.message)}}}});
-let standards=[];const st=document.querySelector('#standard'),cat=document.querySelector('#category');function cats(){{const x=standards.find(v=>v.id===st.value);cat.innerHTML=(x?.categories||[]).filter(v=>v.supported).map(v=>`<option value="${{v.id}}">${{v.labels.ko||v.labels.en||v.id}}</option>`).join('')}}
-if(st)json('/koda/api/v1/standards').then(x=>{{standards=x;st.innerHTML=x.map(v=>`<option value="${{v.id}}">${{v.labels.ko||v.labels.en||v.id}}</option>`).join('');cats()}});st?.addEventListener('change',cats);
-document.querySelector('#scan')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget);try{{const r=await json('/koda/api/v1/scans',{{method:'POST',body:JSON.stringify({{project_id:projectId,input_id:f.get('input_id'),standard:f.get('standard'),standard_category:f.get('standard_category')}})}});location=`/koda/runs/${{r.run_id}}`}}catch(x){{alert(x.message)}}}});
-</script>"""
-    return page(str(project["name"]), upload + scan + f"<section><h2>입력</h2><table><tr><th>이름</th><th>SHA-256</th><th>등록</th></tr>{input_rows}</table></section><section><h2>분석 회차</h2><table><tr><th>회차</th><th>기준</th><th>상태</th></tr>{run_rows}</table></section>" + script, admin=admin)
+    input_rows = "".join(f"<tr><td>{esc(i['name'])}</td><td>{esc(i['created_at'])}</td></tr>" for i in inputs) or "<tr><td colspan='2' class='empty'>등록된 입력이 없습니다.</td></tr>"
+    run_rows = "".join(f"<tr><td><a href='/koda/runs/{esc(r['run_id'])}'>#{r['round_number']}</a></td><td>{esc(r['standard'])} / {esc(r['standard_category'])}</td><td><span class='status status-{esc(r['status'])}'>{esc(r['status'])}</span></td><td>{esc(r['created_at'])}</td></tr>" for r in runs) or "<tr><td colspan='4' class='empty'>점검 회차가 없습니다.</td></tr>"
+    action = "<a class='button primary' href='/koda/scans/new'>새 점검</a>" if can_scan else ""
+    return page(str(project['name']), f"<div class='toolbar' style='margin-bottom:16px'>{action}</div><section class='panel'><div class='panel-head'><h2>등록된 입력</h2></div><div class='table-wrap'><table><tr><th>이름</th><th>등록일</th></tr>{input_rows}</table></div></section><section class='panel'><div class='panel-head'><h2>점검 회차</h2></div><div class='table-wrap'><table><tr><th>회차</th><th>기준</th><th>상태</th><th>요청일</th></tr>{run_rows}</table></div></section>", admin=admin)
 
 
 def runs_page(projects: list[tuple[dict, list[dict]]], *, admin: bool) -> str:
-    body = ""
-    for project, runs in projects:
-        rows = "".join(f"<tr><td><a href='/koda/runs/{esc(r['run_id'])}'>#{r['round_number']}</a></td><td>{esc(r['standard'])} / {esc(r['standard_category'])}</td><td>{esc(r['status'])}</td><td>{esc(r['created_at'])}</td></tr>" for r in runs)
-        body += f"<section><h2>{esc(project['name'])}</h2><table><tr><th>회차</th><th>기준</th><th>상태</th><th>요청</th></tr>{rows}</table></section>"
-    return page("분석 회차", body or "<p>분석 회차가 없습니다.</p>", admin=admin)
+    rows = "".join(
+        f"<tr><td><a href='/koda/runs/{esc(run['run_id'])}'>#{run['round_number']}</a></td><td>{esc(project['name'])}</td><td>{esc(run['standard'])} / {esc(run['standard_category'])}</td><td><span class='status status-{esc(run['status'])}'>{esc(run['status'])}</span></td><td>{esc(run['created_at'])}</td></tr>"
+        for project, runs in projects for run in runs
+    ) or "<tr><td colspan='5' class='empty'>점검 결과가 없습니다.</td></tr>"
+    body = f"<section class='panel'><div class='panel-head'><h2>회차별 점검 결과</h2><div class='toolbar'><input id='run-search' type='search' placeholder='프로젝트, 기준, 상태 검색'><select id='run-status'><option value=''>모든 상태</option><option value='completed'>완료</option><option value='running'>진행 중</option><option value='failed'>실패</option></select></div></div><div class='table-wrap'><table id='runs-table'><thead><tr><th>회차</th><th>프로젝트</th><th>점검 기준</th><th>상태</th><th>실행일</th></tr></thead><tbody>{rows}</tbody></table></div></section><script>function filterRuns(){{const q=document.querySelector('#run-search').value.toLowerCase(),s=document.querySelector('#run-status').value;document.querySelectorAll('#runs-table tbody tr').forEach(r=>r.hidden=(q&&!r.textContent.toLowerCase().includes(q))||(s&&!r.querySelector('.status')?.classList.contains('status-'+s)))}}document.querySelector('#run-search').addEventListener('input',filterRuns);document.querySelector('#run-status').addEventListener('change',filterRuns)</script>"
+    return page("점검 결과", body, admin=admin)
 
 
 def run_page(run: dict, *, admin: bool) -> str:
-    result = run.get("result") or {}
-    findings = result.get("findings", []) if isinstance(result, dict) else []
-    rows = "".join(f"<tr><td>{esc(f.get('severity',''))}</td><td>{esc(f.get('rule_id',''))}</td><td>{esc(f.get('title',''))}</td></tr>" for f in findings[:500])
-    sbom = ""
-    if run["status"] == "completed":
-        available = bool((result.get("nis_sbom") or {}).get("rows") or result.get("components")) if isinstance(result, dict) else False
-        disabled = "" if available else " disabled"
-        note = "" if available else "<p class='muted'>SBOM으로 내보낼 의존성 컴포넌트가 없습니다.</p>"
-        sbom = f"<section><h2>SBOM 다운로드</h2><form method='get' action='/koda/api/v1/runs/{esc(run['run_id'])}/sbom'><label for='sbom-format'>생성 형식</label><select id='sbom-format' name='format'><option value='cyclonedx'>CycloneDX 1.6 (JSON)</option><option value='nis-sbom'>국정원 NIS-SBOM 1.0 (CSV)</option></select> <button type='submit'{disabled}>다운로드</button></form>{note}</section>"
-    return page(
-        f"분석 #{run['round_number']}",
-        f"<section><p>상태: <strong>{esc(run['status'])}</strong></p><p>기준: {esc(run['standard'])} / {esc(run['standard_category'])}</p><p>정책 버전: {esc(run['policy_version'])}</p><p class='error'>{esc(run.get('error') or '')}</p></section>{sbom}<section><h2>결과 ({len(findings)})</h2><table><tr><th>심각도</th><th>규칙</th><th>제목</th></tr>{rows}</table></section><details><summary>불변 실행 스냅샷</summary><pre>{esc(json.dumps(run['snapshot'], ensure_ascii=False, indent=2))}</pre></details>",
-        admin=admin,
-    )
+    result = run.get("result") if isinstance(run.get("result"), dict) else {}
+    findings = result.get("findings", []) if isinstance(result.get("findings"), list) else []
+    counts = _severity_counts([run])
+    rows = "".join(
+        f"<tr class='finding-row' data-index='{i}' data-kind='{esc(f.get('category',''))}'><td class='sev sev-{esc(f.get('severity','info'))}'>{esc(f.get('severity',''))}</td><td><code>{esc(f.get('rule_id',''))}</code></td><td>{esc(f.get('category',''))}</td><td>{esc(f.get('path',''))}</td><td>{esc(f.get('line',''))}</td><td class='wrap'>{esc(f.get('title',''))}</td></tr>"
+        for i, f in enumerate(findings)
+    ) or "<tr><td colspan='6' class='empty'>발견된 항목이 없습니다.</td></tr>"
+    exports = ""
+    if run.get("status") == "completed":
+        base = f"/koda/api/v1/runs/{esc(run['run_id'])}/report"
+        sbom = f"/koda/api/v1/runs/{esc(run['run_id'])}/sbom"
+        exports = f"<a class='button primary' href='{base}.html' target='_blank'>보고서 보기</a><a class='button' href='{base}?format=html'>HTML ZIP</a><a class='button' href='{base}?format=pdf'>PDF</a><a class='button' href='{base}?format=xlsx'>Excel</a><a class='button' href='{base}?format=hwpx'>HWPX</a><a class='button' href='{base}?format=json'>JSON</a><a class='button' href='{base}?format=markdown'>Markdown</a><a class='button' href='{sbom}?format=cyclonedx'>CycloneDX 1.6</a><a class='button' href='{sbom}?format=nis-sbom'>국정원 NIS-SBOM 1.0 (CSV)</a>"
+    body = f"""<div class='toolbar' style='justify-content:space-between;margin-bottom:16px'><div><span class='status status-{esc(run['status'])}'>{esc(run['status'])}</span> · {esc(run['standard'])} / {esc(run['standard_category'])}</div><div class='toolbar'><a class='button' href='/koda/compare?right={esc(run['run_id'])}'>이전 회차와 비교</a><a class='button' href='/koda/scans/new'>새 분석 회차</a>{exports}</div></div>
+<section class='panel summary-strip'><div><small>심각</small><strong class='sev-critical'>{counts['critical']}</strong></div><div><small>높음</small><strong class='sev-high'>{counts['high']}</strong></div><div><small>보통</small><strong>{counts['medium']}</strong></div><div><small>낮음</small><strong>{counts['low']}</strong></div><div><small>전체</small><strong>{len(findings)}</strong></div></section>
+<div class='result-layout'><section class='panel'><div class='tabs'><button class='active' data-tab=''>전체</button><button data-tab='security'>보안</button><button data-tab='quality'>품질</button></div><div class='panel-head'><div class='toolbar'><input id='finding-search' type='search' placeholder='제목, 규칙 ID, 파일 검색'><select id='severity'><option value=''>모든 심각도</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select></div></div><div class='table-wrap'><table id='findings'><thead><tr><th>심각도</th><th>규칙 ID</th><th>구분</th><th>파일</th><th>위치</th><th>제목</th></tr></thead><tbody>{rows}</tbody></table></div></section>
+<aside class='panel inspector'><div class='panel-head'><h2 id='detail-title'>점검 항목 상세</h2></div><div class='panel-body' id='detail'><p class='muted'>왼쪽 목록에서 항목을 선택하세요.</p></div><div class='panel-body'><h3>실행 정보 (변경 불가)</h3><ul class='summary-list'><li><span>정책 버전</span><strong>{esc(run['policy_version'])}</strong></li><li><span>요청 계정</span><strong class='mono'>{esc(run['snapshot'].get('requested_by',''))}</strong></li><li><span>스캐너 버전</span><strong>{esc(run['snapshot'].get('scanner_version',''))}</strong></li></ul></div></aside></div>
+<details><summary>불변 실행 스냅샷</summary><pre>{esc(json.dumps(run['snapshot'], ensure_ascii=False, indent=2))}</pre></details><p class='error'>{esc(run.get('error') or '')}</p>
+<script>const findings={script_json(findings)},h=v=>String(v??'').replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));let tab='',selectedSeverity='';function show(i){{const f=findings[i];if(!f)return;const sev=['critical','high','medium','low','info'].includes(f.severity)?f.severity:'info';document.querySelectorAll('.finding-row').forEach(x=>x.classList.toggle('selected',x.dataset.index==i));document.querySelector('#detail-title').textContent=f.title||'점검 항목 상세';document.querySelector('#detail').innerHTML=`<div class="detail-section"><span class="sev sev-${{sev}}">${{h(f.severity)}}</span> · <code>${{h(f.rule_id)}}</code><p>${{h(f.description||'설명이 없습니다.')}}</p></div><div class="detail-section"><h3>위치</h3><p><code>${{h(f.path||'—')}}${{f.line?':'+h(f.line):''}}</code></p><pre>${{h(f.evidence||f.target||'표시할 증거가 없습니다.')}}</pre></div><div class="detail-section"><h3>조치 방법</h3><p>${{h(f.recommendation||'권장 조치가 없습니다.')}}</p></div>`}}function filter(){{const q=document.querySelector('#finding-search').value.toLowerCase();document.querySelectorAll('.finding-row').forEach(r=>{{const f=findings[Number(r.dataset.index)],kind=String(f.category||'').toLowerCase();r.hidden=(q&&!r.textContent.toLowerCase().includes(q))||(selectedSeverity&&f.severity!==selectedSeverity)||(tab&&kind!==tab)}})}}document.querySelectorAll('.finding-row').forEach(r=>r.addEventListener('click',()=>show(r.dataset.index)));document.querySelector('#finding-search').addEventListener('input',filter);document.querySelector('#severity').addEventListener('change',e=>{{selectedSeverity=e.target.value;filter()}});document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');tab=b.dataset.tab;filter()}}));if(findings.length)show(0)</script>"""
+    return page(f"점검 결과 #{run['round_number']}", body, admin=admin)
 
 
 def admin_page(title: str, body: str) -> str:
-    return page(title, body, admin=True)
+    subnav = "<nav class='admin-subnav'><a class='button' href='/koda/admin/subjects'>계정</a><a class='button' href='/koda/admin/roles'>역할</a><a class='button' href='/koda/admin/rules'>점검 설정</a><a class='button' href='/koda/admin/audit'>감사 로그</a></nav>"
+    return page(title, subnav + body, admin=True)

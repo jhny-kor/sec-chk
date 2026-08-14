@@ -24,6 +24,8 @@ class LinuxSuiteContractTests(unittest.TestCase):
         self.assertIn('location ^~ /koda/', self.gateway)
         self.assertIn('location /api/', self.gateway)
         self.assertIn('location /dependency-track/', self.gateway)
+        self.assertIn('location = /dependency-track/static/config.json', self.gateway)
+        self.assertIn('add_header Cache-Control "no-store" always;', self.gateway)
         self.assertIn('proxy_pass http://${DTRACK_FRONTEND_UPSTREAM}/;', self.gateway)
         self.assertNotIn('proxy_pass http://${DTRACK_FRONTEND_UPSTREAM}${DTRACK_BASE_PATH}/;', self.gateway)
 
@@ -53,6 +55,8 @@ class LinuxSuiteContractTests(unittest.TestCase):
         self.assertIn('KODA_BUNDLE=bundles/', packager)
         self.assertIn('TRACKER_BUNDLE=bundles/', packager)
         self.assertIn('single assignment per key', packager)
+        self.assertIn('TROUBLESHOOTING.ko.md', packager)
+        self.assertIn('"$script_dir/TROUBLESHOOTING.ko.md"', self.launcher)
 
     def test_verify_command_accepts_intact_release_and_rejects_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

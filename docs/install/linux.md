@@ -130,7 +130,8 @@ chmod 600 ./koda-suite.env
 ./koda-suite verify
 ./koda-suite install --env-file ./koda-suite.env
 # after the Tracker account has logged in once and its UUID is known:
-$HOME/koda-suite/koda/koda-docker dashboard bootstrap --tracker-user-id <TRACKER-UUID>
+TRACKER_UUID='UUID shown by Tracker'
+$HOME/koda-suite/koda/koda-docker dashboard bootstrap --tracker-user-id "$TRACKER_UUID"
 ```
 
 The gateway's default host port is `8088`. Production must terminate TLS before
@@ -145,6 +146,14 @@ https://<server>/dependency-track/   # Dependency-Track
 Use `./koda-suite start|status|stop` for the installed suite. The launcher
 keeps KODA's port 8765 private and verifies the three gateway routes before
 reporting healthy status.
+
+The portal separates dashboard, new scan, projects, analysis rounds, comparison,
+and administrator settings. Completed rounds use the shared Windows/Linux CLI
+renderer for the main/detail HTML pair plus PDF, Excel, HWPX, JSON, and Markdown
+downloads. Exact manifest or lockfile dependencies are checked against the
+bundled offline Grype database; use `jar-scan` for libraries nested in
+JAR/WAR/EAR archives. Installation and gateway failures are catalogued in the
+[Korean air-gapped suite troubleshooting runbook](../../platforms/linux/suite/TROUBLESHOOTING.ko.md).
 
 `koda serve` starts the authenticated Linux portal. The old unauthenticated
 dashboard remains available only for local development and Windows-compatible

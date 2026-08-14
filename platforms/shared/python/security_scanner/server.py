@@ -16,6 +16,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .archive_input import prepare_input_target
 from .config import expand_path
+from .dependency_inventory import queryable_osv_components
+from .grype_adapter import GrypeMatch, run_grype_purls
 from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, Finding, ScannerConfig, TargetConfig
 from .reporting import (
     build_dashboard_payload,
@@ -91,6 +93,8 @@ def scan_directory_payload(
     max_file_size_bytes: int = 524288,
     base_dir: Path | None = None,
     enable_osv: bool = False,
+    enable_local_vulnerabilities: bool = False,
+    grype_binary: Path | None = None,
     include_host: bool = False,
     disabled_rules: tuple[str, ...] = (),
     allow_file: bool = False,
@@ -135,6 +139,17 @@ def scan_directory_payload(
     scanner = SecurityScanner(config)
     scan_result = scanner.scan()
     raw_findings = list(scan_result.findings)
+    scan_warnings = list(scanner.warnings)
+    if enable_local_vulnerabilities and not source_only:
+        components = queryable_osv_components(scanner.components)
+        grype = run_grype_purls(
+            tuple(component.purl for component in components if component.purl),
+            grype_binary or _environment_path("KODA_GRYPE_BIN"),
+            300.0,
+        )
+        raw_findings.extend(_grype_findings(grype.matches, components))
+        if grype.warning:
+            scan_warnings.append(grype.warning)
     findings = filter_findings_by_standard(raw_findings, standard_selection)
     if include_host:
         # Host posture is opt-in and orthogonal to the selected standard's rule_id
@@ -151,7 +166,7 @@ def scan_directory_payload(
         target_names,
         language,
         target_paths=target_paths,
-        warnings=tuple(scanner.warnings),
+        warnings=tuple(scan_warnings),
         scan_path=display_path or str(target_path),
         kind="upload" if display_path else "directory",
         standard=standard_selection.standard,
@@ -161,7 +176,45 @@ def scan_directory_payload(
         scanned_categories=scanner_categories,
         source_analysis=scan_result.source_analysis,
     )
+    payload["scan"]["enable_local_vulnerabilities"] = enable_local_vulnerabilities
     return _replace_upload_path(payload, str(target_path.resolve()), display_path) if display_path else payload
+
+
+def _environment_path(name: str) -> Path | None:
+    value = os.environ.get(name, "").strip()
+    return Path(value).expanduser() if value else None
+
+
+def _grype_findings(matches: tuple[GrypeMatch, ...], components) -> list[Finding]:
+    by_purl = {component.purl: component for component in components if component.purl}
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for match in matches:
+        component = by_purl.get(match.purl) or next(
+            (item for item in components if item.name == match.package_name and item.version == match.installed_version),
+            None,
+        )
+        if component is None:
+            continue
+        identifiers = match.cve_ids or match.vulnerability_ids or (match.vulnerability_id,)
+        key = component.purl, ",".join(identifiers)
+        if key in seen:
+            continue
+        seen.add(key)
+        fixed = ", ".join(match.fixed_versions)
+        findings.append(Finding(
+            rule_id="dependency.osv-known-vulnerability",
+            category="dependencies",
+            severity=match.severity if match.severity in SEVERITIES else "high",
+            title=f"Known vulnerable dependency: {component.name}@{component.version}",
+            path=component.path,
+            target=component.target,
+            line=component.line,
+            evidence=f"{component.purl}: {', '.join(identifiers)}" + (f"; fixed in {fixed}" if fixed else ""),
+            description="The bundled local Grype database reports a vulnerability for this exact dependency version.",
+            recommendation=f"Upgrade to {fixed}." if fixed else "Review the vulnerability identifiers and upgrade, patch, replace, or document a compensating control.",
+        ))
+    return findings
 
 
 def _replace_upload_path(value: Any, private_path: str, public_path: str) -> Any:

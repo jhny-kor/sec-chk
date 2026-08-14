@@ -11,11 +11,13 @@ import unittest
 import urllib.error
 import urllib.request
 import uuid
+import zipfile
 from pathlib import Path
 
 from security_scanner.portal_identity import IdentityError, identity_from_headers
 from security_scanner.linux_portal import create_portal_server
 from security_scanner.portal_store import PortalStore
+from security_scanner.reporting import render_html_pair_zip_from_payload
 
 
 class LinuxPortalStoreTests(unittest.TestCase):
@@ -154,7 +156,7 @@ class LinuxPortalHttpTests(unittest.TestCase):
         project_id = created["project_id"]
         status, uploaded = self.request(
             f"/koda/api/v1/projects/{project_id}/inputs", method="POST",
-            payload={"name": "demo.py", "contentBase64": base64.b64encode(b"print('ok')\n").decode()}, headers=self.headers(),
+            payload={"name": "demo.py", "contentBase64": base64.b64encode(b"AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n").decode()}, headers=self.headers(),
         )
         self.assertEqual(status, 201)
         scan = {"project_id": project_id, "input_id": uploaded["input_id"], "standard": "local", "standard_category": "all"}
@@ -170,6 +172,7 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertEqual(detail["status"], "completed", detail.get("error"))
         self.assertEqual(detail["snapshot"]["requested_by"], self.admin)
         self.assertIsInstance(detail["result"], dict)
+        self.assertTrue(detail["result"]["findings"])
 
     def test_cross_project_run_is_hidden_and_policy_versions_conflict(self):
         project = self.server.portal_store.create_project("private", self.admin)
@@ -223,6 +226,46 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.server.portal_store.ensure_subject(other, "other")
         self.server.portal_store.set_subject(other, status="enabled", actor=self.admin)
         self.assertEqual(self.request(f"/koda/api/v1/runs/{run['run_id']}/sbom?format=nis-sbom", headers=self.headers(other, "other"))[0], 404)
+
+    def test_completed_run_report_uses_the_shared_windows_cli_renderer(self):
+        project = self.server.portal_store.create_project("CLI report", self.admin)
+        target = Path(self.tmp.name) / "unsafe.py"
+        target.write_text("password = 'secret'\n", encoding="utf-8")
+        input_id = self.server.portal_store.add_input(project, target.name, target, self.admin)
+        run = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        result = {
+            "scan": {"path": target.name, "kind": "source", "standard": "local", "standard_category": "all"},
+            "findings": [{"rule_id": "secret.literal", "title": "하드코딩된 비밀정보", "severity": "high", "category": "security", "path": target.name, "line": 1}],
+            "components": [],
+        }
+        self.server.portal_store.complete_run(run["run_id"], result=result)
+
+        request = urllib.request.Request(
+            self.base + f"/koda/api/v1/runs/{run['run_id']}/report?format=html",
+            headers=self.headers(),
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            actual, response_headers = response.read(), response.headers
+        self.assertEqual(response_headers.get_content_type(), "application/zip")
+        self.assertEqual(response_headers["Content-Disposition"], 'attachment; filename="koda-round-1-report.zip"')
+
+        expected = render_html_pair_zip_from_payload(result, "ko")
+        with zipfile.ZipFile(io.BytesIO(actual)) as actual_zip, zipfile.ZipFile(io.BytesIO(expected)) as expected_zip:
+            self.assertEqual(actual_zip.namelist(), ["report.html", "report-detail.html"])
+            for name in actual_zip.namelist():
+                self.assertEqual(actual_zip.read(name), expected_zip.read(name))
+                request = urllib.request.Request(
+                    self.base + f"/koda/api/v1/runs/{run['run_id']}/{name}",
+                    headers=self.headers(),
+                )
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    self.assertEqual(response.headers.get_content_type(), "text/html")
+                    self.assertEqual(response.read(), expected_zip.read(name))
+
+        status, markdown = self.request(f"/koda/api/v1/runs/{run['run_id']}/report?format=markdown", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("하드코딩된 비밀정보", markdown)
+        self.assertEqual(self.request(f"/koda/api/v1/runs/{run['run_id']}/report?format=unknown", headers=self.headers())[0], 422)
 
 
 if __name__ == "__main__":

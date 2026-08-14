@@ -13,6 +13,7 @@ switching languages.
 | Install the macOS app | [macOS install](install/macos.md) |
 | Install or build the Linux package | [Linux install and application guide](install/linux.md) |
 | Deploy KODA with KODA SBOM Tracker | [Combined air-gapped Linux suite](../platforms/linux/suite/README.ko.md) |
+| Diagnose a combined air-gapped installation | [Korean troubleshooting runbook](../platforms/linux/suite/TROUBLESHOOTING.ko.md) |
 | Install or build the Windows package | [Windows install](install/windows.md) |
 | Deliver an offline Java scanner | [Offline delivery overview](install/offline-delivery.en.md) |
 | Refresh Windows vulnerability data | [Vulnerability data refresh](install/vuln-data-refresh.en.md) |
@@ -29,6 +30,7 @@ switching languages.
 - [Linux Docker delivery](../platforms/linux/docker/README.en.md)
 - [Linux offline distribution](../platforms/linux/README-offline.md)
 - [Combined KODA + KODA SBOM Tracker suite](../platforms/linux/suite/README.ko.md)
+- [Combined suite troubleshooting runbook](../platforms/linux/suite/TROUBLESHOOTING.ko.md)
 - [macOS packaging](../platforms/macos/packaging/README.md)
 - [Windows installer packaging](../platforms/windows/README.md)
 

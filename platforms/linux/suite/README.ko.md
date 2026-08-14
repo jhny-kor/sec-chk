@@ -4,6 +4,9 @@
 Dependency-Track·PostgreSQL·포털 이미지를 함께 담았습니다. 실제 비밀번호와 API
 키는 포함하지 않습니다.
 
+설치 중 오류가 발생하면 [폐쇄망 설치 장애 대응서](TROUBLESHOOTING.ko.md)의
+`증상 → 확인 → 조치 → 정상 기준` 순서로 확인합니다.
+
 ## 서버 조건
 
 - Linux x86_64/amd64
@@ -58,7 +61,8 @@ bootstrap합니다.
 
 ```bash
 PREFIX="$HOME/koda-suite"
-"$PREFIX/koda/koda-docker" dashboard bootstrap --tracker-user-id <TRACKER-UUID>
+TRACKER_UUID='Tracker 화면에 표시된 UUID'
+"$PREFIX/koda/koda-docker" dashboard bootstrap --tracker-user-id "$TRACKER_UUID"
 ```
 
 기본 주소:
@@ -85,9 +89,9 @@ SBOM 업로드 기본 한도는 Tracker API와 게이트웨이 모두 100MiB입�
 Tracker UI가 이전 화면으로 보이면 브라우저에서 `Ctrl+Shift+R`로 캐시를 비운 뒤
 `/`를 다시 엽니다.
 
-KODA 대시보드의 `SBOM Tracker 열기` 버튼은 기본적으로
-`http://127.0.0.1:8088/?page=runs`를 엽니다. 원격 브라우저가 서버 주소로 직접
-접속한다면 `koda-suite.env`의 `KODA_SSBOM_TRACKER_URL`을 그 주소로 바꿉니다.
+KODA 대시보드의 `SBOM Tracker 열기` 버튼은 기본적으로 same-origin `/`를 엽니다.
+별도 Tracker 주소를 사용할 때만 `koda-suite.env`의
+`KODA_SSBOM_TRACKER_URL`을 해당 HTTPS 주소로 바꿉니다.
 KODA 컨테이너의 8765 포트는 호스트에 게시되지 않고 통합 게이트웨이 전용 Docker
 네트워크에서만 접근됩니다. 인증과 권한은 Tracker 계정 및 게이트웨이의
 `auth_request` 계약으로 처리됩니다.
@@ -109,6 +113,25 @@ KODA 컨테이너의 8765 포트는 호스트에 게시되지 않고 통합 게�
 Tracker 장애 시 KODA 보호 화면과 API는 이전 인증 결과를 캐시해 우회하지 않고
 `503`으로 실패합니다. `/healthz`, `/api/v1/healthz`, `/koda/live` 같은 명시된
 상태 확인 경로만 인증 예외입니다.
+
+## KODA 화면·분석·보고서
+
+- `대시보드`: 프로젝트와 최근 분석 회차를 모아 상태·건수·결과를 검색합니다.
+- `새 점검`: 권한이 있는 프로젝트·입력·검사 기준·기준 범위를 선택합니다.
+- `프로젝트`: 입력 파일과 회차를 프로젝트별로 관리합니다.
+- `점검 결과`: 결과와 실행 당시 정책·요청 계정 스냅샷을 회차별로 보존합니다.
+- `비교`: 같은 프로젝트의 회차 결과를 비교합니다.
+- `관리자 설정`: 계정 승인, 프로젝트 역할, 보안·품질 규칙과 감사 기록을 관리합니다.
+
+완료 회차의 보고서는 Windows/Linux 공통 CLI 렌더러를 그대로 사용합니다. 화면에서
+메인·상세 HTML 보기와 HTML ZIP, PDF, Excel, HWPX, JSON, Markdown을 내려받을 수
+있고, SBOM은 CycloneDX 1.6 JSON 또는 국정원 NIS-SBOM 1.0 CSV로 내려받습니다.
+
+웹 분석은 manifest/lockfile에서 정확한 이름·버전·PURL을 얻은 의존성을 번들된
+오프라인 Grype DB로 점검합니다. 결과에 라이브러리 취약점이 없으면 입력 파일이
+지원 manifest인지와 KODA 컨테이너의 `KODA_GRYPE_BIN`, `GRYPE_DB_CACHE_DIR`를
+[장애 대응서](TROUBLESHOOTING.ko.md#koda-웹에서-라이브러리-취약점이-0건)에서
+확인합니다. JAR/WAR/EAR 내부 라이브러리는 아래 `jar-scan` 경로를 사용합니다.
 
 ## 재기동·상태·중지
 

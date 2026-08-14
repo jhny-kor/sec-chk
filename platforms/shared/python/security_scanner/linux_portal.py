@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import queue
 import re
 import tempfile
 import threading
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +21,7 @@ from .portal_views import (
     dashboard,
     esc,
     login_page,
+    new_scan_page,
     page,
     project_page,
     projects_page,
@@ -53,8 +56,9 @@ def _run_scan(store: PortalStore, run_id: str) -> None:
                 str(target), language="ko", standard=snapshot["standard"],
                 standard_category=snapshot["standard_category"],
                 disabled_rules=tuple(snapshot["disabled_rules"]), allow_file=True,
-                display_path=source["name"],
+                display_path=source["name"], enable_local_vulnerabilities=True,
             )
+            result["findings"] = result.get("findings_by_language", {}).get("ko", [])
         store.complete_run(run_id, result=result)
     except Exception as exc:  # worker errors are durable and visible per round
         store.complete_run(run_id, error=str(exc)[:2000])
@@ -196,7 +200,7 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
             # Branding is a public static asset so the login page can render
             # before gateway authentication.  The package ships the existing
             # Windows icon under security_scanner/assets for offline installs.
-            if path == "/koda/assets/KODA.ico":
+            if path in {"/favicon.ico", "/koda/assets/KODA.ico"}:
                 try:
                     self._send(200, _KODA_ICON.read_bytes(), "image/x-icon")
                 except OSError:
@@ -231,9 +235,28 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
             admin = self._admin(subject)
             projects = store.list_projects(identity.subject_id)
             if path in {"/koda", "/"}:
-                return self._html(200, dashboard(identity, projects, sum(len(store.list_runs(p["project_id"])) for p in projects), admin=admin))
+                project_runs = [
+                    (project, [store.run(run["run_id"]) for run in store.list_runs(project["project_id"])])
+                    for project in projects
+                ]
+                return self._html(200, dashboard(identity, projects, project_runs, admin=admin))
+            if path == "/koda/scans/new":
+                scan_projects = [
+                    {
+                        **project,
+                        "inputs": store.list_inputs(project["project_id"]),
+                        "can_upload": store.can(identity.subject_id, project["project_id"], "input.manage"),
+                        "can_scan": store.can(identity.subject_id, project["project_id"], "scan.create"),
+                    }
+                    for project in projects
+                ]
+                return self._html(200, new_scan_page(scan_projects, admin=admin))
             if path == "/koda/projects":
-                return self._html(200, projects_page(projects, admin=admin))
+                enriched = [
+                    {**project, "inputs": store.list_inputs(project["project_id"]), "runs": store.list_runs(project["project_id"])}
+                    for project in projects
+                ]
+                return self._html(200, projects_page(enriched, admin=admin))
             match = re.fullmatch(r"/koda/projects/([0-9a-f-]+)", path)
             if match:
                 project = self._project(identity, match.group(1))
@@ -314,6 +337,51 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                     filename = f"koda-round-{run['round_number']}-cyclonedx-1.6.json"
                     return self._send(200, raw, "application/vnd.cyclonedx+json; charset=utf-8", {"Content-Disposition": f'attachment; filename="{filename}"'})
                 return self._json(422, {"code": "unsupported_sbom_format"})
+            match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/(report|report(?:-detail)?\.html)", path)
+            if match:
+                try:
+                    run = store.run(match.group(1))
+                except KeyError:
+                    return self._json(404, {"code": "not_found"})
+                if not self._project(identity, run["project_id"], "project.view"):
+                    return self._json(404, {"code": "not_found"})
+                if run["status"] != "completed":
+                    return self._json(409, {"code": "run_not_completed"})
+                from .reporting import (
+                    PdfExportError,
+                    render_html_pair_zip_from_payload,
+                    render_hwpx,
+                    render_markdown_from_payload,
+                    render_pdf,
+                    render_xlsx,
+                )
+
+                report_format = parse_qs(parsed.query).get("format", ["html"])[0]
+                result = run.get("result") or {}
+                filename = f"koda-round-{run['round_number']}-report"
+                if match.group(2) in {"report.html", "report-detail.html"}:
+                    archive = render_html_pair_zip_from_payload(result, language)
+                    with zipfile.ZipFile(io.BytesIO(archive)) as reports:
+                        return self._send(200, reports.read(match.group(2)), "text/html; charset=utf-8")
+                if report_format == "html":
+                    raw, content_type, extension = render_html_pair_zip_from_payload(result, language), "application/zip", "zip"
+                elif report_format in {"md", "markdown"}:
+                    raw, content_type, extension = render_markdown_from_payload(result, language).encode("utf-8"), "text/markdown; charset=utf-8", "md"
+                elif report_format == "xlsx":
+                    raw, content_type, extension = render_xlsx(result, language), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
+                elif report_format == "hwpx":
+                    raw, content_type, extension = render_hwpx(result, language), "application/hwp+zip", "hwpx"
+                elif report_format == "pdf":
+                    try:
+                        raw = render_pdf(result, language)
+                    except PdfExportError as exc:
+                        return self._json(503, {"code": "pdf_unavailable", "detail": str(exc)})
+                    content_type, extension = "application/pdf", "pdf"
+                elif report_format == "json":
+                    raw, content_type, extension = (json.dumps(result, ensure_ascii=False, indent=2) + "\n").encode("utf-8"), "application/json; charset=utf-8", "json"
+                else:
+                    return self._json(422, {"code": "unsupported_report_format"})
+                return self._send(200, raw, content_type, {"Content-Disposition": f'attachment; filename="{filename}.{extension}"'})
             if path.startswith("/koda/admin"):
                 if not admin:
                     return self._html(403, page("권한 없음", "<p>시스템 관리자만 접근할 수 있습니다.</p>"))
@@ -341,7 +409,7 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 return self._html(200, admin_page("역할 정책", f"<form method='get'><select name='project'>{options}</select><button>열기</button></form><section><form id='roles'><input type='hidden' name='project_id' value='{esc(project_id)}'><input type='hidden' name='expected_version' value='{policy['version']}'><label>역할 정책 JSON<textarea name='roles' rows='16'>{esc(json.dumps(policy['roles'],ensure_ascii=False,indent=2))}</textarea></label><p>프로젝트 권한: {esc(', '.join(sorted(PROJECT_PERMISSIONS)))}</p><button>저장</button></form></section>{membership_form}<script>document.querySelector('#roles')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget);try{{await json('/koda/api/v1/admin/roles',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),expected_version:Number(f.get('expected_version')),roles:JSON.parse(f.get('roles'))}})}});location.reload()}}catch(x){{alert(x.message)}}}});document.querySelector('#membership')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget);try{{await json('/koda/api/v1/admin/memberships',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),subject_id:f.get('subject_id'),role:f.get('role')}})}});location.reload()}}catch(x){{alert(x.message)}}}})</script>"))
             if path == "/koda/admin/rules":
                 policy = store.rule_policy(project_id) if project_id else {"version": 0, "disabled_rules": []}
-                return self._html(200, admin_page("보안·품질 점검 설정", f"<form method='get'><select name='project'>{options}</select><button>열기</button></form><section><p>이 설정은 관리자만 바꿀 수 있습니다. 사용자는 검사 기준만 선택합니다.</p><form id='rules'><input type='hidden' name='project_id' value='{esc(project_id)}'><input type='hidden' name='expected_version' value='{policy['version']}'><label>비활성 규칙 (한 줄 하나)<textarea name='rules' rows='16'>{esc(chr(10).join(policy['disabled_rules']))}</textarea></label><button>저장</button></form></section><script>document.querySelector('#rules')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget);try{{await json('/koda/api/v1/admin/rules',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),expected_version:Number(f.get('expected_version')),disabled_rules:String(f.get('rules')).split(/\n/).map(x=>x.trim()).filter(Boolean)}})}});location.reload()}}catch(x){{alert(x.message)}}}})</script>"))
+                return self._html(200, admin_page("보안·품질 점검 설정", f"<form method='get'><select name='project'>{options}</select><button>열기</button></form><section><p>이 설정은 관리자만 바꿀 수 있습니다. 사용자는 검사 기준만 선택합니다.</p><form id='rules'><input type='hidden' name='project_id' value='{esc(project_id)}'><input type='hidden' name='expected_version' value='{policy['version']}'><label>비활성 규칙 (한 줄 하나)<textarea name='rules' rows='16'>{esc(chr(10).join(policy['disabled_rules']))}</textarea></label><button>저장</button></form></section><script>document.querySelector('#rules')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget);try{{await json('/koda/api/v1/admin/rules',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),expected_version:Number(f.get('expected_version')),disabled_rules:String(f.get('rules')).split(/\\n/).map(x=>x.trim()).filter(Boolean)}})}});location.reload()}}catch(x){{alert(x.message)}}}})</script>"))
             return self._html(404, admin_page("찾을 수 없음", "<p>관리 화면이 없습니다.</p>"))
 
         def do_POST(self):
