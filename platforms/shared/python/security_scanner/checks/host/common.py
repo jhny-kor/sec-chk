@@ -107,3 +107,34 @@ def host_finding(
         recommendation=recommendation,
         resource=resource,
     )
+
+
+def host_unverified(
+    rule_id: str,
+    title: str,
+    resource: str,
+    *,
+    evidence: str = "",
+    recommendation: str = "",
+) -> Finding:
+    """Build a host Finding for a control the scanner could not evaluate.
+
+    A control whose probe fails must still appear in the report. Returning an
+    empty list instead would drop it silently, and a reader cannot tell a
+    control that passed from one that was never checked — the same reason the
+    macOS app reports sandbox-blocked items as Unverified rather than guessing
+    PASS or FAIL.
+    """
+
+    return Finding(
+        rule_id=rule_id,
+        category="host",
+        severity="info",
+        title=title,
+        path=Path(resource),
+        evidence=evidence or "The scanner could not read this setting on this host.",
+        description="This control was not evaluated, so it is neither a pass nor a fail. Confirm it manually.",
+        recommendation=recommendation,
+        resource=resource,
+        verification_status="unverified",
+    )

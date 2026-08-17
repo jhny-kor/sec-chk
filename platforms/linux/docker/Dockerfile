@@ -33,6 +33,7 @@ RUN apt-get update \
  && useradd --uid 1000 --gid 1000 --home-dir /home/koda --create-home koda
 
 ENV KODA_PREFIX=/opt/koda \
+    KODA_GRYPE_BIN=/opt/koda/tools/grype \
     HOME=/tmp/koda-home \
     XDG_CACHE_HOME=/tmp/koda-cache \
     GRYPE_DB_CACHE_DIR=/opt/koda/grype-db/db \

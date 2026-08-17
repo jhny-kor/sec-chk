@@ -28,7 +28,7 @@ def run_syft(target: Path, binary: Path | None, timeout: float) -> SyftResult:
     else:
         version_warning = ""
     source = f"file:{target}" if target.is_file() else f"dir:{target}"
-    scan = _run(binary, (source, "-o", "cyclonedx-json"), timeout, {})
+    scan = _run(binary, (source, "-o", "cyclonedx-json@1.6"), timeout, {})
     if scan.returncode != 0:
         warning = f"Syft failed; using the built-in Java inventory: {scan.stderr.strip() or 'unknown error'}"
         return SyftResult(None, version, warning, True)

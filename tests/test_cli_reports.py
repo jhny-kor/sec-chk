@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import sys
 import tempfile
 import unittest
@@ -75,6 +77,7 @@ class CliReportTests(unittest.TestCase):
         self.assertEqual(args.target, ["/srv/api", "/opt/apps"])
         help_text = build_parser()._subparsers._group_actions[0].choices["jar-scan"].format_help()
         self.assertIn("repeat for multiple roots", help_text)
+        self.assertEqual(build_parser().parse_args(["jar-scan", "--target", ".", "--sbom-format", "nis-1.0"]).sbom_format, "nis-1.0")
 
     def test_scan_reports_accept_korean_language_only(self) -> None:
         parser = build_parser()
@@ -84,6 +87,36 @@ class CliReportTests(unittest.TestCase):
             parser.parse_args(["scan", "--target", ".", "--language", "en"])
         with self.assertRaises(SystemExit):
             parser.parse_args(["jar-scan", "--target", ".", "--language", "en"])
+
+    def test_source_scan_writes_nis_sbom_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "requirements.txt").write_text("requests==2.32.0\n", encoding="utf-8")
+            output = root / "koda-nis-sbom-1.0.csv"
+
+            exit_code = main(
+                [
+                    "scan",
+                    "--target",
+                    str(root),
+                    "--category",
+                    "dependencies",
+                    "--format",
+                    "nis-sbom",
+                    "--output",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            raw_nis = output.read_bytes()
+            self.assertTrue(raw_nis.startswith(b"\xef\xbb\xbf"))
+            self.assertIn(b"\r\n", raw_nis)
+            self.assertNotIn(b"\r\r\n", raw_nis)
+            rows = list(csv.DictReader(io.StringIO(output.read_text(encoding="utf-8-sig"))))
+            self.assertEqual(rows[0]["Component Name"], "requests")
+            self.assertEqual(rows[0]["Component Version"], "2.32.0")
+            self.assertEqual(rows[0]["Unique Identifier"], "pkg:pypi/requests@2.32.0")
 
     def test_source_html_writes_main_and_detail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

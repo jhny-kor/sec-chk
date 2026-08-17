@@ -75,7 +75,10 @@ class PortalStore:
                   status TEXT NOT NULL, standard TEXT NOT NULL, standard_category TEXT NOT NULL,
                   input_id TEXT NOT NULL, policy_version INTEGER NOT NULL, requested_by TEXT NOT NULL,
                   snapshot_json TEXT NOT NULL, result_json TEXT, error TEXT,
-                  created_at TEXT NOT NULL, completed_at TEXT, UNIQUE(project_id,round_number));
+                  created_at TEXT NOT NULL, completed_at TEXT,
+                  stage TEXT NOT NULL DEFAULT 'queued', progress INTEGER NOT NULL DEFAULT 0,
+                  cancel_requested INTEGER NOT NULL DEFAULT 0,
+                  UNIQUE(project_id,round_number));
                 CREATE TABLE IF NOT EXISTS analysis_revisions(
                   revision_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,
                   snapshot_json TEXT NOT NULL, result_json TEXT, created_at TEXT NOT NULL,
@@ -85,6 +88,14 @@ class PortalStore:
                   project_id TEXT, detail_json TEXT NOT NULL, created_at TEXT NOT NULL);
                 """
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(scan_runs)")}
+            for definition in (
+                "stage TEXT NOT NULL DEFAULT 'queued'",
+                "progress INTEGER NOT NULL DEFAULT 0",
+                "cancel_requested INTEGER NOT NULL DEFAULT 0",
+            ):
+                if definition.split()[0] not in columns:
+                    db.execute(f"ALTER TABLE scan_runs ADD COLUMN {definition}")
 
     @staticmethod
     def _now() -> str:
@@ -349,21 +360,67 @@ class PortalStore:
             db.execute("COMMIT")
         return self.run(run_id)
 
-    def mark_run_running(self, run_id: str) -> None:
+    def mark_run_running(self, run_id: str) -> bool:
         with self._db() as db:
-            db.execute("UPDATE scan_runs SET status='running' WHERE run_id=? AND status='queued'", (str(run_id),))
+            changed = db.execute(
+                "UPDATE scan_runs SET status='running',stage='preparing',progress=5 "
+                "WHERE run_id=? AND status='queued' AND cancel_requested=0",
+                (str(run_id),),
+            ).rowcount
+            return bool(changed)
+
+    def set_run_progress(self, run_id: str, stage: str, progress: int) -> bool:
+        if stage not in {"preparing", "scanning", "finalizing"} or not 0 <= int(progress) <= 99:
+            raise ValueError("invalid run progress")
+        with self._db() as db:
+            changed = db.execute(
+                "UPDATE scan_runs SET stage=?,progress=? WHERE run_id=? AND status='running' AND cancel_requested=0",
+                (stage, int(progress), str(run_id)),
+            ).rowcount
+            return bool(changed)
+
+    def request_cancel(self, run_id: str, actor: str | None = None) -> dict:
+        with self._lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM scan_runs WHERE run_id=?", (str(run_id),)).fetchone()
+            if not row:
+                raise KeyError("run not found")
+            if row["status"] not in {"queued", "running", "cancelling"}:
+                raise ValueError("run is not cancellable")
+            status, stage, completed = (
+                ("cancelled", "cancelled", self._now())
+                if row["status"] == "queued"
+                else ("cancelling", "cancelling", None)
+            )
+            db.execute(
+                "UPDATE scan_runs SET cancel_requested=1,status=?,stage=?,completed_at=COALESCE(?,completed_at) WHERE run_id=?",
+                (status, stage, completed, str(run_id)),
+            )
+            self._audit_db(db, actor, "scan.cancel_requested", row["project_id"], {"run_id": str(run_id)})
+            db.execute("COMMIT")
+        return self.run(run_id)
 
     def recover_incomplete_runs(self) -> list[str]:
         with self._db() as db:
-            db.execute("UPDATE scan_runs SET status='queued' WHERE status='running'")
+            db.execute("UPDATE scan_runs SET status='cancelled',stage='cancelled',completed_at=? WHERE status IN ('running','cancelling') AND cancel_requested=1", (self._now(),))
+            db.execute("UPDATE scan_runs SET status='queued',stage='queued',progress=0 WHERE status IN ('running','cancelling') AND cancel_requested=0")
             return [row[0] for row in db.execute("SELECT run_id FROM scan_runs WHERE status='queued' ORDER BY created_at")]
 
     def complete_run(self, run_id: str, result: dict | None = None, error: str | None = None) -> None:
-        status, completed = ("failed" if error else "completed"), self._now()
-        result_json = self._json(result) if result is not None else None
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("UPDATE scan_runs SET status=?,result_json=?,error=?,completed_at=? WHERE run_id=?", (status, result_json, error, completed, str(run_id)))
+            current = db.execute("SELECT cancel_requested FROM scan_runs WHERE run_id=?", (str(run_id),)).fetchone()
+            if not current:
+                db.execute("ROLLBACK")
+                raise KeyError("run not found")
+            cancelled = bool(current["cancel_requested"])
+            status = "cancelled" if cancelled else ("failed" if error else "completed")
+            stage, progress, completed = status, (0 if cancelled else 100), self._now()
+            result_json = None if cancelled else (self._json(result) if result is not None else None)
+            db.execute(
+                "UPDATE scan_runs SET status=?,stage=?,progress=?,result_json=?,error=?,completed_at=? WHERE run_id=?",
+                (status, stage, progress, result_json, None if cancelled else error, completed, str(run_id)),
+            )
             db.execute("UPDATE analysis_revisions SET result_json=? WHERE run_id=? AND sequence=1", (result_json, str(run_id)))
             row = db.execute("SELECT requested_by,project_id FROM scan_runs WHERE run_id=?", (str(run_id),)).fetchone()
             if row:

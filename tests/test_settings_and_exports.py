@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import csv
 import io
 import importlib.util
 import sys
 import http.client
 import json
 import os
+import re
+import tempfile
 import threading
 import unittest
 import zipfile
@@ -17,6 +20,7 @@ SHARED_PYTHON = ROOT / "platforms" / "shared" / "python"
 if str(SHARED_PYTHON) not in sys.path:
     sys.path.insert(0, str(SHARED_PYTHON))
 
+from security_scanner.grype_adapter import GrypeMatch, GrypeResult
 from security_scanner.models import DependencyComponent, Finding
 from security_scanner.reporting import (
     build_rule_catalog,
@@ -30,7 +34,8 @@ from security_scanner.reporting import (
     render_pdf,
     render_xlsx,
 )
-from security_scanner.server import create_dashboard_server, zap_scan_payload
+from security_scanner.server import create_dashboard_server, scan_directory_payload, zap_scan_payload
+from security_scanner.sbom import NIS_SBOM_COLUMNS, render_nis_sbom
 
 SAMPLE_PAYLOAD = {
     "findings": [
@@ -102,7 +107,73 @@ class DisabledRuleFilterTests(unittest.TestCase):
         self.assertEqual(filter_disabled_rules(findings, None), findings)
 
 
+class LocalVulnerabilityScanTests(unittest.TestCase):
+    def test_local_grype_findings_are_added_to_source_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            requirements = Path(directory) / "requirements.txt"
+            requirements.write_text("requests==2.19.1\n", encoding="utf-8")
+            match = GrypeMatch(
+                "CVE-2018-18074", ("CVE-2018-18074",), "requests", "2.19.1",
+                "pkg:pypi/requests@2.19.1", ("2.20.0",), "high", (), ("exact-direct-match",),
+            )
+            with patch("security_scanner.server.run_grype_purls", return_value=GrypeResult((match,), "", {}, "", False)) as grype:
+                payload = scan_directory_payload(
+                    str(requirements), allow_file=True, enable_local_vulnerabilities=True,
+                    grype_binary=Path("/opt/koda/tools/grype"),
+                )
+            self.assertEqual(grype.call_args.args[0], ("pkg:pypi/requests@2.19.1",))
+            finding = next(item for item in payload["findings_by_language"]["en"] if item["rule_id"] == "dependency.osv-known-vulnerability")
+            self.assertEqual((finding["severity"], finding["path"]), ("high", str(requirements.resolve())))
+            self.assertIn("CVE-2018-18074", finding["evidence"])
+
+
 class ExportTests(unittest.TestCase):
+    def test_nis_sbom_uses_the_official_twenty_columns(self) -> None:
+        component = DependencyComponent(
+            name="requests",
+            ecosystem="PyPI",
+            version="2.32.0",
+            path=Path("requirements.txt"),
+            target="src",
+            purl="pkg:pypi/requests@2.32.0",
+        )
+
+        document = render_nis_sbom((component,), product_name="sample")
+        rows = list(csv.DictReader(io.StringIO(document.lstrip("\ufeff"))))
+
+        self.assertTrue(document.startswith("\ufeff"))
+        self.assertIn("\r\n", document)
+        self.assertEqual(tuple(rows[0]), NIS_SBOM_COLUMNS)
+        self.assertEqual(rows[0]["SBOM Standard"], "NIS 1.0")
+        self.assertEqual(rows[0]["SBOM Type"], "Analyzed")
+        self.assertRegex(rows[0]["SBOM ID"], rf"^KODA-\d{{8}}-\d{{6}}$")
+        self.assertEqual(rows[0]["Product Name"], "sample")
+        self.assertEqual(rows[0]["Unique Identifier"], "pkg:pypi/requests@2.32.0")
+
+    def test_shared_windows_dashboard_exposes_nis_sbom_download(self) -> None:
+        component = DependencyComponent(
+            name="requests",
+            ecosystem="PyPI",
+            version="2.32.0",
+            path=Path("requirements.txt"),
+            target="src",
+            purl="pkg:pypi/requests@2.32.0",
+        )
+
+        document = render_html([], target_names=("sample",), language="ko", components=(component,))
+        payload_text = re.search(
+            r'<script id="findings-data" type="application/json">(.*?)</script>',
+            document,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(payload_text)
+        payload = json.loads(payload_text.group(1))
+        self.assertEqual(payload["nis_sbom"]["columns"], list(NIS_SBOM_COLUMNS))
+        self.assertEqual(payload["nis_sbom"]["rows"][0]["Product Name"], "sample")
+        self.assertIn('<option value="nis-sbom"></option>', document)
+        self.assertIn('"koda-nis-sbom-1.0.csv"', document)
+
     def test_optional_sbom_tracker_link_is_opt_in_and_safe(self) -> None:
         with patch.dict(os.environ, {"KODA_SSBOM_TRACKER_URL": "http://127.0.0.1:8088/"}):
             document = render_html([], language="ko")
@@ -436,6 +507,73 @@ class ZapScanTests(unittest.TestCase):
             response = connection.getresponse()
             self.assertEqual(response.status, 400)
             self.assertIn("authorized", json.loads(response.read())["error"].lower())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+
+class UploadScanTests(unittest.TestCase):
+    def _upload(self, server, filename: str, body: bytes):
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+        connection.request("GET", "/api/health")
+        response = connection.getresponse()
+        session = response.getheader("X-KODA-Session")
+        response.read()
+        self.assertTrue(session)
+
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port)
+        connection.request(
+            "POST",
+            "/api/scan-upload?language=ko&standard=local&standard_category=all",
+            body=body,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Origin": f"http://127.0.0.1:{server.server_port}",
+                "X-KODA-Session": session,
+                "X-KODA-Filename": filename,
+            },
+        )
+        return connection.getresponse()
+
+    def test_file_and_archive_uploads_scan_without_exposing_temp_paths(self) -> None:
+        server = create_dashboard_server(port=0)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            response = self._upload(server, "config.env", b"AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n")
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual((payload["scan"]["kind"], payload["scan"]["path"]), ("upload", "config.env"))
+            self.assertIn("secret.aws-access-key", {item["rule_id"] for item in payload["findings_by_language"]["en"]})
+            self.assertEqual(set(payload["summary"]["target_paths"].values()), {"config.env"})
+
+            archive_body = io.BytesIO()
+            with zipfile.ZipFile(archive_body, "w") as archive:
+                archive.writestr("src/config.env", "AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n")
+            response = self._upload(server, "source.zip", archive_body.getvalue())
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["scan"]["path"], "source.zip")
+            self.assertIn("secret.aws-access-key", {item["rule_id"] for item in payload["findings_by_language"]["en"]})
+            self.assertNotIn("koda-upload-", json.dumps(payload))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_upload_rejects_archive_path_traversal(self) -> None:
+        archive_body = io.BytesIO()
+        with zipfile.ZipFile(archive_body, "w") as archive:
+            archive.writestr("../escape.py", "print('no')")
+        server = create_dashboard_server(port=0)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            response = self._upload(server, "unsafe.zip", archive_body.getvalue())
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 400)
+            self.assertIn("unsafe path", payload["error"])
         finally:
             server.shutdown()
             server.server_close()

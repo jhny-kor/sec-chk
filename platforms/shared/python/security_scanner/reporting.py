@@ -17,7 +17,7 @@ from . import __version__
 from .checks.secrets import SECRET_RULES, _redact_line
 from .dependency_inventory import component_payload
 from .models import DependencyComponent, Finding, SEVERITIES, SEVERITY_RANK
-from .sbom import cyclonedx_payload, render_cyclonedx
+from .sbom import cyclonedx_payload, nis_sbom_payload, render_cyclonedx, render_nis_sbom
 from .standards import (
     CODE_PATTERN_RULE_IDS,
     CONFIGURATION_RULE_IDS,
@@ -136,6 +136,9 @@ TRANSLATIONS = {
         "no_related_standards": "No standard mapping recorded.",
         "dependency_components": "Components",
         "download_sbom": "Download SBOM",
+        "sbom_format": "SBOM format",
+        "sbom_cyclonedx_16": "CycloneDX 1.6 (JSON)",
+        "sbom_nis_10": "NIS-SBOM 1.0 (CSV)",
         "settings": "Settings",
         "settings_title": "Check rule settings",
         "settings_intro": "Turn individual rules on or off. Disabled rules are excluded from scan results.",
@@ -173,6 +176,10 @@ TRANSLATIONS = {
         "scan_path_placeholder": "No folder selected",
         "choose_folder": "Choose Folder",
         "scan_now": "Security Scan",
+        "upload_scan_title": "Scan File or Archive",
+        "upload_scan_now": "Analyze Upload",
+        "upload_scan_note": "Scans one file or the extracted contents of ZIP, TAR, GZ, JAR, WAR, and EAR archives. Archives are extracted to temporary storage and removed after the scan.",
+        "upload_scan_required": "Choose a file or archive first.",
         "web_scan_title": "Scan Website (Live)",
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "Scan URL",
@@ -374,6 +381,9 @@ TRANSLATIONS = {
         "no_related_standards": "연결된 기준 매핑이 없습니다.",
         "dependency_components": "컴포넌트",
         "download_sbom": "SBOM 다운로드",
+        "sbom_format": "SBOM 생성 형식",
+        "sbom_cyclonedx_16": "CycloneDX 1.6 (JSON)",
+        "sbom_nis_10": "국정원 NIS-SBOM 1.0 (CSV)",
         "settings": "설정",
         "settings_title": "점검 규칙 설정",
         "settings_intro": "규칙을 개별적으로 켜거나 끌 수 있습니다. 끈 규칙은 점검 결과에서 제외됩니다.",
@@ -411,6 +421,10 @@ TRANSLATIONS = {
         "scan_path_placeholder": "선택된 폴더 없음",
         "choose_folder": "폴더 선택",
         "scan_now": "보안 점검",
+        "upload_scan_title": "파일·압축파일 점검",
+        "upload_scan_now": "업로드 분석",
+        "upload_scan_note": "파일 1개 또는 ZIP, TAR, GZ, JAR, WAR, EAR 압축 해제 내용을 점검합니다. 임시 저장 파일은 점검 후 삭제됩니다.",
+        "upload_scan_required": "먼저 파일 또는 압축파일을 선택하세요.",
         "web_scan_title": "웹사이트 점검 (실시간)",
         "web_url_placeholder": "https://example.com",
         "web_scan_now": "URL 점검",
@@ -1317,9 +1331,9 @@ RULE_TRANSLATIONS_KO = {
         "recommendation": "LLM 호출 전 민감값을 제거하거나 마스킹하고 프롬프트가 로컬 신뢰 경계를 벗어나는지 문서화하세요.",
     },
     "dependency.osv-known-vulnerability": {
-        "title": "OSV에 보고된 알려진 취약 의존성",
-        "description": "OSV가 이 정확한 의존성 버전에 대해 알려진 취약점을 보고했습니다.",
-        "recommendation": "OSV 상세 페이지를 확인한 뒤 업그레이드, 패치, 대체, 또는 보완 통제를 문서화하세요.",
+        "title": "알려진 취약 의존성",
+        "description": "취약점 데이터베이스가 이 정확한 의존성 버전의 알려진 취약점을 보고했습니다.",
+        "recommendation": "취약점 식별자를 확인한 뒤 업그레이드, 패치, 대체, 또는 보완 통제를 문서화하세요.",
     },
 }
 
@@ -1345,6 +1359,8 @@ def render_report(
 ) -> str:
     if report_format == "cyclonedx":
         return render_cyclonedx(components)
+    if report_format == "nis-sbom":
+        return render_nis_sbom(components, product_name=target_names[0] if target_names else "KODA scan")
     if report_format == "cyclonedx-vex":
         return render_cyclonedx_vex(findings)
     if report_format == "json":
@@ -2824,6 +2840,7 @@ def build_dashboard_payload(
         "rule_mappings": rule_mappings,
         "components": [component_payload(component) for component in components],
         "sbom": cyclonedx_payload(components),
+        "nis_sbom": nis_sbom_payload(components, product_name=target_names[0] if target_names else "KODA scan"),
         "scanner": {"name": "local-security-scanner", "version": __version__},
         "summary": summary,
         "scan": {
@@ -2876,6 +2893,9 @@ def _html_replacements(labels: dict[str, object], json_payload: str) -> dict[str
         "__INITIAL_SCAN_PATH_PLACEHOLDER__": html.escape(str(labels["scan_path_placeholder"]), quote=True),
         "__INITIAL_CHOOSE_FOLDER__": html.escape(str(labels["choose_folder"])),
         "__INITIAL_SCAN_NOW__": html.escape(str(labels["scan_now"])),
+        "__INITIAL_UPLOAD_SCAN_TITLE__": html.escape(str(labels["upload_scan_title"])),
+        "__INITIAL_UPLOAD_SCAN_NOW__": html.escape(str(labels["upload_scan_now"])),
+        "__INITIAL_UPLOAD_SCAN_NOTE__": html.escape(str(labels["upload_scan_note"])),
         "__INITIAL_WEB_SCAN_TITLE__": html.escape(str(labels["web_scan_title"])),
         "__INITIAL_WEB_URL_PLACEHOLDER__": html.escape(str(labels["web_url_placeholder"]), quote=True),
         "__INITIAL_WEB_SCAN_NOW__": html.escape(str(labels["web_scan_now"])),
@@ -2965,7 +2985,7 @@ def write_report(content: str, output: Path | None) -> None:
         print(content, end="")
         return
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(content, encoding="utf-8")
+    output.write_text(content, encoding="utf-8", newline="")
 
 
 _SOURCE_CONTEXT_BEFORE = 3
@@ -4397,6 +4417,12 @@ HTML_TEMPLATE = """<!doctype html>
         </div>
       </div>
       <div class="scan-web-form">
+        <label id="upload-scan-title" class="scan-web-title" for="scan-upload">__INITIAL_UPLOAD_SCAN_TITLE__</label>
+        <input id="scan-upload" type="file">
+        <button id="scan-upload-run" type="button">__INITIAL_UPLOAD_SCAN_NOW__</button>
+        <span id="upload-scan-note" class="scan-note">__INITIAL_UPLOAD_SCAN_NOTE__</span>
+      </div>
+      <div class="scan-web-form">
         <span id="web-scan-title" class="scan-web-title">__INITIAL_WEB_SCAN_TITLE__</span>
         <input id="web-url" class="path-display" type="url" autocomplete="off" placeholder="__INITIAL_WEB_URL_PLACEHOLDER__">
         <details class="scan-web-options">
@@ -4489,6 +4515,13 @@ HTML_TEMPLATE = """<!doctype html>
         <label class="scan-option" title="">
           <input id="scan-host" type="checkbox">
           <span id="scan-host-label"></span>
+        </label>
+        <label class="scan-select">
+          <span id="sbom-format-label"></span>
+          <select id="sbom-format">
+            <option value="cyclonedx"></option>
+            <option value="nis-sbom"></option>
+          </select>
         </label>
         <button id="sbom-download" type="button"></button>
         <span id="scan-osv-note" class="scan-note"></span>
@@ -4829,12 +4862,18 @@ HTML_TEMPLATE = """<!doctype html>
       setText("scan-directory-title", activeLabels.scan_directory);
       byId("scan-path").placeholder = activeLabels.scan_path_placeholder;
       setText("scan-choose", activeLabels.choose_folder);
+      setText("upload-scan-title", activeLabels.upload_scan_title);
+      setText("scan-upload-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.upload_scan_now);
+      setText("upload-scan-note", activeLabels.upload_scan_note);
       setText("scan-standard-label", activeLabels.scan_standard);
       setText("scan-standard-category-label", activeLabels.scan_standard_category);
       setText("scan-osv-label", activeLabels.osv_toggle);
       setText("scan-osv-note", activeLabels.osv_network_note);
       setText("scan-host-label", activeLabels.host_toggle);
       setText("scan-host-note", activeLabels.host_note);
+      setText("sbom-format-label", activeLabels.sbom_format);
+      byId("sbom-format").options[0].textContent = activeLabels.sbom_cyclonedx_16;
+      byId("sbom-format").options[1].textContent = activeLabels.sbom_nis_10;
       setText("sbom-download", activeLabels.download_sbom);
       setText("report-download-open", activeLabels.download_report);
       setText("download-dialog-title", activeLabels.download_format_prompt);
@@ -4869,6 +4908,8 @@ HTML_TEMPLATE = """<!doctype html>
       byId("scan-run").disabled = state.scanRunning;
       byId("screen-quality-run").disabled = state.scanRunning;
       byId("scan-choose").disabled = state.scanRunning;
+      byId("scan-upload").disabled = state.scanRunning;
+      byId("scan-upload-run").disabled = state.scanRunning;
       setText("web-scan-title", activeLabels.web_scan_title);
       byId("web-url").placeholder = activeLabels.web_url_placeholder;
       setText("web-scan-run", state.scanRunning ? activeLabels.scan_status_running : activeLabels.web_scan_now);
@@ -4930,6 +4971,7 @@ HTML_TEMPLATE = """<!doctype html>
       byId("scan-standard-category").disabled = state.scanRunning;
       byId("scan-osv").disabled = state.scanRunning;
       byId("scan-host").disabled = state.scanRunning;
+      byId("sbom-format").disabled = components().length === 0;
       byId("sbom-download").disabled = components().length === 0;
       const scanStatus = byId("scan-status");
       scanStatus.textContent = state.scanStatus || activeLabels.scan_status_idle;
@@ -5637,6 +5679,59 @@ HTML_TEMPLATE = """<!doctype html>
       }
     }
 
+    async function runUploadScan() {
+      const activeLabels = labels();
+      const file = byId("scan-upload").files[0];
+      if (!file) {
+        state.scanStatus = activeLabels.upload_scan_required;
+        state.scanStatusClass = "error";
+        render();
+        return;
+      }
+
+      state.scanRunning = true;
+      state.scanStatus = activeLabels.scan_status_running;
+      state.scanStatusClass = "";
+      render();
+
+      try {
+        const health = await fetch(apiEndpoint("/api/health"));
+        if (!health.ok) {
+          throw new Error(activeLabels.server_required);
+        }
+        const session = health.headers.get("X-KODA-Session") || "";
+        const query = new URLSearchParams({
+          language: state.language,
+          standard: state.scanStandard,
+          standard_category: state.scanStandardCategory,
+          enable_osv: byId("scan-osv").checked ? "1" : "0",
+        });
+        state.disabledRules.forEach((ruleId) => query.append("disabled_rule", ruleId));
+        const response = await fetch(apiEndpoint(`/api/scan-upload?${query}`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "X-KODA-Session": session,
+            "X-KODA-Filename": encodeURIComponent(file.name),
+          },
+          body: file,
+        });
+        const nextPayload = await parseJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(nextPayload.error || activeLabels.scan_status_failed);
+        }
+        state.scanRunning = false;
+        state.scanStatus = `${labels().scan_status_done}: ${file.name}`;
+        state.scanStatusClass = "ok";
+        applyPayload(nextPayload);
+      } catch (error) {
+        state.scanRunning = false;
+        state.scanStatus = `${activeLabels.scan_status_failed}: ${userFacingApiError(error, activeLabels.server_required)}`;
+        state.scanStatusClass = "error";
+        render();
+      }
+    }
+
     async function runWebScan() {
       const activeLabels = labels();
       const url = byId("web-url").value.trim();
@@ -5876,11 +5971,18 @@ HTML_TEMPLATE = """<!doctype html>
         render();
         return;
       }
-      const blob = new Blob([JSON.stringify(payload.sbom, null, 2)], { type: "application/json" });
+      const format = byId("sbom-format").value;
+      const csvCell = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+      const nis = payload.nis_sbom || { columns: [], rows: [] };
+      const content = format === "nis-sbom"
+        ? "\ufeff" + [nis.columns, ...nis.rows.map((row) => nis.columns.map((column) => row[column] || ""))]
+          .map((row) => row.map(csvCell).join(",")).join("\\r\\n") + "\\r\\n"
+        : JSON.stringify(payload.sbom, null, 2);
+      const blob = new Blob([content], { type: format === "nis-sbom" ? "text/csv;charset=utf-8" : "application/json" });
       const link = document.createElement("a");
       const downloadUrl = URL.createObjectURL(blob);
       link.href = downloadUrl;
-      link.download = "sec-chk-cyclonedx-sbom.json";
+      link.download = format === "nis-sbom" ? "koda-nis-sbom-1.0.csv" : "koda-cyclonedx-1.6.json";
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -5942,6 +6044,9 @@ HTML_TEMPLATE = """<!doctype html>
     });
     byId("scan-run").addEventListener("click", () => {
       runDirectoryScan();
+    });
+    byId("scan-upload-run").addEventListener("click", () => {
+      runUploadScan();
     });
     byId("web-scan-run").addEventListener("click", () => {
       runWebScan();

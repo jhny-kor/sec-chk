@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title desc">
+  <title id="title">KODA 웹 포털 기능 흐름</title>
+  <desc id="desc">사용자가 프로젝트와 검사 기준을 선택하면 관리자 정책이 적용되고, 라이브러리 취약점과 소스코드 취약점 및 품질 점검으로 분기된 뒤 회차별 불변 결과와 공통 리포트로 저장되는 흐름</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7890a6"/>
+    </marker>
+    <style>
+      .bg{fill:#f5f7fa}.panel{fill:#fff;stroke:#cbd6e0;stroke-width:1.5}.focus{fill:#eaf8f6;stroke:#008f83;stroke-width:2}.dark{fill:#071d35}.ink{fill:#12233a}.muted{fill:#66758a}.white{fill:#fff}.teal{fill:#007f75}.branch,.line{fill:none;stroke:#7890a6;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter}.line{marker-end:url(#arrow)}
+      text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif}.h1{font-size:28px;font-weight:750}.h2{font-size:18px;font-weight:700}.body{font-size:14px}.small{font-size:12px}.label{font-size:13px;font-weight:700;letter-spacing:.04em}
+    </style>
+  </defs>
+  <rect class="bg" width="1280" height="620"/>
+  <rect class="dark" x="0" y="0" width="1280" height="84"/>
+  <text class="h1 white" x="48" y="52">KODA 점검·결과 흐름</text>
+  <text class="body" x="1232" y="50" text-anchor="end" fill="#b8ccdd">동일 데이터 · 분리된 결과 탭 · 회차별 보관</text>
+
+  <text class="label muted" x="48" y="126">01  입력과 기준</text>
+  <rect class="panel" x="48" y="146" width="250" height="132" rx="4"/>
+  <text class="h2 ink" x="72" y="181">프로젝트 입력</text>
+  <text class="body muted" x="72" y="213">소스 폴더 · 압축파일 · JAR/WAR</text>
+  <text class="body muted" x="72" y="239">manifest · lockfile · 설정 파일</text>
+
+  <rect class="panel" x="48" y="306" width="250" height="132" rx="4"/>
+  <text class="h2 ink" x="72" y="341">검사 기준 선택</text>
+  <text class="body muted" x="72" y="373">사용자: 기준과 범위만 선택</text>
+  <text class="body muted" x="72" y="399">관리자: 활성 규칙과 정책 관리</text>
+  <path class="line" d="M173 278 V298"/>
+
+  <text class="label muted" x="374" y="126">02  점검 분기</text>
+  <rect class="focus" x="374" y="146" width="310" height="110" rx="4"/>
+  <rect fill="#008f83" x="374" y="146" width="8" height="110"/>
+  <text class="h2 teal" x="406" y="181">라이브러리 취약점</text>
+  <text class="body ink" x="406" y="211">구성요소/PURL → 번들된 오프라인 Grype DB</text>
+  <text class="small muted" x="406" y="235">category: dependencies</text>
+
+  <rect class="panel" x="374" y="280" width="310" height="110" rx="4"/>
+  <rect fill="#2774c8" x="374" y="280" width="8" height="110"/>
+  <text class="h2 ink" x="406" y="315">소스코드 취약점</text>
+  <text class="body ink" x="406" y="345">코드 · 비밀정보 · 보안설정 · 예방통제</text>
+  <text class="small muted" x="406" y="369">code · secrets · configuration · prevention</text>
+
+  <rect class="panel" x="374" y="414" width="310" height="110" rx="4"/>
+  <rect fill="#d79b00" x="374" y="414" width="8" height="110"/>
+  <text class="h2 ink" x="406" y="449">품질 점검</text>
+  <text class="body ink" x="406" y="479">화면 품질과 접근성 규칙</text>
+  <text class="small muted" x="406" y="503">category: screen_quality</text>
+
+  <path class="branch" d="M298 372 H338"/>
+  <path class="branch" d="M338 201 V469"/>
+  <path class="line" d="M338 201 H366"/>
+  <path class="line" d="M338 335 H366"/>
+  <path class="line" d="M338 469 H366"/>
+
+  <text class="label muted" x="760" y="126">03  저장과 조회</text>
+  <rect class="panel" x="760" y="202" width="210" height="180" rx="4"/>
+  <text class="h2 ink" x="784" y="240">회차별 불변 결과</text>
+  <text class="body muted" x="784" y="274">요청 계정</text>
+  <text class="body muted" x="784" y="300">정책 버전 · 입력 해시</text>
+  <text class="body muted" x="784" y="326">스캐너 · DB 기준일</text>
+  <text class="small teal" x="784" y="356">재분석과 회차 비교 가능</text>
+  <path class="branch" d="M684 201 H716"/>
+  <path class="branch" d="M684 335 H716"/>
+  <path class="branch" d="M684 469 H716"/>
+  <path class="branch" d="M716 201 V469"/>
+  <path class="line" d="M716 292 H752"/>
+
+  <text class="label muted" x="1038" y="126">04  결과 활용</text>
+  <rect class="focus" x="1038" y="146" width="194" height="244" rx="4"/>
+  <text class="h2 teal" x="1062" y="183">분리된 결과 탭</text>
+  <text class="body ink" x="1062" y="218">전체</text>
+  <text class="body ink" x="1062" y="246">라이브러리 취약점</text>
+  <text class="body ink" x="1062" y="274">소스코드 취약점</text>
+  <text class="body ink" x="1062" y="302">품질 점검</text>
+  <line x1="1062" y1="325" x2="1208" y2="325" stroke="#b8d9d5"/>
+  <text class="small muted" x="1062" y="351">검색 · 심각도 필터 · 상세 조치</text>
+
+  <rect class="panel" x="1038" y="414" width="194" height="110" rx="4"/>
+  <text class="h2 ink" x="1062" y="449">공통 출력</text>
+  <text class="body muted" x="1062" y="479">HTML · PDF · Excel · HWPX</text>
+  <text class="body muted" x="1062" y="503">CycloneDX · NIS-SBOM</text>
+  <path class="line" d="M970 292 H1030"/>
+  <path class="line" d="M970 342 H1004 V469 H1030"/>
+
+  <text class="small muted" x="48" y="582">권한 경계: Tracker 계정 인증 · KODA 프로젝트 역할 · 관리자 전용 규칙 정책</text>
+</svg>

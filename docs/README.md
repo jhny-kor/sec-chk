@@ -15,6 +15,9 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 있습니다. `Python 불필요`는 macOS 네이티브 사용자가 Python을 별도로 설치할
 필요가 없다는 뜻이며, 플랫폼별 내부 구성은 각 설치 문서에서 설명합니다.
 
+KODA 웹 포털의 화면·분석 탭·회차 비교·접근 관리 흐름은
+[KODA 웹 포털 화면과 기능](koda-web-portal.ko.md)에서 확인합니다.
+
 ## 목적별 빠른 시작
 
 | 목적 | 얻는 결과 | 시작 문서 |
@@ -34,6 +37,8 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 | [offline-delivery.md](install/offline-delivery.md) | 폐쇄망 배포 개요 — Docker 전달물 / Linux tarball / Windows 설치본+데이터 zip 비교, 점검 파이프라인, 종료 코드, 빌드 옵션 |
 | [macos.ko.md](install/macos.ko.md) | macOS 설치 (스크립트 설치) |
 | [linux.ko.md](install/linux.ko.md) | Linux 설치·운영 가이드 (호스트 설치, 대시보드, Docker 전달물) |
+| [koda-web-portal.ko.md](koda-web-portal.ko.md) | KODA 웹 포털 실제 예시 화면, 결과 분류 탭과 기능 흐름 |
+| [폐쇄망 설치 장애 대응](../platforms/linux/suite/TROUBLESHOOTING.ko.md) | 설치 중 발생한 EOF·413·흰 화면·로그인·API 키·분석 실패·안전한 재설치 대응 |
 | [windows.ko.md](install/windows.ko.md) | Windows 설치본 빌드·설치 및 취약점 데이터 패키지 연결 |
 | [vuln-data-refresh.md](install/vuln-data-refresh.md) | Windows 취약점 데이터(`koda-vuln-data-<date>.zip`) 현행화 절차 |
 | [usage.ko.md](usage.ko.md) | 공통 Python CLI 사용법 — 설정, 보고서, CI, 자동 교정과 권한 있는 네트워크 점검 |

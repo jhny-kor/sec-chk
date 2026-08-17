@@ -11,7 +11,10 @@ CATEGORIES = FILE_CATEGORIES + HOST_CATEGORIES
 DEFAULT_CATEGORIES = SECURITY_CATEGORIES
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 SEVERITY_RANK = {severity: index for index, severity in enumerate(SEVERITIES)}
-VERIFICATION_STATUSES = ("confirmed", "needs_review")
+# ``unverified`` means the scanner could not evaluate the control at all (a
+# probe was unavailable, blocked, or unsupported). It is an evidence gap, not a
+# risk judgement, and never counts toward scores or gates.
+VERIFICATION_STATUSES = ("confirmed", "needs_review", "unverified")
 
 
 @dataclass(frozen=True)

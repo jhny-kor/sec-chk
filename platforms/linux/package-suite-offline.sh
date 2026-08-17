@@ -98,6 +98,7 @@ cp "$koda_bundle" "$stage/bundles/$(basename -- "$koda_bundle")"
 cp "$tracker_bundle" "$stage/bundles/$(basename -- "$tracker_bundle")"
 install -m 0755 "$script_dir/suite/koda-suite" "$stage/koda-suite"
 sed "s/@SUITE_VERSION@/$version/g" "$script_dir/suite/README.ko.md" > "$stage/README.ko.md"
+cp "$script_dir/suite/TROUBLESHOOTING.ko.md" "$stage/TROUBLESHOOTING.ko.md"
 cp "$script_dir/suite/compose.integration.yaml" "$stage/compose.integration.yaml"
 cp "$script_dir/suite/gateway.conf.template" "$stage/gateway/gateway.conf.template"
 {
@@ -113,6 +114,32 @@ KODA_PIDS_LIMIT=256
 KODA_TMPFS_SIZE=512m
 EOF
 } > "$stage/config/koda-suite.env.example"
+# The two source examples intentionally overlap on a few runtime keys. Keep a
+# single assignment per key in the shipped file; the suite example is appended
+# last so its gateway/security defaults win over Tracker's local-development
+# defaults. Duplicate assignments make shell sourcing order dependent and were
+# the cause of HTTP cookies and browser API addresses silently being overridden.
+python3 - "$stage/config/koda-suite.env.example" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+positions = {}
+result = []
+assignment = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=")
+for line in lines:
+    match = assignment.match(line)
+    if match:
+        key = match.group(1)
+        if key in positions:
+            result[positions[key]] = line
+            continue
+        positions[key] = len(result)
+    result.append(line)
+path.write_text("".join(result), encoding="utf-8")
+PY
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$stage/"
 
 koda_revision="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"

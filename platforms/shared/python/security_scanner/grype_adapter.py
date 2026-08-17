@@ -32,6 +32,32 @@ class GrypeResult:
     fatal: bool
 
 
+def inspect_grype(binary: Path | None, timeout: float = 10.0) -> dict[str, object]:
+    if binary is None:
+        return {
+            "configured": False,
+            "available": False,
+            "version": "",
+            "database": {},
+            "warning": "Grype is not configured; the vulnerability database cannot be checked.",
+        }
+    validation = _validate_binary(binary)
+    if validation:
+        return {"configured": True, "available": False, "version": "", "database": {}, "warning": validation}
+    version_result = _run(binary, ("--version",), timeout)
+    database, database_warning = _database_status(binary, timeout)
+    version = version_result.stdout.strip() if version_result.returncode == 0 else ""
+    version_warning = "" if version_result.returncode == 0 else f"Grype version check failed: {version_result.stderr.strip() or 'unknown error'}"
+    warning = "; ".join(item for item in (version_warning, database_warning) if item)
+    return {
+        "configured": True,
+        "available": version_result.returncode == 0 and database.get("status") != "unavailable",
+        "version": version,
+        "database": database,
+        "warning": warning,
+    }
+
+
 def run_grype(sbom_path: Path, binary: Path | None, timeout: float) -> GrypeResult:
     if binary is None:
         return GrypeResult((), "", {}, "Grype is not configured; vulnerability comparison was not run.", False)

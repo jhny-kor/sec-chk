@@ -221,10 +221,21 @@ download_nvd_feed() {
   local nvd_file="$asset_dir/vuln-data/nvd/nvdcve-2.0-$feed.json.gz"
   local nvd_url="https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-$feed.json.gz"
   local meta_file="$cache_dir/nvd-meta/nvdcve-2.0-$feed.meta"
+  local cached_pair_valid=0
+  if [ -s "$nvd_file" ] && [ -s "$meta_file" ] && verify_nvd_meta "$nvd_file" "$meta_file" >/dev/null 2>&1; then
+    cached_pair_valid=1
+  fi
   if [ "$mutable" -eq 1 ]; then
     invalidate "$nvd_file"
   fi
-  download "$nvd_url" "$nvd_file"
+  if ! download "$nvd_url" "$nvd_file"; then
+    if [ "$mutable" -eq 1 ] && [ "$cached_pair_valid" -eq 1 ]; then
+      echo "warning: NVD $feed feed unavailable; reusing the checksum-verified cached feed." >&2
+      touch "$cache_dir/.complete/$(basename -- "$nvd_file").done"
+      return
+    fi
+    return 1
+  fi
   if [ "$mutable" -eq 1 ] || [ "$refresh" -eq 1 ]; then
     invalidate "$meta_file"
     download "https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-$feed.meta" "$meta_file"

@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import secrets
 import subprocess
+import tempfile
 import time
 from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
+from .archive_input import prepare_input_target
 from .config import expand_path
+from .dependency_inventory import queryable_osv_components
+from .grype_adapter import GrypeMatch, inspect_grype, run_grype_purls
 from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, Finding, ScannerConfig, TargetConfig
 from .reporting import (
     build_dashboard_payload,
@@ -41,6 +46,13 @@ from .web_audit import approve_request, plan_profile, run_web_audit
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 LOCAL_CORS_HOSTS = {"127.0.0.1", "localhost", "::1"}
+DEFAULT_UPLOAD_MAX_BYTES = 256 * 1024 * 1024
+DEFAULT_UPLOAD_MAX_EXTRACTED_BYTES = 256 * 1024 * 1024
+DEFAULT_UPLOAD_MAX_FILES = 10_000
+
+
+class UploadTooLargeError(ValueError):
+    pass
 
 
 def create_dashboard_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, language: str = "ko") -> ThreadingHTTPServer:
@@ -81,6 +93,8 @@ def scan_directory_payload(
     max_file_size_bytes: int = 524288,
     base_dir: Path | None = None,
     enable_osv: bool = False,
+    enable_local_vulnerabilities: bool = False,
+    grype_binary: Path | None = None,
     include_host: bool = False,
     disabled_rules: tuple[str, ...] = (),
     allow_file: bool = False,
@@ -125,6 +139,31 @@ def scan_directory_payload(
     scanner = SecurityScanner(config)
     scan_result = scanner.scan()
     raw_findings = list(scan_result.findings)
+    scan_warnings = list(scanner.warnings)
+    local_vulnerability: dict[str, object] = {
+        "status": "disabled",
+        "queried_components": 0,
+        "matched_vulnerabilities": 0,
+    }
+    if source_only:
+        local_vulnerability["status"] = "skipped"
+        local_vulnerability["warning"] = "선택한 소스코드 전용 기준은 라이브러리 취약점 점검을 실행하지 않습니다."
+    elif enable_local_vulnerabilities:
+        components = queryable_osv_components(scanner.components)
+        binary = grype_binary or _environment_path("KODA_GRYPE_BIN")
+        local_vulnerability.update(inspect_grype(binary))
+        local_vulnerability["queried_components"] = len(tuple(component for component in components if component.purl))
+        grype = run_grype_purls(
+            tuple(component.purl for component in components if component.purl),
+            binary,
+            300.0,
+        )
+        raw_findings.extend(_grype_findings(grype.matches, components))
+        local_vulnerability["matched_vulnerabilities"] = len(grype.matches)
+        local_vulnerability["status"] = "failed" if grype.fatal or not local_vulnerability.get("available") else ("warning" if grype.warning or local_vulnerability.get("warning") else "completed")
+        for warning in (local_vulnerability.get("warning"), grype.warning):
+            if warning and str(warning) not in scan_warnings:
+                scan_warnings.append(str(warning))
     findings = filter_findings_by_standard(raw_findings, standard_selection)
     if include_host:
         # Host posture is opt-in and orthogonal to the selected standard's rule_id
@@ -141,7 +180,7 @@ def scan_directory_payload(
         target_names,
         language,
         target_paths=target_paths,
-        warnings=tuple(scanner.warnings),
+        warnings=tuple(scan_warnings),
         scan_path=display_path or str(target_path),
         kind="upload" if display_path else "directory",
         standard=standard_selection.standard,
@@ -151,7 +190,46 @@ def scan_directory_payload(
         scanned_categories=scanner_categories,
         source_analysis=scan_result.source_analysis,
     )
+    payload["scan"]["enable_local_vulnerabilities"] = enable_local_vulnerabilities
+    payload["scan"]["local_vulnerability"] = local_vulnerability
     return _replace_upload_path(payload, str(target_path.resolve()), display_path) if display_path else payload
+
+
+def _environment_path(name: str) -> Path | None:
+    value = os.environ.get(name, "").strip()
+    return Path(value).expanduser() if value else None
+
+
+def _grype_findings(matches: tuple[GrypeMatch, ...], components) -> list[Finding]:
+    by_purl = {component.purl: component for component in components if component.purl}
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for match in matches:
+        component = by_purl.get(match.purl) or next(
+            (item for item in components if item.name == match.package_name and item.version == match.installed_version),
+            None,
+        )
+        if component is None:
+            continue
+        identifiers = match.cve_ids or match.vulnerability_ids or (match.vulnerability_id,)
+        key = component.purl, ",".join(identifiers)
+        if key in seen:
+            continue
+        seen.add(key)
+        fixed = ", ".join(match.fixed_versions)
+        findings.append(Finding(
+            rule_id="dependency.osv-known-vulnerability",
+            category="dependencies",
+            severity=match.severity if match.severity in SEVERITIES else "high",
+            title=f"Known vulnerable dependency: {component.name}@{component.version}",
+            path=component.path,
+            target=component.target,
+            line=component.line,
+            evidence=f"{component.purl}: {', '.join(identifiers)}" + (f"; fixed in {fixed}" if fixed else ""),
+            description="The bundled local Grype database reports a vulnerability for this exact dependency version.",
+            recommendation=f"Upgrade to {fixed}." if fixed else "Review the vulnerability identifiers and upgrade, patch, replace, or document a compensating control.",
+        ))
+    return findings
 
 
 def _replace_upload_path(value: Any, private_path: str, public_path: str) -> Any:
@@ -608,7 +686,7 @@ def _handler(language: str):
 
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
-            if path in {"/api/health", "/api/scan", "/api/web-scan", "/api/zap-scan", "/api/select-directory", "/api/prevention-kit", "/api/export", "/api/web-audit/plan", "/api/web-audit/approve", "/api/web-audit/run"}:
+            if path in {"/api/health", "/api/scan", "/api/scan-upload", "/api/web-scan", "/api/zap-scan", "/api/select-directory", "/api/prevention-kit", "/api/export", "/api/web-audit/plan", "/api/web-audit/approve", "/api/web-audit/run"}:
                 if path.startswith("/api/web-audit/") and not self._require_web_audit_access(options=True):
                     return
                 self.send_response(HTTPStatus.NO_CONTENT)
@@ -632,6 +710,9 @@ def _handler(language: str):
                 return
             if path == "/api/select-directory":
                 self._handle_select_directory()
+                return
+            if path == "/api/scan-upload":
+                self._handle_scan_upload()
                 return
             if path == "/api/web-scan":
                 self._handle_web_scan()
@@ -674,6 +755,51 @@ def _handler(language: str):
                 self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                 return
 
+            self._send_json(payload)
+
+        def _handle_scan_upload(self) -> None:
+            if not self._require_upload_access():
+                return
+            try:
+                query = parse_qs(urlparse(self.path).query)
+                filename = _upload_filename(self.headers.get("X-KODA-Filename"))
+                max_upload_bytes = _environment_limit("KODA_UPLOAD_MAX_BYTES", DEFAULT_UPLOAD_MAX_BYTES)
+                max_extracted_bytes = _environment_limit(
+                    "KODA_UPLOAD_MAX_EXTRACTED_BYTES", DEFAULT_UPLOAD_MAX_EXTRACTED_BYTES
+                )
+                max_archive_files = _environment_limit("KODA_UPLOAD_MAX_FILES", DEFAULT_UPLOAD_MAX_FILES)
+                with tempfile.TemporaryDirectory(prefix="koda-upload-") as temp_dir:
+                    temp_root = Path(temp_dir)
+                    upload_path = temp_root / filename
+                    self._receive_upload(upload_path, max_upload_bytes)
+                    target_path = prepare_input_target(
+                        upload_path,
+                        temp_root / "extracted",
+                        max_files=max_archive_files,
+                        max_bytes=max_extracted_bytes,
+                    )
+                    payload = scan_directory_payload(
+                        str(target_path),
+                        language=_query_choice(query, "language", {"en", "ko"}, language),
+                        min_severity="low",
+                        discover_projects=target_path.is_dir(),
+                        discovery_depth=None,
+                        categories=DEFAULT_CATEGORIES,
+                        standard=_query_choice(query, "standard", set(SECURITY_STANDARD_IDS), DEFAULT_STANDARD),
+                        standard_category=_query_text(query, "standard_category", DEFAULT_STANDARD_CATEGORY),
+                        max_file_size_bytes=_environment_limit("KODA_UPLOAD_SCAN_MAX_FILE_BYTES", 10 * 1024 * 1024),
+                        enable_osv=_query_flag(query, "enable_osv"),
+                        include_host=False,
+                        disabled_rules=tuple(query.get("disabled_rule", ())),
+                        allow_file=True,
+                        display_path=filename,
+                    )
+            except UploadTooLargeError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+                return
+            except (OSError, TypeError, ValueError) as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
             self._send_json(payload)
 
         def _handle_web_scan(self) -> None:
@@ -873,6 +999,35 @@ def _handler(language: str):
                 return False
             return True
 
+        def _require_upload_access(self) -> bool:
+            host = self.headers.get("Host", "")
+            origin = self.headers.get("Origin", "")
+            if not host or origin not in {f"http://{host}", f"https://{host}"}:
+                self._send_json({"error": "same-origin upload is required"}, status=HTTPStatus.FORBIDDEN)
+                return False
+            if self.headers.get("X-KODA-Session") != getattr(self.server, "koda_session_token", ""):
+                self._send_json({"error": "invalid X-KODA-Session"}, status=HTTPStatus.FORBIDDEN)
+                return False
+            return True
+
+        def _receive_upload(self, destination: Path, max_bytes: int) -> None:
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+            except ValueError as exc:
+                raise ValueError("Invalid Content-Length") from exc
+            if content_length <= 0:
+                raise ValueError("Uploaded file is empty")
+            if content_length > max_bytes:
+                raise UploadTooLargeError(f"Uploaded file exceeds {max_bytes} bytes")
+            remaining = content_length
+            with destination.open("wb") as output:
+                while remaining:
+                    chunk = self.rfile.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("Uploaded file ended before Content-Length")
+                    output.write(chunk)
+                    remaining -= len(chunk)
+
         def _read_json(self, *, required: bool = True, max_bytes: int = 32768) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0"))
             if content_length <= 0:
@@ -921,7 +1076,7 @@ def _handler(language: str):
                 return
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-KODA-Session")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-KODA-Session, X-KODA-Filename")
             self.send_header("Access-Control-Expose-Headers", "X-KODA-Session")
             self.send_header("Vary", "Origin")
 
@@ -1071,13 +1226,53 @@ def _choice_value(request: dict[str, Any], key: str, choices: set[str], default:
 
 
 def _choice_value_query(query: str, key: str, choices: set[str], default: str) -> str:
-    from urllib.parse import parse_qs
-
     values = parse_qs(query).get(key)
     if not values:
         return default
     normalized = values[0].lower()
     return normalized if normalized in choices else default
+
+
+def _upload_filename(raw: str | None) -> str:
+    filename = unquote(raw or "").strip()
+    if not filename or len(filename) > 255 or "\0" in filename or "/" in filename or "\\" in filename:
+        raise ValueError("X-KODA-Filename must contain one safe filename")
+    if filename in {".", ".."}:
+        raise ValueError("X-KODA-Filename must contain one safe filename")
+    return filename
+
+
+def _environment_limit(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _query_choice(query: dict[str, list[str]], key: str, choices: set[str], default: str) -> str:
+    value = _query_text(query, key, default).lower()
+    if value not in choices:
+        raise ValueError(f"Unsupported {key}: {value}")
+    return value
+
+
+def _query_text(query: dict[str, list[str]], key: str, default: str) -> str:
+    values = query.get(key)
+    value = values[0].strip() if values else default
+    if not value:
+        raise ValueError(f"'{key}' must be a non-empty string")
+    return value
+
+
+def _query_flag(query: dict[str, list[str]], key: str) -> bool:
+    values = query.get(key)
+    return bool(values and values[0].lower() in {"1", "true", "yes", "on"})
 
 
 def _disabled_rules_value(request: dict[str, Any]) -> tuple[str, ...]:
