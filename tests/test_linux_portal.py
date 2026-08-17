@@ -2,6 +2,7 @@ import datetime as dt
 import base64
 import csv
 import hashlib
+import http.client
 import io
 import json
 import tempfile
@@ -13,9 +14,10 @@ import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from security_scanner.portal_identity import IdentityError, identity_from_headers
-from security_scanner.linux_portal import create_portal_server
+from security_scanner.linux_portal import MAX_INPUT_BYTES, create_portal_server
 from security_scanner.portal_store import PortalStore
 from security_scanner.reporting import render_html_pair_zip_from_payload
 
@@ -77,6 +79,16 @@ class LinuxPortalStoreTests(unittest.TestCase):
             self.store.set_role_policy(self.project, {"viewer": ["system.admin"]}, 1, self.admin)
         reopened = PortalStore(Path(self.tmp.name) / "portal.sqlite3")
         self.assertEqual(reopened.list_inputs(self.project)[0]["input_id"], self.input_id)
+
+    def test_run_progress_cancel_and_recovery(self):
+        run = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all")
+        self.assertTrue(self.store.mark_run_running(run["run_id"]))
+        self.assertTrue(self.store.set_run_progress(run["run_id"], "scanning", 35))
+        cancelling = self.store.request_cancel(run["run_id"], self.admin)
+        self.assertEqual(cancelling["status"], "cancelling")
+        self.store.complete_run(run["run_id"], result={"findings": []})
+        cancelled = self.store.run(run["run_id"])
+        self.assertEqual((cancelled["status"], cancelled["stage"], cancelled["result"]), ("cancelled", "cancelled", None))
 
 
 class LinuxPortalHttpTests(unittest.TestCase):
@@ -142,6 +154,10 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("/koda/assets/KODA.ico", admin_page)
         self.assertNotIn("Tracker", admin_page.split("</nav>", 1)[0])
+        self.assertIn("회원가입과 계정 승인은 KODA-SBOM-Tracker", admin_page)
+        self.assertIn("KODA 접근 제어", admin_page)
+        self.assertNotIn("<option>pending</option>", admin_page)
+        self.assertIn("syncSubject()", admin_page)
 
     def test_public_koda_icon_asset(self):
         status, body = self.request("/koda/assets/KODA.ico")
@@ -153,10 +169,13 @@ class LinuxPortalHttpTests(unittest.TestCase):
         status, created = self.request("/koda/api/v1/projects", method="POST", payload={"name": "portal"}, headers=self.headers())
         self.assertEqual(status, 201)
         project_id = created["project_id"]
-        status, uploaded = self.request(
-            f"/koda/api/v1/projects/{project_id}/inputs", method="POST",
-            payload={"name": "demo.py", "contentBase64": base64.b64encode(b"AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n").decode()}, headers=self.headers(),
+        request = urllib.request.Request(
+            self.base + f"/koda/api/v1/projects/{project_id}/inputs?name=demo.py",
+            data=b"AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n", method="POST",
+            headers={**self.headers(), "Content-Type": "application/octet-stream"},
         )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            status, uploaded = response.status, json.loads(response.read())
         self.assertEqual(status, 201)
         scan = {"project_id": project_id, "input_id": uploaded["input_id"], "standard": "local", "standard_category": "all"}
         injected = dict(scan, disabled_rules=["secret.rule"])
@@ -172,6 +191,82 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertEqual(detail["snapshot"]["requested_by"], self.admin)
         self.assertIsInstance(detail["result"], dict)
         self.assertTrue(detail["result"]["findings"])
+        self.assertIn("analysis_stages", detail["result"])
+        self.assertIn("local_vulnerability", detail["result"]["scan"])
+        self.assertIn("queried_components", detail["result"]["scan"]["local_vulnerability"])
+
+    def test_streaming_upload_limit_and_vulnerability_database_status(self):
+        _, created = self.request("/koda/api/v1/projects", method="POST", payload={"name": "large input"}, headers=self.headers())
+        project_id = created["project_id"]
+        request = urllib.request.Request(
+            self.base + f"/koda/api/v1/projects/{project_id}/inputs?name=demo.zip",
+            data=b"zip-content", method="POST", headers={**self.headers(), "Content-Type": "application/octet-stream"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            uploaded = json.loads(response.read())
+            self.assertEqual(response.status, 201)
+        self.assertEqual(uploaded["size"], len(b"zip-content"))
+        self.assertEqual(self.server.portal_store.list_inputs(project_id)[0]["name"], "demo.zip")
+        status, scan_page = self.request("/koda/scans/new", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("최대 1 GiB", scan_page)
+        self.assertIn("application/octet-stream", scan_page)
+        self.assertIn("/koda/api/v1/vulnerability-db", scan_page)
+        self.assertEqual(
+            self.request(
+                f"/koda/api/v1/projects/{project_id}/inputs?name=legacy.json",
+                method="POST", payload={"content": "emlw"}, headers=self.headers(),
+            )[0],
+            415,
+        )
+
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        connection.putrequest("POST", f"/koda/api/v1/projects/{project_id}/inputs?name=too-large.zip")
+        for name, value in self.headers().items():
+            connection.putheader(name, value)
+        connection.putheader("Content-Type", "application/octet-stream")
+        connection.putheader("Content-Length", str(MAX_INPUT_BYTES + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 413)
+        response.read(); connection.close()
+
+        status_value = {"configured": True, "available": True, "version": "0.99.1", "database": {"built": "2026-08-17"}, "warning": ""}
+        with patch("security_scanner.linux_portal._vulnerability_database_status", return_value=status_value):
+            self.assertEqual(self.request("/koda/api/v1/vulnerability-db", headers=self.headers()), (200, status_value))
+            status, page = self.request("/koda/admin/vulnerability-db", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("0.99.1", page)
+        self.assertIn("2026-08-17", page)
+
+    def test_cancel_retry_and_comparison_exports(self):
+        project = self.server.portal_store.create_project("history", self.admin)
+        target = Path(self.tmp.name) / "history.py"
+        target.write_text("print('history')\n", encoding="utf-8")
+        input_id = self.server.portal_store.add_input(project, target.name, target, self.admin)
+        first = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        self.server.portal_store.complete_run(first["run_id"], result={"findings": [{"rule_id": "rule.old", "title": "old", "severity": "low", "category": "code", "path": "a.py", "line": 1}]})
+        second = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        status, cancelled = self.request(f"/koda/api/v1/runs/{second['run_id']}/cancel", method="POST", payload={}, headers=self.headers())
+        self.assertEqual((status, cancelled["status"]), (200, "cancelled"))
+        cancelled_comparison = f"left={first['run_id']}&right={second['run_id']}"
+        self.assertEqual(self.request(f"/koda/api/v1/compare?{cancelled_comparison}", headers=self.headers())[0], 422)
+        status, retried = self.request(f"/koda/api/v1/runs/{second['run_id']}/retry", method="POST", payload={}, headers=self.headers())
+        self.assertEqual((status, retried["round_number"]), (202, 3))
+
+        comparison_run = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        self.server.portal_store.complete_run(comparison_run["run_id"], result={"findings": [{"rule_id": "rule.new", "title": "new", "severity": "high", "category": "code", "path": "b.py", "line": 2}]})
+        query = f"left={first['run_id']}&right={comparison_run['run_id']}"
+        status, page = self.request(f"/koda/compare?{query}", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("항목별 비교", page)
+        self.assertIn("rule.old", page)
+        self.assertIn("rule.new", page)
+        status, comparison = self.request(f"/koda/api/v1/compare?{query}&format=json", headers=self.headers())
+        self.assertEqual((status, comparison["counts"]), (200, {"new": 1, "resolved": 1, "persistent": 0}))
+        request = urllib.request.Request(self.base + f"/koda/api/v1/compare?{query}&format=csv", headers=self.headers())
+        with urllib.request.urlopen(request, timeout=10) as response:
+            self.assertTrue(response.read().startswith(b"\xef\xbb\xbf"))
 
     def test_cross_project_run_is_hidden_and_policy_versions_conflict(self):
         project = self.server.portal_store.create_project("private", self.admin)

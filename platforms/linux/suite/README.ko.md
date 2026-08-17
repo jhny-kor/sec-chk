@@ -81,9 +81,9 @@ TRACKER_UUID='Tracker 화면에 표시된 UUID'
   새 압축파일의 `install`을 반복하기보다 `./koda-suite status`와
   `docker compose ... logs gateway dtrack-frontend`를 먼저 확인합니다.
 
-SBOM 업로드 기본 한도는 Tracker API와 게이트웨이 모두 100MiB입니다. 413이 계속되면
-앞단 TLS reverse proxy를 별도로 운영 중인 것이므로 그 프록시의 `client_max_body_size`
-또는 요청 본문 제한도 100MiB 이상으로 맞춰야 합니다.
+Tracker SBOM 업로드 기본 한도는 100MiB이고, KODA 입력 파일은 `/koda/api/`에서
+1GiB까지 스트리밍 업로드합니다. 413이 계속되면 앞단 TLS reverse proxy의
+`client_max_body_size` 또는 요청 본문 제한도 `/koda/api/` 기준 1GiB 이상으로 맞춥니다.
 
 Tracker UI가 이전 화면으로 보이면 브라우저에서 `Ctrl+Shift+R`로 캐시를 비운 뒤
 `/`를 다시 엽니다.

@@ -63,6 +63,8 @@ server {
     }
 
     location ^~ /koda/api/ {
+        client_max_body_size 1g;
+        proxy_request_buffering off;
         auth_request /_koda_auth;
         auth_request_set $koda_identity_id $upstream_http_x_koda_identity_id;
         auth_request_set $koda_identity_expires $upstream_http_x_koda_identity_expires;

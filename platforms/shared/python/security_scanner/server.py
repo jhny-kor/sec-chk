@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .archive_input import prepare_input_target
 from .config import expand_path
 from .dependency_inventory import queryable_osv_components
-from .grype_adapter import GrypeMatch, run_grype_purls
+from .grype_adapter import GrypeMatch, inspect_grype, run_grype_purls
 from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, Finding, ScannerConfig, TargetConfig
 from .reporting import (
     build_dashboard_payload,
@@ -140,16 +140,30 @@ def scan_directory_payload(
     scan_result = scanner.scan()
     raw_findings = list(scan_result.findings)
     scan_warnings = list(scanner.warnings)
-    if enable_local_vulnerabilities and not source_only:
+    local_vulnerability: dict[str, object] = {
+        "status": "disabled",
+        "queried_components": 0,
+        "matched_vulnerabilities": 0,
+    }
+    if source_only:
+        local_vulnerability["status"] = "skipped"
+        local_vulnerability["warning"] = "선택한 소스코드 전용 기준은 라이브러리 취약점 점검을 실행하지 않습니다."
+    elif enable_local_vulnerabilities:
         components = queryable_osv_components(scanner.components)
+        binary = grype_binary or _environment_path("KODA_GRYPE_BIN")
+        local_vulnerability.update(inspect_grype(binary))
+        local_vulnerability["queried_components"] = len(tuple(component for component in components if component.purl))
         grype = run_grype_purls(
             tuple(component.purl for component in components if component.purl),
-            grype_binary or _environment_path("KODA_GRYPE_BIN"),
+            binary,
             300.0,
         )
         raw_findings.extend(_grype_findings(grype.matches, components))
-        if grype.warning:
-            scan_warnings.append(grype.warning)
+        local_vulnerability["matched_vulnerabilities"] = len(grype.matches)
+        local_vulnerability["status"] = "failed" if grype.fatal or not local_vulnerability.get("available") else ("warning" if grype.warning or local_vulnerability.get("warning") else "completed")
+        for warning in (local_vulnerability.get("warning"), grype.warning):
+            if warning and str(warning) not in scan_warnings:
+                scan_warnings.append(str(warning))
     findings = filter_findings_by_standard(raw_findings, standard_selection)
     if include_host:
         # Host posture is opt-in and orthogonal to the selected standard's rule_id
@@ -177,6 +191,7 @@ def scan_directory_payload(
         source_analysis=scan_result.source_analysis,
     )
     payload["scan"]["enable_local_vulnerabilities"] = enable_local_vulnerabilities
+    payload["scan"]["local_vulnerability"] = local_vulnerability
     return _replace_upload_path(payload, str(target_path.resolve()), display_path) if display_path else payload
 
 
