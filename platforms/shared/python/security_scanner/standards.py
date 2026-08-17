@@ -2855,7 +2855,7 @@ _CIS_MACOS_CATEGORIES = (
         "disk-encryption",
         {"en": "Disk Encryption", "ko": "디스크 암호화"},
         scanner_categories=("host",),
-        rule_ids=("host.macos.filevault-on", "host.macos.filevault-off"),
+        rule_ids=("host.macos.filevault-on", "host.macos.filevault-off", "host.macos.filevault-unverified"),
     ),
     StandardCategory(
         "system-integrity",
@@ -2864,8 +2864,10 @@ _CIS_MACOS_CATEGORIES = (
         rule_ids=(
             "host.macos.sip-enabled",
             "host.macos.sip-disabled",
+            "host.macos.sip-unverified",
             "host.macos.gatekeeper-enabled",
             "host.macos.gatekeeper-disabled",
+            "host.macos.gatekeeper-unverified",
         ),
     ),
     StandardCategory(
@@ -2875,8 +2877,10 @@ _CIS_MACOS_CATEGORIES = (
         rule_ids=(
             "host.macos.firewall-enabled",
             "host.macos.firewall-disabled",
+            "host.macos.firewall-unverified",
             "host.macos.firewall-stealth-enabled",
             "host.macos.firewall-stealth-disabled",
+            "host.macos.firewall-stealth-unverified",
         ),
     ),
     StandardCategory(
@@ -2886,6 +2890,7 @@ _CIS_MACOS_CATEGORIES = (
         rule_ids=(
             "host.macos.auto-security-updates-enabled",
             "host.macos.auto-security-updates-disabled",
+            "host.macos.auto-security-updates-unverified",
         ),
     ),
     StandardCategory(
@@ -2895,10 +2900,13 @@ _CIS_MACOS_CATEGORIES = (
         rule_ids=(
             "host.macos.auto-login-enabled",
             "host.macos.auto-login-disabled",
+            "host.macos.auto-login-unverified",
             "host.macos.guest-account-enabled",
             "host.macos.guest-account-disabled",
+            "host.macos.guest-account-unverified",
             "host.macos.screen-lock-enabled",
             "host.macos.screen-lock-disabled",
+            "host.macos.screen-lock-unverified",
             "host.drift.regressed",
             "host.drift.improved",
         ),
@@ -2931,7 +2939,7 @@ _CIS_WINDOWS_CATEGORIES = (
         "disk-encryption",
         {"en": "Disk Encryption", "ko": "디스크 암호화"},
         scanner_categories=("host",),
-        rule_ids=("host.windows.bitlocker-on", "host.windows.bitlocker-off"),
+        rule_ids=("host.windows.bitlocker-on", "host.windows.bitlocker-off", "host.windows.bitlocker-unverified"),
     ),
     StandardCategory(
         "boot-integrity",
@@ -2941,6 +2949,7 @@ _CIS_WINDOWS_CATEGORIES = (
             "host.windows.secure-boot-on",
             "host.windows.secure-boot-off",
             "host.windows.secure-boot-unsupported",
+            "host.windows.secure-boot-unverified",
         ),
     ),
     StandardCategory(
@@ -2950,6 +2959,7 @@ _CIS_WINDOWS_CATEGORIES = (
         rule_ids=(
             "host.windows.firewall-all-profiles-enabled",
             "host.windows.firewall-profile-disabled",
+            "host.windows.firewall-unverified",
         ),
     ),
     StandardCategory(
@@ -2959,6 +2969,7 @@ _CIS_WINDOWS_CATEGORIES = (
         rule_ids=(
             "host.windows.defender-realtime-on",
             "host.windows.defender-realtime-off",
+            "host.windows.defender-unverified",
         ),
     ),
     StandardCategory(
@@ -2968,10 +2979,13 @@ _CIS_WINDOWS_CATEGORIES = (
         rule_ids=(
             "host.windows.auto-login-enabled",
             "host.windows.auto-login-disabled",
+            "host.windows.auto-login-unverified",
             "host.windows.guest-account-enabled",
             "host.windows.guest-account-disabled",
+            "host.windows.guest-account-unverified",
             "host.windows.screen-lock-enabled",
             "host.windows.screen-lock-disabled",
+            "host.windows.screen-lock-unverified",
             "host.drift.regressed",
             "host.drift.improved",
         ),

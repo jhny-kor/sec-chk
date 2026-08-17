@@ -8,8 +8,10 @@ network and malware-defense checks) by adding functions to ``HOST_CHECKS``.
 
 from __future__ import annotations
 
+import re
+
 from ...models import Finding
-from .common import host_finding
+from .common import host_finding, host_unverified
 from .runner import run_command
 
 FIREWALL_BIN = "/usr/libexec/ApplicationFirewall/socketfilterfw"
@@ -18,7 +20,15 @@ FIREWALL_BIN = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 def check_system_integrity_protection() -> list[Finding]:
     result = run_command(["csrutil", "status"])
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.macos.sip-unverified",
+                "System Integrity Protection state was not verified",
+                "macos/system-integrity-protection",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check with 'csrutil status'; changes require macOS Recovery.",
+            )
+        ]
     enabled = "enabled" in result.text.lower()
     if enabled:
         return [
@@ -46,7 +56,15 @@ def check_system_integrity_protection() -> list[Finding]:
 def check_filevault() -> list[Finding]:
     result = run_command(["fdesetup", "status"])
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.macos.filevault-unverified",
+                "FileVault disk encryption state was not verified",
+                "macos/filevault",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check System Settings > Privacy & Security > FileVault.",
+            )
+        ]
     on = "filevault is on" in result.text.lower()
     if on:
         return [
@@ -74,7 +92,15 @@ def check_filevault() -> list[Finding]:
 def check_gatekeeper() -> list[Finding]:
     result = run_command(["spctl", "--status"])
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.macos.gatekeeper-unverified",
+                "Gatekeeper assessment state was not verified",
+                "macos/gatekeeper",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check System Settings > Privacy & Security > Security.",
+            )
+        ]
     enabled = "assessments enabled" in result.text.lower()
     if enabled:
         return [
@@ -102,7 +128,15 @@ def check_gatekeeper() -> list[Finding]:
 def check_application_firewall() -> list[Finding]:
     result = run_command([FIREWALL_BIN, "--getglobalstate"])
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.macos.firewall-unverified",
+                "Application Firewall state was not verified",
+                "macos/application-firewall",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check System Settings > Network > Firewall.",
+            )
+        ]
     text = result.text
     enabled = "state = 1" in text.lower() or "state = 2" in text.lower() or "enabled" in text.lower()
     if enabled:
@@ -131,7 +165,15 @@ def check_application_firewall() -> list[Finding]:
 def check_firewall_stealth_mode() -> list[Finding]:
     result = run_command([FIREWALL_BIN, "--getstealthmode"])
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.macos.firewall-stealth-unverified",
+                "Firewall stealth mode state was not verified",
+                "macos/firewall-stealth-mode",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check System Settings > Network > Firewall > Options.",
+            )
+        ]
     text = result.text
     on = "stealth mode is on" in text.lower() or "enabled" in text.lower()
     if on:
@@ -242,19 +284,30 @@ def check_guest_account() -> list[Finding]:
 
 
 def check_screen_lock() -> list[Finding]:
-    ask = run_command(["defaults", "-currentHost", "read", "com.apple.screensaver", "askForPassword"])
-    if not ask.ok:
-        return []
-    # CIS 2.10.2/2.11.2: password required AND askForPasswordDelay of 0-5 seconds
+    # `sysadminctl -screenLock status` is the supported probe and matches the
+    # macOS app. The com.apple.screensaver askForPassword pair it replaced is
+    # unset on current macOS, so that read fails and the control is unreadable.
+    # sysadminctl reports on stderr, so both streams are considered.
+    status = run_command(["sysadminctl", "-screenLock", "status"])
+    combined = f"{status.stdout}\n{status.stderr}".strip()
+    lowered = combined.lower()
+    if not combined or "screenlock" not in lowered:
+        return [
+            host_unverified(
+                "host.macos.screen-lock-unverified",
+                "Screen lock password state was not verified",
+                "macos/screen-lock",
+                evidence=status.error or combined,
+                recommendation="Check System Settings > Lock Screen.",
+            )
+        ]
+    # CIS 2.10.2/2.11.2: a password must be required within 0-5 seconds
     # (effectively immediate). A large delay leaves a window of unlocked access.
-    delay = run_command(["defaults", "-currentHost", "read", "com.apple.screensaver", "askForPasswordDelay"])
-    ask_on = ask.text.strip() == "1"
-    delay_text = delay.text.strip() if delay.ok else ""
-    try:
-        delay_ok = 0 <= int(float(delay_text)) <= 5
-    except ValueError:
-        delay_ok = False
-    evidence = f"askForPassword={ask.text.strip() or 'unset'}, askForPasswordDelay={delay_text or 'unset'}"
+    delay_match = re.search(r"screenlock delay is (\d+(?:\.\d+)?)", lowered)
+    delay_seconds = float(delay_match.group(1)) if delay_match else None
+    ask_on = "screenlock is off" not in lowered and "screenlock disabled" not in lowered
+    delay_ok = "delay is immediate" in lowered or (delay_seconds is not None and 0 <= delay_seconds <= 5)
+    evidence = combined
     if ask_on and delay_ok:
         return [
             host_finding(

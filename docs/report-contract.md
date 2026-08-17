@@ -23,7 +23,7 @@ Every `scan --format json` finding uses these keys:
 | `recommendation` | yes | Remediation guidance. Empty string is allowed. |
 | `resource` | yes | Stable host/resource identifier. Empty string for file-backed findings. |
 | `reachable` | yes | Empty string, `reachable`, `unreachable`, or `unknown`. |
-| `verification_status` | yes | `confirmed` or `needs_review`. Unknown imported values fail closed to `needs_review`. |
+| `verification_status` | yes | `confirmed`, `needs_review`, or `unverified`. `unverified` means the check could not be evaluated (probe unavailable or blocked); it is an evidence gap, not a risk judgement, and never counts toward scores or gates. Unknown imported values fail closed to `needs_review`. |
 | `verification_note` | yes | Reason for the deterministic verification state. Empty string when not needed. |
 | `triage_verdict` | yes | Empty string, `likely_true`, `likely_false`, or `uncertain`. |
 | `triage_confidence` | yes | Number from 0 to 1, or `null`. |

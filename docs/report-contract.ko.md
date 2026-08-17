@@ -15,7 +15,7 @@ Swift 스캐너를 사용합니다. 소비자는 읽는 산출물의 계약을 �
 | `evidence`, `description`, `recommendation` | 비밀값을 제거한 근거와 설명·조치 안내 |
 | `resource` | 호스트 finding의 안정적인 리소스 ID. 파일 finding은 빈 문자열 |
 | `reachable` | 빈 문자열 또는 `reachable`, `unreachable`, `unknown` |
-| `verification_status`, `verification_note` | `confirmed`/`needs_review` 판정과 근거. 알 수 없는 외부 값은 `needs_review`로 처리 |
+| `verification_status`, `verification_note` | `confirmed`/`needs_review`/`unverified` 판정과 근거. `unverified`는 점검 자체를 수행하지 못한 상태(조회 수단 없음·차단)로, 위험 판정이 아니라 근거 공백이며 점수와 게이트에 반영하지 않음. 알 수 없는 외부 값은 `needs_review`로 처리 |
 | `triage_verdict`, `triage_confidence`, `triage_note` | 선택적 AI 분류 결과. 심각도나 게이트 판정을 바꾸지 않음 |
 | `analyzer`, `analyzer_version`, `analyzer_rule_id` | 분석기 식별자·버전·원본 룰 ID |
 | `cwe_ids`, `evidence_kind`, `trace` | CWE 목록, 근거 종류, 순서가 있는 추적 근거 |

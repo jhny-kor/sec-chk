@@ -27,6 +27,7 @@ ALLOWED_COMMANDS: frozenset[str] = frozenset(
         "sw_vers",
         "defaults",
         "scutil",
+        "sysadminctl",
         # Windows
         "powershell",
         "powershell.exe",

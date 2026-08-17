@@ -4,7 +4,7 @@ import stat
 from pathlib import Path
 
 from ...models import Finding
-from .common import HostCheck, host_finding
+from .common import HostCheck, host_finding, host_unverified
 from .runner import run_command
 
 SSHD_CONFIG = Path("/etc/ssh/sshd_config")
@@ -35,7 +35,15 @@ def check_ssh_root_login() -> list[Finding]:
                 evidence=f"PermitRootLogin {value}",
             )
         ]
-    return []
+    return [
+        host_unverified(
+            "host.linux.ssh-root-login-unverified",
+            "SSH root login policy was not verified",
+            "linux/ssh-root-login",
+            evidence=f"PermitRootLogin resolved to {value or 'no sshd_config value'}",
+            recommendation="Check the effective sshd_config with 'sshd -T | grep permitrootlogin'.",
+        )
+    ]
 
 
 def check_ssh_password_authentication() -> list[Finding]:
@@ -62,13 +70,29 @@ def check_ssh_password_authentication() -> list[Finding]:
                 evidence="PasswordAuthentication no",
             )
         ]
-    return []
+    return [
+        host_unverified(
+            "host.linux.ssh-password-auth-unverified",
+            "SSH password authentication policy was not verified",
+            "linux/ssh-password-authentication",
+            evidence=f"PasswordAuthentication resolved to {value or 'no sshd_config value'}",
+            recommendation="Check the effective sshd_config with 'sshd -T | grep passwordauthentication'.",
+        )
+    ]
 
 
 def check_ip_forwarding() -> list[Finding]:
     result = run_command(["sysctl", "-n", "net.ipv4.ip_forward"])
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.linux.ip-forwarding-unverified",
+                "IPv4 forwarding state was not verified",
+                "linux/ip-forwarding",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check with 'sysctl net.ipv4.ip_forward'.",
+            )
+        ]
     if result.text == "1":
         return [
             host_finding(
@@ -135,7 +159,15 @@ def check_tmp_sticky_bit() -> list[Finding]:
     try:
         mode = TMP_DIR.stat().st_mode
     except OSError:
-        return []
+        return [
+            host_unverified(
+                "host.linux.tmp-sticky-bit-unverified",
+                "/tmp sticky bit was not verified",
+                "linux/tmp-sticky-bit",
+                evidence=f"could not stat {TMP_DIR}",
+                recommendation="Check with 'ls -ld /tmp'; the mode should be 1777.",
+            )
+        ]
     has_sticky_bit = bool(mode & stat.S_ISVTX)
     if has_sticky_bit:
         return [
@@ -163,7 +195,15 @@ def check_tmp_sticky_bit() -> list[Finding]:
 def check_listening_services() -> list[Finding]:
     result = run_command(["ss", "-tuln"])
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.linux.listening-services-unverified",
+                "Listening services were not verified",
+                "linux/listening-services",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Install iproute2 so 'ss -tuln' can enumerate listening sockets.",
+            )
+        ]
     exposed = sorted(_all_interface_listeners(result.stdout))
     if not exposed:
         return [

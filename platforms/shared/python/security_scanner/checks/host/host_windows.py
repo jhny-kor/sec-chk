@@ -10,7 +10,7 @@ Defender signature age, etc.) by adding functions to ``HOST_CHECKS``.
 from __future__ import annotations
 
 from ...models import Finding
-from .common import host_finding
+from .common import host_finding, host_unverified
 from .runner import powershell
 
 
@@ -20,7 +20,15 @@ def check_bitlocker() -> list[Finding]:
         "(Get-BitLockerVolume -MountPoint $env:SystemDrive).ProtectionStatus"
     )
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.windows.bitlocker-unverified",
+                "BitLocker protection state was not verified",
+                "windows/bitlocker",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check BitLocker in Settings > Privacy & security > Device encryption, or run Get-BitLockerVolume as administrator.",
+            )
+        ]
     value = result.text.lower()
     if value in {"on", "1"}:
         return [
@@ -48,7 +56,15 @@ def check_bitlocker() -> list[Finding]:
 def check_defender() -> list[Finding]:
     result = powershell("(Get-MpComputerStatus).RealTimeProtectionEnabled")
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.windows.defender-unverified",
+                "Microsoft Defender real-time protection state was not verified",
+                "windows/defender",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check Windows Security > Virus & threat protection, or your third-party antivirus console.",
+            )
+        ]
     value = result.text.lower()
     if value in {"true", "1"}:
         return [
@@ -79,7 +95,15 @@ def check_secure_boot() -> list[Finding]:
         "try { [string](Confirm-SecureBootUEFI) } catch { 'unsupported' }"
     )
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.windows.secure-boot-unverified",
+                "Secure Boot state was not verified",
+                "windows/secure-boot",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check System Information > Secure Boot State, or the UEFI firmware settings.",
+            )
+        ]
     value = result.text.lower()
     if value in {"true", "1"}:
         return [
@@ -123,7 +147,15 @@ def check_firewall_profiles() -> list[Finding]:
         "Select-Object -ExpandProperty Name) -join ','"
     )
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.windows.firewall-unverified",
+                "Windows Firewall profile state was not verified",
+                "windows/firewall",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check Windows Security > Firewall & network protection for all three profiles.",
+            )
+        ]
     disabled = [name for name in result.text.split(",") if name.strip()]
     if not disabled:
         return [
@@ -154,7 +186,15 @@ def check_automatic_login() -> list[Finding]:
         "-Name AutoAdminLogon -ErrorAction SilentlyContinue).AutoAdminLogon"
     )
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.windows.auto-login-unverified",
+                "Automatic login state was not verified",
+                "windows/automatic-login",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check the Winlogon AutoAdminLogon registry value.",
+            )
+        ]
     if result.text.strip() == "1":
         return [
             host_finding(
@@ -175,7 +215,15 @@ def check_automatic_login() -> list[Finding]:
 def check_guest_account() -> list[Finding]:
     result = powershell("(Get-LocalUser -Name 'Guest' -ErrorAction SilentlyContinue).Enabled")
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.windows.guest-account-unverified",
+                "Guest account state was not verified",
+                "windows/guest-account",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check Computer Management > Local Users and Groups > Users > Guest.",
+            )
+        ]
     if result.text.strip().lower() == "true":
         return [
             host_finding(
@@ -199,7 +247,15 @@ def check_screen_lock() -> list[Finding]:
         "-Name InactivityTimeoutSecs -ErrorAction SilentlyContinue).InactivityTimeoutSecs"
     )
     if not result.ok:
-        return []
+        return [
+            host_unverified(
+                "host.windows.screen-lock-unverified",
+                "Screen lock timeout state was not verified",
+                "windows/screen-lock",
+                evidence=result.error or result.stderr.strip(),
+                recommendation="Check the interactive logon machine inactivity limit policy.",
+            )
+        ]
     value = result.text.strip()
     seconds = int(value) if value.isdigit() else 0
     # CIS Windows Benchmark: '900 or fewer second(s), but not 0'. A value above
