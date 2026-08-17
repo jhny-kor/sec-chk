@@ -93,7 +93,8 @@ cap-drop ALL, CPU/메모리/PID 제한으로 실행됩니다. 대상 JAR은 읽�
 로그인·계정·권한·분석 회차 화면을 운영하려면 두 제품을 묶은 단일 압축파일을
 사용합니다. Tracker가 계정과 현재 브라우저 세션을 관리하고 KODA는 자체 프로젝트
 역할과 관리자 전용 점검 설정을 적용합니다. 동일 오리진의 `/`와 `/koda/`를
-사용하므로 한쪽 로그아웃이 양쪽에 함께 반영됩니다.
+사용하므로 한쪽 로그아웃이 양쪽에 함께 반영됩니다. 가입 신청과 계정 활성화는
+Tracker에서 한 번만 처리하고 KODA에는 프로젝트 역할만 별도로 배정합니다.
 
 ```bash
 KODA_TRACKER_BUNDLE=/path/to/koda-sbom-tracker-airgap-linux-amd64.tar.gz \

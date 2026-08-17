@@ -121,7 +121,7 @@ class LinuxPortalHttpTests(unittest.TestCase):
             finally:
                 exc.close()
 
-    def test_login_pending_and_admin_pages(self):
+    def test_login_registration_and_admin_pages(self):
         status, body = self.request("/koda/login?next=https://evil.example")
         self.assertEqual(status, 200)
         self.assertIn("LDAP 계정", body)
@@ -132,13 +132,12 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("<script>alert(1)</script>", body)
         self.assertIn('location="/koda/"', body)
-        pending = str(uuid.uuid4())
-        status, me = self.request("/koda/api/v1/me", headers=self.headers(pending, "pending"))
-        self.assertEqual((status, me["status"]), (200, "pending"))
-        status, pending_page = self.request("/koda/", headers=self.headers(pending, "pending"))
-        self.assertEqual(status, 403)
-        self.assertIn(pending, pending_page)
-        self.assertEqual(self.request("/koda/api/v1/projects", headers=self.headers(pending))[0], 403)
+        self.assertIn("회원가입", body)
+        self.assertIn("/api/v1/auth/register", body)
+        approved_tracker_user = str(uuid.uuid4())
+        status, me = self.request("/koda/api/v1/me", headers=self.headers(approved_tracker_user, "approved"))
+        self.assertEqual((status, me["status"]), (200, "enabled"))
+        self.assertEqual(self.request("/koda/api/v1/projects", headers=self.headers(approved_tracker_user)), (200, []))
         status, admin_page = self.request("/koda/admin/subjects", headers=self.headers())
         self.assertEqual(status, 200)
         self.assertIn("/koda/assets/KODA.ico", admin_page)
@@ -226,6 +225,32 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.server.portal_store.ensure_subject(other, "other")
         self.server.portal_store.set_subject(other, status="enabled", actor=self.admin)
         self.assertEqual(self.request(f"/koda/api/v1/runs/{run['run_id']}/sbom?format=nis-sbom", headers=self.headers(other, "other"))[0], 404)
+
+    def test_completed_run_separates_library_source_and_quality_tabs(self):
+        project = self.server.portal_store.create_project("분류 탭", self.admin)
+        target = Path(self.tmp.name) / "app.py"
+        target.write_text("print('demo')\n", encoding="utf-8")
+        input_id = self.server.portal_store.add_input(project, target.name, target, self.admin)
+        run = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        self.server.portal_store.complete_run(run["run_id"], result={"findings": [
+            {"rule_id": "dependency.osv", "title": "취약한 라이브러리", "severity": "high", "category": "dependencies", "path": "requirements.txt"},
+            {"rule_id": "code.sql", "title": "동적 SQL", "severity": "critical", "category": "code", "path": target.name},
+            {"rule_id": "secret.literal", "title": "비밀정보", "severity": "high", "category": "secrets", "path": target.name},
+            {"rule_id": "screen.alt", "title": "대체 텍스트", "severity": "low", "category": "screen_quality", "path": "index.html"},
+        ]})
+
+        status, result_page = self.request(f"/koda/runs/{run['run_id']}", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("라이브러리 취약점 1", result_page)
+        self.assertIn("소스코드 취약점 2", result_page)
+        self.assertIn("품질 점검 1", result_page)
+        self.assertEqual(result_page.count("data-group='library'"), 1)
+        self.assertEqual(result_page.count("data-group='source'"), 2)
+        self.assertEqual(result_page.count("data-group='quality'"), 1)
+        self.assertIn(">라이브러리</td>", result_page)
+        self.assertIn(">소스코드</td>", result_page)
+        self.assertIn(">비밀정보</td>", result_page)
+        self.assertIn(">화면품질</td>", result_page)
 
     def test_completed_run_report_uses_the_shared_windows_cli_renderer(self):
         project = self.server.portal_store.create_project("CLI report", self.admin)

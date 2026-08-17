@@ -210,18 +210,18 @@ docker compose --project-directory "$PREFIX/tracker" \
 
 ### 로그인 후 `접근 대기`, 계정 식별자(UUID)가 표시됨
 
-중앙 Tracker 로그인은 성공했지만 KODA 권한이 아직 승인되지 않은 정상 상태입니다.
-화면의 UUID를 KODA 시스템 관리자가 한 번 bootstrap합니다.
+현재 버전에서는 Tracker에서 승인된 계정이 KODA에도 자동 활성화됩니다. 이 화면이
+계속 보이면 이전 KODA 이미지를 실행 중인 것입니다. 통합 Compose로 KODA 컨테이너를
+재생성한 뒤 다시 확인합니다.
 
 ```bash
-TRACKER_UUID='화면에-표시된-실제-UUID'
-/home/user0/koda-suite/koda/koda-docker dashboard bootstrap \
-  --tracker-user-id "$TRACKER_UUID"
+cd /home/user0/koda-suite
+./koda-suite stop
+./koda-suite start
 ```
 
-그 후 KODA 관리자 화면에서 사용자를 활성화하고 프로젝트 역할을 배정합니다.
-Tracker 역할과 KODA 프로젝트 역할은 별도이므로 Tracker 관리자라고 KODA가 자동
-승인되지는 않습니다.
+KODA 최초 시스템 관리자 bootstrap은 설치 시 한 번만 필요합니다. 일반 사용자는
+Tracker 승인 후 자동 활성화되고, KODA 관리자는 프로젝트 역할만 별도로 배정합니다.
 
 ### LDAP 체크 후 `501 ldap_not_configured`
 

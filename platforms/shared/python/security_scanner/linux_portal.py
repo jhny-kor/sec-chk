@@ -142,7 +142,10 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                 return None
-            return identity, store.ensure_subject(identity.subject_id, identity.display)
+            subject = store.ensure_subject(identity.subject_id, identity.display)
+            if subject["status"] == "pending":
+                subject = store.set_subject(identity.subject_id, status="enabled", actor="tracker-sso")
+            return identity, subject
 
         def _enabled(self, api=False):
             authenticated = self._identity(api)
