@@ -105,5 +105,5 @@ rm -rf "$tmp_root"
 echo "Bundled Playwright wheels + Chromium for dashboard PDF export." >&2
 
 tarball="$dist_dir/$package_name.tar.gz"
-tar -C "$stage_parent" -czf "$tarball" "$package_name"
+tar --no-xattrs -C "$stage_parent" -czf "$tarball" "$package_name"
 echo "$tarball"

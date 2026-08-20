@@ -87,9 +87,10 @@ bash -n /home/user0/koda-suite/tracker/.env
 ```bash
 chmod 600 /home/user0/koda/koda-suite.env
 VERSION=0.1.0
-"/home/user0/koda/koda-suite-offline-x86_64-${VERSION}/koda-suite" install \
-  --env-file /home/user0/koda/koda-suite.env \
-  --prefix /home/user0/koda-suite
+cd "/home/user0/koda/koda-suite-offline-x86_64-${VERSION}"
+cp /home/user0/koda/.env ./.env
+cp /home/user0/koda/koda-suite.env ./koda-suite.env
+./reset-install.sh --delete-all-koda-data --prefix /home/user0/koda-suite
 ```
 
 ### `tar: Ignoring unknown extended header keyword LIBARCHIVE.xattr...`
@@ -103,7 +104,7 @@ macOS가 붙인 확장 속성 경고입니다. 그 뒤 `./koda-suite verify`가 
 
 구형 `koda-suite`의 Linux awk 호환성 경고입니다. 서비스 장애 메시지는 아니지만
 구형 launcher를 사용 중이라는 뜻입니다. 설치 디렉터리의 launcher만 임의 수정하지
-말고 최신 통합 압축파일을 같은 prefix에 덮어 설치합니다.
+말고 최신 통합 압축파일의 `reset-install.sh` 또는 검증된 그룹 `patch`를 사용합니다.
 
 ### `bash: [: missing ']'` 또는 `command not found`
 
@@ -120,8 +121,9 @@ macOS가 붙인 확장 속성 경고입니다. 그 뒤 `./koda-suite verify`가 
 ```bash
 VERSION=0.1.0
 cd "/home/user0/koda/koda-suite-offline-x86_64-${VERSION}"
-cp config/koda-suite.env.example ./koda-suite.env
-chmod 600 ./koda-suite.env
+cp .env.example ./.env
+cp koda-suite.env.example ./koda-suite.env
+chmod 600 ./.env ./koda-suite.env
 vi ./koda-suite.env
 ```
 
@@ -385,9 +387,10 @@ Compose 파일이나 향후 재기동이 참조하지 않는다는 보장은 아
 목적이면 [README의 테스트 설치 완전 초기화](README.ko.md#테스트-설치를-완전히-초기화할-때)에
 기재된 정확한 제품 컨테이너·volume만 제거합니다.
 
-기존 `/home/user0/koda-suite`는 새 설치 검증 전에는 삭제하지 않습니다. 업데이트는
-동일 prefix 덮어 설치로 수행하고, 전체 초기화가 필요하면 먼저 README의 백업
-절차로 KODA portal 디렉터리와 Tracker/Dependency-Track volume을 보관합니다.
+전체 초기화는 복구할 데이터가 없다는 것을 확인한 테스트 환경에서만
+`reset-install.sh --delete-all-koda-data`로 수행합니다. 이 경로는 백업 없이 기존
+prefix와 KODA 소유 volume을 삭제합니다. 데이터를 보존해야 하면 그룹 `patch`만
+사용합니다.
 
 ## 9. 정상 완료 체크리스트
 
@@ -400,4 +403,4 @@ Compose 파일이나 향후 재기동이 참조하지 않는다는 보장은 아
 - `verify-dtrack-connection.sh`가 키와 최소 권한을 확인한다.
 - 테스트 SBOM 한 건이 오프라인 분석과 Dependency-Track 전송 모두 완료된다.
 - 로그아웃 후 Tracker와 KODA 보호 화면이 모두 다시 로그인을 요구한다.
-- 백업과 이전 릴리스는 새 설치 검증이 끝날 때까지 보존한다.
+- 초기화 전에 `.env`와 `koda-suite.env`를 새 릴리스 루트에 복사했다.

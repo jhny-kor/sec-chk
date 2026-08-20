@@ -26,7 +26,9 @@ cd koda-suite-offline-x86_64-@SUITE_VERSION@
 ./koda-suite verify
 ```
 
-운영 환경파일을 준비합니다. 예시의 모든 `change-me-*` 값을 실제 값으로 바꾸고,
+운영 환경파일 두 개를 준비합니다. `.env`에는 DB·이미지·volume·비밀정보를 두고,
+`koda-suite.env`에는 포트·게이트웨이·KODA 설정만 둡니다. 예시의 모든
+`change-me-*` 값을 실제 값으로 바꾸고,
 `DTRACK_API_BASE_URL`은 브라우저가 접근할 수 있는 Dependency-Track base 주소인
 `http://<서버주소>:8088/dependency-track` 형태로 지정합니다. 프론트엔드가 여기에
 `/api`를 자동으로 붙이므로 `/dependency-track/api`까지 입력하면 안 됩니다.
@@ -35,13 +37,16 @@ cd koda-suite-offline-x86_64-@SUITE_VERSION@
 생성·조회에 필요한 최소 권한 전용 키를 넣습니다.
 
 ```bash
-cp config/koda-suite.env.example ./koda-suite.env
-chmod 600 ./koda-suite.env
+cp .env.example ./.env
+cp koda-suite.env.example ./koda-suite.env
+chmod 600 ./.env ./koda-suite.env
+vi ./.env
 vi ./koda-suite.env
-./koda-suite install --env-file ./koda-suite.env
+./reset-install.sh --delete-all-koda-data
 ```
 
-위 `install` 한 번이 두 내부 manifest를 검증하고, 모든 이미지를 `docker load`한
+위 명령 한 번이 삭제 전에 두 내부 manifest·환경설정·취약점 bundle을 모두
+검증하고, KODA 소유 자원만 초기화한 뒤 모든 이미지를 `docker load`하고
 뒤 Tracker와 KODA 대시보드를 함께 기동하고 HTTP 상태까지 확인합니다. 압축파일의
 `metadata.env`가 `TRACKER_VULNERABILITY_BUNDLE=included`이면 최초 설치에서 Tracker
 전용 Grype/NVD/KEV 데이터도 manifest 검증 후 자동 반입합니다. 이 단계는 Docker
@@ -151,54 +156,31 @@ PREFIX="$HOME/koda-suite" # 사용자 지정 설치 경로라면 같은 값으�
 
 ### 테스트 설치를 완전히 초기화할 때
 
-아래 명령은 계정·세션·프로젝트·SBOM·Dependency-Track DB·취약점 volume과 KODA
-포털 SQLite를 모두 삭제합니다. 다른 서비스가 있는 서버에서는 이 목록 외의
-`docker system prune`이나 전체 volume/image 삭제를 실행하지 않습니다.
+새 압축파일을 별도 폴더에 풀고, 기존 설치 루트에 보관된 두 환경파일만 복사합니다.
+아래 명령은 백업 없이 계정·세션·프로젝트·SBOM·Dependency-Track DB·취약점
+volume과 KODA 포털 SQLite를 모두 삭제한 뒤 새 취약점 자료와 서비스를 설치합니다.
+플래그가 없거나 사전검사가 실패하면 삭제를 시작하지 않습니다.
 
 ```bash
 PREFIX="$HOME/koda-suite"
-"$PREFIX/koda-suite" stop || true
-docker compose --project-directory "$PREFIX/tracker" --env-file "$PREFIX/tracker/.env" \
-  -f "$PREFIX/tracker/compose.yaml" \
-  -f "$PREFIX/tracker/compose.airgap.yaml" \
-  -f "$PREFIX/tracker/compose.integration.yaml" \
-  down --volumes --remove-orphans
-
-# 복구 가능하게 옆으로 보관한 뒤 새 설치에서만 삭제합니다.
-if [ -d "$PREFIX/data/koda-portal" ]; then
-  mv "$PREFIX/data/koda-portal" \
-    "$PREFIX/data/koda-portal.before-reset.$(date -u +%Y%m%dT%H%M%SZ)"
-fi
-
-docker image rm \
-  koda-offline:0.1.0 \
-  local/koda-sbom-portal-web:dev \
-  local/koda-sbom-portal-api:dev \
-  local/koda-sbom-portal-worker:dev \
-  dependencytrack/apiserver:5.0.3 \
-  dependencytrack/frontend:5.0.3 \
-  postgres:16.10-alpine \
-  nginx:1.29.1-alpine \
-  anchore/grype:v0.109.1 \
-  cyclonedx/cyclonedx-cli:0.30.0 \
-  alpine:3.22.1
+cp "$PREFIX/.env" ./.env
+cp "$PREFIX/koda-suite.env" ./koda-suite.env
+chmod 600 ./.env ./koda-suite.env
+./reset-install.sh --delete-all-koda-data --prefix "$PREFIX"
 ```
 
-`docker image rm`에서 “image is being used”가 나오면 해당 컨테이너가 아직 남은
-것이므로 먼저 `docker ps -a --format '{{.ID}} {{.Names}} {{.Image}}'`로 위 제품의
-컨테이너만 확인하고 `docker rm -f <확인한-ID>` 후 다시 실행합니다. 화면에 보이는
-다른 제품의 이미지와 `<none>` 이미지는 KODA와 관계가 확인되기 전에는 삭제하지
-않습니다. 새 설치는 통합 압축파일의 `./koda-suite install`만 사용합니다.
+스크립트는 `COMPOSE_PROJECT_NAME`이 `koda-sbom` 계열인지, container/network/volume의
+Compose 소유권 라벨이 일치하는지 확인합니다. `open-webui`, `chromadb` 같은 다른
+프로젝트와 Docker 이미지는 삭제하지 않으며 `docker system prune`도 실행하지 않습니다.
 
 ## 폐쇄망 부분 교체·백업·복원
 
-설치 디렉터리를 통째로 지우거나 내부 image tar를 골라 직접 설치하지 않습니다.
-응용프로그램·이미지를 바꿀 때는 새 통합 압축파일을 반입하여 같은 `--prefix`에
-덮어 설치합니다. 이 방식은 KODA 포털 디렉터리와 Tracker named volume을 보존합니다.
+검증된 새 통합 압축파일에서 호환 그룹만 패치할 수 있습니다. 패치는 KODA 포털
+디렉터리와 Tracker named volume·network를 보존하고 선택한 컨테이너만 재생성합니다.
 
 | 대상 | 실제 저장 위치 | 교체·백업 방법 |
 | --- | --- | --- |
-| KODA·Tracker·Dependency-Track 응용프로그램/이미지 | Docker 이미지와 `$PREFIX/koda`, `$PREFIX/tracker` | 새 통합 압축파일의 SHA-256과 manifest를 검증한 뒤 같은 prefix에 `install` |
+| KODA·Tracker·Dependency-Track 응용프로그램/이미지 | Docker 이미지와 `$PREFIX/koda`, `$PREFIX/tracker` | 새 통합 압축파일에서 아래 호환 그룹 `patch` 실행 |
 | KODA 사용자 승인·프로젝트 권한·점검 정책·회차 | `$PREFIX/data/koda-portal` | Suite를 중지하고 디렉터리 전체를 tar로 백업·복원 |
 | Tracker 계정·역할·세션·서비스·업로드 회차·감사 기록 | `sbom_tracker` DB와 `tracker-artifacts` volume | Tracker `backup-system.sh`/`restore-system.sh` 사용 |
 | Dependency-Track 프로젝트·정책·분석 데이터 | `dtrack` DB와 `dtrack-data` volume | 같은 Tracker 전체 백업에 포함 |
@@ -239,11 +221,11 @@ Tracker 취약점 volume이 포함됩니다. KODA 포털 디렉터리, 운영 `.
 호스트의 원본/보고서는 포함되지 않으므로 위처럼 각각 보관해야 전체 복원이
 가능합니다.
 
-### 응용프로그램·이미지 교체
+### 응용프로그램·이미지 부분 교체
 
-새 통합 압축파일을 별도 디렉터리에 풀고 무결성을 확인한 뒤 기존 prefix에 설치합니다.
-업데이트 전에 위 백업을 만들고, 정상 확인 전에는 이전 릴리스 압축파일과 Docker
-이미지를 삭제하거나 `docker system prune`을 실행하지 않습니다.
+새 통합 압축파일을 별도 디렉터리에 풀고 무결성을 확인한 뒤 필요한 그룹만 패치합니다.
+Compose·인증·포털 스키마 계약이 달라진 릴리스는 부분 패치를 거부하므로 전체 초기화
+설치를 사용합니다. PostgreSQL도 부분 패치 대상이 아닙니다.
 
 ```bash
 PREFIX="$HOME/koda-suite"
@@ -251,16 +233,14 @@ cd /media/koda-release
 sha256sum -c koda-suite-offline-x86_64-<새버전>.tar.gz.sha256
 cd koda-suite-offline-x86_64-<새버전>
 ./koda-suite verify
-./koda-suite install --env-file "$PREFIX/tracker/.env" --prefix "$PREFIX"
+GROUP=portal-api-worker # koda, gateway, portal-web, portal-api-worker, dependency-track 중 하나
+./koda-suite patch --group "$GROUP" --prefix "$PREFIX"
 ./koda-suite status
 ```
 
-기존 설치를 갱신할 때는 통합본에 취약점 데이터가 들어 있어도 자동 반입하지
-않습니다. `metadata.env`의 `TRACKER_VULNERABILITY_BUNDLE=included`를 확인한 뒤 아래
-`Tracker 취약점 데이터 저장과 갱신` 절차로 `$PREFIX/tracker/vulnerability-data`를
-명시적으로 검증·반입합니다. 특정 컨테이너만 임의 태그로 교체하면 manifest와
-Compose 고정 버전 계약이 깨지므로, 한 제품만 수정한 경우에도 새 통합본을 생성하여
-같은 절차로 반입합니다.
+`portal-api`와 `portal-worker`, Dependency-Track API와 frontend는 호환 그룹으로 함께
+교체됩니다. 부분 패치는 취약점 volume을 변경하지 않습니다. 취약점 DB까지 새로
+설치하려면 `reset-install.sh --delete-all-koda-data`를 사용합니다.
 
 ### 데이터만 복원
 

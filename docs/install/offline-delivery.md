@@ -97,7 +97,12 @@ cap-drop ALL, CPU/메모리/PID 제한으로 실행됩니다. 대상 JAR은 읽�
 Tracker에서 한 번만 처리하고 KODA에는 프로젝트 역할만 별도로 배정합니다.
 
 ```bash
-KODA_TRACKER_BUNDLE=/path/to/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
+TRACKER_REPO=../security-sbom-dependecy
+./platforms/linux/build-suite-vuln-bundle.sh dist/linux/tracker-vulnerability-data
+"$TRACKER_REPO/scripts/build-airgap-release.sh" \
+  dist/linux/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
+  --vuln-bundle dist/linux/tracker-vulnerability-data
+KODA_TRACKER_BUNDLE=dist/linux/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
   bash platforms/linux/package-suite-offline.sh
 ```
 
@@ -109,12 +114,12 @@ Tracker 전달물에 포함된 Dependency-Track·PostgreSQL·포털 이미지도
 sha256sum -c koda-suite-offline-x86_64-<version>.tar.gz.sha256
 tar -xzf koda-suite-offline-x86_64-<version>.tar.gz
 cd koda-suite-offline-x86_64-<version>
-cp config/koda-suite.env.example ./koda-suite.env
-chmod 600 ./koda-suite.env
+cp .env.example ./.env
+cp koda-suite.env.example ./koda-suite.env
+chmod 600 ./.env ./koda-suite.env
 # change-me 값을 실제 폐쇄망 운영값으로 교체
 ./koda-suite verify
-./koda-suite install --env-file ./koda-suite.env
-./koda-suite status
+./reset-install.sh --delete-all-koda-data
 ```
 
 기본 gateway 호스트 포트는 `8088`이며 운영 환경은 그 앞에서 TLS를 종료하고

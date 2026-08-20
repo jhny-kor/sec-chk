@@ -112,7 +112,12 @@ On a connected build host, wrap the verified KODA Docker and Tracker air-gap
 payloads—including Dependency-Track—into one archive:
 
 ```bash
-KODA_TRACKER_BUNDLE=/path/to/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
+TRACKER_REPO=../security-sbom-dependecy
+./platforms/linux/build-suite-vuln-bundle.sh dist/linux/tracker-vulnerability-data
+"$TRACKER_REPO/scripts/build-airgap-release.sh" \
+  dist/linux/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
+  --vuln-bundle dist/linux/tracker-vulnerability-data
+KODA_TRACKER_BUNDLE=dist/linux/koda-sbom-tracker-airgap-linux-amd64.tar.gz \
   bash platforms/linux/package-suite-offline.sh
 ```
 
@@ -124,11 +129,12 @@ then install and start all services through the one launcher:
 sha256sum -c koda-suite-offline-x86_64-<version>.tar.gz.sha256
 tar -xzf koda-suite-offline-x86_64-<version>.tar.gz
 cd koda-suite-offline-x86_64-<version>
-cp config/koda-suite.env.example ./koda-suite.env
-chmod 600 ./koda-suite.env
+cp .env.example ./.env
+cp koda-suite.env.example ./koda-suite.env
+chmod 600 ./.env ./koda-suite.env
 # replace every change-me value with the approved closed-network setting
 ./koda-suite verify
-./koda-suite install --env-file ./koda-suite.env
+./reset-install.sh --delete-all-koda-data
 # after the Tracker account has logged in once and its UUID is known:
 TRACKER_UUID='UUID shown by Tracker'
 $HOME/koda-suite/koda/koda-docker dashboard bootstrap --tracker-user-id "$TRACKER_UUID"

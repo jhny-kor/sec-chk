@@ -160,5 +160,5 @@ PY
 
 # 13. single deliverable (image tar is compressed only once, here)
 deliverable="$dist_dir/$package_name.tar.gz"
-tar -C "$staging_parent" -czf "$deliverable" "$package_name"
+tar --no-xattrs -C "$staging_parent" -czf "$deliverable" "$package_name"
 echo "$deliverable"
