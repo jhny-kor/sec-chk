@@ -268,6 +268,11 @@ HTML이 참조하는 `js/app.*.js`, `css/app.*.css`도 200이어야 합니다.
 `static/config.json`이 404이면 구형 gateway가 public prefix를 제거하지 못한
 것입니다. 최신 통합본의 gateway를 사용합니다.
 
+구형 통합본에서 `DTRACK_BASE_PATH=/dependency-track`를 frontend에 그대로 넘기면
+`<base href=/dependency-track>`가 되어 JS가 `/js/...`로 요청될 수 있습니다. 이때는
+`tracker/compose.yaml`의 frontend `BASE_PATH`에만 `/`를 추가한 뒤 frontend와
+gateway를 재생성합니다. 새 통합본에서는 이 보정이 포함됩니다.
+
 `static/config.json`이 200이어도 `API_BASE_URL`이 `localhost`이면 원격 PC는 자기
 PC의 8088로 접속하므로 로그인 요청이 `ERR_CONNECTION_REFUSED`가 됩니다. `.env`를
 서버 IP/FQDN으로 고친 뒤 frontend와 gateway를 재생성합니다.
