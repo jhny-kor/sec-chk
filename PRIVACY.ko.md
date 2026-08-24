@@ -16,7 +16,7 @@ KODA는 사용자가 선택한 파일과 폴더를 기기에서 분석하는 로
   수 있습니다. 원시 비밀 값은 전송하지 않습니다.
 
 KODA는 제3자 광고 SDK를 사용하지 않고 앱·웹사이트 간 사용자를 추적하지
-않습니다. 문의는 [GitHub 프로젝트](https://github.com/jhny-kor/sec-chk)를
+않습니다. 문의는 [GitHub 프로젝트](https://github.com/jhny-kor/KODA)를
 이용하세요.
 
 - [한국어 문서 인덱스](docs/README.md)

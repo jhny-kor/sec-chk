@@ -245,7 +245,7 @@ runs:
     - uses: github/codeql-action/upload-sarif@v3
       with: { sarif_file: koda.sarif }
 ```
-- 사용자 워크플로: `uses: jhny-kor/koda@v1`.
+- 사용자 워크플로: `uses: jhny-kor/KODA@v1`.
 - PR 인라인 코멘트: SARIF → 신규 발견만 리뷰 코멘트(GitHub API 또는 reviewdog). 기존 `diffing` 재사용해 노이즈 억제.
 - AI triage는 CI에서 **기본 OFF**(키 없음·재현성). 켤 경우 verdict는 코멘트 보조 정보로만, 게이트는 결정론 severity.
 
