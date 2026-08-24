@@ -422,6 +422,7 @@ KODA_RBAC_CATALOG_VERSION=koda-rbac-v1
         self.assertIn('tar --no-xattrs', packager)
         self.assertIn('TROUBLESHOOTING.ko.md', packager)
         self.assertIn('"$script_dir/TROUBLESHOOTING.ko.md"', self.launcher)
+        self.assertEqual(packager.count('status --porcelain --untracked-files=no'), 2)
 
     def test_vulnerability_seed_reuses_koda_offline_datasets(self) -> None:
         builder = (ROOT / 'platforms/linux/build-suite-vuln-bundle.sh').read_text()
