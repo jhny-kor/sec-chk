@@ -98,6 +98,18 @@ class LinuxPortalStoreTests(unittest.TestCase):
         self.store.complete_run(run["run_id"], result={"findings": []})
         cancelled = self.store.run(run["run_id"])
         self.assertEqual((cancelled["status"], cancelled["stage"], cancelled["result"]), ("cancelled", "cancelled", None))
+        self.assertFalse(Path(self.store.input(self.input_id)["path"]).exists())
+        with self.assertRaises(ValueError):
+            self.store.create_scan(self.admin, self.project, self.input_id, "local", "all")
+
+    def test_recovery_removes_terminal_input_left_by_previous_process(self):
+        run = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all")
+        self.store.complete_run(run["run_id"], result={"findings": []})
+        path = Path(self.store.input(self.input_id)["path"])
+        path.write_text("stale copy", encoding="utf-8")
+        reopened = PortalStore(Path(self.tmp.name) / "portal.sqlite3")
+        self.assertEqual(reopened.recover_incomplete_runs(), [])
+        self.assertFalse(path.exists())
 
 
 class LinuxPortalHttpTests(unittest.TestCase):
@@ -250,6 +262,7 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertIn("analysis_stages", detail["result"])
         self.assertIn("local_vulnerability", detail["result"]["scan"])
         self.assertIn("queried_components", detail["result"]["scan"]["local_vulnerability"])
+        self.assertFalse(Path(self.server.portal_store.input(uploaded["input_id"])["path"]).exists())
 
     def test_streaming_upload_limit_and_vulnerability_database_status(self):
         _, created = self.request("/koda/api/v1/projects", method="POST", payload={"name": "large input"}, headers=self.headers())
@@ -295,22 +308,22 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertIn("0.99.1", page)
         self.assertIn("2026-08-17", page)
 
-    def test_cancel_retry_and_comparison_exports(self):
+    def test_cancel_and_comparison_exports(self):
         project = self.server.portal_store.create_project("history", self.admin)
-        target = Path(self.tmp.name) / "history.py"
-        target.write_text("print('history')\n", encoding="utf-8")
-        input_id = self.server.portal_store.add_input(project, target.name, target, self.admin)
-        first = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        targets = [Path(self.tmp.name) / name for name in ("history-first.py", "history-second.py", "history-comparison.py")]
+        for target in targets:
+            target.write_text("print('history')\n", encoding="utf-8")
+        input_ids = [self.server.portal_store.add_input(project, target.name, target, self.admin) for target in targets]
+        first = self.server.portal_store.create_scan(self.admin, project, input_ids[0], "local", "all")
         self.server.portal_store.complete_run(first["run_id"], result={"findings": [{"rule_id": "rule.old", "title": "old", "severity": "low", "category": "code", "path": "a.py", "line": 1}]})
-        second = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        second = self.server.portal_store.create_scan(self.admin, project, input_ids[1], "local", "all")
         status, cancelled = self.request(f"/koda/api/v1/runs/{second['run_id']}/cancel", method="POST", payload={}, headers=self.headers())
         self.assertEqual((status, cancelled["status"]), (200, "cancelled"))
         cancelled_comparison = f"left={first['run_id']}&right={second['run_id']}"
         self.assertEqual(self.request(f"/koda/api/v1/compare?{cancelled_comparison}", headers=self.headers())[0], 422)
-        status, retried = self.request(f"/koda/api/v1/runs/{second['run_id']}/retry", method="POST", payload={}, headers=self.headers())
-        self.assertEqual((status, retried["round_number"]), (202, 3))
+        self.assertEqual(self.request(f"/koda/api/v1/runs/{second['run_id']}/retry", method="POST", payload={}, headers=self.headers())[0], 404)
 
-        comparison_run = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        comparison_run = self.server.portal_store.create_scan(self.admin, project, input_ids[2], "local", "all")
         self.server.portal_store.complete_run(comparison_run["run_id"], result={"findings": [{"rule_id": "rule.new", "title": "new", "severity": "high", "category": "code", "path": "b.py", "line": 2}]})
         query = f"left={first['run_id']}&right={comparison_run['run_id']}"
         status, page = self.request(f"/koda/compare?{query}", headers=self.headers())
@@ -402,6 +415,8 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertIn(">소스코드</td>", result_page)
         self.assertIn(">비밀정보</td>", result_page)
         self.assertIn(">화면품질</td>", result_page)
+        self.assertNotIn("다시 실행", result_page)
+        self.assertNotIn("/retry", result_page)
 
     def test_completed_run_report_uses_the_shared_windows_cli_renderer(self):
         project = self.server.portal_store.create_project("CLI report", self.admin)

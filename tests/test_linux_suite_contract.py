@@ -399,7 +399,13 @@ KODA_RBAC_CATALOG_VERSION=koda-rbac-v1
     def test_koda_upload_is_streamed_and_limited_to_one_gibibyte(self) -> None:
         api_location = self.gateway.split('location ^~ /koda/api/', 1)[1].split('location ^~ /koda/', 1)[0]
         self.assertIn('client_max_body_size 1g;', api_location)
+        self.assertIn('client_body_timeout 1h;', api_location)
+        self.assertIn('proxy_connect_timeout 30s;', api_location)
+        self.assertIn('proxy_send_timeout 1h;', api_location)
+        self.assertIn('proxy_read_timeout 1h;', api_location)
         self.assertIn('proxy_request_buffering off;', api_location)
+        self.assertIn('error_page 500 = @koda_auth_unavailable;', api_location)
+        self.assertNotIn('error_page 500 502 503 504 = @koda_auth_unavailable;', api_location)
 
     def test_packager_requires_both_verified_offline_payloads(self) -> None:
         packager = (ROOT / "platforms/linux/package-suite-offline.sh").read_text()

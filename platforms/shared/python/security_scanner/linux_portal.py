@@ -621,29 +621,14 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                     run = store.create_scan(identity.subject_id, **payload)
                     self.server.portal_worker.enqueue(run["run_id"])
                     return self._json(202, run)
-                match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/(cancel|retry)", path)
+                match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/cancel", path)
                 if match:
                     if not self._exact(payload, set()):
                         return
                     run = store.run(match.group(1))
                     if not self._project(identity, run["project_id"], "scan.create"):
                         return self._json(404, {"code": "not_found"})
-                    if match.group(2) == "cancel":
-                        return self._json(200, store.request_cancel(run["run_id"], identity.subject_id))
-                    if run["status"] not in {"completed", "failed", "cancelled"}:
-                        return self._json(409, {"code": "run_not_terminal"})
-                    if not self.server.portal_worker.available:
-                        return self._json(503, {"code": "worker_unavailable"})
-                    retried = store.create_scan(
-                        identity.subject_id,
-                        run["project_id"],
-                        run["input_id"],
-                        run["standard"],
-                        run["standard_category"],
-                        run["snapshot"].get("scan_scope", "all"),
-                    )
-                    self.server.portal_worker.enqueue(retried["run_id"])
-                    return self._json(202, retried)
+                    return self._json(200, store.request_cancel(run["run_id"], identity.subject_id))
                 if path == "/koda/api/v1/admin/subjects":
                     if not admin or not self._exact(payload, {"subject_id", "status", "system_admin"}):
                         return self._json(403, {"code": "forbidden"}) if not admin else None

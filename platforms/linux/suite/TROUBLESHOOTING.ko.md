@@ -209,6 +209,57 @@ docker compose --project-directory "$PREFIX/tracker" \
   up -d --no-build --pull never --force-recreate gateway portal-api
 ```
 
+### KODA 입력 업로드에서 `503 authentication service unavailable`
+
+KODA 애플리케이션의 파일 형식 오류는 `422`, 용량 초과는 `413`으로 응답합니다.
+47바이트 JSON `{"detail":"authentication service unavailable"}`가 보이면 gateway의
+인증 subrequest가 실패했거나, 구형 gateway가 대용량 요청의 기본 60초 timeout을
+초과한 것입니다. 최신 통합본의 `/koda/api/`에는 1시간 body·proxy timeout과
+`proxy_request_buffering off`가 있으므로 gateway 설정과 이미지를 함께 교체합니다.
+새 통합 압축파일을 푼 디렉터리에서 다음처럼 gateway 그룹만 교체할 수 있습니다.
+
+```bash
+cd /home/user0/koda/koda-suite-offline-x86_64-<새버전>
+./koda-suite verify
+./koda-suite patch --group gateway --prefix /home/user0/koda-suite
+```
+
+```bash
+docker compose --project-directory "$PREFIX/tracker" \
+  --env-file "$ENV_FILE" \
+  -f "$PREFIX/tracker/compose.yaml" \
+  -f "$PREFIX/tracker/compose.airgap.yaml" \
+  -f "$PREFIX/tracker/compose.integration.yaml" \
+  exec gateway nginx -T 2>/dev/null \
+  | grep -E 'client_body_timeout|proxy_(connect|send|read)_timeout|proxy_request_buffering'
+
+docker compose --project-directory "$PREFIX/tracker" \
+  --env-file "$ENV_FILE" \
+  -f "$PREFIX/tracker/compose.yaml" \
+  -f "$PREFIX/tracker/compose.airgap.yaml" \
+  -f "$PREFIX/tracker/compose.integration.yaml" \
+  logs --tail=200 gateway portal-api portal-worker
+```
+
+외부 TLS reverse proxy를 별도로 사용하는 경우에도 `/koda/api/` location에 아래
+설정을 추가합니다. 외부 proxy가 60초에 끊기면 내부 gateway 설정만으로는 고칠 수
+없습니다.
+
+```nginx
+location ^~ /koda/api/ {
+    client_max_body_size 1g;
+    client_body_timeout 1h;
+    proxy_connect_timeout 30s;
+    proxy_send_timeout 1h;
+    proxy_read_timeout 1h;
+    proxy_request_buffering off;
+    proxy_pass http://127.0.0.1:8088;
+}
+```
+
+인증 subrequest 장애를 우회하기 위해 쿠키 검사나 `auth_request`를 제거하지
+않습니다. 인증이 실제로 중단된 경우에는 보안상 업로드를 거부해야 합니다.
+
 ## 5. KODA 화면·로그인·권한
 
 ### 로그인 후 `접근 대기`, 계정 식별자(UUID)가 표시됨

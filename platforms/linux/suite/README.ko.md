@@ -89,6 +89,10 @@ TRACKER_UUID='Tracker 화면에 표시된 UUID'
 Tracker SBOM 업로드 기본 한도는 100MiB이고, KODA 입력 파일은 `/koda/api/`에서
 1GiB까지 스트리밍 업로드합니다. 413이 계속되면 앞단 TLS reverse proxy의
 `client_max_body_size` 또는 요청 본문 제한도 `/koda/api/` 기준 1GiB 이상으로 맞춥니다.
+대용량 업로드가 503으로 끝나지 않도록 통합 gateway에는 `/koda/api/` 전용
+1시간 body·proxy timeout과 요청 스트리밍 설정이 포함되어 있습니다. 외부 TLS
+reverse proxy도 같은 경로에 `client_body_timeout 1h`, `proxy_send_timeout 1h`,
+`proxy_read_timeout 1h`, `proxy_request_buffering off`를 적용해야 합니다.
 
 Tracker UI가 이전 화면으로 보이면 브라우저에서 `Ctrl+Shift+R`로 캐시를 비운 뒤
 `/`를 다시 엽니다.

@@ -64,13 +64,22 @@ server {
 
     location ^~ /koda/api/ {
         client_max_body_size 1g;
+        # KODA streams uploads to disk.  The defaults are only 60 seconds and
+        # turn a slow, valid upload into a gateway 504 (then the old broad
+        # error mapping misreported it as authentication failure).
+        client_body_timeout 1h;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 1h;
+        proxy_read_timeout 1h;
         proxy_request_buffering off;
         auth_request /_koda_auth;
         auth_request_set $koda_identity_id $upstream_http_x_koda_identity_id;
         auth_request_set $koda_identity_expires $upstream_http_x_koda_identity_expires;
         auth_request_set $koda_identity_display $upstream_http_x_koda_identity_display;
         error_page 401 = @koda_api_unauthorized;
-        error_page 500 502 503 504 = @koda_auth_unavailable;
+        # auth_request reports an unavailable auth subrequest as 500.  Do not
+        # rewrite KODA's own 502/503/504 responses as an auth outage.
+        error_page 500 = @koda_auth_unavailable;
         proxy_pass http://${KODA_PORTAL_UPSTREAM};
         proxy_set_header Host $host;
         proxy_set_header Cookie "";
