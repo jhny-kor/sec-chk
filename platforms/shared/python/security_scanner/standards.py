@@ -596,8 +596,8 @@ LOCAL_STANDARD = SecurityStandard(
         ),
     ),
     description=_text(
-        "SecChk native rule categories for local file, dependency, configuration, code-pattern, screen-quality, and prevention guardrail checks.",
-        "로컬 파일, 의존성, 설정, 코드 패턴, 화면 품질, 예방 가드레일을 점검하는 SecChk 기본 룰 묶음입니다.",
+        "KODA native rule categories for local file, dependency, configuration, code-pattern, screen-quality, and prevention guardrail checks.",
+        "로컬 파일, 의존성, 설정, 코드 패턴, 화면 품질, 예방 가드레일을 점검하는 KODA 기본 룰 묶음입니다.",
     ),
     coverage=_text(
         "Runs the local heuristic rules directly. It is not a replacement for full SAST, DAST, or CVE intelligence.",
@@ -3117,6 +3117,7 @@ def standards_payload() -> list[dict[str, object]]:
                     "id": category.id,
                     "labels": category.labels,
                     "description": category.description,
+                    "scanner_categories": list(category.scanner_categories),
                     "supported": category.supported,
                 }
                 for category in standard.categories

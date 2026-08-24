@@ -35,7 +35,8 @@ from security_scanner.reporting import (
     render_xlsx,
 )
 from security_scanner.server import create_dashboard_server, scan_directory_payload, zap_scan_payload
-from security_scanner.sbom import NIS_SBOM_COLUMNS, render_nis_sbom
+from security_scanner.sbom import NIS_SBOM_COLUMNS, cyclonedx_payload, render_nis_sbom
+from security_scanner.standards import standards_payload
 
 SAMPLE_PAYLOAD = {
     "findings": [
@@ -91,6 +92,30 @@ class RuleCatalogTests(unittest.TestCase):
         self.assertIn("secret.private-key", titles)
         self.assertNotEqual(titles["secret.private-key"], "Private key")
 
+    def test_local_standard_uses_koda_branding(self) -> None:
+        local = next(item for item in standards_payload() if item["id"] == "local")
+        text = json.dumps(local, ensure_ascii=False)
+        self.assertIn("KODA", text)
+        self.assertNotIn("SecChk", text)
+
+
+class SbomBrandingTests(unittest.TestCase):
+    def test_cyclonedx_uses_koda_branding(self) -> None:
+        component = DependencyComponent(
+            name="requests",
+            version="2.32.0",
+            ecosystem="PyPI",
+            target="app",
+            source="requirements.txt",
+            path=Path("requirements.txt"),
+        )
+        payload = cyclonedx_payload([component])
+        tool = payload["metadata"]["tools"]["components"][0]  # type: ignore[index]
+        properties = payload["components"][0]["properties"]  # type: ignore[index]
+        self.assertEqual(tool["name"], "KODA")
+        self.assertTrue(all(item["name"].startswith("koda:") for item in properties))
+        self.assertNotIn("sec-chk", json.dumps(payload))
+
 
 class DisabledRuleFilterTests(unittest.TestCase):
     def _finding(self, rule_id: str) -> Finding:
@@ -108,6 +133,18 @@ class DisabledRuleFilterTests(unittest.TestCase):
 
 
 class LocalVulnerabilityScanTests(unittest.TestCase):
+    def test_scan_scope_limits_the_scanner_categories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "requirements.txt").write_text("requests==2.32.0\n", encoding="utf-8")
+            (root / "app.py").write_text("password = 'secret'\n", encoding="utf-8")
+            library = scan_directory_payload(str(root), discover_projects=False, scan_scope="library")
+            source = scan_directory_payload(str(root), discover_projects=False, scan_scope="source")
+        self.assertEqual(library["scan"]["scanned_categories"], ["dependencies"])
+        self.assertEqual(source["scan"]["scanned_categories"], ["secrets", "configuration", "code", "prevention"])
+        self.assertEqual(library["scan"]["scope"], "library")
+        self.assertEqual(source["scan"]["scope"], "source")
+
     def test_local_grype_findings_are_added_to_source_scan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             requirements = Path(directory) / "requirements.txt"

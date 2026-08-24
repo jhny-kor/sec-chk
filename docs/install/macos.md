@@ -60,7 +60,7 @@ keeps the native scan to its GET/HEAD read-only boundary.
 ## Run Python Dashboard Helper
 
 ```bash
-bash platforms/macos/scripts/sec-chk.command
+bash platforms/macos/scripts/koda.command
 ```
 
 The helper sets `PYTHONPATH` to `platforms/shared/python` and runs `python3 -m security_scanner app`.
@@ -71,4 +71,4 @@ The helper sets `PYTHONPATH` to `platforms/shared/python` and runs `python3 -m s
 bash platforms/macos/scripts/install-macos.command
 ```
 
-This installs under `~/Library/Application Support/SecChk` and creates launchers in `~/Applications`. The helper path remains separate from the native Swift app.
+This installs under `~/Library/Application Support/KODA` and creates `KODA.command` and `KODA-CLI.command` launchers in `~/Applications`. The helper path remains separate from the native Swift app; existing legacy shortcuts continue to work through a compatibility wrapper.

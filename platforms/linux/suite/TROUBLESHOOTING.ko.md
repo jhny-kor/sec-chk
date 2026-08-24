@@ -226,11 +226,12 @@ cd /home/user0/koda-suite
 KODA 최초 시스템 관리자 bootstrap은 설치 시 한 번만 필요합니다. 일반 사용자는
 Tracker 승인 후 자동 활성화되고, KODA 관리자는 프로젝트 역할만 별도로 배정합니다.
 
-### LDAP 체크 후 `501 ldap_not_configured`
+### LDAP 체크 후 `503 ldap_not_configured` 또는 LDAP 연결 오류
 
-현재 LDAP 체크박스는 향후 연동용이며 실제 LDAP 인증은 구현되지 않았습니다.
-로컬 Tracker 계정으로 로그인합니다. LDAP 실패 후 로컬 비밀번호로 자동 fallback
-하지 않는 것이 정상입니다.
+LDAP은 Tracker 관리자의 `설정 → LDAP 로그인`에서 먼저 활성화해야 합니다. 서버·bind
+DN·검색 기준 DN·TLS/CA·속성·그룹 매핑을 확인하고, `TRACKER_LDAP_ENCRYPTION_KEY`가
+portal-api 컨테이너에 전달되는지 확인합니다. LDAP 실패 후 로컬 비밀번호로 자동
+fallback되지 않으며, 통합 KODA는 Tracker의 검증된 세션을 사용합니다.
 
 ### KODA 웹에서 라이브러리 취약점이 0건
 

@@ -111,8 +111,13 @@ KODA 컨테이너의 8765 포트는 호스트에 게시되지 않고 통합 게�
   활성화하면 같은 계정으로 KODA에도 로그인되며, KODA 프로젝트 역할은 별도입니다.
 - KODA의 보안·품질 점검 규칙은 시스템 관리자만 변경합니다. 일반 사용자는
   프로젝트 화면에서 검사 기준과 기준 범위만 선택합니다.
-- 로그인 화면의 LDAP 체크박스는 향후 연동용이며 현재 선택하면
-  `501 ldap_not_configured`로 실패합니다.
+- LDAP은 Tracker의 `설정 → LDAP 로그인`에서 서버·TLS·검색 기준 DN·속성·그룹
+  매핑을 입력해 활성화합니다. 통합 gateway는 Tracker가 발급한 검증 세션을 KODA에
+  전달하므로 KODA에서도 같은 LDAP 로그인과 로그아웃을 사용합니다. bind 비밀번호
+  암호화용 `TRACKER_LDAP_ENCRYPTION_KEY`는 운영 `.env`에만 설정합니다.
+- `/dependency-track/`는 Tracker의 서버 연동 API 키와 별도인 upstream UI 계정·권한을
+  사용합니다. Dependency-Track 자체 LDAP/OIDC는 설치된 upstream 버전의 공식 설정으로
+  별도 구성해야 하며 Tracker 세션을 자동으로 공유하지 않습니다.
 
 Tracker 장애 시 KODA 보호 화면과 API는 이전 인증 결과를 캐시해 우회하지 않고
 `503`으로 실패합니다. `/healthz`, `/api/v1/healthz`, `/koda/live` 같은 명시된

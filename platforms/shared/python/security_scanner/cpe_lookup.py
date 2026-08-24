@@ -75,7 +75,7 @@ def _query_nvd(keyword: str, api_key: str | None, timeout_seconds: float) -> dic
     query = urllib.parse.urlencode(
         {"keywordSearch": keyword, "resultsPerPage": DEFAULT_RESULTS_PER_PAGE}
     )
-    headers = {"User-Agent": "sec-chk-local-security-scanner"}
+    headers = {"User-Agent": "koda-local-security-scanner"}
     if api_key:
         headers["apiKey"] = api_key
     request = urllib.request.Request(f"{NVD_CVE_URL}?{query}", headers=headers)

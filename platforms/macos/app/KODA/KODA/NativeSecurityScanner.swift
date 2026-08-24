@@ -3013,7 +3013,7 @@ final class NativeSecurityScanner {
             findings.append(finding("prevention.repository-security-settings-missing", "info", "prevention", "GitHub 저장소 보안 설정 문서가 없음", ".", nil, "브랜치 보호/secret scanning 체크리스트 없음", "브랜치 보호, 필수 리뷰, secret scanning, Dependabot alerts, Actions 최소 권한 설정을 문서화하고 활성화하세요."))
         }
         if (hasDependencyManifest || hasSourceCode) && !hasSecurityWorkflow(workflowFiles) {
-            findings.append(finding("prevention.ci-security-scan-missing", "info", "prevention", "CI 보안 점검 워크플로가 없음", ".", nil, "보안 점검 workflow 없음", "KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline 같은 보안 점검을 CI에 추가하세요."))
+            findings.append(finding("prevention.ci-security-scan-missing", "info", "prevention", "CI 보안 점검 워크플로가 없음", ".", nil, "보안 점검 workflow 없음", "KODA, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline 같은 보안 점검을 CI에 추가하세요."))
         }
         if (hasSourceCode || hasDependencyManifest) && releaseProvenanceWorkflowPaths.intersection(lowerRelPaths).isEmpty && !containsAny(workflowText, ["slsa-framework", "slsa-github-generator", "sigstore", "cosign", "sign-blob", "attestation", "provenance"]) && !lowerRelPaths.contains("docs/security/slsa_sigstore.md") {
             findings.append(finding("prevention.release-provenance-automation-missing", "info", "prevention", "릴리스 서명 자동화가 준비되지 않음", ".", nil, "릴리스 provenance/signing workflow 없음", "CI에서 산출물을 빌드하고 provenance 생성, 서명, 체크섬 게시까지 수행하는 릴리스 workflow를 추가하세요."))
@@ -4234,7 +4234,7 @@ private extension NativeSecurityScanner {
         case "prevention.dependency-update-automation-missing":
             return "Add Dependabot or Renovate so vulnerable and outdated dependencies are surfaced continuously."
         case "prevention.ci-security-scan-missing":
-            return "Add a CI job for KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline, or a similar security scanner."
+            return "Add a CI job for KODA, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline, or a similar security scanner."
         case "prevention.pre-commit-hook-missing":
             return "Install the KODA pre-commit hook so high-risk findings are blocked before entering Git history."
         case "prevention.codeowners-missing":

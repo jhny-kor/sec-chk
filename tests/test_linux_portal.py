@@ -60,6 +60,15 @@ class LinuxPortalStoreTests(unittest.TestCase):
         self.assertEqual(run2["round_number"], 2)
         self.assertEqual(run["snapshot"]["rule_policy_version"], 1)
 
+    def test_scan_scope_is_immutable_and_validated(self):
+        library = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "library")
+        self.assertEqual(library["snapshot"]["scan_scope"], "library")
+        source = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "source")
+        self.assertEqual(source["snapshot"]["scan_scope"], "source")
+        self.assertEqual(self.store.list_runs(self.project)[0]["scan_scope"], "source")
+        with self.assertRaises(ValueError):
+            self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "unknown")
+
     def test_last_admin_and_project_isolation(self):
         with self.assertRaises(ValueError):
             self.store.set_subject(self.admin, status="disabled")
@@ -137,6 +146,7 @@ class LinuxPortalHttpTests(unittest.TestCase):
         status, body = self.request("/koda/login?next=https://evil.example")
         self.assertEqual(status, 200)
         self.assertIn("LDAP 계정", body)
+        self.assertIn("<link rel='icon' href='/koda/assets/KODA.ico'>", body)
         self.assertIn("/koda/assets/KODA.ico", body)
         self.assertNotIn("Tracker", body)
         self.assertIn('location="/koda/"', body)
@@ -152,12 +162,58 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertEqual(self.request("/koda/api/v1/projects", headers=self.headers(approved_tracker_user)), (200, []))
         status, admin_page = self.request("/koda/admin/subjects", headers=self.headers())
         self.assertEqual(status, 200)
+        self.assertIn("<link rel='icon' href='/koda/assets/KODA.ico'>", admin_page)
         self.assertIn("/koda/assets/KODA.ico", admin_page)
         self.assertNotIn("Tracker", admin_page.split("</nav>", 1)[0])
         self.assertIn("회원가입과 계정 승인은 KODA-SBOM-Tracker", admin_page)
         self.assertIn("KODA 접근 제어", admin_page)
         self.assertNotIn("<option>pending</option>", admin_page)
         self.assertIn("syncSubject()", admin_page)
+
+    def test_empty_project_pages_explain_onboarding(self):
+        status, body = self.request("/koda/scans/new", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("프로젝트 생성으로 이동", body)
+        status, body = self.request("/koda/projects", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("프로젝트를 생성하면", body)
+
+        viewer = str(uuid.uuid4())
+        viewer_headers = self.headers(viewer, "승인된 사용자")
+        status, body = self.request("/koda/scans/new", headers=viewer_headers)
+        self.assertEqual(status, 200)
+        self.assertIn("KODA 관리자에게 프로젝트 생성 및", body)
+        status, body = self.request("/koda/projects", headers=viewer_headers)
+        self.assertEqual(status, 200)
+        self.assertIn("Tracker 승인 후에도 KODA 관리자가", body)
+        self.assertNotIn("id='create'", body)
+
+    def test_scope_menus_render_independent_scan_pages(self):
+        project = self.server.portal_store.create_project("scope pages", self.admin)
+        target = Path(self.tmp.name) / "scope.py"
+        target.write_text("print('scope')\n", encoding="utf-8")
+        self.server.portal_store.add_input(project, target.name, target, self.admin)
+        status, library = self.request("/koda/scans/library", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("라이브러리 보안취약점 점검", library)
+        self.assertIn("scope=\"library\"", library)
+        self.assertIn("href='/koda/scans/source'", library)
+        status, source = self.request("/koda/scans/source", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("소스코드 보안취약점 점검", source)
+        self.assertIn("scope=\"source\"", source)
+        self.assertIn("href='/koda/scans/library'", source)
+
+    def test_role_policy_labels_screens_and_features_in_korean(self):
+        project = self.server.portal_store.create_project("role labels", self.admin)
+        status, body = self.request(f"/koda/admin/roles?project={project}", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("화면·기능별 역할 권한", body)
+        self.assertIn("프로젝트·결과", body)
+        self.assertIn("라이브러리·소스코드 점검", body)
+        self.assertIn("프로젝트 관리자", body)
+        self.assertIn("value='admin'>프로젝트 관리자", body)
+        self.assertIn("project.view", body)
 
     def test_public_koda_icon_asset(self):
         status, body = self.request("/koda/assets/KODA.ico")

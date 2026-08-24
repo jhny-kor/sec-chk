@@ -166,7 +166,7 @@ Updates)에 자동 로그인·게스트 계정·화면 잠금이 추가되었습
 - 주의(후속): KODA.entitlements는 App Sandbox 활성입니다. 현재 App Store 경로는 시스템 상태를 자동 확정하지 않고 `미확인`과 설정 조치 경로를 제공합니다. 앱 내부에서 실제 값을 자동 확정하려면 별도의 권한 있는 helper/XPC 경로가 필요합니다.
 
 ### macOS PyInstaller 레인 — 참고만(host posture는 Swift로 이관)
-- PyInstaller 레인(`build-koda-app.command`)은 레거시 실험용. `--collect-submodules security_scanner`만 유지(지연 임포트 모듈 번들). 엔트리포인트는 원복(`sec-chk-app.py`).
+- PyInstaller 레인(`build-koda-app.command`)은 레거시 실험용. `--collect-submodules security_scanner`만 유지(지연 임포트 모듈 번들). 엔트리포인트는 `koda-browser-app.py`를 사용하며 기존 엔트리포인트는 호환성 래퍼로 유지합니다.
 
 ### Dashboard UI — 🟡 진행 (2026-06-07)
 - [x] host 카테고리 라벨(en/ko), JSON `resource` 노출(Phase 0/1).

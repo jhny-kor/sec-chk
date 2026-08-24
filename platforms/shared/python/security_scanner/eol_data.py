@@ -81,7 +81,7 @@ def _parse_date(value: str) -> date | None:
 
 
 def _fetch(url: str, timeout_seconds: float) -> object:
-    request = urllib.request.Request(url, headers={"User-Agent": "sec-chk-local-security-scanner"})
+    request = urllib.request.Request(url, headers={"User-Agent": "koda-local-security-scanner"})
     with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
         return json.loads(response.read().decode("utf-8"))
 

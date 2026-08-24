@@ -9,6 +9,11 @@ FILE_CATEGORIES = SECURITY_CATEGORIES + ("screen_quality",)
 HOST_CATEGORIES = ("host",)
 CATEGORIES = FILE_CATEGORIES + HOST_CATEGORIES
 DEFAULT_CATEGORIES = SECURITY_CATEGORIES
+SCAN_SCOPE_CATEGORIES = {
+    "all": DEFAULT_CATEGORIES,
+    "library": ("dependencies",),
+    "source": ("secrets", "configuration", "code", "prevention"),
+}
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 SEVERITY_RANK = {severity: index for index, severity in enumerate(SEVERITIES)}
 # ``unverified`` means the scanner could not evaluate the control at all (a

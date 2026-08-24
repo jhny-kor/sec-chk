@@ -10,6 +10,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from .models import SCAN_SCOPE_CATEGORIES
+
 
 DEFAULT_ROLE_PERMISSIONS = {
     "admin": {"project.view", "input.manage", "scan.create", "project.manage"},
@@ -321,8 +323,22 @@ class PortalStore:
             db.execute("COMMIT")
         return {"version": version, "hash": digest, "disabled_rules": json.loads(encoded)}
 
-    def create_scan(self, subject_id: str, project_id: str, input_id: str, standard: str, standard_category: str, **unsafe) -> dict:
-        if unsafe or not isinstance(standard, str) or not isinstance(standard_category, str):
+    def create_scan(
+        self,
+        subject_id: str,
+        project_id: str,
+        input_id: str,
+        standard: str,
+        standard_category: str,
+        scan_scope: str = "all",
+        **unsafe,
+    ) -> dict:
+        if (
+            unsafe
+            or not isinstance(standard, str)
+            or not isinstance(standard_category, str)
+            or scan_scope not in SCAN_SCOPE_CATEGORIES
+        ):
             raise ValueError("unsupported scan options")
         if not self.can(subject_id, project_id, "scan.create"):
             raise PermissionError("project access denied")
@@ -345,6 +361,7 @@ class PortalStore:
             snapshot = {
                 "input_id": str(input_id), "input_hash": source["content_hash"],
                 "standard": standard, "standard_category": standard_category,
+                "scan_scope": scan_scope,
                 "disabled_rules": disabled_rules, "rule_policy_version": policy["version"],
                 "rule_policy_hash": policy["hash"], "scanner_version": _scanner_version(),
                 "requested_by": str(subject_id),
@@ -441,7 +458,14 @@ class PortalStore:
     def list_runs(self, project_id: str) -> list[dict]:
         with self._db() as db:
             rows = db.execute("SELECT * FROM scan_runs WHERE project_id=? ORDER BY round_number DESC", (str(project_id),))
-            return [{key: value for key, value in dict(row).items() if key not in {"snapshot_json", "result_json"}} for row in rows]
+            runs = []
+            for row in rows:
+                value = dict(row)
+                snapshot = json.loads(value.pop("snapshot_json"))
+                value.pop("result_json", None)
+                value["scan_scope"] = snapshot.get("scan_scope", "all")
+                runs.append(value)
+            return runs
 
     def audit_events(self, limit: int = 100) -> list[dict]:
         with self._db() as db:

@@ -114,7 +114,7 @@ install directory.
 ## Run From Source
 
 ```bat
-platforms\windows\scripts\sec-chk.bat
+platforms\windows\scripts\koda.bat
 ```
 
 The source-tree launcher sets `PYTHONPATH` to `platforms\shared\python` before running the scanner.

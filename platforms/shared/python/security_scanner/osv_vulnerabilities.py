@@ -88,7 +88,7 @@ def _post_querybatch(components: tuple[DependencyComponent, ...], timeout_second
         data=body,
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "sec-chk-local-security-scanner",
+            "User-Agent": "koda-local-security-scanner",
         },
         method="POST",
     )
