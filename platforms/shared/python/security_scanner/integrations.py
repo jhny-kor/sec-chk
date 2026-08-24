@@ -411,7 +411,7 @@ def upload_sbom_to_dependency_track(
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "X-Api-Key": api_key,
-            "User-Agent": "sec-chk-local-security-scanner",
+            "User-Agent": "koda-local-security-scanner",
         },
         method="POST",
     )

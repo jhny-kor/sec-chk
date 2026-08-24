@@ -109,7 +109,7 @@ def prioritize_severity(base: str, cve_ids: Iterable[str], intel: dict[str, Vuln
 def _fetch_kev(timeout_seconds: float) -> dict[str, dict[str, object]]:
     request = urllib.request.Request(
         CISA_KEV_JSON_URL,
-        headers={"User-Agent": "sec-chk-local-security-scanner"},
+        headers={"User-Agent": "koda-local-security-scanner"},
     )
     with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
         payload = json.loads(response.read().decode("utf-8"))
@@ -131,7 +131,7 @@ def _fetch_epss(cve_ids: tuple[str, ...], timeout_seconds: float) -> dict[str, d
     output: dict[str, dict[str, object]] = {}
     for chunk in _cve_chunks(cve_ids):
         url = f"{FIRST_EPSS_URL}?{urllib.parse.urlencode({'cve': ','.join(chunk)})}"
-        request = urllib.request.Request(url, headers={"User-Agent": "sec-chk-local-security-scanner"})
+        request = urllib.request.Request(url, headers={"User-Agent": "koda-local-security-scanner"})
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
         data = payload.get("data", []) if isinstance(payload, dict) else []

@@ -92,7 +92,7 @@ capability 제거, CPU/메모리/PID 제한이 적용됩니다. `--target`/`--sb
 
 ## 인증 Linux 포털
 
-운영 화면은 [KODA + KODA SBOM Tracker 통합본](../suite/README.ko.md)의 동일
+운영 화면은 [KODA + KODA SBOM Tracker 통합본](../suite/README.md)의 동일
 오리진 `/koda/` 경로를 사용합니다. 통합본에서는 `KODA_PUBLISH_DASHBOARD=0`으로
 8765 포트를 게시하지 않고 gateway가 전용 Docker 네트워크로만 접근합니다.
 완료된 분석 회차에서는 **SBOM 다운로드**에서

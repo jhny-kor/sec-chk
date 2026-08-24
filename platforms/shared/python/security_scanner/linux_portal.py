@@ -19,6 +19,9 @@ from .grype_adapter import inspect_grype
 from .portal_identity import IdentityError, IdentityUnavailable, identity_from_headers
 from .portal_store import PROJECT_PERMISSIONS, PortalStore, VersionConflict
 from .portal_views import (
+    PERMISSION_METADATA,
+    ROLE_DESCRIPTIONS,
+    ROLE_LABELS,
     admin_page,
     dashboard,
     esc,
@@ -65,14 +68,16 @@ def _run_scan(store: PortalStore, run_id: str) -> None:
             target = prepare_input_target(Path(source["path"]), Path(extraction))
             if not store.set_run_progress(run_id, "scanning", 35):
                 return store.complete_run(run_id)
+            scan_scope = str(snapshot.get("scan_scope") or "all")
             result = scan_directory_payload(
                 str(target), language="ko", standard=snapshot["standard"],
                 standard_category=snapshot["standard_category"],
                 disabled_rules=tuple(snapshot["disabled_rules"]), allow_file=True,
-                display_path=source["name"], enable_local_vulnerabilities=True,
+                display_path=source["name"], scan_scope=scan_scope,
+                enable_local_vulnerabilities=scan_scope in {"all", "library"},
             )
             result["findings"] = result.get("findings_by_language", {}).get("ko", [])
-            result["analysis_stages"] = _analysis_stages(result)
+            result["analysis_stages"] = _analysis_stages(result, scan_scope)
             result["analysis_overall"] = "partial" if any(
                 stage["status"] in {"failed", "warning"} for stage in result["analysis_stages"].values()
             ) else "completed"
@@ -83,7 +88,7 @@ def _run_scan(store: PortalStore, run_id: str) -> None:
         store.complete_run(run_id, error=str(exc)[:2000])
 
 
-def _analysis_stages(result: dict) -> dict[str, dict[str, object]]:
+def _analysis_stages(result: dict, scan_scope: str = "all") -> dict[str, dict[str, object]]:
     findings = result.get("findings", []) if isinstance(result.get("findings"), list) else []
     counts = {"source": 0, "library": 0, "quality": 0}
     for finding in findings:
@@ -92,10 +97,15 @@ def _analysis_stages(result: dict) -> dict[str, dict[str, object]]:
         counts[group] += 1
     local = result.get("scan", {}).get("local_vulnerability", {})
     library_status = str(local.get("status", "failed"))
+    active_groups = {
+        "all": {"source", "library", "quality"},
+        "library": {"library"},
+        "source": {"source"},
+    }.get(scan_scope, {"source", "library", "quality"})
     return {
-        "source": {"status": "completed", "finding_count": counts["source"]},
+        "source": {"status": "completed" if "source" in active_groups else "skipped", "finding_count": counts["source"]},
         "library": {
-            "status": library_status,
+            "status": library_status if "library" in active_groups else "skipped",
             "finding_count": counts["library"],
             "queried_components": int(local.get("queried_components", 0) or 0),
             "matched_vulnerabilities": int(local.get("matched_vulnerabilities", 0) or 0),
@@ -103,7 +113,7 @@ def _analysis_stages(result: dict) -> dict[str, dict[str, object]]:
             "database": local.get("database", {}),
             "warning": str(local.get("warning", "")),
         },
-        "quality": {"status": "completed", "finding_count": counts["quality"]},
+        "quality": {"status": "completed" if "quality" in active_groups else "skipped", "finding_count": counts["quality"]},
     }
 
 
@@ -324,7 +334,7 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                     for project in projects
                 ]
                 return self._html(200, dashboard(identity, projects, project_runs, admin=admin))
-            if path == "/koda/scans/new":
+            if path in {"/koda/scans/new", "/koda/scans/library", "/koda/scans/source"}:
                 scan_projects = [
                     {
                         **project,
@@ -334,7 +344,8 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                     }
                     for project in projects
                 ]
-                return self._html(200, new_scan_page(scan_projects, admin=admin))
+                scope = {"/koda/scans/library": "library", "/koda/scans/source": "source"}.get(path, "all")
+                return self._html(200, new_scan_page(scan_projects, admin=admin, scan_scope=scope))
             if path == "/koda/projects":
                 enriched = [
                     {**project, "inputs": store.list_inputs(project["project_id"]), "runs": store.list_runs(project["project_id"])}
@@ -518,20 +529,36 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 policy = store.role_policy(project_id) if project_id else {"version": 0, "roles": {}}
                 memberships = store.list_memberships(project_id) if project_id else []
                 subjects = [subject for subject in store.list_subjects() if subject["status"] == "enabled"]
-                member_rows = "".join(f"<tr><td>{esc(m['display'])}</td><td><code>{esc(m['subject_id'])}</code></td><td>{esc(m['role'])}</td></tr>" for m in memberships)
-                role_options = "".join(f"<option>{esc(role)}</option>" for role in policy["roles"])
+                role_options = "".join(
+                    f"<option value='{esc(role)}'>{esc(ROLE_LABELS.get(role, role))}</option>"
+                    for role in policy["roles"]
+                )
                 subject_options = "".join(f"<option value='{esc(s['subject_id'])}'>{esc(s['display'] or s['subject_id'])}</option>" for s in subjects)
+                permission_order = [permission for permission in PERMISSION_METADATA if permission in PROJECT_PERMISSIONS]
+                permission_order.extend(permission for permission in sorted(PROJECT_PERMISSIONS) if permission not in permission_order)
+                role_headers = "".join(
+                    f"<th class='role-head'><strong>{esc(ROLE_LABELS.get(role, role))}</strong><small class='muted'>{esc(ROLE_DESCRIPTIONS.get(role, '사용자 정의 역할'))}</small><code>{esc(role)}</code></th>"
+                    for role in policy["roles"]
+                )
                 permission_rows = []
-                for role, permissions in policy["roles"].items():
-                    cells = "".join(
-                        f"<td><input type='checkbox' name='{esc(role)}' value='{esc(permission)}' {'checked' if permission in permissions else ''} aria-label='{esc(role)} {esc(permission)}'></td>"
-                        for permission in sorted(PROJECT_PERMISSIONS)
+                for permission in permission_order:
+                    screen, feature, description = PERMISSION_METADATA.get(
+                        permission, ("기타", permission, "추가된 프로젝트 권한입니다.")
                     )
-                    permission_rows.append(f"<tr><th>{esc(role)}</th>{cells}</tr>")
+                    cells = "".join(
+                        f"<td class='permission-check'><input type='checkbox' name='{esc(role)}' value='{esc(permission)}' {'checked' if permission in permissions else ''} aria-label='{esc(ROLE_LABELS.get(role, role))} · {esc(screen)} · {esc(feature)}'></td>"
+                        for role, permissions in policy["roles"].items()
+                    )
+                    permission_rows.append(f"<tr><th>{esc(screen)}</th><td><strong>{esc(feature)}</strong><code>{esc(permission)}</code></td><td class='wrap'>{esc(description)}</td>{cells}</tr>")
                 permission_rows = "".join(permission_rows)
-                permission_headers = "".join(f"<th>{esc(permission)}</th>" for permission in sorted(PROJECT_PERMISSIONS))
-                membership_form = f"<section class='panel'><div class='panel-head'><h2>계정별 프로젝트 역할</h2></div><div class='panel-body'><form id='membership' class='toolbar'><input type='hidden' name='project_id' value='{esc(project_id)}'><label>공유 계정<select name='subject_id'>{subject_options}</select></label><label>역할<select name='role'>{role_options}</select></label><button>배정</button></form></div><table><tr><th>계정</th><th>UUID</th><th>역할</th></tr>{member_rows}</table></section>"
-                return self._html(200, admin_page("역할 정책", f"<form method='get' class='toolbar'><select name='project'>{options}</select><button>열기</button></form><section class='panel'><div class='panel-head'><h2>기능별 역할 권한</h2></div><form id='roles'><input type='hidden' name='project_id' value='{esc(project_id)}'><input type='hidden' name='expected_version' value='{policy['version']}'><div class='table-wrap'><table><tr><th>역할</th>{permission_headers}</tr>{permission_rows}</table></div><div class='panel-body'><button>저장</button></div></form></section>{membership_form}<script>document.querySelector('#roles')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget),roles={script_json({role: [] for role in policy['roles']})};for(const [k,v] of f)if(k in roles)roles[k].push(v);try{{await json('/koda/api/v1/admin/roles',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),expected_version:Number(f.get('expected_version')),roles}})}});location.reload()}}catch(x){{alert(x.message)}}}});document.querySelector('#membership')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget);try{{await json('/koda/api/v1/admin/memberships',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),subject_id:f.get('subject_id'),role:f.get('role')}})}});location.reload()}}catch(x){{alert(x.message)}}}})</script>"))
+                membership_rows = "".join(
+                    f"<tr><td>{esc(m['display'])}</td><td><code>{esc(m['subject_id'])}</code></td><td>{esc(ROLE_LABELS.get(m['role'], m['role']))}<br><code>{esc(m['role'])}</code></td></tr>"
+                    for m in memberships
+                )
+                membership_form = f"<section class='panel'><div class='panel-head'><div><h2>계정별 프로젝트 역할</h2><p class='muted'>역할은 선택한 프로젝트에만 적용됩니다.</p></div></div><div class='panel-body'><form id='membership' class='toolbar'><input type='hidden' name='project_id' value='{esc(project_id)}'><label>공유 계정<select name='subject_id'>{subject_options}</select></label><label>역할<select name='role'>{role_options}</select></label><button>역할 배정</button></form></div><div class='table-wrap'><table><tr><th>계정</th><th>UUID</th><th>역할</th></tr>{membership_rows}</table></div></section>"
+                role_intro = "화면별 기능을 역할마다 선택합니다. 내부 권한 키는 API 호환을 위해 함께 표시합니다."
+                role_table = f"<div class='table-wrap'><table><tr><th>화면</th><th>기능</th><th>설명</th>{role_headers}</tr>{permission_rows}</table></div>"
+                return self._html(200, admin_page("역할 정책", f"<form method='get' class='toolbar'><label>프로젝트<select name='project'>{options}</select></label><button>프로젝트 열기</button></form><section class='panel'><div class='panel-head'><div><h2>화면·기능별 역할 권한</h2><p class='muted'>{role_intro}</p></div></div><form id='roles'><input type='hidden' name='project_id' value='{esc(project_id)}'><input type='hidden' name='expected_version' value='{policy['version']}'>{role_table}<div class='panel-body'><button class='primary'>역할 정책 저장</button></div></form></section>{membership_form}<script>document.querySelector('#roles')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget),roles={script_json({role: [] for role in policy['roles']})};for(const [k,v] of f)if(k in roles)roles[k].push(v);try{{await json('/koda/api/v1/admin/roles',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),expected_version:Number(f.get('expected_version')),roles}})}});location.reload()}}catch(x){{alert(x.message)}}}});document.querySelector('#membership')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget);try{{await json('/koda/api/v1/admin/memberships',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),subject_id:f.get('subject_id'),role:f.get('role')}})}});location.reload()}}catch(x){{alert(x.message)}}}})</script>"))
             if path == "/koda/admin/rules":
                 policy = store.rule_policy(project_id) if project_id else {"version": 0, "disabled_rules": []}
                 from .reporting import build_rule_catalog
@@ -547,7 +574,7 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                     )
                     rule_groups.append(f"<details><summary>{esc(key)} ({len(rules)})</summary>{choices}</details>")
                 rule_groups = "".join(rule_groups)
-                return self._html(200, admin_page("보안·품질 점검 설정", f"<form method='get' class='toolbar'><select name='project'>{options}</select><button>열기</button></form><section class='panel'><div class='panel-head'><div><h2>점검 규칙</h2><p class='muted'>관리자만 활성 규칙을 바꿀 수 있습니다. 사용자는 검사 기준과 범위만 선택합니다.</p></div><input id='rule-search' type='search' placeholder='규칙 검색'></div><form id='rules' class='panel-body'><input type='hidden' name='project_id' value='{esc(project_id)}'><input type='hidden' name='expected_version' value='{policy['version']}'>{rule_groups}<button style='margin-top:16px'>저장</button></form></section><script>document.querySelector('#rule-search').addEventListener('input',e=>document.querySelectorAll('#rules .choice').forEach(x=>x.hidden=!x.textContent.toLowerCase().includes(e.target.value.toLowerCase())));document.querySelector('#rules')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget),enabled=new Set(f.getAll('rule')),disabled=[...document.querySelectorAll('[name=rule]')].map(x=>x.value).filter(x=>!enabled.has(x));try{{await json('/koda/api/v1/admin/rules',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),expected_version:Number(f.get('expected_version')),disabled_rules:disabled}})}});location.reload()}}catch(x){{alert(x.message)}}}})</script>"))
+                return self._html(200, admin_page("보안·품질 점검 설정", f"<form method='get' class='toolbar toolbar-spaced'><label>프로젝트<select name='project'>{options}</select></label><button>열기</button></form><section class='panel'><div class='panel-head'><div><h2>점검 규칙</h2><p class='muted'>관리자만 활성 규칙을 바꿀 수 있습니다. 사용자는 검사 기준과 범위만 선택합니다.</p></div><input id='rule-search' type='search' placeholder='규칙 검색'></div><form id='rules' class='panel-body'><input type='hidden' name='project_id' value='{esc(project_id)}'><input type='hidden' name='expected_version' value='{policy['version']}'>{rule_groups}<button class='primary toolbar-submit'>저장</button></form></section><script>document.querySelector('#rule-search').addEventListener('input',e=>document.querySelectorAll('#rules .choice').forEach(x=>x.hidden=!x.textContent.toLowerCase().includes(e.target.value.toLowerCase())));document.querySelector('#rules')?.addEventListener('submit',async e=>{{e.preventDefault();const f=new FormData(e.currentTarget),enabled=new Set(f.getAll('rule')),disabled=[...document.querySelectorAll('[name=rule]')].map(x=>x.value).filter(x=>!enabled.has(x));try{{await json('/koda/api/v1/admin/rules',{{method:'POST',body:JSON.stringify({{project_id:f.get('project_id'),expected_version:Number(f.get('expected_version')),disabled_rules:disabled}})}});location.reload()}}catch(x){{alert(x.message)}}}})</script>"))
             return self._html(404, admin_page("찾을 수 없음", "<p>관리 화면이 없습니다.</p>"))
 
         def do_POST(self):
@@ -586,35 +613,22 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                     return self._json(415, {"code": "binary_upload_required", "detail": "Content-Type application/octet-stream이 필요합니다"})
                 if path == "/koda/api/v1/scans":
                     fields = {"project_id", "input_id", "standard", "standard_category"}
-                    if not self._exact(payload, fields):
+                    if not self._exact(payload, fields | ({"scan_scope"} if "scan_scope" in payload else set())):
                         return
+                    payload.setdefault("scan_scope", "all")
                     if not self.server.portal_worker.available:
                         return self._json(503, {"code": "worker_unavailable"})
                     run = store.create_scan(identity.subject_id, **payload)
                     self.server.portal_worker.enqueue(run["run_id"])
                     return self._json(202, run)
-                match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/(cancel|retry)", path)
+                match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/cancel", path)
                 if match:
                     if not self._exact(payload, set()):
                         return
                     run = store.run(match.group(1))
                     if not self._project(identity, run["project_id"], "scan.create"):
                         return self._json(404, {"code": "not_found"})
-                    if match.group(2) == "cancel":
-                        return self._json(200, store.request_cancel(run["run_id"], identity.subject_id))
-                    if run["status"] not in {"completed", "failed", "cancelled"}:
-                        return self._json(409, {"code": "run_not_terminal"})
-                    if not self.server.portal_worker.available:
-                        return self._json(503, {"code": "worker_unavailable"})
-                    retried = store.create_scan(
-                        identity.subject_id,
-                        run["project_id"],
-                        run["input_id"],
-                        run["standard"],
-                        run["standard_category"],
-                    )
-                    self.server.portal_worker.enqueue(retried["run_id"])
-                    return self._json(202, retried)
+                    return self._json(200, store.request_cancel(run["run_id"], identity.subject_id))
                 if path == "/koda/api/v1/admin/subjects":
                     if not admin or not self._exact(payload, {"subject_id", "status", "system_admin"}):
                         return self._json(403, {"code": "forbidden"}) if not admin else None

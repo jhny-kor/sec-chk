@@ -60,6 +60,15 @@ class LinuxPortalStoreTests(unittest.TestCase):
         self.assertEqual(run2["round_number"], 2)
         self.assertEqual(run["snapshot"]["rule_policy_version"], 1)
 
+    def test_scan_scope_is_immutable_and_validated(self):
+        library = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "library")
+        self.assertEqual(library["snapshot"]["scan_scope"], "library")
+        source = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "source")
+        self.assertEqual(source["snapshot"]["scan_scope"], "source")
+        self.assertEqual(self.store.list_runs(self.project)[0]["scan_scope"], "source")
+        with self.assertRaises(ValueError):
+            self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "unknown")
+
     def test_last_admin_and_project_isolation(self):
         with self.assertRaises(ValueError):
             self.store.set_subject(self.admin, status="disabled")
@@ -89,6 +98,18 @@ class LinuxPortalStoreTests(unittest.TestCase):
         self.store.complete_run(run["run_id"], result={"findings": []})
         cancelled = self.store.run(run["run_id"])
         self.assertEqual((cancelled["status"], cancelled["stage"], cancelled["result"]), ("cancelled", "cancelled", None))
+        self.assertFalse(Path(self.store.input(self.input_id)["path"]).exists())
+        with self.assertRaises(ValueError):
+            self.store.create_scan(self.admin, self.project, self.input_id, "local", "all")
+
+    def test_recovery_removes_terminal_input_left_by_previous_process(self):
+        run = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all")
+        self.store.complete_run(run["run_id"], result={"findings": []})
+        path = Path(self.store.input(self.input_id)["path"])
+        path.write_text("stale copy", encoding="utf-8")
+        reopened = PortalStore(Path(self.tmp.name) / "portal.sqlite3")
+        self.assertEqual(reopened.recover_incomplete_runs(), [])
+        self.assertFalse(path.exists())
 
 
 class LinuxPortalHttpTests(unittest.TestCase):
@@ -137,6 +158,7 @@ class LinuxPortalHttpTests(unittest.TestCase):
         status, body = self.request("/koda/login?next=https://evil.example")
         self.assertEqual(status, 200)
         self.assertIn("LDAP 계정", body)
+        self.assertIn("<link rel='icon' href='/koda/assets/KODA.ico'>", body)
         self.assertIn("/koda/assets/KODA.ico", body)
         self.assertNotIn("Tracker", body)
         self.assertIn('location="/koda/"', body)
@@ -152,12 +174,58 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertEqual(self.request("/koda/api/v1/projects", headers=self.headers(approved_tracker_user)), (200, []))
         status, admin_page = self.request("/koda/admin/subjects", headers=self.headers())
         self.assertEqual(status, 200)
+        self.assertIn("<link rel='icon' href='/koda/assets/KODA.ico'>", admin_page)
         self.assertIn("/koda/assets/KODA.ico", admin_page)
         self.assertNotIn("Tracker", admin_page.split("</nav>", 1)[0])
         self.assertIn("회원가입과 계정 승인은 KODA-SBOM-Tracker", admin_page)
         self.assertIn("KODA 접근 제어", admin_page)
         self.assertNotIn("<option>pending</option>", admin_page)
         self.assertIn("syncSubject()", admin_page)
+
+    def test_empty_project_pages_explain_onboarding(self):
+        status, body = self.request("/koda/scans/new", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("프로젝트 생성으로 이동", body)
+        status, body = self.request("/koda/projects", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("프로젝트를 생성하면", body)
+
+        viewer = str(uuid.uuid4())
+        viewer_headers = self.headers(viewer, "승인된 사용자")
+        status, body = self.request("/koda/scans/new", headers=viewer_headers)
+        self.assertEqual(status, 200)
+        self.assertIn("KODA 관리자에게 프로젝트 생성 및", body)
+        status, body = self.request("/koda/projects", headers=viewer_headers)
+        self.assertEqual(status, 200)
+        self.assertIn("Tracker 승인 후에도 KODA 관리자가", body)
+        self.assertNotIn("id='create'", body)
+
+    def test_scope_menus_render_independent_scan_pages(self):
+        project = self.server.portal_store.create_project("scope pages", self.admin)
+        target = Path(self.tmp.name) / "scope.py"
+        target.write_text("print('scope')\n", encoding="utf-8")
+        self.server.portal_store.add_input(project, target.name, target, self.admin)
+        status, library = self.request("/koda/scans/library", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("라이브러리 보안취약점 점검", library)
+        self.assertIn("scope=\"library\"", library)
+        self.assertIn("href='/koda/scans/source'", library)
+        status, source = self.request("/koda/scans/source", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("소스코드 보안취약점 점검", source)
+        self.assertIn("scope=\"source\"", source)
+        self.assertIn("href='/koda/scans/library'", source)
+
+    def test_role_policy_labels_screens_and_features_in_korean(self):
+        project = self.server.portal_store.create_project("role labels", self.admin)
+        status, body = self.request(f"/koda/admin/roles?project={project}", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("화면·기능별 역할 권한", body)
+        self.assertIn("프로젝트·결과", body)
+        self.assertIn("라이브러리·소스코드 점검", body)
+        self.assertIn("프로젝트 관리자", body)
+        self.assertIn("value='admin'>프로젝트 관리자", body)
+        self.assertIn("project.view", body)
 
     def test_public_koda_icon_asset(self):
         status, body = self.request("/koda/assets/KODA.ico")
@@ -194,6 +262,7 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertIn("analysis_stages", detail["result"])
         self.assertIn("local_vulnerability", detail["result"]["scan"])
         self.assertIn("queried_components", detail["result"]["scan"]["local_vulnerability"])
+        self.assertFalse(Path(self.server.portal_store.input(uploaded["input_id"])["path"]).exists())
 
     def test_streaming_upload_limit_and_vulnerability_database_status(self):
         _, created = self.request("/koda/api/v1/projects", method="POST", payload={"name": "large input"}, headers=self.headers())
@@ -239,22 +308,22 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertIn("0.99.1", page)
         self.assertIn("2026-08-17", page)
 
-    def test_cancel_retry_and_comparison_exports(self):
+    def test_cancel_and_comparison_exports(self):
         project = self.server.portal_store.create_project("history", self.admin)
-        target = Path(self.tmp.name) / "history.py"
-        target.write_text("print('history')\n", encoding="utf-8")
-        input_id = self.server.portal_store.add_input(project, target.name, target, self.admin)
-        first = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        targets = [Path(self.tmp.name) / name for name in ("history-first.py", "history-second.py", "history-comparison.py")]
+        for target in targets:
+            target.write_text("print('history')\n", encoding="utf-8")
+        input_ids = [self.server.portal_store.add_input(project, target.name, target, self.admin) for target in targets]
+        first = self.server.portal_store.create_scan(self.admin, project, input_ids[0], "local", "all")
         self.server.portal_store.complete_run(first["run_id"], result={"findings": [{"rule_id": "rule.old", "title": "old", "severity": "low", "category": "code", "path": "a.py", "line": 1}]})
-        second = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        second = self.server.portal_store.create_scan(self.admin, project, input_ids[1], "local", "all")
         status, cancelled = self.request(f"/koda/api/v1/runs/{second['run_id']}/cancel", method="POST", payload={}, headers=self.headers())
         self.assertEqual((status, cancelled["status"]), (200, "cancelled"))
         cancelled_comparison = f"left={first['run_id']}&right={second['run_id']}"
         self.assertEqual(self.request(f"/koda/api/v1/compare?{cancelled_comparison}", headers=self.headers())[0], 422)
-        status, retried = self.request(f"/koda/api/v1/runs/{second['run_id']}/retry", method="POST", payload={}, headers=self.headers())
-        self.assertEqual((status, retried["round_number"]), (202, 3))
+        self.assertEqual(self.request(f"/koda/api/v1/runs/{second['run_id']}/retry", method="POST", payload={}, headers=self.headers())[0], 404)
 
-        comparison_run = self.server.portal_store.create_scan(self.admin, project, input_id, "local", "all")
+        comparison_run = self.server.portal_store.create_scan(self.admin, project, input_ids[2], "local", "all")
         self.server.portal_store.complete_run(comparison_run["run_id"], result={"findings": [{"rule_id": "rule.new", "title": "new", "severity": "high", "category": "code", "path": "b.py", "line": 2}]})
         query = f"left={first['run_id']}&right={comparison_run['run_id']}"
         status, page = self.request(f"/koda/compare?{query}", headers=self.headers())
@@ -346,6 +415,8 @@ class LinuxPortalHttpTests(unittest.TestCase):
         self.assertIn(">소스코드</td>", result_page)
         self.assertIn(">비밀정보</td>", result_page)
         self.assertIn(">화면품질</td>", result_page)
+        self.assertNotIn("다시 실행", result_page)
+        self.assertNotIn("/retry", result_page)
 
     def test_completed_run_report_uses_the_shared_windows_cli_renderer(self):
         project = self.server.portal_store.create_project("CLI report", self.admin)

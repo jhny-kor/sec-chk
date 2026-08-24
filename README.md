@@ -33,10 +33,10 @@ python3 -m security_scanner scan --config my-config.json
 | 목적 | 문서 |
 | --- | --- |
 | 전체 문서와 기능별 시작점 | [한국어 문서 인덱스](docs/README.md) |
-| CLI·설정·보고서·CI 사용법 | [CLI 및 로컬 사용법](docs/usage.ko.md) |
-| macOS 설치 | [macOS 설치](docs/install/macos.ko.md) |
-| Linux 설치·운영 | [Linux 설치·운영](docs/install/linux.ko.md) |
-| Windows 설치·빌드 | [Windows 설치](docs/install/windows.ko.md) |
+| CLI·설정·보고서·CI 사용법 | [CLI 및 로컬 사용법](docs/usage.md) |
+| macOS 설치 | [macOS 설치](docs/install/macos.md) |
+| Linux 설치·운영 | [Linux 설치·운영](docs/install/linux.md) |
+| Windows 설치·빌드 | [Windows 설치](docs/install/windows.md) |
 | 폐쇄망 배포 | [폐쇄망 배포 개요](docs/install/offline-delivery.md) |
 | Java SBOM·취약점 점검 | [Java SBOM 점검 런북](docs/security/java-sbom-vulnerability-scan.md) |
 | 보안 연동·VEX·ZAP | [한국어 문서 인덱스의 보안 연동](docs/README.md#보안-점검연동-security) |

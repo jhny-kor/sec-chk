@@ -49,7 +49,7 @@ def cyclonedx_payload(components: tuple[DependencyComponent, ...] | list[Depende
                 "components": [
                     {
                         "type": "application",
-                        "name": "local-security-scanner",
+                        "name": "KODA",
                         "version": __version__,
                     }
                 ]
@@ -159,12 +159,12 @@ def _component_payload(component: DependencyComponent) -> dict[str, object]:
         "scope": component.scope,
         "purl": component.purl,
         "properties": [
-            {"name": "sec-chk:ecosystem", "value": component.ecosystem},
-            {"name": "sec-chk:target", "value": component.target},
-            {"name": "sec-chk:source", "value": component.source},
-            {"name": "sec-chk:path", "value": str(component.path)},
+            {"name": "koda:ecosystem", "value": component.ecosystem},
+            {"name": "koda:target", "value": component.target},
+            {"name": "koda:source", "value": component.source},
+            {"name": "koda:path", "value": str(component.path)},
         ],
     }
     if component.line is not None:
-        payload["properties"].append({"name": "sec-chk:line", "value": str(component.line)})  # type: ignore[index]
+        payload["properties"].append({"name": "koda:line", "value": str(component.line)})  # type: ignore[index]
     return payload

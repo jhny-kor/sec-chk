@@ -10,6 +10,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from .models import SCAN_SCOPE_CATEGORIES
+
 
 DEFAULT_ROLE_PERMISSIONS = {
     "admin": {"project.view", "input.manage", "scan.create", "project.manage"},
@@ -20,6 +22,7 @@ DEFAULT_ROLE_PERMISSIONS = {
 }
 PROJECT_PERMISSIONS = frozenset().union(*DEFAULT_ROLE_PERMISSIONS.values())
 RESERVED_PERMISSIONS = {"system.admin", "subjects.manage", "roles.manage", "rules.manage"}
+TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 class VersionConflict(ValueError):
@@ -288,7 +291,10 @@ class PortalStore:
 
     def list_inputs(self, project_id: str) -> list[dict]:
         with self._db() as db:
-            return [dict(row) for row in db.execute("SELECT * FROM inputs WHERE project_id=? ORDER BY created_at DESC", (str(project_id),))]
+            rows = [dict(row) for row in db.execute("SELECT * FROM inputs WHERE project_id=? ORDER BY created_at DESC", (str(project_id),))]
+        for row in rows:
+            row["available"] = Path(row["path"]).is_file()
+        return rows
 
     def input(self, input_id: str) -> dict:
         with self._db() as db:
@@ -321,8 +327,22 @@ class PortalStore:
             db.execute("COMMIT")
         return {"version": version, "hash": digest, "disabled_rules": json.loads(encoded)}
 
-    def create_scan(self, subject_id: str, project_id: str, input_id: str, standard: str, standard_category: str, **unsafe) -> dict:
-        if unsafe or not isinstance(standard, str) or not isinstance(standard_category, str):
+    def create_scan(
+        self,
+        subject_id: str,
+        project_id: str,
+        input_id: str,
+        standard: str,
+        standard_category: str,
+        scan_scope: str = "all",
+        **unsafe,
+    ) -> dict:
+        if (
+            unsafe
+            or not isinstance(standard, str)
+            or not isinstance(standard_category, str)
+            or scan_scope not in SCAN_SCOPE_CATEGORIES
+        ):
             raise ValueError("unsupported scan options")
         if not self.can(subject_id, project_id, "scan.create"):
             raise PermissionError("project access denied")
@@ -337,6 +357,8 @@ class PortalStore:
             source = db.execute("SELECT * FROM inputs WHERE input_id=? AND project_id=?", (str(input_id), str(project_id))).fetchone()
             if not source:
                 raise KeyError("input not found")
+            if not Path(source["path"]).is_file():
+                raise ValueError("input file is no longer available; upload it again")
             policy = db.execute("SELECT * FROM rule_policies WHERE project_id=? ORDER BY version DESC LIMIT 1", (str(project_id),)).fetchone()
             if not policy:
                 raise KeyError("rule policy not found")
@@ -345,6 +367,7 @@ class PortalStore:
             snapshot = {
                 "input_id": str(input_id), "input_hash": source["content_hash"],
                 "standard": standard, "standard_category": standard_category,
+                "scan_scope": scan_scope,
                 "disabled_rules": disabled_rules, "rule_policy_version": policy["version"],
                 "rule_policy_hash": policy["hash"], "scanner_version": _scanner_version(),
                 "requested_by": str(subject_id),
@@ -398,13 +421,47 @@ class PortalStore:
             )
             self._audit_db(db, actor, "scan.cancel_requested", row["project_id"], {"run_id": str(run_id)})
             db.execute("COMMIT")
-        return self.run(run_id)
+        result = self.run(run_id)
+        if result["status"] == "cancelled":
+            self.cleanup_input_for_run(run_id)
+        return result
 
     def recover_incomplete_runs(self) -> list[str]:
-        with self._db() as db:
+        with self._lock, self._db() as db:
             db.execute("UPDATE scan_runs SET status='cancelled',stage='cancelled',completed_at=? WHERE status IN ('running','cancelling') AND cancel_requested=1", (self._now(),))
             db.execute("UPDATE scan_runs SET status='queued',stage='queued',progress=0 WHERE status IN ('running','cancelling') AND cancel_requested=0")
-            return [row[0] for row in db.execute("SELECT run_id FROM scan_runs WHERE status='queued' ORDER BY created_at")]
+            queued = [row[0] for row in db.execute("SELECT run_id FROM scan_runs WHERE status='queued' ORDER BY created_at")]
+        self.cleanup_terminal_inputs()
+        return queued
+
+    def cleanup_input_for_run(self, run_id: str) -> bool:
+        """Remove a terminal run's source file while retaining its result metadata."""
+        with self._lock:
+            with self._db() as db:
+                run = db.execute("SELECT input_id,status FROM scan_runs WHERE run_id=?", (str(run_id),)).fetchone()
+                if not run or run["status"] not in TERMINAL_RUN_STATUSES:
+                    return False
+                active = db.execute(
+                    "SELECT 1 FROM scan_runs WHERE input_id=? AND status NOT IN ('completed','failed','cancelled') LIMIT 1",
+                    (run["input_id"],),
+                ).fetchone()
+                if active:
+                    return False
+                source = db.execute("SELECT path FROM inputs WHERE input_id=?", (run["input_id"],)).fetchone()
+                if not source:
+                    return False
+                path = Path(source["path"])
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                return False
+            return True
+
+    def cleanup_terminal_inputs(self) -> int:
+        with self._lock:
+            with self._db() as db:
+                run_ids = [row[0] for row in db.execute("SELECT run_id FROM scan_runs WHERE status IN ('completed','failed','cancelled')")]
+            return sum(self.cleanup_input_for_run(run_id) for run_id in run_ids)
 
     def complete_run(self, run_id: str, result: dict | None = None, error: str | None = None) -> None:
         with self._db() as db:
@@ -426,6 +483,7 @@ class PortalStore:
             if row:
                 self._audit_db(db, row["requested_by"], f"scan.{status}", row["project_id"], {"run_id": str(run_id), "error": error or ""})
             db.execute("COMMIT")
+        self.cleanup_input_for_run(run_id)
 
     def run(self, run_id: str) -> dict:
         with self._db() as db:
@@ -441,7 +499,14 @@ class PortalStore:
     def list_runs(self, project_id: str) -> list[dict]:
         with self._db() as db:
             rows = db.execute("SELECT * FROM scan_runs WHERE project_id=? ORDER BY round_number DESC", (str(project_id),))
-            return [{key: value for key, value in dict(row).items() if key not in {"snapshot_json", "result_json"}} for row in rows]
+            runs = []
+            for row in rows:
+                value = dict(row)
+                snapshot = json.loads(value.pop("snapshot_json"))
+                value.pop("result_json", None)
+                value["scan_scope"] = snapshot.get("scan_scope", "all")
+                runs.append(value)
+            return runs
 
     def audit_events(self, limit: int = 100) -> list[dict]:
         with self._db() as db:

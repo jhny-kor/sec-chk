@@ -79,7 +79,7 @@ koda web-audit run --profile profile.json --approval approval.json \
 `plan`은 대상 DNS/IP만 확인하고 트래픽을 보내지 않습니다. `run`은 승인서의
 프로필 hash·origin·현재 IP·만료·서명을 검증하고 승인서를 한 번만 소비합니다.
 자격증명은 `${ENV:NAME}` 또는 환경변수 이름으로만 참조하세요. 프로필 예시와
-21개 상태 판정은 [웹취약점 자동 점검 런북](security/WEB_AUDIT.ko.md)에 있습니다.
+21개 상태 판정은 [웹취약점 자동 점검 런북](security/WEB_AUDIT.md)에 있습니다.
 
 실행 전에는 `--dry-run`으로 승인서·프로필·현재 capability만 확인할 수 있습니다.
 이 모드는 대상 요청을 보내지 않고 nonce도 소비하지 않습니다.

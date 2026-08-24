@@ -119,7 +119,7 @@ TRANSLATIONS = {
         "screen_quality_done": "Screen quality scan complete",
         "screen_quality_note": "Uses only the screen_quality category. Choose a project folder with HTML, JSP, CLX, JS, TS, Vue, or React source.",
         "help_title": "Security Standards Help",
-        "help_intro": "Review each selectable standard, what SecChk checks locally, and links to the official source.",
+        "help_intro": "Review each selectable standard, what KODA checks locally, and links to the official source.",
         "coverage_matrix": "Coverage Matrix",
         "coverage": "Coverage",
         "publication_info": "Issuer / release",
@@ -608,7 +608,7 @@ RULE_TRANSLATIONS_KO = {
     "prevention.ci-security-scan-missing": {
         "title": "CI 보안 점검 워크플로가 없음",
         "description": "CI에서 실행되는 보안 점검 워크플로가 확인되지 않았습니다.",
-        "recommendation": "KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline 같은 보안 점검을 CI에 추가하세요.",
+        "recommendation": "KODA, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline 같은 보안 점검을 CI에 추가하세요.",
     },
     "prevention.env-not-gitignored": {
         "title": ".env 파일이 gitignore로 제외되지 않음",
@@ -1424,7 +1424,7 @@ def render_json(
     payload = {
         "generated_at": _generated_at()[0],
         "language": _labels(language)["html_lang"],
-        "scanner": {"name": "local-security-scanner", "version": __version__},
+        "scanner": {"name": "KODA", "version": __version__},
         "summary": _summary(findings, target_names, target_paths, source_analysis),
         "warnings": list(warnings),
         "components": [component_payload(component) for component in components],
@@ -1538,7 +1538,7 @@ def render_sarif(findings: list[Finding], *, source_analysis: object | None = No
             {
                 "tool": {
                     "driver": {
-                        "name": "local-security-scanner",
+                        "name": "KODA",
                         "semanticVersion": __version__,
                         "rules": [_sarif_rule(finding) for finding in rules_by_id.values()],
                     }
@@ -2841,7 +2841,7 @@ def build_dashboard_payload(
         "components": [component_payload(component) for component in components],
         "sbom": cyclonedx_payload(components),
         "nis_sbom": nis_sbom_payload(components, product_name=target_names[0] if target_names else "KODA scan"),
-        "scanner": {"name": "local-security-scanner", "version": __version__},
+        "scanner": {"name": "KODA", "version": __version__},
         "summary": summary,
         "scan": {
             "kind": kind,

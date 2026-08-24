@@ -21,7 +21,7 @@ DIST_DIR="$REPO_ROOT/dist/macos"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 PKG_UNSIGNED="$DIST_DIR/$APP_NAME-$VERSION-unsigned.pkg"
 PKG_SIGNED="$DIST_DIR/$APP_NAME-$VERSION.pkg"
-ENTRY_POINT="$REPO_ROOT/platforms/macos/scripts/sec-chk-app.py"
+ENTRY_POINT="$REPO_ROOT/platforms/macos/scripts/koda-browser-app.py"
 ICON_FILE="$PACKAGING_DIR/assets/KODA.icns"
 ENTITLEMENTS="$PACKAGING_DIR/KODA.entitlements"
 

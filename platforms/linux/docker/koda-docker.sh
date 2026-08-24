@@ -19,6 +19,16 @@ fi
 dashboard_name="koda-dashboard"
 dashboard_network="koda-dashboard"
 
+dashboard_is_owned() {
+  local offline_label
+  docker container inspect "$dashboard_name" >/dev/null 2>&1 || return 1
+  offline_label="$(docker inspect -f '{{index .Config.Labels "io.koda.offline"}}' "$dashboard_name")"
+  if [ "$offline_label" != true ]; then
+    echo "error: refusing to replace foreign container named $dashboard_name" >&2
+    exit 2
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -206,11 +216,13 @@ dashboard_start() {
     echo "error: dashboard port must be an integer from 1 to 65535: $port" >&2
     exit 2
   fi
-  if docker ps --format '{{.Names}}' | grep -qx "$dashboard_name"; then
-    echo "dashboard already running: http://$bind:$port/security-dashboard.html"
-    return 0
+  if dashboard_is_owned; then
+    if docker ps --format '{{.Names}}' | grep -qx "$dashboard_name"; then
+      echo "dashboard already running: http://$bind:$port/security-dashboard.html"
+      return 0
+    fi
+    docker rm -f "$dashboard_name" >/dev/null
   fi
-  docker rm -f "$dashboard_name" >/dev/null 2>&1 || true
   # A dedicated bridge with IP masquerade disabled: the published port keeps
   # working (DNAT+conntrack) while container-originated egress is unroutable.
   # A --internal network would also disable the published port, so it is not
@@ -283,7 +295,14 @@ case "${1:-}" in
         docker exec "$dashboard_name" /opt/koda/bin/koda portal-bootstrap \
           --tracker-user-id "$2" --db /var/lib/koda/portal.sqlite3
         ;;
-      stop) docker rm -f "$dashboard_name" >/dev/null 2>&1 && echo "dashboard stopped" || echo "dashboard not running" ;;
+      stop)
+        if dashboard_is_owned; then
+          docker rm -f "$dashboard_name" >/dev/null
+          echo "dashboard stopped"
+        else
+          echo "dashboard not running"
+        fi
+        ;;
       *) echo "Usage: koda-docker dashboard start|status|logs|bootstrap|stop" >&2; exit 2 ;;
     esac
     ;;

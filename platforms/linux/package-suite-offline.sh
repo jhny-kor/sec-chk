@@ -93,53 +93,18 @@ cleanup() { rm -rf "$stage_parent" "$archive_tmp"; }
 trap cleanup EXIT
 
 export COPYFILE_DISABLE=1
-mkdir -p "$stage/bundles" "$stage/config" "$stage/gateway"
+mkdir -p "$stage/bundles" "$stage/gateway"
 cp "$koda_bundle" "$stage/bundles/$(basename -- "$koda_bundle")"
 cp "$tracker_bundle" "$stage/bundles/$(basename -- "$tracker_bundle")"
 install -m 0755 "$script_dir/suite/koda-suite" "$stage/koda-suite"
-sed "s/@SUITE_VERSION@/$version/g" "$script_dir/suite/README.ko.md" > "$stage/README.ko.md"
-cp "$script_dir/suite/TROUBLESHOOTING.ko.md" "$stage/TROUBLESHOOTING.ko.md"
+install -m 0755 "$script_dir/suite/reset-install.sh" "$stage/reset-install.sh"
+sed "s/@SUITE_VERSION@/$version/g" "$script_dir/suite/README.md" > "$stage/README.md"
+cp "$script_dir/suite/TROUBLESHOOTING.md" "$stage/TROUBLESHOOTING.md"
 cp "$script_dir/suite/compose.integration.yaml" "$stage/compose.integration.yaml"
 cp "$script_dir/suite/gateway.conf.template" "$stage/gateway/gateway.conf.template"
-{
-  cat "$(CDPATH= cd -- "$(dirname -- "$tracker_verifier")/.." && pwd)/.env.example"
-  cat "$script_dir/suite/koda-suite.env.example"
-  cat <<'EOF'
-
-# KODA dashboard and gateway (same HTTPS origin; Tracker owns the cookie)
-KODA_SSBOM_TRACKER_URL=/
-KODA_CPUS=2
-KODA_MEMORY=4g
-KODA_PIDS_LIMIT=256
-KODA_TMPFS_SIZE=512m
-EOF
-} > "$stage/config/koda-suite.env.example"
-# The two source examples intentionally overlap on a few runtime keys. Keep a
-# single assignment per key in the shipped file; the suite example is appended
-# last so its gateway/security defaults win over Tracker's local-development
-# defaults. Duplicate assignments make shell sourcing order dependent and were
-# the cause of HTTP cookies and browser API addresses silently being overridden.
-python3 - "$stage/config/koda-suite.env.example" <<'PY'
-import pathlib
-import re
-import sys
-
-path = pathlib.Path(sys.argv[1])
-lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-positions = {}
-result = []
-assignment = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=")
-for line in lines:
-    match = assignment.match(line)
-    if match:
-        key = match.group(1)
-        if key in positions:
-            result[positions[key]] = line
-            continue
-        positions[key] = len(result)
-    result.append(line)
-path.write_text("".join(result), encoding="utf-8")
-PY
+cp "$(CDPATH= cd -- "$(dirname -- "$tracker_verifier")/.." && pwd)/.env.example" \
+  "$stage/.env.example"
+cp "$script_dir/suite/koda-suite.env.example" "$stage/koda-suite.env.example"
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$stage/"
 
 koda_revision="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -154,10 +119,8 @@ if [[ "$koda_dirty" == true || "$tracker_dirty" == true ]]; then
     || fail "production suite archives require clean KODA and Tracker worktrees; set KODA_SUITE_ALLOW_DIRTY=1 for an explicit snapshot."
 fi
 tracker_vuln_bundle="$(tar -xzOf "$tracker_bundle" ./metadata.env 2>/dev/null | awk -F= '$1 == "VULNERABILITY_BUNDLE" { print $2; exit }')"
-case "$tracker_vuln_bundle" in
-  included|absent) ;;
-  *) fail "Tracker metadata has an invalid VULNERABILITY_BUNDLE value." ;;
-esac
+[[ "$tracker_vuln_bundle" == included ]] \
+  || fail "Tracker release must include fresh vulnerability data for destructive reset installs."
 
 cat > "$stage/metadata.env" <<EOF
 SUITE_VERSION=$version
@@ -201,7 +164,7 @@ for path in sorted(root.rglob("*")):
 manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
-tar -C "$stage_parent" -cf - "$package_name" | gzip -1 > "$archive_tmp"
+tar --no-xattrs -C "$stage_parent" -cf - "$package_name" | gzip -1 > "$archive_tmp"
 mv "$archive_tmp" "$output"
 python3 - "$output" <<'PY'
 import hashlib

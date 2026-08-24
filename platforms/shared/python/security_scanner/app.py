@@ -16,7 +16,7 @@ def run_app(
     open_browser: bool = True,
     port_attempts: int = 20,
 ) -> int:
-    display_name = environ.get("KODA_DISPLAY_NAME", "SecChk")
+    display_name = environ.get("KODA_DISPLAY_NAME", "KODA")
     resolved_port, server = _create_available_server(host, port, language, port_attempts)
     url = dashboard_url(host, resolved_port)
     print(f"{display_name} is running: {url}")

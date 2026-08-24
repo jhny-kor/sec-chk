@@ -18,7 +18,7 @@ from .archive_input import prepare_input_target
 from .config import expand_path
 from .dependency_inventory import queryable_osv_components
 from .grype_adapter import GrypeMatch, inspect_grype, run_grype_purls
-from .models import CATEGORIES, DEFAULT_CATEGORIES, SEVERITIES, Finding, ScannerConfig, TargetConfig
+from .models import CATEGORIES, DEFAULT_CATEGORIES, SCAN_SCOPE_CATEGORIES, SEVERITIES, Finding, ScannerConfig, TargetConfig
 from .reporting import (
     build_dashboard_payload,
     build_rule_catalog,
@@ -99,6 +99,7 @@ def scan_directory_payload(
     disabled_rules: tuple[str, ...] = (),
     allow_file: bool = False,
     display_path: str | None = None,
+    scan_scope: str | None = None,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -107,6 +108,13 @@ def scan_directory_payload(
         raise ValueError(f"Unsupported categories: {', '.join(unknown_categories)}")
     standard_selection = resolve_standard_selection(standard, standard_category, categories)
     scanner_categories = standard_selection.scanner_categories
+    if scan_scope is not None:
+        if scan_scope not in SCAN_SCOPE_CATEGORIES:
+            raise ValueError(f"Unsupported scan scope: {scan_scope}")
+        allowed_categories = set(SCAN_SCOPE_CATEGORIES[scan_scope])
+        scanner_categories = tuple(category for category in scanner_categories if category in allowed_categories)
+        if not scanner_categories:
+            raise ValueError(f"Selected standard has no checks for the {scan_scope} scan")
     if include_host and standard_selection.standard != "sw-dev-security-49" and "host" not in scanner_categories:
         scanner_categories = scanner_categories + ("host",)
     if discovery_depth is not None and discovery_depth < 0:
@@ -192,6 +200,7 @@ def scan_directory_payload(
     )
     payload["scan"]["enable_local_vulnerabilities"] = enable_local_vulnerabilities
     payload["scan"]["local_vulnerability"] = local_vulnerability
+    payload["scan"]["scope"] = scan_scope or "all"
     return _replace_upload_path(payload, str(target_path.resolve()), display_path) if display_path else payload
 
 
@@ -668,7 +677,7 @@ def _handler(language: str):
     initial_html = render_html([], language=language)
 
     class DashboardHandler(BaseHTTPRequestHandler):
-        server_version = "SecChkDashboard/0.1"
+        server_version = "KODADashboard/0.1"
 
         def do_GET(self) -> None:
             path = urlparse(self.path).path

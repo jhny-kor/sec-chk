@@ -48,7 +48,7 @@ def cyclonedx_vex_payload(findings: list[Finding]) -> dict[str, object]:
                 "components": [
                     {
                         "type": "application",
-                        "name": "local-security-scanner",
+                        "name": "KODA",
                         "version": __version__,
                     }
                 ]

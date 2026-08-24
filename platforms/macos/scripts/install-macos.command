@@ -3,13 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 REPO_DIR="${SCRIPT_DIR:h:h:h}"
-INSTALL_ROOT="${SEC_CHK_INSTALL_ROOT:-$HOME/Library/Application Support/SecChk}"
+INSTALL_ROOT="${KODA_INSTALL_ROOT:-${SEC_CHK_INSTALL_ROOT:-$HOME/Library/Application Support/KODA}}"
 APP_DIR="$INSTALL_ROOT/app"
 VENV_DIR="$INSTALL_ROOT/.venv"
-LAUNCHER_DIR="${SEC_CHK_LAUNCHER_DIR:-$HOME/Applications}"
-LAUNCHER_PATH="$LAUNCHER_DIR/SecChk.command"
-CLI_LAUNCHER_PATH="$LAUNCHER_DIR/SecChk-CLI.command"
-UNINSTALL_PATH="$INSTALL_ROOT/Uninstall-SecChk.command"
+LAUNCHER_DIR="${KODA_LAUNCHER_DIR:-${SEC_CHK_LAUNCHER_DIR:-$HOME/Applications}}"
+LAUNCHER_PATH="$LAUNCHER_DIR/KODA.command"
+CLI_LAUNCHER_PATH="$LAUNCHER_DIR/KODA-CLI.command"
+UNINSTALL_PATH="$INSTALL_ROOT/Uninstall-KODA.command"
 
 find_python() {
   local candidates=()
@@ -39,7 +39,7 @@ if [[ -z "$PYTHON_CMD" ]]; then
   exit 1
 fi
 
-echo "Installing SecChk to $INSTALL_ROOT"
+echo "Installing KODA to $INSTALL_ROOT"
 mkdir -p "$INSTALL_ROOT" "$LAUNCHER_DIR"
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
@@ -75,24 +75,24 @@ cat > "$LAUNCHER_PATH" <<EOF
 #!/bin/zsh
 set -u
 
-SEC_CHK_ROOT="$INSTALL_ROOT"
-SEC_CHK_APP="$APP_DIR"
-SEC_CHK_PY="$VENV_DIR/bin/python"
+KODA_ROOT="$INSTALL_ROOT"
+KODA_APP="$APP_DIR"
+KODA_PY="$VENV_DIR/bin/python"
 
-if [[ ! -x "\$SEC_CHK_PY" ]]; then
-  echo "SecChk Python environment was not found."
+if [[ ! -x "\$KODA_PY" ]]; then
+  echo "KODA Python environment was not found."
   echo "Run install-macos.command again."
   read -r "?Press Enter to close."
   exit 1
 fi
 
-export PYTHONPATH="\$SEC_CHK_APP\${PYTHONPATH:+:\$PYTHONPATH}"
+export PYTHONPATH="\$KODA_APP\${PYTHONPATH:+:\$PYTHONPATH}"
 cd "\$HOME"
-"\$SEC_CHK_PY" -m security_scanner app "\$@"
+"\$KODA_PY" -m security_scanner app "\$@"
 status=\$?
 if [[ "\$status" -ne 0 ]]; then
   echo
-  echo "SecChk stopped with exit code \$status."
+  echo "KODA stopped with exit code \$status."
   read -r "?Press Enter to close."
 fi
 exit "\$status"
@@ -103,23 +103,23 @@ cat > "$CLI_LAUNCHER_PATH" <<EOF
 #!/bin/zsh
 set -u
 
-SEC_CHK_APP="$APP_DIR"
-SEC_CHK_PY="$VENV_DIR/bin/python"
+KODA_APP="$APP_DIR"
+KODA_PY="$VENV_DIR/bin/python"
 
-if [[ ! -x "\$SEC_CHK_PY" ]]; then
-  echo "SecChk Python environment was not found."
+if [[ ! -x "\$KODA_PY" ]]; then
+  echo "KODA Python environment was not found."
   echo "Run install-macos.command again."
   exit 1
 fi
 
-export PYTHONPATH="\$SEC_CHK_APP\${PYTHONPATH:+:\$PYTHONPATH}"
-"\$SEC_CHK_PY" -m security_scanner "\$@"
+export PYTHONPATH="\$KODA_APP\${PYTHONPATH:+:\$PYTHONPATH}"
+"\$KODA_PY" -m security_scanner "\$@"
 exit \$?
 EOF
 chmod +x "$CLI_LAUNCHER_PATH"
 
 echo
-echo "SecChk was installed successfully."
+echo "KODA was installed successfully."
 echo "Run it from:"
 echo "  $LAUNCHER_PATH"
 echo

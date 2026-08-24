@@ -30,7 +30,7 @@ nvd_end_year=2026                                  ← 포함된 마지막 NVD �
 
 * **인터넷에 연결된 빌드 PC** (Windows, macOS 또는 Linux). NVD·CISA에서 자료를
   내려받아야 하므로 폐쇄망 서버에서는 만들 수 없습니다.
-* 이 저장소(sec-chk) 체크아웃.
+* KODA 저장소 체크아웃.
 * Windows: PowerShell 5.1 또는 PowerShell 7. Python, Docker, Inno Setup은
   필요하지 않습니다.
 * macOS/Linux: Python 3, curl. (저장소 빌드 환경에 이미 있습니다.)
@@ -63,7 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 #### macOS/Linux에서 생성
 
 ```bash
-cd /path/to/sec-chk
+cd /path/to/koda
 bash platforms/linux/package-offline.sh --vuln-data-only
 ```
 
@@ -74,7 +74,7 @@ bash platforms/linux/package-offline.sh --vuln-data-only
 
 ```text
 sha256=def5781460d0377066fb66d091cf978ea0a37fb49361478a568d694fb4e7f679
-/path/to/sec-chk/dist/Windows/koda-vuln-data-2026-07-18.zip
+/path/to/koda/dist/Windows/koda-vuln-data-2026-07-18.zip
 ```
 
 파일명의 날짜는 빌드한 날(UTC)입니다. 출력된 **SHA-256을 따로 기록**해 두십시오

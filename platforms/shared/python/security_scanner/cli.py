@@ -1191,7 +1191,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 @contextmanager
 def _build_scan_config_context(args: argparse.Namespace):
-    with tempfile.TemporaryDirectory(prefix="sec-chk-inputs-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="koda-inputs-") as temp_dir:
         yield _build_scan_config(args, archive_extract_root=Path(temp_dir))
 
 

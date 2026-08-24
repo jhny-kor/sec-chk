@@ -237,7 +237,7 @@ def check_project(root: Path, files: Iterable[Path], target: TargetConfig) -> li
                 "CI security scan is not configured",
                 ".github/workflows",
                 "No recognized security scan workflow found",
-                "Add a CI job for KODA/SecChk, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline, or a similar security scanner.",
+                "Add a CI job for KODA, CodeQL, Semgrep, OSV, Trivy, Gitleaks, ZAP baseline, or a similar security scanner.",
             )
         )
 

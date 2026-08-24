@@ -44,7 +44,7 @@ HTML과 Markdown은 현재 한국어로 생성되며 `--language`는 `ko`만 지
 ## KODA + KODA SBOM Tracker 통합 포털
 
 서버에서 로그인·계정·역할·분석 회차 화면이 필요하면 단독 tarball 대신
-[통합 폐쇄망 설치본](suite/README.ko.md)을 사용합니다. 통합본은 Tracker 계정과
+[통합 폐쇄망 설치본](suite/README.md)을 사용합니다. 통합본은 Tracker 계정과
 로그아웃 세션을 공유하고 KODA 권한은 별도로 관리하며, KODA의 8765 포트를
 호스트에 공개하지 않습니다.
 

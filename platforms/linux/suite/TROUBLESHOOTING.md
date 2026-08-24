@@ -87,9 +87,10 @@ bash -n /home/user0/koda-suite/tracker/.env
 ```bash
 chmod 600 /home/user0/koda/koda-suite.env
 VERSION=0.1.0
-"/home/user0/koda/koda-suite-offline-x86_64-${VERSION}/koda-suite" install \
-  --env-file /home/user0/koda/koda-suite.env \
-  --prefix /home/user0/koda-suite
+cd "/home/user0/koda/koda-suite-offline-x86_64-${VERSION}"
+cp /home/user0/koda/.env ./.env
+cp /home/user0/koda/koda-suite.env ./koda-suite.env
+./reset-install.sh --delete-all-koda-data --prefix /home/user0/koda-suite
 ```
 
 ### `tar: Ignoring unknown extended header keyword LIBARCHIVE.xattr...`
@@ -103,7 +104,7 @@ macOS가 붙인 확장 속성 경고입니다. 그 뒤 `./koda-suite verify`가 
 
 구형 `koda-suite`의 Linux awk 호환성 경고입니다. 서비스 장애 메시지는 아니지만
 구형 launcher를 사용 중이라는 뜻입니다. 설치 디렉터리의 launcher만 임의 수정하지
-말고 최신 통합 압축파일을 같은 prefix에 덮어 설치합니다.
+말고 최신 통합 압축파일의 `reset-install.sh` 또는 검증된 그룹 `patch`를 사용합니다.
 
 ### `bash: [: missing ']'` 또는 `command not found`
 
@@ -120,8 +121,9 @@ macOS가 붙인 확장 속성 경고입니다. 그 뒤 `./koda-suite verify`가 
 ```bash
 VERSION=0.1.0
 cd "/home/user0/koda/koda-suite-offline-x86_64-${VERSION}"
-cp config/koda-suite.env.example ./koda-suite.env
-chmod 600 ./koda-suite.env
+cp .env.example ./.env
+cp koda-suite.env.example ./koda-suite.env
+chmod 600 ./.env ./koda-suite.env
 vi ./koda-suite.env
 ```
 
@@ -207,6 +209,50 @@ docker compose --project-directory "$PREFIX/tracker" \
   up -d --no-build --pull never --force-recreate gateway portal-api
 ```
 
+### KODA 입력 업로드에서 `503 authentication service unavailable`
+
+KODA 애플리케이션의 파일 형식 오류는 `422`, 용량 초과는 `413`으로 응답합니다.
+47바이트 JSON `{"detail":"authentication service unavailable"}`가 보이면 gateway의
+인증 subrequest가 실패했거나, 구형 gateway가 대용량 요청의 기본 60초 timeout을
+초과한 것입니다. 최신 통합본의 `/koda/api/`에는 1시간 body·proxy timeout과
+`proxy_request_buffering off`가 있으므로 gateway 설정과 이미지를 함께 교체합니다.
+새 통합 압축파일을 푼 디렉터리에서 다음처럼 gateway 그룹만 교체할 수 있습니다.
+
+```bash
+cd /home/user0/koda/koda-suite-offline-x86_64-<새버전>
+./koda-suite verify
+./koda-suite patch --group gateway --prefix /home/user0/koda-suite
+```
+
+```bash
+docker compose --project-directory "$PREFIX/tracker" \
+  --env-file "$ENV_FILE" \
+  -f "$PREFIX/tracker/compose.yaml" \
+  -f "$PREFIX/tracker/compose.airgap.yaml" \
+  -f "$PREFIX/tracker/compose.integration.yaml" \
+  exec gateway nginx -T 2>/dev/null \
+  | grep -E 'client_body_timeout|proxy_(connect|send|read)_timeout|proxy_request_buffering'
+```
+
+외부 TLS reverse proxy를 별도로 사용하는 경우에도 `/koda/api/` location에 아래
+설정을 추가합니다. 외부 proxy가 60초에 끊기면 내부 gateway 설정만으로는 고칠 수
+없습니다.
+
+```nginx
+location ^~ /koda/api/ {
+    client_max_body_size 1g;
+    client_body_timeout 1h;
+    proxy_connect_timeout 30s;
+    proxy_send_timeout 1h;
+    proxy_read_timeout 1h;
+    proxy_request_buffering off;
+    proxy_pass http://127.0.0.1:8088;
+}
+```
+
+인증 subrequest 장애를 우회하기 위해 쿠키 검사나 `auth_request`를 제거하지
+않습니다. 인증이 실제로 중단된 경우에는 보안상 업로드를 거부해야 합니다.
+
 ## 5. KODA 화면·로그인·권한
 
 ### 로그인 후 `접근 대기`, 계정 식별자(UUID)가 표시됨
@@ -224,11 +270,12 @@ cd /home/user0/koda-suite
 KODA 최초 시스템 관리자 bootstrap은 설치 시 한 번만 필요합니다. 일반 사용자는
 Tracker 승인 후 자동 활성화되고, KODA 관리자는 프로젝트 역할만 별도로 배정합니다.
 
-### LDAP 체크 후 `501 ldap_not_configured`
+### LDAP 체크 후 `503 ldap_not_configured` 또는 LDAP 연결 오류
 
-현재 LDAP 체크박스는 향후 연동용이며 실제 LDAP 인증은 구현되지 않았습니다.
-로컬 Tracker 계정으로 로그인합니다. LDAP 실패 후 로컬 비밀번호로 자동 fallback
-하지 않는 것이 정상입니다.
+LDAP은 Tracker 관리자의 `설정 → LDAP 로그인`에서 먼저 활성화해야 합니다. 서버·bind
+DN·검색 기준 DN·TLS/CA·속성·그룹 매핑을 확인하고, `TRACKER_LDAP_ENCRYPTION_KEY`가
+portal-api 컨테이너에 전달되는지 확인합니다. LDAP 실패 후 로컬 비밀번호로 자동
+fallback되지 않으며, 통합 KODA는 Tracker의 검증된 세션을 사용합니다.
 
 ### KODA 웹에서 라이브러리 취약점이 0건
 
@@ -265,6 +312,11 @@ curl -I http://127.0.0.1:8088/dependency-track/static/config.json
 HTML이 참조하는 `js/app.*.js`, `css/app.*.css`도 200이어야 합니다.
 `static/config.json`이 404이면 구형 gateway가 public prefix를 제거하지 못한
 것입니다. 최신 통합본의 gateway를 사용합니다.
+
+구형 통합본에서 `DTRACK_BASE_PATH=/dependency-track`를 frontend에 그대로 넘기면
+`<base href=/dependency-track>`가 되어 JS가 `/js/...`로 요청될 수 있습니다. 이때는
+`tracker/compose.yaml`의 frontend `BASE_PATH`에만 `/`를 추가한 뒤 frontend와
+gateway를 재생성합니다. 새 통합본에서는 이 보정이 포함됩니다.
 
 `static/config.json`이 200이어도 `API_BASE_URL`이 `localhost`이면 원격 PC는 자기
 PC의 8088로 접속하므로 로그인 요청이 `ERR_CONNECTION_REFUSED`가 됩니다. `.env`를
@@ -382,12 +434,13 @@ done
 
 출력이 없으면 현재 컨테이너가 그 이미지로 생성되지 않았다는 뜻일 뿐, 다른
 Compose 파일이나 향후 재기동이 참조하지 않는다는 보장은 아닙니다. KODA reset이
-목적이면 [README의 테스트 설치 완전 초기화](README.ko.md#테스트-설치를-완전히-초기화할-때)에
+목적이면 [README의 테스트 설치 완전 초기화](README.md#테스트-설치를-완전히-초기화할-때)에
 기재된 정확한 제품 컨테이너·volume만 제거합니다.
 
-기존 `/home/user0/koda-suite`는 새 설치 검증 전에는 삭제하지 않습니다. 업데이트는
-동일 prefix 덮어 설치로 수행하고, 전체 초기화가 필요하면 먼저 README의 백업
-절차로 KODA portal 디렉터리와 Tracker/Dependency-Track volume을 보관합니다.
+전체 초기화는 복구할 데이터가 없다는 것을 확인한 테스트 환경에서만
+`reset-install.sh --delete-all-koda-data`로 수행합니다. 이 경로는 백업 없이 기존
+prefix와 KODA 소유 volume을 삭제합니다. 데이터를 보존해야 하면 그룹 `patch`만
+사용합니다.
 
 ## 9. 정상 완료 체크리스트
 
@@ -400,4 +453,4 @@ Compose 파일이나 향후 재기동이 참조하지 않는다는 보장은 아
 - `verify-dtrack-connection.sh`가 키와 최소 권한을 확인한다.
 - 테스트 SBOM 한 건이 오프라인 분석과 Dependency-Track 전송 모두 완료된다.
 - 로그아웃 후 Tracker와 KODA 보호 화면이 모두 다시 로그인을 요구한다.
-- 백업과 이전 릴리스는 새 설치 검증이 끝날 때까지 보존한다.
+- 초기화 전에 `.env`와 `koda-suite.env`를 새 릴리스 루트에 복사했다.
