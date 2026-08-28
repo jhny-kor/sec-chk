@@ -1792,6 +1792,7 @@ def render_html_pair_zip_from_payload(payload: dict[str, object], language: str 
     standard_category = str(scan.get("standard_category") or DEFAULT_STANDARD_CATEGORY)
     raw_warnings = scan.get("warnings")
     warnings = tuple(str(item) for item in raw_warnings if str(item).strip()) if isinstance(raw_warnings, (list, tuple)) else ()
+    kind = "library" if scan.get("scope") == "library" else str(scan.get("kind") or "source")
     main_html, detail_html = render_html_pair(
         findings,
         target_names=target_names,
@@ -1801,7 +1802,7 @@ def render_html_pair_zip_from_payload(payload: dict[str, object], language: str 
         summary_href=None,
         components=components,
         scan_path=str(scan.get("path") or ", ".join(target_paths.values())),
-        kind=str(scan.get("kind") or "source"),
+        kind=kind,
         standard=standard,
         standard_category=standard_category,
         warnings=warnings,
@@ -1997,6 +1998,15 @@ def render_xlsx(payload: dict[str, object], language: str = "ko") -> bytes:
             sw49_rows.append([row_data[key] for key in _SW49_COLUMN_KEYS])
         sheets.append(("SW49", sw49_rows))
 
+    return _render_xlsx_sheets(sheets)
+
+
+def render_rows_xlsx(sheet_name: str, rows: list[list[object]]) -> bytes:
+    """Render ordinary tabular rows with the report writer's minimal XLSX package."""
+    return _render_xlsx_sheets([(sheet_name, rows)])
+
+
+def _render_xlsx_sheets(sheets: list[tuple[str, list[list[object]]]]) -> bytes:
     def _sheet_xml(sheet_rows_data: list[list[object]]) -> str:
         sheet_rows = []
         for r_index, row in enumerate(sheet_rows_data, start=1):
@@ -2324,6 +2334,7 @@ def render_html_pair(
     # detail artifact, while the detail page remains independently openable.
     report_language = "ko"
     main_html = _render_html_main(payload, report_language, detail_href)
+    report_mode = "LIBRARY VULNERABILITY REPORT" if kind == "library" else "STATIC ANALYSIS REPORT"
     main_html = main_html.replace(
         '<section class="source-summary-panel">',
         f'{_source_main_filter_markup(payload, report_language)}<section class="source-summary-panel">',
@@ -2342,7 +2353,7 @@ def render_html_pair(
         1,
     ).replace(
         '</div><section class="koda-main-hero">',
-        '<span class="report-mode">STATIC ANALYSIS REPORT</span></div></header><section class="koda-main-hero">',
+        f'<span class="report-mode">{report_mode}</span></div></header><section class="koda-main-hero">',
         1,
     )
     detail_html = _render_html_detail(payload, report_language).replace(
@@ -2356,7 +2367,7 @@ def render_html_pair(
     )
     detail_html = re.sub(
         r'<header class="report-head"><div><small>(.*?)</small><h1>(.*?)</h1></div><span class="external-classification-badge">대외 비공개</span></header>',
-        r'<header class="report-brand"><div class="brand"><span class="source-detail-mark" aria-hidden="true">K</span><span class="brand-copy"><strong>KODA</strong><span>Korean On-Device Auditor</span></span></div><div class="report-header-actions"><span class="report-mode">STATIC ANALYSIS REPORT</span><span class="external-classification-badge">대외 비공개</span></div></header><div class="report-head-title"><small>\1</small><h1>\2</h1></div>',
+        rf'<header class="report-brand"><div class="brand"><span class="source-detail-mark" aria-hidden="true">K</span><span class="brand-copy"><strong>KODA</strong><span>Korean On-Device Auditor</span></span></div><div class="report-header-actions"><span class="report-mode">{report_mode}</span><span class="external-classification-badge">대외 비공개</span></div></header><div class="report-head-title"><small>\1</small><h1>\2</h1></div>',
         detail_html,
         count=1,
         flags=re.DOTALL,
@@ -2503,8 +2514,9 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
             break
 
     is_ko = language == "ko"
-    title = "소스 보안 분석 요약" if is_ko else "Source Security Scan Summary"
-    eyebrow = "KODA · 정적 분석" if is_ko else "KODA · STATIC ANALYSIS"
+    is_library = scan.get("kind") == "library"
+    title = ("라이브러리 취약점 분석 요약" if is_ko else "Library Vulnerability Summary") if is_library else ("소스 보안 분석 요약" if is_ko else "Source Security Scan Summary")
+    eyebrow = ("KODA · 라이브러리 취약점" if is_ko else "KODA · LIBRARY VULNERABILITY") if is_library else ("KODA · 정적 분석" if is_ko else "KODA · STATIC ANALYSIS")
     intro = "요약을 확인한 뒤 전체 취약점과 근거는 상세 보고서에서 확인하세요." if is_ko else "Review the summary first, then open the detailed findings and evidence."
     target_text = "대상" if is_ko else "Target"
     standard_text = "기준" if is_ko else "Standard"
@@ -2539,12 +2551,14 @@ def _render_html_main(payload: dict[str, object], language: str, detail_href: st
     critical_count = by_severity.get("critical", 0)
     high_count = by_severity.get("high", 0)
     if is_ko:
-        priority = f"우선 조치: 치명 {_format_main_count(critical_count)}건 · 높음 {_format_main_count(high_count)}건. 상세 보고서에서 파일 위치, 문제행 문맥과 수정 방법을 확인하세요."
+        detail_hint = "구성요소, 취약점 식별자와 조치 방법" if is_library else "파일 위치, 문제행 문맥과 수정 방법"
+        priority = f"우선 조치: 치명 {_format_main_count(critical_count)}건 · 높음 {_format_main_count(high_count)}건. 상세 보고서에서 {detail_hint}을 확인하세요."
     else:
-        priority = f"Priority action: {_format_main_count(critical_count)} Critical · {_format_main_count(high_count)} High. Use the detailed report for file locations, source context, and remediation guidance."
+        detail_hint = "components, vulnerability identifiers, and remediation guidance" if is_library else "file locations, source context, and remediation guidance"
+        priority = f"Priority action: {_format_main_count(critical_count)} Critical · {_format_main_count(high_count)} High. Use the detailed report for {detail_hint}."
     findings = _source_report_findings(payload, language)
-    summary_heading = "소스 취약점 요약" if is_ko else "Source finding summary"
-    summary_intro = "문맥 확인 결과와 추가 검토가 필요한 후보를 구분한 파일·행·규칙별 결과입니다." if is_ko else "Results by file, line, and rule, separating context-confirmed findings from review candidates."
+    summary_heading = ("라이브러리 취약점 요약" if is_ko else "Library vulnerability summary") if is_library else ("소스 취약점 요약" if is_ko else "Source finding summary")
+    summary_intro = ("구성요소·버전·취약점 식별자별 결과입니다." if is_ko else "Results by component, version, and vulnerability identifier.") if is_library else ("문맥 확인 결과와 추가 검토가 필요한 후보를 구분한 파일·행·규칙별 결과입니다." if is_ko else "Results by file, line, and rule, separating context-confirmed findings from review candidates.")
     table_headers = (
         ("심각도", "규칙", "위치", "발견 내용", "기준")
         if is_ko
@@ -2746,12 +2760,14 @@ def _render_html_detail(payload: dict[str, object], language: str) -> str:
     is_ko = language == "ko"
     findings = _source_report_findings(payload, language)
     scan = payload.get("scan") if isinstance(payload.get("scan"), dict) else {}
-    title = "소스코드 취약점 상세" if is_ko else "Source Code Vulnerability Detail"
+    is_library = scan.get("kind") == "library"
+    title = ("라이브러리 취약점 상세" if is_ko else "Library Vulnerability Detail") if is_library else ("소스코드 취약점 상세" if is_ko else "Source Code Vulnerability Detail")
+    report_context = "KODA · LIBRARY VULNERABILITY" if is_library else "KODA · STATIC ANALYSIS"
     problem = "문제 설명" if is_ko else "Problem description"
     evidence_label = "탐지 근거" if is_ko else "Evidence"
     remediation = "조치 방법" if is_ko else "Remediation"
-    context_label = "소스 문맥" if is_ko else "Source context"
-    unavailable = "소스 문맥을 표시할 수 없습니다." if is_ko else "Source context is unavailable for this finding."
+    context_label = ("구성요소 근거" if is_ko else "Component evidence") if is_library else ("소스 문맥" if is_ko else "Source context")
+    unavailable = ("추가 구성요소 근거가 없습니다." if is_ko else "No additional component evidence is available.") if is_library else ("소스 문맥을 표시할 수 없습니다." if is_ko else "Source context is unavailable for this finding.")
     all_locations = "전체 위치" if is_ko else "All locations"
     cards: list[str] = []
     location_options = sorted({_source_location(item).rsplit(":", 1)[0] for item in findings})
@@ -2792,7 +2808,7 @@ def _render_html_detail(payload: dict[str, object], language: str) -> str:
     return f'''<!doctype html><html lang="{html.escape(language, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>{html.escape(title)}</title><style>
 main{{max-width:1560px!important;padding:28px!important}}.language-buttons{{display:none!important}}
 :root{{--ink:#10233f;--muted:#60708a;--line:#dce4ee;--brand:#1368e8;--critical:#b42318;--high:#c64b09;--medium:#886100;--low:#246b49}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f7fb;color:var(--ink);font:15px/1.6 Inter,Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}main{{max-width:1000px;margin:auto;padding:32px 22px 64px}}.report-head{{display:flex;align-items:center;gap:12px;margin-bottom:20px}}.report-head h1{{margin:0;font-size:clamp(28px,5vw,46px)}}.external-classification-badge{{margin-left:auto;padding:7px 14px;border:2px solid #ef4444;border-radius: 0;color:#b42318;background: none;font-weight:900}}.toolbar{{display:grid;grid-template-columns:1fr 170px 220px auto;gap:10px;margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fff}}input,select{{min-height:40px;border:1px solid #cbd6e5;border-radius:9px;padding:0 11px;background:#fff}}.finding{{margin:16px 0;padding:24px;border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(15,35,64,.05)}}.finding[hidden]{{display:none}}.finding header{{display:flex;justify-content:space-between;gap:14px}}.finding h2{{margin:14px 0 4px;font-size:22px}}.finding h3{{margin:18px 0 6px;font-size:14px}}.location,.unavailable,.standards{{color:var(--muted)}}.standards{{white-space:pre-line}}.source-severity{{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}}.source-severity--critical{{color:var(--critical);background:#fff0ee}}.source-severity--high{{color:var(--high);background:#fff4e8}}.source-severity--medium{{color:var(--medium);background:#fff8d8}}.source-severity--low,.source-severity--info{{color:var(--low);background:#ecfdf3}}pre,.source-context{{overflow:auto;padding:14px;border-radius:10px;background:#0d1b2e;color:#dce8f8}}pre{{white-space:pre-wrap}}.source-code-line{{display:grid;grid-template-columns:48px 1fr;gap:12px;padding:2px 8px}}.source-code-line span{{color:#7890ad;text-align:right}}.source-code-line code{{color:inherit;white-space:pre}}.source-code-line--focus{{background:#46350e;outline:1px solid #d6a514}}@media(max-width:760px){{.toolbar{{grid-template-columns:1fr}}.report-head{{align-items:flex-start;flex-wrap:wrap}}.external-classification-badge{{margin-left:0}}}}
-</style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>KODA · STATIC ANALYSIS · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비공개</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select></div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section></main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script></body></html>'''
+</style></head><body><main data-standard="{html.escape(str(scan.get('standard') or DEFAULT_STANDARD), quote=True)}"><header class="report-head"><div><small>{report_context} · {html.escape(str(scan.get('standard') or DEFAULT_STANDARD))}</small><h1>{html.escape(title)}</h1></div><span class="external-classification-badge">대외 비공개</span><div class="language-buttons"><button id="lang-ko" type="button">한국어</button><button id="lang-en" type="button">English</button></div></header><div class="toolbar"><input id="query" type="search" placeholder="{'검색' if is_ko else 'Search findings'}"><select id="severity"><option value="">{'전체 심각도' if is_ko else 'All severities'}</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select><select id="location"><option value="">{html.escape(all_locations)}</option>{options}</select></div><p><span id="visibleCount">{len(findings)}</span> / {len(findings)}</p><section id="findings">{cards_html}</section></main><script>(function(){{const q=document.getElementById('query'),s=document.getElementById('severity'),l=document.getElementById('location'),c=document.getElementById('visibleCount');function filter(){{let visible=0;document.querySelectorAll('.finding').forEach(card=>{{const hidden=(q.value&&!card.dataset.search.includes(q.value.toLowerCase()))||(s.value&&card.dataset.severity!==s.value)||(l.value&&card.dataset.location!==l.value);card.hidden=hidden;if(!hidden)visible++;}});c.textContent=visible;}}[q,s,l].forEach(control=>{{control.addEventListener('input',filter);control.addEventListener('change',filter);}});}})();</script></body></html>'''
 
 
 def _format_main_count(value: object) -> str:

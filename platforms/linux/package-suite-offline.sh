@@ -113,7 +113,7 @@ tracker_revision="$(git -C "$tracker_root" rev-parse HEAD 2>/dev/null || echo un
 koda_dirty=false
 tracker_dirty=false
 [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no 2>/dev/null)" ]] && koda_dirty=true
-[[ -n "$(git -C "$tracker_root" status --porcelain 2>/dev/null)" ]] && tracker_dirty=true
+[[ -n "$(git -C "$tracker_root" status --porcelain --untracked-files=no 2>/dev/null)" ]] && tracker_dirty=true
 if [[ "$koda_dirty" == true || "$tracker_dirty" == true ]]; then
   [[ "${KODA_SUITE_ALLOW_DIRTY:-0}" == 1 ]] \
     || fail "production suite archives require clean KODA and Tracker worktrees; set KODA_SUITE_ALLOW_DIRTY=1 for an explicit snapshot."

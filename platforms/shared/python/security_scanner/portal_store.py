@@ -13,16 +13,22 @@ from pathlib import Path
 from .models import SCAN_SCOPE_CATEGORIES
 
 
+SCREEN_PERMISSIONS = frozenset({
+    "dashboard.view", "scan.library.view", "scan.source.view", "runs.view", "compare.view", "projects.view",
+})
+FEATURE_PERMISSIONS = frozenset({"input.manage", "scan.create", "project.manage"})
+LEGACY_PROJECT_PERMISSION = "project.view"
 DEFAULT_ROLE_PERMISSIONS = {
-    "admin": {"project.view", "input.manage", "scan.create", "project.manage"},
-    "manager": {"project.view", "input.manage", "scan.create"},
-    "analyst": {"project.view", "scan.create"},
-    "uploader": {"project.view", "input.manage", "scan.create"},
-    "viewer": {"project.view"},
+    "admin": {*SCREEN_PERMISSIONS, *FEATURE_PERMISSIONS},
+    "manager": {*SCREEN_PERMISSIONS, "input.manage", "scan.create"},
+    "analyst": {*SCREEN_PERMISSIONS, "input.manage", "scan.create"},
+    "uploader": {"dashboard.view", "scan.library.view", "scan.source.view", "runs.view", "projects.view", "input.manage", "scan.create"},
+    "viewer": {"dashboard.view", "runs.view", "projects.view"},
 }
-PROJECT_PERMISSIONS = frozenset().union(*DEFAULT_ROLE_PERMISSIONS.values())
+PROJECT_PERMISSIONS = frozenset().union(*DEFAULT_ROLE_PERMISSIONS.values(), {LEGACY_PROJECT_PERMISSION})
 RESERVED_PERMISSIONS = {"system.admin", "subjects.manage", "roles.manage", "rules.manage"}
 TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+GLOBAL_ROLE_POLICY_ID = "__koda_global__"
 
 
 class VersionConflict(ValueError):
@@ -99,6 +105,56 @@ class PortalStore:
             ):
                 if definition.split()[0] not in columns:
                     db.execute(f"ALTER TABLE scan_runs ADD COLUMN {definition}")
+            self._migrate_legacy_role_permissions(db)
+            self._ensure_global_role_policy(db)
+
+    def _migrate_legacy_role_permissions(self, db) -> None:
+        """Give legacy project viewers explicit access to every screen once."""
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            rows = db.execute(
+                "SELECT p.project_id,p.version,p.roles_json FROM role_policies p "
+                "WHERE p.version=(SELECT max(version) FROM role_policies WHERE project_id=p.project_id)"
+            ).fetchall()
+            for row in rows:
+                roles = json.loads(row["roles_json"])
+                migrated = False
+                for permissions in roles.values():
+                    if LEGACY_PROJECT_PERMISSION in permissions:
+                        merged = (set(permissions) - {LEGACY_PROJECT_PERMISSION}) | SCREEN_PERMISSIONS
+                        if merged != set(permissions):
+                            permissions[:] = sorted(merged)
+                            migrated = True
+                if not migrated:
+                    continue
+                encoded, now = self._json(roles), self._now()
+                version = int(row["version"]) + 1
+                digest = hashlib.sha256(encoded.encode()).hexdigest()
+                db.execute("INSERT INTO role_policies VALUES(?,?,?,?,?)", (row["project_id"], version, encoded, digest, now))
+                self._audit_db(db, None, "role_policy.migrated", row["project_id"], {
+                    "from_version": int(row["version"]), "version": version, "reason": "legacy project.view screen access",
+                })
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+
+    def _ensure_global_role_policy(self, db) -> None:
+        """Create one KODA-wide role policy from the most evolved legacy policy."""
+        if db.execute("SELECT 1 FROM role_policies WHERE project_id=? LIMIT 1", (GLOBAL_ROLE_POLICY_ID,)).fetchone():
+            return
+        source = db.execute(
+            "SELECT project_id,roles_json FROM role_policies WHERE project_id!=? "
+            "ORDER BY version DESC,created_at DESC LIMIT 1",
+            (GLOBAL_ROLE_POLICY_ID,),
+        ).fetchone()
+        roles_json = source["roles_json"] if source else self._json({key: sorted(value) for key, value in DEFAULT_ROLE_PERMISSIONS.items()})
+        now = self._now()
+        digest = hashlib.sha256(roles_json.encode()).hexdigest()
+        db.execute("INSERT INTO role_policies VALUES(?,?,?,?,?)", (GLOBAL_ROLE_POLICY_ID, 1, roles_json, digest, now))
+        self._audit_db(db, None, "role_policy.globalized", None, {
+            "version": 1, "source_project_id": source["project_id"] if source else None,
+        })
 
     @staticmethod
     def _now() -> str:
@@ -115,6 +171,10 @@ class PortalStore:
     def subject(self, subject_id: str) -> dict | None:
         with self._db() as db:
             return self._dict(db.execute("SELECT * FROM subjects WHERE subject_id=?", (str(subject_id),)).fetchone())
+
+    def project(self, project_id: str) -> dict | None:
+        with self._db() as db:
+            return self._dict(db.execute("SELECT * FROM projects WHERE project_id=?", (str(project_id),)).fetchone())
 
     def ensure_subject(self, subject_id: str, display: str = "") -> dict:
         subject_id, now = str(uuid.UUID(str(subject_id))), self._now()
@@ -180,8 +240,6 @@ class PortalStore:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("INSERT INTO projects(project_id,name,created_at) VALUES(?,?,?)", (project_id, name, now))
-            roles = self._json({key: sorted(value) for key, value in DEFAULT_ROLE_PERMISSIONS.items()})
-            db.execute("INSERT INTO role_policies VALUES(?,?,?,?,?)", (project_id, 1, roles, hashlib.sha256(roles.encode()).hexdigest(), now))
             rules = self._json([])
             db.execute("INSERT INTO rule_policies VALUES(?,?,?,?,?)", (project_id, 1, rules, hashlib.sha256(rules.encode()).hexdigest(), now))
             if actor:
@@ -206,7 +264,7 @@ class PortalStore:
             return [dict(row) for row in rows]
 
     def set_membership(self, project_id: str, subject_id: str, role: str, actor: str | None = None) -> None:
-        policy = self.role_policy(project_id)
+        policy = self.role_policy()
         if role not in policy["roles"]:
             raise ValueError("unknown role")
         with self._db() as db:
@@ -226,10 +284,24 @@ class PortalStore:
             )
             return [dict(row) for row in rows]
 
-    def role_policy(self, project_id: str) -> dict:
+    def list_memberships_all(self) -> list[dict]:
+        with self._db() as db:
+            rows = db.execute(
+                "SELECT m.project_id,p.name AS project_name,m.subject_id,m.role,s.display,s.status "
+                "FROM memberships m JOIN projects p USING(project_id) JOIN subjects s USING(subject_id) "
+                "ORDER BY p.name,s.display,m.subject_id"
+            )
+            return [dict(row) for row in rows]
+
+    def remove_membership(self, project_id: str, subject_id: str, actor: str | None = None) -> None:
+        with self._db() as db:
+            db.execute("DELETE FROM memberships WHERE project_id=? AND subject_id=?", (str(project_id), str(subject_id)))
+            self._audit_db(db, actor, "membership.removed", project_id, {"subject_id": str(subject_id)})
+
+    def role_policy(self, project_id: str | None = None) -> dict:
         with self._db() as db:
             row = db.execute(
-                "SELECT * FROM role_policies WHERE project_id=? ORDER BY version DESC LIMIT 1", (str(project_id),)
+                "SELECT * FROM role_policies WHERE project_id=? ORDER BY version DESC LIMIT 1", (GLOBAL_ROLE_POLICY_ID,)
             ).fetchone()
         if not row:
             raise KeyError("role policy not found")
@@ -237,7 +309,7 @@ class PortalStore:
         result["roles"] = json.loads(result.pop("roles_json"))
         return result
 
-    def set_role_policy(self, project_id: str, roles: dict, expected_version: int, actor: str | None = None) -> dict:
+    def set_role_policy(self, roles: dict, expected_version: int, actor: str | None = None) -> dict:
         normalized: dict[str, list[str]] = {}
         for role, permissions in dict(roles).items():
             if not isinstance(role, str) or not role or not isinstance(permissions, list):
@@ -245,19 +317,21 @@ class PortalStore:
             permission_set = set(permissions)
             if len(permission_set) != len(permissions) or permission_set - PROJECT_PERMISSIONS or permission_set & RESERVED_PERMISSIONS:
                 raise ValueError("unknown, duplicate, or reserved permission")
+            if LEGACY_PROJECT_PERMISSION in permission_set:
+                permission_set = (permission_set - {LEGACY_PROJECT_PERMISSION}) | SCREEN_PERMISSIONS
             normalized[role] = sorted(permission_set)
         if not normalized:
             raise ValueError("at least one role is required")
         encoded, now = self._json(normalized), self._now()
         with self._lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
-            current = db.execute("SELECT max(version) FROM role_policies WHERE project_id=?", (str(project_id),)).fetchone()[0] or 0
+            current = db.execute("SELECT max(version) FROM role_policies WHERE project_id=?", (GLOBAL_ROLE_POLICY_ID,)).fetchone()[0] or 0
             if int(expected_version) != current:
                 raise VersionConflict("stale role policy version")
             version = current + 1
             digest = hashlib.sha256(encoded.encode()).hexdigest()
-            db.execute("INSERT INTO role_policies VALUES(?,?,?,?,?)", (str(project_id), version, encoded, digest, now))
-            self._audit_db(db, actor, "role_policy.updated", project_id, {"version": version})
+            db.execute("INSERT INTO role_policies VALUES(?,?,?,?,?)", (GLOBAL_ROLE_POLICY_ID, version, encoded, digest, now))
+            self._audit_db(db, actor, "role_policy.updated", None, {"version": version})
             db.execute("COMMIT")
         return {"version": version, "hash": digest, "roles": normalized}
 
@@ -274,11 +348,12 @@ class PortalStore:
         if not member:
             return False
         try:
-            permissions = set(self.role_policy(project_id)["roles"].get(member["role"], []))
+            permissions = set(self.role_policy()["roles"].get(member["role"], []))
         except KeyError:
             return False
         aliases = {"view": "project.view", "scan": "scan.create", "upload": "input.manage", "manage": "project.manage"}
-        return aliases.get(permission, permission) in permissions
+        requested = aliases.get(permission, permission)
+        return requested in permissions or (requested == LEGACY_PROJECT_PERMISSION and bool(permissions & SCREEN_PERMISSIONS))
 
     def add_input(self, project_id: str, name: str, path: str | Path, actor: str | None = None, content_hash="") -> str:
         path = Path(path)
@@ -337,6 +412,8 @@ class PortalStore:
         scan_scope: str = "all",
         **unsafe,
     ) -> dict:
+        if scan_scope == "library":
+            standard, standard_category = "local", "all"
         if (
             unsafe
             or not isinstance(standard, str)
@@ -508,9 +585,13 @@ class PortalStore:
                 runs.append(value)
             return runs
 
-    def audit_events(self, limit: int = 100) -> list[dict]:
+    def audit_events(self, limit: int | None = 100) -> list[dict]:
         with self._db() as db:
-            return [dict(row) for row in db.execute("SELECT * FROM audit_events ORDER BY id DESC LIMIT ?", (min(max(int(limit), 1), 500),))]
+            if limit is None:
+                rows = db.execute("SELECT * FROM audit_events ORDER BY id DESC")
+            else:
+                rows = db.execute("SELECT * FROM audit_events ORDER BY id DESC LIMIT ?", (min(max(int(limit), 1), 500),))
+            return [dict(row) for row in rows]
 
     def _audit_db(self, db, subject_id, action, project_id, detail) -> None:
         db.execute(

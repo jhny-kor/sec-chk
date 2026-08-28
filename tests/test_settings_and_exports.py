@@ -114,6 +114,7 @@ class SbomBrandingTests(unittest.TestCase):
         properties = payload["components"][0]["properties"]  # type: ignore[index]
         self.assertEqual(tool["name"], "KODA")
         self.assertTrue(all(item["name"].startswith("koda:") for item in properties))
+        self.assertNotIn("purl", payload["components"][0])  # type: ignore[index]
         self.assertNotIn("sec-chk", json.dumps(payload))
 
 

@@ -232,6 +232,13 @@ docker compose --project-directory "$PREFIX/tracker" \
   -f "$PREFIX/tracker/compose.integration.yaml" \
   exec gateway nginx -T 2>/dev/null \
   | grep -E 'client_body_timeout|proxy_(connect|send|read)_timeout|proxy_request_buffering'
+
+docker compose --project-directory "$PREFIX/tracker" \
+  --env-file "$ENV_FILE" \
+  -f "$PREFIX/tracker/compose.yaml" \
+  -f "$PREFIX/tracker/compose.airgap.yaml" \
+  -f "$PREFIX/tracker/compose.integration.yaml" \
+  logs --tail=200 gateway portal-api portal-worker
 ```
 
 외부 TLS reverse proxy를 별도로 사용하는 경우에도 `/koda/api/` location에 아래

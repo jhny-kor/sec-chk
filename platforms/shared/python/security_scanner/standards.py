@@ -3181,6 +3181,15 @@ def rule_standard_mappings_payload() -> dict[str, list[dict[str, object]]]:
                         "standard_labels": standard.labels,
                         "category_id": category.id,
                         "category_labels": category.labels,
+                        # Keep one metadata shape for the portal.  Standards
+                        # without a separate control registry use their
+                        # canonical category id and local support status.
+                        "control_id": category.id,
+                        "official_id": "",
+                        "guide_id": "",
+                        "cwe_ids": ["-".join(category.id.split("-", 2)[:2]).upper()]
+                        if category.id.lower().startswith("cwe-") and len(category.id.split("-", 2)) > 1 else [],
+                        "support_level": "automated" if category.supported else "unsupported",
                     }
                 )
     return mappings

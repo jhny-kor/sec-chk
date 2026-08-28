@@ -19,7 +19,7 @@ if str(SHARED_PYTHON) not in sys.path:
 
 from security_scanner.java_archives import scan_archives
 from security_scanner.java_inventory import inventory_components
-from security_scanner.java_vulnerability_scan import JavaScanOptions, VulnerabilityRecord, aggregate_vulnerabilities, run_java_scan
+from security_scanner.java_vulnerability_scan import JavaScanOptions, VulnerabilityRecord, _merge_syft, aggregate_vulnerabilities, run_java_scan
 from security_scanner.grype_adapter import GrypeMatch, GrypeResult
 from security_scanner.java_vulnerability_reporting import write_reports
 from security_scanner.syft_adapter import run_syft
@@ -122,6 +122,13 @@ class JavaInventoryTests(unittest.TestCase):
 
 
 class JavaScanTests(unittest.TestCase):
+    def test_syft_components_omit_null_purl(self) -> None:
+        payload = _merge_syft(
+            {"components": [{"type": "library", "name": "internal", "version": "1.0", "purl": None}]},
+            (),
+        )
+        self.assertNotIn("purl", payload["components"][0])  # type: ignore[index]
+
     @staticmethod
     def _record(
         vulnerability_id: str,
