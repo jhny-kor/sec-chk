@@ -157,7 +157,6 @@ def _component_payload(component: DependencyComponent) -> dict[str, object]:
         "name": component.name,
         "version": component.version,
         "scope": component.scope,
-        "purl": component.purl,
         "properties": [
             {"name": "koda:ecosystem", "value": component.ecosystem},
             {"name": "koda:target", "value": component.target},
@@ -165,6 +164,8 @@ def _component_payload(component: DependencyComponent) -> dict[str, object]:
             {"name": "koda:path", "value": str(component.path)},
         ],
     }
+    if component.purl:
+        payload["purl"] = component.purl
     if component.line is not None:
         payload["properties"].append({"name": "koda:line", "value": str(component.line)})  # type: ignore[index]
     return payload
