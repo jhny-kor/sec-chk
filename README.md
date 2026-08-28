@@ -97,8 +97,9 @@ with Tracker at `/`, KODA at `/koda/`, and Dependency-Track at
 `/dependency-track/`; see the [combined suite guide](platforms/linux/suite/README.ko.md).
 The authenticated KODA portal keeps searchable project and analysis-round
 history, runs the bundled offline Grype database for exact manifest dependency
-versions, and exports the same HTML pair, PDF, Excel, HWPX, JSON, and Markdown
-report payload used by the shared Windows/Linux CLI renderer.
+versions, and exports HTML ZIP, PDF, Excel, JSON, Markdown, CycloneDX 1.6, and
+NIS-SBOM 1.0 CSV. Library-only rounds open a component-oriented library
+vulnerability HTML report.
 
 ## Capabilities and architecture
 

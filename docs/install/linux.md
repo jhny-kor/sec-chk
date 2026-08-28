@@ -153,12 +153,13 @@ Use `./koda-suite start|status|stop` for the installed suite. The launcher
 keeps KODA's port 8765 private and verifies the three gateway routes before
 reporting healthy status.
 
-The portal separates dashboard, new scan, projects, analysis rounds, comparison,
-and administrator settings. Completed rounds use the shared Windows/Linux CLI
-renderer for the main/detail HTML pair plus PDF, Excel, HWPX, JSON, and Markdown
-downloads. Exact manifest or lockfile dependencies are checked against the
-bundled offline Grype database; use `jar-scan` for libraries nested in
-JAR/WAR/EAR archives. Installation and gateway failures are catalogued in the
+The portal separates library CVE scans, source-code scans, projects, analysis
+rounds, comparison, administration, and a common user guide. Library rounds keep
+only CVE-backed Grype findings and open a component-oriented library vulnerability
+HTML report. Completed rounds also provide HTML ZIP, PDF, Excel, JSON, Markdown,
+CycloneDX 1.6, and NIS-SBOM 1.0 CSV downloads. Exact manifest or lockfile
+dependencies are checked against the bundled offline Grype database; use
+`jar-scan` for libraries nested in JAR/WAR/EAR archives. Installation and gateway failures are catalogued in the
 [Korean air-gapped suite troubleshooting runbook](../../platforms/linux/suite/TROUBLESHOOTING.ko.md).
 
 `koda serve` starts the authenticated Linux portal. The old unauthenticated
@@ -188,13 +189,11 @@ koda jar-scan --target /deploy/apps --sbom-format nis-1.0 \
   --output-dir reports/java-scan
 ```
 
-After a scan finds at least one item, select **보고서** and choose a format. The
-PDF option downloads `koda-report[-standard].pdf` as a file; it does not invoke
-the browser print dialog. SBOM downloads use the same browser download path.
-Markdown, HWPX, and Excel buttons remain available when their exporters are
-installed; if a deployment returns an unsupported-format response, the UI shows
-a future-support notice and directs the operator to PDF. Keep the Chromium
-renderer installed on every Linux host that serves reports.
+After a completed scan, open the primary HTML report or choose HTML ZIP, PDF,
+Excel, JSON, or Markdown. Library rounds use a library-vulnerability title and
+component-oriented summary/detail pages. SBOM downloads use the same browser
+download path. Keep the Chromium renderer installed on every Linux host that
+serves PDF reports.
 
 To apply the scan result as a deployment gate, use the CLI output and exit code:
 

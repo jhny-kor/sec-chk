@@ -100,6 +100,7 @@ def scan_directory_payload(
     allow_file: bool = False,
     display_path: str | None = None,
     scan_scope: str | None = None,
+    cve_only: bool = False,
 ) -> dict[str, object]:
     if min_severity not in SEVERITIES:
         raise ValueError(f"Unsupported min_severity: {min_severity}")
@@ -147,6 +148,10 @@ def scan_directory_payload(
     scanner = SecurityScanner(config)
     scan_result = scanner.scan()
     raw_findings = list(scan_result.findings)
+    if cve_only:
+        # Library scans report only CVE-backed Grype findings; dependency
+        # hygiene and other advisory sources remain available to normal scans.
+        raw_findings = [item for item in raw_findings if item.category != "dependencies"]
     scan_warnings = list(scanner.warnings)
     local_vulnerability: dict[str, object] = {
         "status": "disabled",
@@ -166,8 +171,9 @@ def scan_directory_payload(
             binary,
             300.0,
         )
-        raw_findings.extend(_grype_findings(grype.matches, components))
-        local_vulnerability["matched_vulnerabilities"] = len(grype.matches)
+        grype_matches = tuple(match for match in grype.matches if not cve_only or match.cve_ids)
+        raw_findings.extend(_grype_findings(grype_matches, components))
+        local_vulnerability["matched_vulnerabilities"] = len(grype_matches)
         local_vulnerability["status"] = "failed" if grype.fatal or not local_vulnerability.get("available") else ("warning" if grype.warning or local_vulnerability.get("warning") else "completed")
         for warning in (local_vulnerability.get("warning"), grype.warning):
             if warning and str(warning) not in scan_warnings:
