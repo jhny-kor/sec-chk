@@ -441,6 +441,66 @@ KODA_RBAC_CATALOG_VERSION=koda-rbac-v1
         self.assertIn('KODA bundle provenance does not match', packager)
         self.assertIn('Tracker bundle provenance does not match', packager)
 
+    def test_packager_accepts_flat_tracker_release_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp)
+            tracker_repo = work / 'tracker'
+            (tracker_repo / 'scripts').mkdir(parents=True)
+            verifier = tracker_repo / 'scripts/verify-airgap-release.sh'
+            verifier.write_text('#!/usr/bin/env bash\nexit 0\n')
+            verifier.chmod(0o755)
+            (tracker_repo / '.env.example').write_text('PUBLIC_HTTP_PORT=8088\n')
+            subprocess.run(['git', 'init', '-q', tracker_repo], check=True)
+            subprocess.run(['git', '-C', tracker_repo, 'add', '.'], check=True)
+            subprocess.run([
+                'git', '-C', tracker_repo, '-c', 'user.name=KODA Test',
+                '-c', 'user.email=koda@example.invalid', 'commit', '-qm', 'fixture',
+            ], check=True)
+            tracker_revision = subprocess.check_output(
+                ['git', '-C', tracker_repo, 'rev-parse', 'HEAD'], text=True,
+            ).strip()
+            koda_revision = subprocess.check_output(
+                ['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True,
+            ).strip()
+            koda_dirty = bool(subprocess.check_output(
+                ['git', '-C', ROOT, 'status', '--porcelain', '--untracked-files=all'],
+                text=True,
+            ).strip())
+
+            koda_root = work / 'koda-payload'
+            koda_root.mkdir()
+            for name in ('manifest.sha256', 'install.sh', 'koda-docker.sh', 'image-ref.txt'):
+                (koda_root / name).write_text('fixture\n')
+            (koda_root / 'versions.txt').write_text(
+                f'git_revision={koda_revision}\ngit_worktree_dirty={str(koda_dirty).lower()}\n'
+            )
+            koda_bundle = work / 'koda.tar.gz'
+            with tarfile.open(koda_bundle, 'w:gz') as archive:
+                archive.add(koda_root, arcname='koda')
+
+            tracker_metadata = work / 'metadata.env'
+            tracker_metadata.write_text(
+                f'TRACKER_GIT_REVISION={tracker_revision}\n'
+                'TRACKER_WORKTREE_DIRTY=false\nVULNERABILITY_BUNDLE=included\n'
+            )
+            tracker_bundle = work / 'tracker.tar.gz'
+            with tarfile.open(tracker_bundle, 'w:gz') as archive:
+                archive.add(tracker_metadata, arcname='./metadata.env')
+            output = work / 'suite.tar.gz'
+            result = subprocess.run(
+                ['bash', str(ROOT / 'platforms/linux/package-suite-offline.sh'), str(output)],
+                text=True, capture_output=True, check=False, env={
+                    **os.environ,
+                    'KODA_SUITE_VERSION': 'test',
+                    'KODA_DOCKER_BUNDLE': str(koda_bundle),
+                    'KODA_TRACKER_BUNDLE': str(tracker_bundle),
+                    'KODA_TRACKER_VERIFIER': str(verifier),
+                    'KODA_SUITE_ALLOW_DIRTY': '1',
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(output.is_file())
+
     def test_vulnerability_seed_reuses_koda_offline_datasets(self) -> None:
         builder = (ROOT / 'platforms/linux/build-suite-vuln-bundle.sh').read_text()
         self.assertIn('grype-db/incoming/', builder)

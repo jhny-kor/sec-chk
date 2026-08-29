@@ -125,7 +125,7 @@ def metadata(archive, root=None):
         return values
 
 koda_values = metadata(koda)
-tracker_values = metadata(tracker)
+tracker_values = metadata(tracker, root="")
 if koda_values.get("git_revision") != expected_koda or koda_values.get("git_worktree_dirty") != dirty_koda:
     raise SystemExit("KODA bundle provenance does not match the current worktree")
 if tracker_values.get("TRACKER_GIT_REVISION") != expected_tracker or tracker_values.get("TRACKER_WORKTREE_DIRTY") != ("true" if dirty_tracker == "true" else "false"):
