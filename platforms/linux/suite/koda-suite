@@ -30,7 +30,8 @@ key is required and is never stored in the release archive.
 
 Patch groups: koda, gateway, portal-web, portal-api-worker, dependency-track.
 Patches preserve volumes and require the new release's Compose contracts to
-match the installed release. PostgreSQL changes require a full reset install.
+match the installed release. Incompatible data/schema changes require a full
+install; reset-install.sh is reserved for intentional data destruction.
 EOF
 }
 
@@ -64,6 +65,22 @@ verify_release() {
     || fail "release is not linux/amd64."
   grep -qx 'DISTRIBUTION_SCOPE=internal-only' "$metadata_file" \
     || fail "release is not marked internal-only."
+  # Older suite archives did not carry these provenance fields; validate them
+  # when present while keeping those archives inspectable for rollback.
+  for dirty_key in KODA_WORKTREE_DIRTY TRACKER_GIT_WORKTREE_DIRTY; do
+    if grep -q "^${dirty_key}=" "$metadata_file"; then
+      dirty_value="$(metadata_value "$metadata_file" "$dirty_key")"
+      [[ "$dirty_value" == false ]] \
+        || fail "production release must be clean: $dirty_key=$dirty_value"
+    fi
+  done
+  if grep -q '^KODA_WORKTREE_DIRTY=' "$metadata_file" || grep -q '^TRACKER_GIT_WORKTREE_DIRTY=' "$metadata_file"; then
+    for revision_key in KODA_GIT_REVISION TRACKER_GIT_REVISION; do
+      revision="$(metadata_value "$metadata_file" "$revision_key")"
+      [[ "$revision" =~ ^[0-9a-fA-F]{40}$ ]] \
+        || fail "invalid production revision in metadata.env: $revision_key=$revision"
+    done
+  fi
   KODA_BUNDLE="$(metadata_value "$metadata_file" KODA_BUNDLE)"
   TRACKER_BUNDLE="$(metadata_value "$metadata_file" TRACKER_BUNDLE)"
   TRACKER_VULNERABILITY_BUNDLE="$(metadata_value "$metadata_file" TRACKER_VULNERABILITY_BUNDLE)"
@@ -81,6 +98,7 @@ verify_release() {
   done
   [[ -f "$script_dir/$KODA_BUNDLE" ]] || fail "KODA payload is missing."
   [[ -f "$script_dir/$TRACKER_BUNDLE" ]] || fail "Tracker payload is missing."
+  verify_inner_manifests "$script_dir/$KODA_BUNDLE" "$script_dir/$TRACKER_BUNDLE"
   echo "KODA Suite release integrity OK"
 }
 
@@ -89,6 +107,51 @@ metadata_value() {
   count="$(grep -c "^${key}=" "$file" || true)"
   [[ "$count" == 1 ]] || fail "metadata.env must contain exactly one $key entry."
   sed -n "s/^${key}=//p" "$file"
+}
+
+verify_inner_manifests() {
+  python3 - "$@" <<'PY'
+import hashlib
+import pathlib
+import posixpath
+import sys
+import tarfile
+
+def verify(path):
+    with tarfile.open(path, "r:gz") as archive:
+        members = {posixpath.normpath(m.name): m for m in archive.getmembers()}
+        if "manifest.sha256" in members:
+            root = ""
+            manifest_name = "manifest.sha256"
+        else:
+            roots = {name.split("/", 1)[0] for name in members if name not in {"", "."}}
+            root = next(iter(roots)) if len(roots) == 1 else ""
+            manifest_name = f"{root}/manifest.sha256" if root else "manifest.sha256"
+        if manifest_name not in members:
+            raise SystemExit(f"inner manifest is missing: {path}")
+        manifest = archive.extractfile(members[manifest_name])
+        assert manifest is not None
+        for line in manifest.read().decode("utf-8").splitlines():
+            if not line.strip():
+                continue
+            digest, relative = line.split(None, 1)
+            relative = relative.lstrip(" *")
+            member_name = f"{root}/{posixpath.normpath(relative)}" if root else posixpath.normpath(relative)
+            member = members.get(member_name)
+            if member is None or not member.isfile():
+                raise SystemExit(f"inner manifest entry is missing: {path}: {relative}")
+            stream = archive.extractfile(member)
+            assert stream is not None
+            checksum = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                checksum.update(chunk)
+            actual = checksum.hexdigest()
+            if actual != digest:
+                raise SystemExit(f"inner manifest mismatch: {path}: {relative}")
+
+for value in sys.argv[1:]:
+    verify(pathlib.Path(value))
+PY
 }
 
 require_runtime() {
@@ -137,6 +200,68 @@ env_value() {
   printf '%s\n' "${value:-$fallback}"
 }
 
+ensure_tracker_integration_secrets() {
+  local env_file="$1" prefix secret_file token_dir
+  prefix="$(dirname -- "$(dirname -- "$env_file")")"
+  secret_file="$(env_value "$env_file" KODA_TRACKER_PROVISIONING_TOKEN_FILE "$prefix/config/koda-tracker-provisioning.token")"
+  token_dir="$(env_value "$env_file" KODA_TRACKER_TOKEN_DIR "$prefix/config/tracker-tokens")"
+  python3 - "$env_file" "$secret_file" "$token_dir" "$prefix/config" <<'PY'
+import os
+import secrets
+import stat
+import sys
+from pathlib import Path
+
+env_file, secret_file, token_dir, private_root = map(Path, sys.argv[1:])
+private_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+os.chmod(private_root, 0o700)
+
+for parent in {secret_file.parent, token_dir.parent}:
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        parent.relative_to(private_root)
+    except ValueError:
+        if stat.S_IMODE(parent.stat().st_mode) & 0o077:
+            raise SystemExit(f"custom integration secret parent must be private (0700): {parent}")
+    else:
+        os.chmod(parent, 0o700)
+
+token_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+# The private parent prevents host traversal. These bind-mount modes let the
+# fixed non-root container UIDs read the shared token and let KODA create its
+# own mode-0600 repository tokens without running either container as root.
+os.chmod(token_dir, 0o733)
+if not secret_file.exists():
+    temporary = secret_file.with_name(f".{secret_file.name}.{os.getpid()}.tmp")
+    with temporary.open("x", encoding="utf-8") as output:
+        os.chmod(temporary, 0o600)
+        output.write(secrets.token_urlsafe(48) + "\n")
+        output.flush()
+        os.fsync(output.fileno())
+    temporary.replace(secret_file)
+os.chmod(secret_file, 0o444)
+
+values = {
+    "KODA_TRACKER_PROVISIONING_TOKEN_FILE": str(secret_file),
+    "KODA_TRACKER_TOKEN_DIR": str(token_dir),
+}
+lines = env_file.read_text(encoding="utf-8").splitlines()
+seen = set()
+for index, line in enumerate(lines):
+    key = line.split("=", 1)[0]
+    if key in values:
+        lines[index] = f"{key}={values[key]}"
+        seen.add(key)
+for key, value in values.items():
+    if key not in seen:
+        lines.append(f"{key}={value}")
+temporary = env_file.with_name(f".{env_file.name}.{os.getpid()}.tmp")
+temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+os.chmod(temporary, env_file.stat().st_mode & 0o777)
+temporary.replace(env_file)
+PY
+}
+
 wait_http() {
   local url="$1" expected="${2:-}" timeout="${3:-60}"
   python3 - "$url" "$expected" "$timeout" <<'PY'
@@ -170,6 +295,16 @@ runtime_values() {
   koda_port="${KODA_PORT:-$(env_value "$env_file" KODA_PORT 8765)}"
   koda_bind="${KODA_DASHBOARD_BIND:-$(env_value "$env_file" KODA_DASHBOARD_BIND 127.0.0.1)}"
   tracker_url="${KODA_SSBOM_TRACKER_URL:-$(env_value "$env_file" KODA_SSBOM_TRACKER_URL "http://127.0.0.1:$public_port/?page=runs")}"
+  gitlab_url="${KODA_GITLAB_URL:-$(env_value "$env_file" KODA_GITLAB_URL "")}"
+  gitlab_token_file="${KODA_GITLAB_TOKEN_FILE:-$(env_value "$env_file" KODA_GITLAB_TOKEN_FILE "")}"
+  gitlab_write_token_file="${KODA_GITLAB_WRITE_TOKEN_FILE:-$(env_value "$env_file" KODA_GITLAB_WRITE_TOKEN_FILE "")}"
+  gitlab_ca_file="${KODA_GITLAB_CA_FILE:-$(env_value "$env_file" KODA_GITLAB_CA_FILE "")}"
+  gitlab_network="${KODA_GITLAB_NETWORK:-$(env_value "$env_file" KODA_GITLAB_NETWORK "")}"
+  tracker_api_url="${KODA_TRACKER_URL:-$(env_value "$env_file" KODA_TRACKER_URL "")}"
+  tracker_token_dir="${KODA_TRACKER_TOKEN_DIR:-$(env_value "$env_file" KODA_TRACKER_TOKEN_DIR "")}"
+  tracker_provisioning_file="${KODA_TRACKER_PROVISIONING_TOKEN_FILE:-$(env_value "$env_file" KODA_TRACKER_PROVISIONING_TOKEN_FILE "")}"
+  tracker_result_timeout="${KODA_TRACKER_RESULT_TIMEOUT_SECONDS:-$(env_value "$env_file" KODA_TRACKER_RESULT_TIMEOUT_SECONDS 900)}"
+  tracker_ca_file="${KODA_TRACKER_CA_FILE:-$(env_value "$env_file" KODA_TRACKER_CA_FILE "")}"
   gateway_scheme="${GATEWAY_PUBLIC_SCHEME:-$(env_value "$env_file" GATEWAY_PUBLIC_SCHEME https)}"
   tracker_env="${TRACKER_ENVIRONMENT:-$(env_value "$env_file" TRACKER_ENVIRONMENT production)}"
   tracker_secure_cookies="${TRACKER_SECURE_COOKIES:-$(env_value "$env_file" TRACKER_SECURE_COOKIES true)}"
@@ -208,6 +343,7 @@ suite_compose() {
 
 start_dashboard() {
   local prefix="$1" env_file="$prefix/tracker/.env"
+  ensure_tracker_integration_secrets "$env_file"
   runtime_values "$env_file"
   "$prefix/koda/koda-docker" dashboard stop >/dev/null
   KODA_PORT="$koda_port" \
@@ -215,6 +351,16 @@ start_dashboard() {
   KODA_PUBLISH_DASHBOARD=0 \
   KODA_PORTAL_DATA_DIR="$prefix/data/koda-portal" \
   KODA_SSBOM_TRACKER_URL="$tracker_url" \
+  KODA_GITLAB_URL="$gitlab_url" \
+  KODA_GITLAB_TOKEN_FILE="$gitlab_token_file" \
+  KODA_GITLAB_WRITE_TOKEN_FILE="$gitlab_write_token_file" \
+  KODA_GITLAB_CA_FILE="$gitlab_ca_file" \
+  KODA_GITLAB_NETWORK="$gitlab_network" \
+  KODA_TRACKER_URL="$tracker_api_url" \
+  KODA_TRACKER_TOKEN_DIR="$tracker_token_dir" \
+  KODA_TRACKER_PROVISIONING_TOKEN_FILE="$tracker_provisioning_file" \
+  KODA_TRACKER_RESULT_TIMEOUT_SECONDS="$tracker_result_timeout" \
+  KODA_TRACKER_CA_FILE="$tracker_ca_file" \
     "$prefix/koda/koda-docker" dashboard start
 }
 
@@ -297,7 +443,7 @@ preflight_suite() {
   [[ -n "$prefix" ]] || fail "install prefix may not be empty."
   prepare_payloads
   validate_preflight "$env_file" "$require_vulnerability_data"
-  echo "KODA Suite destructive-install preflight OK"
+  echo "KODA Suite preflight OK"
 }
 
 install_suite() {
@@ -365,7 +511,7 @@ require_same_contract() {
     installed="$(metadata_value "$prefix/metadata.env" "$key")"
     current="$(metadata_value "$script_dir/metadata.env" "$key")"
     [[ "$installed" == "$current" ]] \
-      || fail "patch contract changed for $key; use a full reset install."
+      || fail "patch contract changed for $key; use a full install (reset only incompatible data)."
   done
 }
 
@@ -373,7 +519,7 @@ require_same_file() {
   local current="$1" installed="$2"
   [[ -f "$installed" && -f "$current" && "$(sha256sum "$current" | awk '{print $1}')" \
       == "$(sha256sum "$installed" | awk '{print $1}')" ]] \
-    || fail "$(basename -- "$installed") changed; use a full reset install."
+    || fail "$(basename -- "$installed") changed; use a full install (reset only incompatible data)."
 }
 
 tracker_image_ref() {
@@ -401,7 +547,7 @@ load_tracker_image() {
   target_ref="$(tracker_image_ref "$prefix/tracker/.env" "$variable")"
   target_ref="${target_ref%@*}"
   [[ "$source_ref" == "$target_ref" ]] \
-    || fail "$variable image reference changed; use a full reset install."
+    || fail "$variable image reference changed; use a full install (reset only incompatible data)."
   safe_name="$(printf '%s' "$archive_ref" | tr '/:@' '___').tar"
   image="$install_tmp/tracker/images/$safe_name"
   [[ -f "$image" ]] || fail "patch image is missing: $safe_name"
@@ -428,7 +574,7 @@ patch_suite() {
   done
   case "$group" in
     koda|gateway|portal-web|portal-api-worker|dependency-track) ;;
-    postgres) fail "PostgreSQL is not patchable in place; use reset-install.sh." ;;
+    postgres) fail "PostgreSQL is not patchable in place; use a full install; reset-install.sh is only for intentional data destruction." ;;
     *) fail "unknown patch group: ${group:-<empty>}" ;;
   esac
   [[ -f "$prefix/metadata.env" && -f "$prefix/tracker/.env" \

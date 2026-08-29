@@ -21,8 +21,9 @@ Linux KODA는 Tracker의 SBOM 관리 화면이 아니라 KODA 보안·품질 점
 화면은 SBOM·manifest·lockfile·JAR/WAR와 오프라인 취약점 DB를 사용하고, 소스코드
 화면은 코드·비밀정보·보안설정·예방통제 카테고리를 실행합니다. 라이브러리 점검은
 검사 기준과 범위를 고르지 않고 `CVE 점검`으로 고정하며, CVE가 연결된 Grype 결과만
-남깁니다. 소스코드 점검은 `전체` 또는 지원 기준·범위를 선택합니다. 입력 화면은 최대
-`1 GB`로 안내하고 스트리밍으로 등록합니다. 오프라인 취약점 DB를 사용할 수 없으면
+남깁니다. 소스코드 점검은 `전체` 또는 지원 기준·범위를 선택합니다. 입력은 최대
+`1 GB` 파일을 스트리밍 등록하거나, 관리자가 연결한 GitLab 저장소의 브랜치·태그를
+선택할 수 있습니다. GitLab 입력은 실행 전에 commit SHA로 고정됩니다. 오프라인 취약점 DB를 사용할 수 없으면
 라이브러리 화면에서 실행 전에 `점검 불가`와 원인을 표시합니다.
 
 ### 결과 탭
@@ -51,6 +52,11 @@ JSON·Markdown과 CycloneDX 1.6·국정원 NIS-SBOM 1.0을 내려받을 수 있�
 
 비교 결과는 항목별 검색·상태 필터와 CSV·JSON 내보내기를 제공합니다. KODA 관리자는
 공유 계정의 KODA 접근·시스템 관리자 여부와 사용자별 프로젝트 역할을 설정합니다.
+`설정 > 연동 설정`에서는 시스템 관리자만 서비스 계정이 접근 가능한 저장소를 KODA 프로젝트에 연결합니다.
+Tracker 서비스·환경·전송 토큰은 연결 시 자동 생성 또는 재사용됩니다. 시스템 관리자는
+GitLab HTTPS URL, 조회용 `read_api` PAT와 결과 저장용 `api` PAT를 분리해 저장·교체할
+수 있으며 PAT와 사설 CA는 다시 표시되지 않는 write-only 값입니다. GitLab API 호출은
+KODA만 수행하고 Tracker에는 GitLab 자격증명을 저장하지 않습니다.
 
 ### 오프라인 취약점 DB 상태
 
@@ -75,6 +81,14 @@ JSON·Markdown과 CycloneDX 1.6·국정원 NIS-SBOM 1.0을 내려받을 수 있�
 라이브러리 단계에는 실제 사용한 Grype 버전, 오프라인 DB 메타데이터, 조회 구성요소 수와 경고를
 표시하므로 `취약점 0건`과 `DB 점검 실패`를 구분할 수 있습니다. KODA 입력 파일은
 브라우저 메모리에 Base64로 올리지 않고 화면 안내 기준 최대 1 GB까지 스트리밍 업로드합니다.
+GitLab 회차에는 저장소·ref·commit SHA·아카이브 해시를 기록합니다. 완료 CycloneDX를
+Tracker로 전송해 분석 결과를 받은 뒤 GitLab 결과 브랜치·Merge Request와 commit당
+하나의 비공개 CVE 요약 Issue를 생성하며, 결과 화면에는 `Tracker 전송`과 `GitLab 결과
+등록`을 분리한 상태·링크·재시도 기능을 함께 표시합니다. 이 흐름과 별도로 KODA가 확정한 코드·비밀정보·보안설정·예방통제
+취약점은 항목별 비공개 Issue로 관리합니다. 열린 동일 Issue에는 새 회차 댓글을
+추가하고 닫힌 Issue는 새로 생성하며, 품질·검토 필요·미검증 결과는 제외합니다. GitLab
+쓰기 실패는 점검이나 Tracker 전송 상태를 변경하지 않습니다. 라이브러리 CVE는 Tracker
+요약 Issue에만 포함합니다.
 
 계정 가입과 승인은 KODA-SBOM-Tracker가 단일 원본으로 관리합니다. KODA 관리자 화면은
 공유 계정의 KODA 접근 차단·허용, 시스템 관리자 여부, 사용자별 프로젝트 역할을
@@ -89,4 +103,5 @@ JSON·Markdown과 CycloneDX 1.6·국정원 NIS-SBOM 1.0을 내려받을 수 있�
 
 - [Linux 설치·운영](install/linux.ko.md)
 - [통합 폐쇄망 설치](../platforms/linux/suite/README.ko.md)
+- [GitLab 저장소 연동](gitlab-integration-ko.md)
 - [KODA 리포트 계약](report-contract.ko.md)

@@ -40,6 +40,14 @@ done
 
 fail() { echo "error: $*" >&2; exit 2; }
 
+worktree_dirty=false
+if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=all 2>/dev/null)" ]]; then
+  worktree_dirty=true
+fi
+if [[ "$worktree_dirty" == true && "${KODA_SUITE_ALLOW_DIRTY:-0}" != 1 ]]; then
+  fail "production Docker archives require a clean KODA worktree; set KODA_SUITE_ALLOW_DIRTY=1 for an explicit development snapshot."
+fi
+
 # 1. toolchain
 command -v docker >/dev/null 2>&1 || fail "docker is required."
 docker buildx version >/dev/null 2>&1 || fail "docker buildx is required."
@@ -136,6 +144,7 @@ printf '%s\n' "$image_ref" > "$stage/image-ref.txt"
   echo "docker_image=$image_ref"
   echo "docker_base_image=$python_image_digest"
   echo "git_revision=$git_sha"
+  echo "git_worktree_dirty=$worktree_dirty"
 } > "$stage/versions.txt"
 
 # 12. manifest (sha256sum -c compatible)

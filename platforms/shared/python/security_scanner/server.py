@@ -243,6 +243,7 @@ def _grype_findings(matches: tuple[GrypeMatch, ...], components) -> list[Finding
             evidence=f"{component.purl}: {', '.join(identifiers)}" + (f"; fixed in {fixed}" if fixed else ""),
             description="The bundled local Grype database reports a vulnerability for this exact dependency version.",
             recommendation=f"Upgrade to {fixed}." if fixed else "Review the vulnerability identifiers and upgrade, patch, replace, or document a compensating control.",
+            issue_key=f"dependency.osv-known-vulnerability|{component.purl}|{','.join(sorted(identifiers))}",
         ))
     return findings
 

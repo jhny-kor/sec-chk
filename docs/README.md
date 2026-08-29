@@ -23,7 +23,8 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 | macOS 앱을 설치 | 네이티브 KODA 앱 또는 Python 대시보드 도우미 | [macOS 설치](install/macos.ko.md) |
 | Linux 서버에서 실행 | 사용자 경로 CLI 또는 Tracker 계정 기반 인증 포털·배포 게이트 | [Linux 설치·운영](install/linux.ko.md) |
 | Linux KODA 화면과 결과 분류 확인 | 실제 결과 화면, 라이브러리·소스코드·품질 탭, 기능 흐름도 | [KODA 웹 포털 화면과 기능](koda-web-portal.ko.md) |
-| KODA와 SBOM Tracker를 폐쇄망에 함께 설치 | 계정·로그아웃을 공유하고 사이트별 권한을 분리한 동일 오리진 포털 | [통합 폐쇄망 설치](../platforms/linux/suite/README.ko.md) |
+| 사내 GitLab 저장소를 선택해 점검 | SHA 고정 점검, Tracker 자동 전송, 확정 취약점별 비공개 Issue 등록 | [GitLab 저장소 연동](gitlab-integration-ko.md) |
+| KODA와 SBOM Tracker를 폐쇄망에 함께 설치 | `koda-suite-offline-x86_64-0.1.0-20260830.tar.gz` 단일 압축파일, SHA-256 검증, 계정·로그아웃 공유와 사이트별 권한 | [통합 폐쇄망 설치](../platforms/linux/suite/README.ko.md) |
 | 폐쇄망 설치 오류를 진단 | 압축·주소·로그인·Dependency-Track·업로드·이미지 교체별 확인과 복구 절차 | [폐쇄망 설치 장애 대응](../platforms/linux/suite/TROUBLESHOOTING.ko.md) |
 | 폐쇄망 JAR/WAR/EAR를 점검 | 오프라인 SBOM·취약점·KEV·승인 SBOM 비교 결과 | [폐쇄망 배포 개요](install/offline-delivery.md) |
 | Windows 데스크톱 앱을 설치 | KODA 설치본과 별도 취약점 데이터 갱신 경로 | [Windows 설치](install/windows.ko.md) |
@@ -37,6 +38,7 @@ KODA를 처음 쓰는 사람은 이 페이지에서 목적에 맞는 경로를 �
 | [macos.ko.md](install/macos.ko.md) | macOS 설치 (App Store 앱 및 스크립트 설치) |
 | [linux.ko.md](install/linux.ko.md) | Linux 설치·운영 가이드 (호스트 설치, 대시보드, Docker 전달물) |
 | [koda-web-portal.ko.md](koda-web-portal.ko.md) | KODA 웹 포털 화면, CVE·소스 점검, 보고서, 접근 관리와 사용 가이드 |
+| [gitlab-integration-ko.md](gitlab-integration-ko.md) | KODA 전용 GitLab 저장소 연결, Tracker 자동 분석, 결과 MR·commit 요약 Issue와 확정 취약점별 비공개 Issue 운영 |
 | [통합 폐쇄망 설치](../platforms/linux/suite/README.ko.md) | KODA + KODA SBOM Tracker 단일 압축파일 설치, 공유 로그인, 사이트별 권한, 운영 명령 |
 | [폐쇄망 설치 장애 대응](../platforms/linux/suite/TROUBLESHOOTING.ko.md) | 설치 중 발생한 EOF·413·흰 화면·로그인·API 키·분석 실패·안전한 재설치 대응 |
 | [windows.ko.md](install/windows.ko.md) | Windows 설치본 빌드·설치 및 취약점 데이터 패키지 연결 |

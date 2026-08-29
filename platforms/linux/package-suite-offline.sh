@@ -83,6 +83,55 @@ tracker_verifier="${KODA_TRACKER_VERIFIER:-$tracker_repo/scripts/verify-airgap-r
 [[ -x "$tracker_verifier" ]] || fail "Tracker verifier not found; set KODA_TRACKER_VERIFIER"
 "$tracker_verifier" "$tracker_bundle"
 
+koda_revision="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+tracker_root="$(CDPATH= cd -- "$(dirname -- "$tracker_verifier")/.." && pwd)"
+tracker_revision="$(git -C "$tracker_root" rev-parse HEAD 2>/dev/null || echo unknown)"
+koda_dirty=false
+tracker_dirty=false
+[[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=all 2>/dev/null)" ]] && koda_dirty=true
+[[ -n "$(git -C "$tracker_root" status --porcelain --untracked-files=all 2>/dev/null)" ]] && tracker_dirty=true
+if [[ "$koda_dirty" == true || "$tracker_dirty" == true ]]; then
+  [[ "${KODA_SUITE_ALLOW_DIRTY:-0}" == 1 ]] \
+    || fail "production suite archives require clean KODA and Tracker worktrees; set KODA_SUITE_ALLOW_DIRTY=1 for an explicit snapshot."
+fi
+
+python3 - "$koda_bundle" "$tracker_bundle" "$koda_revision" "$tracker_revision" "$koda_dirty" "$tracker_dirty" <<'PY'
+import pathlib
+import posixpath
+import sys
+import tarfile
+
+koda, tracker, expected_koda, expected_tracker, dirty_koda, dirty_tracker = sys.argv[1:]
+
+def metadata(archive, root=None):
+    with tarfile.open(archive, "r:gz") as stream:
+        names = [posixpath.normpath(item.name) for item in stream.getmembers()]
+        if root is None:
+            roots = {name.split("/", 1)[0] for name in names if name not in {"", "."}}
+            if len(roots) != 1:
+                raise SystemExit(f"archive must have one root: {archive}")
+            root = next(iter(roots))
+        target = f"{root}/versions.txt" if archive == koda else "metadata.env"
+        member = next((item for item in stream.getmembers() if posixpath.normpath(item.name) == target), None)
+        if member is None:
+            raise SystemExit(f"provenance metadata is missing: {archive}: {target}")
+        handle = stream.extractfile(member)
+        assert handle is not None
+        values = {}
+        for line in handle.read().decode("utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key] = value
+        return values
+
+koda_values = metadata(koda)
+tracker_values = metadata(tracker)
+if koda_values.get("git_revision") != expected_koda or koda_values.get("git_worktree_dirty") != dirty_koda:
+    raise SystemExit("KODA bundle provenance does not match the current worktree")
+if tracker_values.get("TRACKER_GIT_REVISION") != expected_tracker or tracker_values.get("TRACKER_WORKTREE_DIRTY") != ("true" if dirty_tracker == "true" else "false"):
+    raise SystemExit("Tracker bundle provenance does not match the current worktree")
+PY
+
 mkdir -p "$(dirname -- "$output")"
 output="$(CDPATH= cd -- "$(dirname -- "$output")" && pwd)/$(basename -- "$output")"
 stage_parent="$(mktemp -d "$(dirname -- "$output")/.koda-suite.XXXXXX")"
@@ -105,22 +154,46 @@ cp "$script_dir/suite/gateway.conf.template" "$stage/gateway/gateway.conf.templa
 cp "$(CDPATH= cd -- "$(dirname -- "$tracker_verifier")/.." && pwd)/.env.example" \
   "$stage/.env.example"
 cp "$script_dir/suite/koda-suite.env.example" "$stage/koda-suite.env.example"
+python3 - "$stage/.env.example" "$stage/koda-suite.env.example" <<'PY'
+import pathlib
+import re
+import sys
+
+target, overlay = map(pathlib.Path, sys.argv[1:])
+assignment = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+def read(path):
+    values, lines = {}, []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = assignment.match(line)
+        if match:
+            values[match.group(1)] = match.group(2)
+        lines.append(line)
+    return values, lines
+
+values, lines = read(target)
+suite, _ = read(overlay)
+seen = set()
+merged = []
+for line in lines:
+    match = assignment.match(line)
+    if match and match.group(1) in suite:
+        key = match.group(1)
+        if key not in seen:
+            merged.append(f"{key}={suite[key]}")
+            seen.add(key)
+    else:
+        merged.append(line)
+for key, value in suite.items():
+    if key not in values:
+        merged.append(f"{key}={value}")
+target.write_text("\n".join(merged) + "\n", encoding="utf-8")
+PY
 cp "$repo_root/LICENSE" "$repo_root/NOTICE" "$stage/"
 
-koda_revision="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-tracker_root="$(CDPATH= cd -- "$(dirname -- "$tracker_verifier")/.." && pwd)"
-tracker_revision="$(git -C "$tracker_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-koda_dirty=false
-tracker_dirty=false
-[[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no 2>/dev/null)" ]] && koda_dirty=true
-[[ -n "$(git -C "$tracker_root" status --porcelain --untracked-files=no 2>/dev/null)" ]] && tracker_dirty=true
-if [[ "$koda_dirty" == true || "$tracker_dirty" == true ]]; then
-  [[ "${KODA_SUITE_ALLOW_DIRTY:-0}" == 1 ]] \
-    || fail "production suite archives require clean KODA and Tracker worktrees; set KODA_SUITE_ALLOW_DIRTY=1 for an explicit snapshot."
-fi
 tracker_vuln_bundle="$(tar -xzOf "$tracker_bundle" ./metadata.env 2>/dev/null | awk -F= '$1 == "VULNERABILITY_BUNDLE" { print $2; exit }')"
 [[ "$tracker_vuln_bundle" == included ]] \
-  || fail "Tracker release must include fresh vulnerability data for destructive reset installs."
+  || fail "Tracker release must include fresh vulnerability data for an offline install."
 
 cat > "$stage/metadata.env" <<EOF
 SUITE_VERSION=$version
@@ -131,8 +204,10 @@ KODA_BUNDLE=bundles/$(basename -- "$koda_bundle")
 TRACKER_BUNDLE=bundles/$(basename -- "$tracker_bundle")
 KODA_GIT_REVISION=$koda_revision
 KODA_TRACKED_WORKTREE_DIRTY=$koda_dirty
+KODA_WORKTREE_DIRTY=$koda_dirty
 TRACKER_GIT_REVISION=$tracker_revision
 TRACKER_WORKTREE_DIRTY=$tracker_dirty
+TRACKER_GIT_WORKTREE_DIRTY=$tracker_dirty
 TRACKER_VULNERABILITY_BUNDLE=$tracker_vuln_bundle
 AUTHORITY=tracker
 AUTH_CONTRACT_VERSION=1

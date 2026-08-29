@@ -6,6 +6,7 @@ import hashlib
 import http.client
 import io
 import json
+import os
 import tempfile
 import threading
 import time
@@ -18,7 +19,21 @@ from pathlib import Path
 from unittest.mock import patch
 
 from security_scanner.portal_identity import IdentityError, identity_from_headers
-from security_scanner.linux_portal import MAX_INPUT_BYTES, create_portal_server
+from security_scanner.portal_integrations import (
+    IntegrationError,
+    _gitlab_settings,
+    create_gitlab_issue,
+    find_gitlab_issue,
+    find_gitlab_issue_note,
+    gitlab_configuration,
+    list_gitlab_refs,
+    provision_tracker_repository,
+    publish_tracker_result,
+    remove_gitlab_configuration,
+    save_gitlab_configuration,
+    test_gitlab_write_configuration,
+)
+from security_scanner.linux_portal import MAX_INPUT_BYTES, _deliver_gitlab_issues, _deliver_gitlab_result, _deliver_tracker, _run_delivery, create_portal_server
 from security_scanner.grype_adapter import GrypeMatch, GrypeResult
 from security_scanner.portal_store import GLOBAL_ROLE_POLICY_ID, SCREEN_PERMISSIONS, PortalStore
 from security_scanner.portal_views import format_portal_time
@@ -41,6 +56,27 @@ class LinuxPortalStoreTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def gitlab_run(self, findings):
+        mappings = self.store.gitlab_repositories(self.project)
+        mapping = mappings[0] if mappings else self.store.set_gitlab_repositories(self.project, [{
+            "gitlab_project_id": 42, "path_with_namespace": "group/demo", "name": "demo",
+            "default_branch": "main", "tracker_service_id": "service-1",
+            "tracker_environment_id": "environment-1", "tracker_token_ref": "demo.token",
+        }], self.admin)[0]
+        target = Path(self.tmp.name) / f"gitlab-{uuid.uuid4().hex}.tar.gz"
+        target.write_bytes(b"archive")
+        input_id = self.store.add_input(self.project, target.name, target)
+        run = self.store.create_scan(self.admin, self.project, input_id, "local", "all", "source", source_snapshot={
+            "gitlab_mapping_id": mapping["mapping_id"], "gitlab_project_id": 42,
+            "gitlab_path_with_namespace": "group/demo", "gitlab_ref_type": "branch",
+            "gitlab_ref_name": "main", "gitlab_commit_sha": "a" * 40,
+            "gitlab_archive_sha256": "b" * 64, "gitlab_fetched_at": self.store._now(),
+            "gitlab_default_branch": "main", "tracker_service_id": "service-1",
+            "tracker_environment_id": "environment-1", "tracker_token_ref": "demo.token",
+        })
+        self.store.complete_run(run["run_id"], result={"findings": findings, "sbom": {"components": []}})
+        return self.store.run(run["run_id"])
+
     def test_header_identity_and_expiry(self):
         headers = {
             "X-KODA-Identity-ID": self.admin,
@@ -51,6 +87,449 @@ class LinuxPortalStoreTests(unittest.TestCase):
         headers["X-KODA-Identity-Expires"] = "2000-01-01T00:00:00+00:00"
         with self.assertRaises(IdentityError):
             identity_from_headers(headers)
+
+    def test_gitlab_ref_pagination_rejects_repeated_page(self):
+        with patch("security_scanner.portal_integrations._gitlab_json", return_value=([], {"X-Next-Page": "1"})):
+            with self.assertRaises(IntegrationError):
+                list_gitlab_refs(42, "branch")
+
+    def test_gitlab_write_token_requires_api_scope_and_same_account(self):
+        account = {"id": 7, "username": "scanner"}
+        with patch("security_scanner.portal_integrations._gitlab_status", side_effect=[account, account]), patch(
+            "security_scanner.portal_integrations._gitlab_json", side_effect=[
+                ({"scopes": ["read_api"]}, {}), ({"scopes": ["api"]}, {}),
+            ],
+        ):
+            self.assertEqual(test_gitlab_write_configuration(
+                "https://gitlab.example.internal", "read-token", "write-token",
+            ), account)
+        with patch("security_scanner.portal_integrations._gitlab_status", side_effect=[account, account]), patch(
+            "security_scanner.portal_integrations._gitlab_json", side_effect=[
+                ({"scopes": ["read_api"]}, {}), ({"scopes": ["write_repository"]}, {}),
+            ],
+        ):
+            with self.assertRaisesRegex(IntegrationError, "api 범위"):
+                test_gitlab_write_configuration(
+                    "https://gitlab.example.internal", "read-token", "write-token",
+                )
+        with patch("security_scanner.portal_integrations._gitlab_status", side_effect=[account, {"id": 8, "username": "other"}]), patch(
+            "security_scanner.portal_integrations._gitlab_json", side_effect=[
+                ({"scopes": ["read_api"]}, {}), ({"scopes": ["api"]}, {}),
+            ],
+        ):
+            with self.assertRaisesRegex(IntegrationError, "같은 계정"):
+                test_gitlab_write_configuration(
+                    "https://gitlab.example.internal", "read-token", "write-token",
+                )
+
+    def test_gitlab_issue_client_always_creates_confidential_issue(self):
+        with patch("security_scanner.portal_integrations._gitlab_write_json", return_value={
+            "iid": 3, "web_url": "https://gitlab.example/group/demo/-/issues/3",
+        }) as request:
+            issue = create_gitlab_issue(42, "title", "body", settings_dir=Path(self.tmp.name))
+        self.assertEqual(issue["iid"], 3)
+        self.assertEqual(request.call_args.kwargs["payload"], {
+            "title": "title", "description": "body", "confidential": True,
+        })
+
+    def test_confirmed_security_findings_create_and_reuse_open_or_closed_gitlab_issues(self):
+        confirmed = {
+            "rule_id": "code.demo", "category": "code", "severity": "high", "title": "Demo flaw",
+            "path": "src/demo.py", "line": 7, "target": "demo", "evidence": "masked evidence",
+            "description": "description", "recommendation": "fix it", "verification_status": "confirmed",
+            "issue_key": "code.demo|src/demo.py|7", "trace": [{"raw": "must-not-leave-koda"}],
+        }
+        excluded = {**confirmed, "rule_id": "code.review", "issue_key": "review", "verification_status": "needs_review"}
+        run1 = self.gitlab_run([
+            confirmed, excluded,
+            {**confirmed, "category": "quality", "issue_key": "quality"},
+            {**confirmed, "category": "dependencies", "issue_key": "dependency"},
+        ])
+        with patch("security_scanner.linux_portal.find_gitlab_issue", return_value=None), patch(
+            "security_scanner.linux_portal.create_gitlab_issue", return_value={
+                "iid": 1, "web_url": "https://gitlab.example/group/demo/-/issues/1", "state": "opened",
+            },
+        ) as created:
+            first = _deliver_gitlab_issues(self.store, run1["run_id"])
+        self.assertEqual((first["status"], first["total_count"], first["created_count"]), ("completed", 1, 1))
+        self.assertNotIn("must-not-leave-koda", created.call_args.args[2])
+        self.assertIn("[KODA][HIGH] Demo flaw", created.call_args.args[1])
+
+        run2 = self.gitlab_run([confirmed])
+        opened = {"iid": 1, "web_url": "https://gitlab.example/group/demo/-/issues/1", "state": "opened"}
+        with patch("security_scanner.linux_portal.get_gitlab_issue", return_value=opened), patch(
+            "security_scanner.linux_portal.find_gitlab_issue_note", return_value=None,
+        ), patch("security_scanner.linux_portal.add_gitlab_issue_note", return_value={"id": 9}) as noted:
+            second = _deliver_gitlab_issues(self.store, run2["run_id"])
+        self.assertEqual((second["status"], second["reused_count"]), ("completed", 1))
+        self.assertIn(run2["run_id"], noted.call_args.args[2])
+
+        run3 = self.gitlab_run([confirmed])
+        with patch("security_scanner.linux_portal.get_gitlab_issue", return_value={**opened, "state": "closed"}), patch(
+            "security_scanner.linux_portal.find_gitlab_issue_note", return_value=None,
+        ), patch("security_scanner.linux_portal.add_gitlab_issue_note", return_value={"id": 10}) as noted_closed, patch(
+            "security_scanner.linux_portal.create_gitlab_issue",
+        ) as recreated:
+            third = _deliver_gitlab_issues(self.store, run3["run_id"])
+        self.assertEqual((third["status"], third["reused_count"]), ("completed", 1))
+        noted_closed.assert_called_once()
+        recreated.assert_not_called()
+
+    def test_gitlab_marker_search_paginates_issues_and_notes(self):
+        marker = "<!-- koda-finding:" + "a" * 64 + " -->"
+        first_page = [{"description": "other"} for _ in range(100)]
+        expected_issue = {"iid": 7, "description": marker}
+        with patch("security_scanner.portal_integrations._gitlab_json", side_effect=[
+            (first_page, {"X-Next-Page": "2"}), ([expected_issue], {"X-Next-Page": ""}),
+        ]) as request:
+            self.assertEqual(find_gitlab_issue(42, marker, settings_dir=Path(self.tmp.name)), expected_issue)
+        self.assertEqual(request.call_args_list[1].args[1]["page"], "2")
+
+        note_marker = "<!-- koda-delivery:run:item -->"
+        expected_note = {"id": 8, "body": note_marker}
+        with patch("security_scanner.portal_integrations._gitlab_json", side_effect=[
+            ([{"body": "other"}] * 100, {"X-Next-Page": "2"}), ([expected_note], {}),
+        ]):
+            self.assertEqual(find_gitlab_issue_note(42, 7, note_marker, settings_dir=Path(self.tmp.name)), expected_note)
+
+    def test_gitlab_issue_partial_retry_and_restart_recovery(self):
+        findings = [{
+            "rule_id": f"code.demo.{index}", "category": "code", "severity": "medium", "title": f"Finding {index}",
+            "path": f"src/{index}.py", "line": index, "verification_status": "confirmed", "issue_key": f"finding-{index}",
+        } for index in (1, 2)]
+        run = self.gitlab_run(findings)
+        with patch("security_scanner.linux_portal.find_gitlab_issue", return_value=None), patch(
+            "security_scanner.linux_portal.create_gitlab_issue", side_effect=[
+                IntegrationError("invalid item", status=400),
+                {"iid": 2, "web_url": "https://gitlab.example/group/demo/-/issues/2", "state": "opened"},
+            ],
+        ):
+            partial = _deliver_gitlab_issues(self.store, run["run_id"])
+        self.assertEqual((partial["status"], partial["created_count"], partial["failed_count"]), ("partial", 1, 1))
+        with patch("security_scanner.linux_portal.find_gitlab_issue", return_value=None), patch(
+            "security_scanner.linux_portal.create_gitlab_issue", return_value={
+                "iid": 1, "web_url": "https://gitlab.example/group/demo/-/issues/1", "state": "opened",
+            },
+        ) as retried:
+            completed = _deliver_gitlab_issues(self.store, run["run_id"], retry=True)
+        self.assertEqual((completed["status"], completed["created_count"], completed["failed_count"]), ("completed", 2, 0))
+        retried.assert_called_once()
+
+        recovering = self.gitlab_run(findings[:1])
+        self.store.claim_gitlab_issue_delivery(recovering["run_id"])
+        reopened = PortalStore(Path(self.tmp.name) / "portal.sqlite3")
+        self.assertIn(recovering["run_id"], reopened.recover_gitlab_issue_deliveries())
+        self.assertEqual(reopened.gitlab_issue_delivery(recovering["run_id"])["status"], "pending")
+
+    def test_gitlab_issue_crash_marker_and_system_failure_do_not_duplicate_or_fail_scan(self):
+        finding = {
+            "rule_id": "code.crash", "category": "code", "severity": "critical", "title": "Crash safe",
+            "path": "src/crash.py", "line": 1, "verification_status": "confirmed", "issue_key": "crash-safe",
+        }
+        run = self.gitlab_run([finding])
+        self.store.claim_gitlab_issue_delivery(run["run_id"])
+        self.store.prepare_gitlab_issue_items(run["run_id"], 42, [{
+            "finding_index": 0, "finding_key": "crash-safe",
+        }])
+        self.store.claim_gitlab_issue_item(run["run_id"], "crash-safe")
+        reopened = PortalStore(Path(self.tmp.name) / "portal.sqlite3")
+        reopened.recover_gitlab_issue_deliveries()
+        recovered_issue = {"iid": 11, "web_url": "https://gitlab.example/group/demo/-/issues/11", "state": "opened"}
+        with patch("security_scanner.linux_portal.find_gitlab_issue", return_value=recovered_issue), patch(
+            "security_scanner.linux_portal.create_gitlab_issue",
+        ) as create:
+            delivery = _deliver_gitlab_issues(reopened, run["run_id"])
+        self.assertEqual((delivery["status"], delivery["created_count"]), ("completed", 1))
+        create.assert_not_called()
+
+        failed_run = self.gitlab_run([{**finding, "issue_key": "system-failure"}])
+        with patch("security_scanner.linux_portal.find_gitlab_issue", side_effect=IntegrationError("rate limited", status=429)):
+            failed = _deliver_gitlab_issues(self.store, failed_run["run_id"])
+        self.assertEqual((failed["status"], failed["failed_count"]), ("failed", 1))
+        self.assertEqual(self.store.run(failed_run["run_id"])["status"], "completed")
+        self.assertEqual(self.store.tracker_delivery(failed_run["run_id"])["status"], "pending")
+
+    def test_guarded_retries_finalize_sending_state_after_unexpected_errors(self):
+        tracker_run = self.gitlab_run([])
+
+        def crash_tracker(store, run_id, *, retry=False):
+            store.claim_tracker_delivery(run_id, retry=retry)
+            raise OSError("tracker socket failed")
+
+        with patch("security_scanner.linux_portal._deliver_tracker", side_effect=crash_tracker), self.assertRaises(OSError):
+            _run_delivery(self.store, "tracker", tracker_run["run_id"])
+        self.assertEqual(self.store.tracker_delivery(tracker_run["run_id"])["status"], "failed")
+
+        result_run = self.gitlab_run([])
+        self.store.claim_tracker_delivery(result_run["run_id"])
+        self.store.finish_tracker_delivery(result_run["run_id"], "completed", tracker_run_id="tracker-result")
+
+        def crash_result(store, run_id, *, retry=False):
+            store.claim_gitlab_result(run_id, retry=retry)
+            raise TypeError("malformed GitLab result")
+
+        with patch("security_scanner.linux_portal._deliver_gitlab_result", side_effect=crash_result), self.assertRaises(TypeError):
+            _run_delivery(self.store, "gitlab_result", result_run["run_id"])
+        self.assertEqual(self.store.tracker_delivery(result_run["run_id"])["gitlab_result_status"], "failed")
+
+        issue_run = self.gitlab_run([{
+            "rule_id": "code.guard", "category": "code", "severity": "high", "title": "guard",
+            "verification_status": "confirmed", "issue_key": "guarded-item",
+        }])
+
+        def crash_issues(store, run_id, *, retry=False):
+            store.claim_gitlab_issue_delivery(run_id, retry=retry)
+            store.prepare_gitlab_issue_items(run_id, 42, [{"finding_index": 0, "finding_key": "guarded-item"}])
+            store.claim_gitlab_issue_item(run_id, "guarded-item")
+            raise KeyError("malformed issue result")
+
+        with patch("security_scanner.linux_portal._deliver_gitlab_issues", side_effect=crash_issues), self.assertRaises(KeyError):
+            _run_delivery(self.store, "issues", issue_run["run_id"])
+        self.assertEqual(self.store.gitlab_issue_delivery(issue_run["run_id"])["status"], "failed")
+
+    def test_gitlab_result_retry_uses_snapshotted_tracker_token(self):
+        run = self.gitlab_run([])
+        self.store.claim_tracker_delivery(run["run_id"])
+        self.store.finish_tracker_delivery(run["run_id"], "completed", tracker_run_id="tracker-result")
+        tracker_result = {"run": {"runUrl": None}, "analysis": {"findings": []}}
+        with patch(
+            "security_scanner.linux_portal.fetch_tracker_result", return_value=tracker_result,
+        ) as fetch, patch(
+            "security_scanner.linux_portal.publish_tracker_result",
+            return_value={"mergeRequestUrl": "https://gitlab.example/mr/1", "issueUrls": []},
+        ):
+            delivery = _deliver_gitlab_result(self.store, run["run_id"])
+        self.assertEqual(delivery["gitlab_result_status"], "completed")
+        self.assertEqual(fetch.call_args.args[0]["tracker_token_ref"], "demo.token")
+
+    def test_gitlab_web_configuration_uses_private_files_and_environment_lock(self):
+        directory = Path(self.tmp.name) / "integrations"
+        environment = {"KODA_GITLAB_URL": "", "KODA_GITLAB_TOKEN_FILE": "", "KODA_GITLAB_WRITE_TOKEN_FILE": "", "KODA_GITLAB_CA_FILE": ""}
+        with patch.dict(os.environ, environment):
+            saved = save_gitlab_configuration(directory, "https://gitlab.example.internal/", "glpat-secret", write_token="glpat-write-secret")
+            self.assertEqual(saved, {
+                "configured": True, "locked": False, "source": "web",
+                "url": "https://gitlab.example.internal", "write_configured": True, "ca_configured": False,
+            })
+            self.assertEqual((directory / "gitlab.token").read_text(encoding="utf-8"), "glpat-secret\n")
+            self.assertEqual((directory / "gitlab-write.token").read_text(encoding="utf-8"), "glpat-write-secret\n")
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((directory / "gitlab.token").stat().st_mode & 0o777, 0o600)
+            self.assertEqual((directory / "gitlab.json").stat().st_mode & 0o777, 0o600)
+            self.assertNotIn("glpat-secret", (directory / "gitlab.json").read_text(encoding="utf-8"))
+            self.assertEqual(_gitlab_settings(directory)[:2], ("https://gitlab.example.internal", "glpat-secret"))
+            save_gitlab_configuration(directory, "https://gitlab.example.internal", "", write_token="")
+            self.assertEqual((directory / "gitlab.token").read_text(encoding="utf-8"), "glpat-secret\n")
+            self.assertEqual((directory / "gitlab-write.token").read_text(encoding="utf-8"), "glpat-write-secret\n")
+            remove_gitlab_configuration(directory)
+            self.assertFalse(gitlab_configuration(directory)["configured"])
+        token_file = Path(self.tmp.name) / "operator.token"
+        token_file.write_text("operator-secret\n", encoding="utf-8")
+        with patch.dict(os.environ, {
+            "KODA_GITLAB_URL": "https://operator.example.internal",
+            "KODA_GITLAB_TOKEN_FILE": str(token_file), "KODA_GITLAB_WRITE_TOKEN_FILE": str(token_file), "KODA_GITLAB_CA_FILE": "",
+        }):
+            self.assertTrue(gitlab_configuration(directory)["locked"])
+            with self.assertRaises(IntegrationError):
+                save_gitlab_configuration(directory, "https://other.example.internal", "other-secret")
+
+    def test_tracker_provisioning_stores_rotated_service_token_privately(self):
+        provisioning_file = Path(self.tmp.name) / "tracker-provisioning.token"
+        provisioning_file.write_text("provision-secret\n", encoding="utf-8")
+        token_dir = Path(self.tmp.name) / "tracker-tokens"
+        token_dir.mkdir(mode=0o733)
+        token_dir.chmod(0o733)
+        with patch.dict(os.environ, {
+            "KODA_TRACKER_URL": "https://tracker.example.internal",
+            "KODA_TRACKER_PROVISIONING_TOKEN_FILE": str(provisioning_file),
+            "KODA_TRACKER_TOKEN_DIR": str(token_dir),
+        }), patch("security_scanner.portal_integrations._tracker_request_json", return_value={
+            "serviceId": "service-1", "environmentId": "environment-1", "uploadToken": "upload-secret",
+        }) as request:
+            result = provision_tracker_repository("https://gitlab.example.internal", {
+                "id": 42, "path_with_namespace": "group/demo",
+            })
+        self.assertEqual(result, {
+            "tracker_service_id": "service-1", "tracker_environment_id": "environment-1",
+            "tracker_token_ref": "gitlab-42.token",
+        })
+        self.assertEqual((token_dir / "gitlab-42.token").read_text(encoding="utf-8"), "upload-secret\n")
+        self.assertEqual((token_dir / "gitlab-42.token").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(token_dir.stat().st_mode & 0o777, 0o733)
+        self.assertEqual(request.call_args.args[:2], ("/api/v1/integrations/koda/repositories", "provision-secret"))
+
+    def test_tracker_result_is_committed_to_mr_and_confidential_issue(self):
+        calls = []
+
+        def write(path, query=None, *, settings_dir, method="GET", payload=None):
+            calls.append((path, query, method, payload))
+            if path.endswith("/repository/commits"):
+                return {"web_url": "https://gitlab.example/group/demo/-/commit/1"}
+            if path.endswith("/merge_requests") and method == "GET":
+                return []
+            if path.endswith("/merge_requests"):
+                return {"web_url": "https://gitlab.example/group/demo/-/merge_requests/1"}
+            if path.endswith("/issues") and method == "GET":
+                return []
+            if path.endswith("/issues"):
+                return {"web_url": "https://gitlab.example/group/demo/-/issues/1"}
+            self.fail(path)
+
+        with patch("security_scanner.portal_integrations._gitlab_optional_json", side_effect=[None, None, None]), patch(
+            "security_scanner.portal_integrations.find_gitlab_issue", return_value=None,
+        ), patch(
+            "security_scanner.portal_integrations._gitlab_write_json", side_effect=write,
+        ):
+            result = publish_tracker_result(
+                {"gitlab_project_id": 42, "default_branch": "main"},
+                {"run_id": "koda-run-1", "snapshot": {
+                    "gitlab_project_id": 42, "gitlab_path_with_namespace": "group/demo",
+                    "gitlab_ref_type": "branch", "gitlab_ref_name": "main", "gitlab_commit_sha": "a" * 40,
+                }},
+                "tracker-run-1", {"run": {"runUrl": "https://tracker.example/runs/tracker-run-1"}, "analysis": {"findings": [{
+                    "canonicalId": "CVE-2026-1234", "severity": "high", "cvssScore": 8.1,
+                    "component": "demo", "installedVersion": "1.0", "fixedIn": ["1.1"],
+                }, {
+                    "canonicalId": "CVE-2026-1234", "severity": "high", "cvssScore": 8.1,
+                    "component": "demo", "installedVersion": "1.0", "fixedIn": ["1.2"],
+                }, {
+                    "canonicalId": "CVE-2026-1234", "severity": "low", "cvssScore": 3.0,
+                    "component": "demo", "installedVersion": "1.0", "fixedIn": ["1.3"],
+                }]}}, settings_dir=Path(self.tmp.name),
+            )
+        self.assertEqual(result["mergeRequestUrl"], "https://gitlab.example/group/demo/-/merge_requests/1")
+        self.assertEqual(result["issueUrls"], ["https://gitlab.example/group/demo/-/issues/1"])
+        commit_payload = next(payload for path, _, method, payload in calls if path.endswith("/repository/commits") and method == "POST")
+        self.assertEqual((commit_payload["branch"], commit_payload["start_sha"]), ("koda/sbom-results/aaaaaaaaaaaa", "a" * 40))
+        merge_payload = next(payload for path, _, method, payload in calls if path.endswith("/merge_requests") and method == "POST")
+        self.assertFalse(merge_payload["remove_source_branch"])
+        issue_payload = next(payload for path, _, method, payload in calls if path.endswith("/issues") and method == "POST")
+        self.assertTrue(issue_payload["confidential"])
+        self.assertIn("CVE-2026-1234", issue_payload["description"])
+        self.assertIn("| demo | 1.0 | 1.1, 1.2 |", issue_payload["description"])
+        self.assertEqual(issue_payload["description"].count("| CVE-2026-1234 |"), 2)
+        self.assertIn("<!-- koda-sbom-tracker-run:tracker-run-1 -->", issue_payload["description"])
+        self.assertIn("https://tracker.example/runs/tracker-run-1", issue_payload["description"])
+
+    def test_merged_tracker_result_is_not_recommitted_when_target_file_matches(self):
+        commit_sha = "b" * 40
+        run = {"run_id": "koda-run-2", "snapshot": {
+            "gitlab_project_id": 42, "gitlab_path_with_namespace": "group/demo",
+            "gitlab_ref_type": "branch", "gitlab_ref_name": "main", "gitlab_commit_sha": commit_sha,
+        }}
+        tracker_result = {"analysis": {"findings": []}}
+        report = {
+            "schemaVersion": 1,
+            "source": {
+                "gitlabProjectId": 42, "pathWithNamespace": "group/demo", "refType": "branch",
+                "refName": "main", "commitSha": commit_sha,
+            },
+            "kodaRunId": "koda-run-2", "trackerRunId": "tracker-run-2", "trackerResult": tracker_result,
+        }
+        encoded = base64.b64encode((json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()).decode()
+        with patch("security_scanner.portal_integrations._gitlab_optional_json", side_effect=[None, {
+            "encoding": "base64", "content": encoded,
+        }]), patch("security_scanner.portal_integrations._gitlab_write_json", return_value=[{
+            "web_url": "https://gitlab.example/group/demo/-/merge_requests/1",
+        }]) as write:
+            result = publish_tracker_result(
+                {"gitlab_project_id": 42, "default_branch": "main"}, run,
+                "tracker-run-2", tracker_result, settings_dir=Path(self.tmp.name),
+            )
+        self.assertEqual(result["mergeRequestUrl"], "https://gitlab.example/group/demo/-/merge_requests/1")
+        self.assertFalse(any(call.args[0].endswith("/repository/commits") for call in write.call_args_list))
+
+    def test_malformed_gitlab_result_file_is_rejected_before_commit(self):
+        with patch("security_scanner.portal_integrations._gitlab_optional_json", return_value={
+            "encoding": "base64", "content": "not-base64%%%",
+        }), patch("security_scanner.portal_integrations._gitlab_write_json") as write, self.assertRaisesRegex(
+            IntegrationError, "base64",
+        ):
+            publish_tracker_result(
+                {"gitlab_project_id": 42, "default_branch": "main"},
+                {"run_id": "koda-malformed", "snapshot": {
+                    "gitlab_project_id": 42, "gitlab_commit_sha": "e" * 40,
+                }},
+                "tracker-malformed", {"analysis": {"findings": []}}, settings_dir=Path(self.tmp.name),
+            )
+        write.assert_not_called()
+
+    def test_same_commit_same_analysis_reuses_mr_and_adds_one_tracker_run_comment(self):
+        commit_sha = "c" * 40
+        analysis = {"findings": [{"canonicalId": "CVE-2026-4321", "component": "demo", "version": "1.0"}]}
+        previous = {
+            "schemaVersion": 1,
+            "source": {"commitSha": commit_sha},
+            "kodaRunId": "old-koda-run", "trackerRunId": "old-tracker-run",
+            "trackerResult": {"analysis": analysis},
+        }
+        encoded = base64.b64encode(json.dumps(previous).encode()).decode()
+        calls = []
+
+        def write(path, query=None, *, settings_dir, method="GET", payload=None):
+            calls.append((path, method, payload))
+            if path.endswith("/merge_requests"):
+                return [{"web_url": "https://gitlab.example/group/demo/-/merge_requests/1"}]
+            if path.endswith("/issues"):
+                return [{
+                    "iid": 9, "web_url": "https://gitlab.example/group/demo/-/issues/9",
+                    "description": f"<!-- koda-sbom-tracker:{commit_sha} -->",
+                }]
+            self.fail(path)
+
+        existing_issue = {
+            "iid": 9, "web_url": "https://gitlab.example/group/demo/-/issues/9",
+            "description": f"<!-- koda-sbom-tracker:{commit_sha} -->",
+        }
+        with patch("security_scanner.portal_integrations._gitlab_optional_json", return_value={
+            "encoding": "base64", "content": encoded,
+        }), patch("security_scanner.portal_integrations.find_gitlab_issue", return_value=existing_issue), patch(
+            "security_scanner.portal_integrations._gitlab_write_json", side_effect=write,
+        ), patch(
+            "security_scanner.portal_integrations.find_gitlab_issue_note", return_value=None,
+        ), patch("security_scanner.portal_integrations.add_gitlab_issue_note") as add_note:
+            publish_tracker_result(
+                {"gitlab_project_id": 42, "default_branch": "main"},
+                {"run_id": "new-koda-run", "snapshot": {
+                    "gitlab_project_id": 42, "gitlab_commit_sha": commit_sha,
+                }},
+                "new-tracker-run", {"analysis": analysis}, settings_dir=Path(self.tmp.name),
+            )
+        self.assertFalse(any(path.endswith("/repository/commits") for path, _, _ in calls))
+        add_note.assert_called_once()
+        self.assertIn("<!-- koda-sbom-tracker-run:new-tracker-run -->", add_note.call_args.args[2])
+
+    def test_tracker_summary_issue_limits_rows_and_reports_omissions(self):
+        findings = [{
+            "canonicalId": f"CVE-2026-{10000 + index}", "severity": "medium",
+            "component": f"component-{index}", "installedVersion": "1.0",
+        } for index in range(201)]
+        issue_payload = {}
+
+        def write(path, query=None, *, settings_dir, method="GET", payload=None):
+            if path.endswith("/repository/commits"):
+                return {"web_url": "https://gitlab.example/commit/1"}
+            if path.endswith("/merge_requests") and method == "GET":
+                return [{"web_url": "https://gitlab.example/mr/1"}]
+            if path.endswith("/issues") and method == "GET":
+                return []
+            if path.endswith("/issues"):
+                issue_payload.update(payload)
+                return {"web_url": "https://gitlab.example/issue/1"}
+            self.fail(path)
+
+        with patch("security_scanner.portal_integrations._gitlab_optional_json", side_effect=[None, None, None]), patch(
+            "security_scanner.portal_integrations.find_gitlab_issue", return_value=None,
+        ), patch(
+            "security_scanner.portal_integrations._gitlab_write_json", side_effect=write,
+        ):
+            publish_tracker_result(
+                {"gitlab_project_id": 42, "default_branch": "main"},
+                {"run_id": "koda-limit", "snapshot": {"gitlab_project_id": 42, "gitlab_commit_sha": "d" * 40}},
+                "tracker-limit", {"analysis": {"findings": findings}}, settings_dir=Path(self.tmp.name),
+            )
+        self.assertEqual(issue_payload["description"].count("| CVE-2026-"), 200)
+        self.assertIn("전체 201건 · 생략 1건", issue_payload["description"])
 
     def test_round_snapshot_and_injection_rejection(self):
         run = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all")
@@ -144,6 +623,7 @@ class LinuxPortalStoreTests(unittest.TestCase):
         encoded = json.dumps(payload, ensure_ascii=False)
         self.assertEqual(payload["scan"]["local_vulnerability"]["matched_vulnerabilities"], 1)
         self.assertIn("CVE-2026-1234", encoded)
+        self.assertIn("dependency.osv-known-vulnerability|pkg:pypi/demo@1.0|CVE-2026-1234", encoded)
         self.assertNotIn("GHSA-only", encoded)
 
     def test_run_progress_cancel_and_recovery(self):
@@ -167,6 +647,87 @@ class LinuxPortalStoreTests(unittest.TestCase):
         reopened = PortalStore(Path(self.tmp.name) / "portal.sqlite3")
         self.assertEqual(reopened.recover_incomplete_runs(), [])
         self.assertFalse(path.exists())
+
+    def test_gitlab_mapping_snapshot_and_tracker_state_persist(self):
+        mapping = self.store.set_gitlab_repositories(self.project, [{
+            "gitlab_project_id": 42, "path_with_namespace": "group/demo", "name": "demo",
+            "default_branch": "main", "tracker_service_id": "service-1",
+            "tracker_environment_id": "environment-1", "tracker_token_ref": "demo.token",
+        }], self.admin)[0]
+        run = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "source", source_snapshot={
+            "gitlab_mapping_id": mapping["mapping_id"], "gitlab_project_id": 42,
+            "gitlab_path_with_namespace": "group/demo", "gitlab_ref_type": "branch",
+            "gitlab_ref_name": "main", "gitlab_commit_sha": "a" * 40,
+            "gitlab_archive_sha256": "b" * 64, "gitlab_fetched_at": self.store._now(),
+            "gitlab_default_branch": "main",
+            "tracker_service_id": "service-1", "tracker_environment_id": "environment-1",
+            "tracker_token_ref": "demo.token",
+        })
+        self.assertEqual(run["snapshot"]["gitlab_commit_sha"], "a" * 40)
+        self.store.mark_run_running(run["run_id"])
+        self.store.complete_run(run["run_id"], result={"findings": [], "sbom": {"components": []}})
+        self.assertEqual(self.store.claim_tracker_delivery(run["run_id"])["attempts"], 1)
+        self.store.finish_tracker_delivery(run["run_id"], "failed", error="offline")
+        self.store.remove_gitlab_repository(mapping["mapping_id"], self.admin)
+        self.assertEqual(self.store.gitlab_repositories(self.project), [])
+        self.assertEqual(self.store.gitlab_repository(mapping["mapping_id"], include_disabled=True)["enabled"], 0)
+        self.store.claim_tracker_delivery(run["run_id"], retry=True)
+        reopened = PortalStore(Path(self.tmp.name) / "portal.sqlite3")
+        self.assertEqual(reopened.recover_tracker_deliveries(), [run["run_id"]])
+        self.assertEqual(reopened.tracker_delivery(run["run_id"])["status"], "pending")
+
+    def test_legacy_combined_failure_migrates_to_gitlab_result_and_keeps_tracker_run(self):
+        run = self.gitlab_run([])
+        self.store.claim_tracker_delivery(run["run_id"])
+        self.store.finish_tracker_delivery(
+            run["run_id"], "failed", tracker_run_id="tracker-run-legacy", error="GitLab unavailable",
+        )
+        self.store.claim_tracker_delivery(run["run_id"], retry=True)
+        failed_again = self.store.finish_tracker_delivery(run["run_id"], "failed", error="still unavailable")
+        self.assertEqual(failed_again["tracker_run_id"], "tracker-run-legacy")
+
+        migrated = PortalStore(Path(self.tmp.name) / "portal.sqlite3").tracker_delivery(run["run_id"])
+        self.assertEqual(migrated["status"], "completed")
+        self.assertEqual(migrated["gitlab_result_status"], "failed")
+        self.assertEqual(migrated["gitlab_result_last_error"], "still unavailable")
+        self.assertIsNone(migrated["last_error"])
+
+    def test_completed_gitlab_run_delivers_sbom_to_tracker(self):
+        mapping = self.store.set_gitlab_repositories(self.project, [{
+            "gitlab_project_id": 42, "path_with_namespace": "group/demo", "name": "demo",
+            "default_branch": "main", "tracker_service_id": "service-1",
+            "tracker_environment_id": "environment-1", "tracker_token_ref": "demo.token",
+        }], self.admin)[0]
+        run = self.store.create_scan(self.admin, self.project, self.input_id, "local", "all", "source", source_snapshot={
+            "gitlab_mapping_id": mapping["mapping_id"], "gitlab_project_id": 42,
+            "gitlab_path_with_namespace": "group/demo", "gitlab_ref_type": "branch",
+            "gitlab_ref_name": "main", "gitlab_commit_sha": "a" * 40,
+            "gitlab_archive_sha256": "b" * 64, "gitlab_fetched_at": self.store._now(),
+            "gitlab_default_branch": "main",
+            "tracker_service_id": "service-1", "tracker_environment_id": "environment-1",
+            "tracker_token_ref": "demo.token",
+        })
+        self.store.mark_run_running(run["run_id"])
+        self.store.complete_run(run["run_id"], result={"findings": [], "sbom": {"components": [{"name": "demo"}]}})
+        self.store.set_gitlab_repositories(self.project, [{
+            "gitlab_project_id": 42, "path_with_namespace": "group/demo", "name": "demo",
+            "default_branch": "main", "tracker_service_id": "service-2",
+            "tracker_environment_id": "environment-2", "tracker_token_ref": "changed.token",
+        }], self.admin)
+        with patch("security_scanner.linux_portal.send_tracker_sbom", return_value="tracker-run-1") as send, patch(
+            "security_scanner.linux_portal.fetch_tracker_result", return_value={"analysis": {"findings": []}},
+        ), patch("security_scanner.linux_portal.publish_tracker_result", return_value={
+            "mergeRequestUrl": "https://gitlab.example/group/demo/-/merge_requests/1",
+            "issueUrls": ["https://gitlab.example/group/demo/-/issues/1"],
+        }):
+            delivery = _deliver_tracker(self.store, run["run_id"])
+        self.assertEqual((delivery["status"], delivery["tracker_run_id"], delivery["attempts"]), ("completed", "tracker-run-1", 1))
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args[0]["tracker_service_id"], "service-1")
+        self.assertEqual(delivery["gitlab_merge_request_url"], "https://gitlab.example/group/demo/-/merge_requests/1")
+        self.assertEqual(delivery["gitlab_issue_urls"], ["https://gitlab.example/group/demo/-/issues/1"])
+        with self.assertRaises(ValueError):
+            _deliver_tracker(self.store, run["run_id"], retry=True)
 
 
 class LinuxPortalHttpTests(unittest.TestCase):
@@ -295,7 +856,6 @@ class LinuxPortalHttpTests(unittest.TestCase):
         status, body = self.request("/koda/projects", headers=self.headers())
         self.assertEqual(status, 200)
         self.assertIn("프로젝트를 생성하면", body)
-
         viewer = str(uuid.uuid4())
         viewer_headers = self.headers(viewer, "승인된 사용자")
         status, body = self.request("/koda/scans/new", headers=viewer_headers)
@@ -304,6 +864,202 @@ class LinuxPortalHttpTests(unittest.TestCase):
         status, body = self.request("/koda/projects", headers=viewer_headers)
         self.assertEqual(status, 403)
         self.assertIn("이 화면에 접근할 권한이 없습니다", body)
+
+    def test_gitlab_catalog_mapping_ref_and_scan_snapshot(self):
+        project = self.server.portal_store.create_project("GitLab project", self.admin)
+        remote = {"id": 42, "name": "demo", "path_with_namespace": "group/demo", "default_branch": "main"}
+        with patch("security_scanner.linux_portal.gitlab_status", return_value={"username": "scanner", "name": "Scanner"}), patch(
+            "security_scanner.linux_portal.list_gitlab_projects", return_value=[remote]
+        ), patch("security_scanner.linux_portal.gitlab_configuration", return_value={
+            "configured": True, "write_configured": True, "locked": False, "source": "web",
+            "url": "https://gitlab.example.internal", "ca_configured": False,
+        }), patch("security_scanner.linux_portal.provision_tracker_repository", return_value={
+            "tracker_service_id": "service-1", "tracker_environment_id": "environment-1",
+            "tracker_token_ref": "gitlab-42.token",
+        }):
+            status, page = self.request("/koda/admin/gitlab", headers=self.headers())
+            self.assertEqual(status, 200)
+            self.assertIn("GitLab 서비스 계정", page)
+            self.assertIn("GitLab 연결 설정", page)
+            self.assertIn("저장소 조회 PAT", page)
+            self.assertIn("결과 저장 PAT", page)
+            self.assertIn("연결 시 자동 생성·재사용", page)
+            self.assertNotIn("data-service=", page)
+            self.assertEqual(self.request("/koda/api/v1/admin/gitlab/status", headers=self.headers())[0], 200)
+            status, mappings = self.request("/koda/api/v1/admin/gitlab/mappings", method="POST", headers=self.headers(), payload={
+                "project_id": project, "mappings": [{"gitlab_project_id": 42}],
+            })
+        self.assertEqual(status, 200)
+        mapping_id = mappings[0]["mapping_id"]
+        status, scan_page = self.request("/koda/scans/library", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("input-source-switch", scan_page)
+        self.assertIn("gitlab-repository-row", scan_page)
+        self.assertIn("gitlab-ref-row", scan_page)
+        status, visible = self.request(f"/koda/api/v1/projects/{project}/gitlab/repositories", headers=self.headers())
+        self.assertEqual((status, visible[0]["path_with_namespace"]), (200, "group/demo"))
+        self.assertNotIn("tracker_token_ref", visible[0])
+        viewer, outsider = str(uuid.uuid4()), str(uuid.uuid4())
+        self.server.portal_store.ensure_subject(viewer, "viewer")
+        self.server.portal_store.ensure_subject(outsider, "outsider")
+        self.server.portal_store.set_subject(viewer, status="enabled", system_admin=False, display="viewer", actor=self.admin)
+        self.server.portal_store.set_subject(outsider, status="enabled", system_admin=False, display="outsider", actor=self.admin)
+        self.server.portal_store.set_membership(project, viewer, "analyst", self.admin)
+        self.assertEqual(self.request(
+            f"/koda/api/v1/projects/{project}/gitlab/repositories", headers=self.headers(viewer)
+        )[0], 200)
+        self.assertEqual(self.request(
+            f"/koda/api/v1/projects/{project}/gitlab/repositories", headers=self.headers(outsider)
+        )[0], 404)
+        self.assertEqual(self.request("/koda/api/v1/admin/gitlab/status", headers=self.headers(viewer))[0], 403)
+        with patch("security_scanner.linux_portal.list_gitlab_refs", return_value=[{"name": "main", "commit_sha": "a" * 40}]):
+            status, refs = self.request(f"/koda/api/v1/projects/{project}/gitlab/repositories/{mapping_id}/refs?type=branch", headers=self.headers())
+        self.assertEqual((status, refs[0]["name"]), (200, "main"))
+
+        def fake_download(_project_id, _sha, target, *, max_bytes, settings_dir=None):
+            self.assertEqual(max_bytes, MAX_INPUT_BYTES)
+            self.assertEqual(settings_dir, Path(self.tmp.name) / "integrations")
+            target.write_bytes(b"archive")
+            return "b" * 64, 7
+
+        with patch("security_scanner.linux_portal.resolve_gitlab_ref", return_value="a" * 40), patch(
+            "security_scanner.linux_portal.download_gitlab_archive", side_effect=fake_download
+        ), patch.object(self.server.portal_worker, "enqueue"):
+            status, run = self.request("/koda/api/v1/scans", method="POST", headers=self.headers(), payload={
+                "project_id": project, "gitlab_repository_id": mapping_id,
+                "ref_type": "branch", "ref_name": "main", "standard": "local",
+                "standard_category": "all", "scan_scope": "source",
+            })
+        self.assertEqual(status, 202)
+        saved = self.server.portal_store.run(run["run_id"])
+        self.assertEqual(saved["snapshot"]["gitlab_commit_sha"], "a" * 40)
+        self.assertEqual(saved["snapshot"]["gitlab_path_with_namespace"], "group/demo")
+        self.assertEqual(saved["snapshot"]["tracker_service_id"], "service-1")
+        before = set((Path(self.tmp.name) / "inputs").glob("*.tar.gz"))
+        with patch("security_scanner.linux_portal.resolve_gitlab_ref", return_value="a" * 40), patch(
+            "security_scanner.linux_portal.download_gitlab_archive", side_effect=fake_download
+        ), patch.object(self.server.portal_store, "add_input", side_effect=ValueError("database rejected input")):
+            status, _ = self.request("/koda/api/v1/scans", method="POST", headers=self.headers(), payload={
+                "project_id": project, "gitlab_repository_id": mapping_id,
+                "ref_type": "branch", "ref_name": "main", "standard": "local",
+                "standard_category": "all", "scan_scope": "source",
+            })
+        self.assertEqual(status, 422)
+        self.assertEqual(set((Path(self.tmp.name) / "inputs").glob("*.tar.gz")), before)
+
+    def test_gitlab_configuration_api_never_returns_or_audits_token(self):
+        payload = {"url": "https://gitlab.example.internal", "token": "glpat-web-secret", "write_token": "glpat-write-secret", "ca_pem": ""}
+        account = {"id": 7, "username": "scanner", "name": "Scanner", "state": "active"}
+        with patch.dict(os.environ, {"KODA_GITLAB_URL": "", "KODA_GITLAB_TOKEN_FILE": "", "KODA_GITLAB_WRITE_TOKEN_FILE": "", "KODA_GITLAB_CA_FILE": ""}), patch(
+            "security_scanner.linux_portal.test_gitlab_configuration", return_value=account,
+        ), patch(
+            "security_scanner.linux_portal.test_gitlab_write_configuration", return_value=account,
+        ):
+            status, tested = self.request(
+                "/koda/api/v1/admin/gitlab/configuration/test", method="POST",
+                headers=self.headers(), payload={key: value for key, value in payload.items() if key != "write_token"},
+            )
+            self.assertEqual((status, tested["account"]["username"]), (200, "scanner"))
+            status, saved = self.request(
+                "/koda/api/v1/admin/gitlab/configuration", method="POST",
+                headers=self.headers(), payload=payload,
+            )
+            self.assertEqual((status, saved["configured"], saved["write_configured"], saved["locked"]), (200, True, True, False))
+            self.assertNotIn("token", saved)
+            status, page = self.request("/koda/admin/gitlab", headers=self.headers())
+            self.assertEqual(status, 200)
+            self.assertIn("https://gitlab.example.internal", page)
+            self.assertNotIn("glpat-web-secret", page)
+            self.assertIn("비워 두면 기존 PAT 유지", page)
+            status, preserved = self.request(
+                "/koda/api/v1/admin/gitlab/configuration", method="POST", headers=self.headers(),
+                payload={"url": payload["url"], "token": "", "write_token": "", "ca_pem": ""},
+            )
+            self.assertEqual((status, preserved["configured"], preserved["write_configured"]), (200, True, True))
+            integration_dir = Path(self.tmp.name) / "integrations"
+            self.assertEqual((integration_dir / "gitlab.token").read_text(), "glpat-web-secret\n")
+            self.assertEqual((integration_dir / "gitlab-write.token").read_text(), "glpat-write-secret\n")
+            events = self.server.portal_store.audit_events(None)
+            encoded = json.dumps(events, ensure_ascii=False)
+            self.assertIn("gitlab.configuration.updated", encoded)
+            self.assertNotIn("glpat-web-secret", encoded)
+            self.assertNotIn("glpat-write-secret", encoded)
+            status, removed = self.request(
+                "/koda/api/v1/admin/gitlab/configuration", method="DELETE", headers=self.headers(),
+            )
+            self.assertEqual((status, removed), (200, {"ok": True}))
+            self.assertFalse((Path(self.tmp.name) / "integrations" / "gitlab.token").exists())
+            self.assertFalse((Path(self.tmp.name) / "integrations" / "gitlab-write.token").exists())
+        viewer = str(uuid.uuid4())
+        self.assertEqual(self.request(
+            "/koda/api/v1/admin/gitlab/configuration", headers=self.headers(viewer),
+        )[0], 403)
+
+    def test_gitlab_issue_status_api_hides_project_and_retry_is_admin_only(self):
+        store = self.server.portal_store
+        project = store.create_project("Issue API", self.admin)
+        store.set_membership(project, self.admin, "admin", self.admin)
+        mapping = store.set_gitlab_repositories(project, [{
+            "gitlab_project_id": 77, "path_with_namespace": "group/issues", "name": "issues",
+            "default_branch": "main", "tracker_service_id": "service-77",
+            "tracker_environment_id": "environment-77", "tracker_token_ref": "issues.token",
+        }], self.admin)[0]
+        target = Path(self.tmp.name) / "issue-api.tar.gz"
+        target.write_bytes(b"archive")
+        input_id = store.add_input(project, target.name, target)
+        run = store.create_scan(self.admin, project, input_id, "local", "all", "source", source_snapshot={
+            "gitlab_mapping_id": mapping["mapping_id"], "gitlab_project_id": 77,
+            "gitlab_path_with_namespace": "group/issues", "gitlab_ref_type": "branch", "gitlab_ref_name": "main",
+            "gitlab_commit_sha": "c" * 40, "gitlab_archive_sha256": "d" * 64,
+            "gitlab_fetched_at": store._now(), "gitlab_default_branch": "main",
+            "tracker_service_id": "service-77", "tracker_environment_id": "environment-77", "tracker_token_ref": "issues.token",
+        })
+        store.complete_run(run["run_id"], result={"findings": [{
+            "rule_id": "code.api", "category": "code", "severity": "high", "title": "API finding",
+            "path": "api.py", "line": 1, "verification_status": "confirmed", "issue_key": "api-finding",
+        }, {
+            "rule_id": "dependency.cve", "category": "dependencies", "severity": "medium",
+            "title": "Library finding", "path": "requirements.txt", "verification_status": "confirmed",
+        }]})
+        store.claim_tracker_delivery(run["run_id"])
+        store.finish_tracker_delivery(
+            run["run_id"], "completed", tracker_run_id="tracker-ui-1",
+            tracker_run_url="https://tracker.example/?page=runs&runId=tracker-ui-1",
+        )
+        store.claim_gitlab_result(run["run_id"])
+        store.finish_gitlab_result(
+            run["run_id"], "failed", error="GitLab unavailable",
+            issue_urls=["https://gitlab.example/group/issues/-/issues/10"],
+        )
+        store.claim_gitlab_issue_delivery(run["run_id"])
+        store.prepare_gitlab_issue_items(run["run_id"], 77, [{"finding_index": 0, "finding_key": "api-finding"}])
+        store.finish_gitlab_issue_item(run["run_id"], "api-finding", "failed", error="offline")
+        store.finish_gitlab_issue_delivery(run["run_id"])
+
+        viewer, outsider = str(uuid.uuid4()), str(uuid.uuid4())
+        for subject in (viewer, outsider):
+            store.ensure_subject(subject, subject)
+            store.set_subject(subject, status="enabled", system_admin=False, display=subject, actor=self.admin)
+        store.set_membership(project, viewer, "viewer", self.admin)
+        endpoint = f"/koda/api/v1/runs/{run['run_id']}/gitlab/issues"
+        self.assertEqual(self.request(endpoint, headers=self.headers(outsider))[0], 404)
+        status, payload = self.request(endpoint, headers=self.headers(viewer))
+        self.assertEqual((status, payload["status"], payload["items"][0]["status"]), (200, "failed", "failed"))
+        self.assertEqual(self.request(endpoint + "/retry", method="POST", headers=self.headers(viewer), payload={})[0], 403)
+        with patch("security_scanner.linux_portal._deliver_gitlab_issues", return_value={"status": "completed"}) as retry:
+            self.assertEqual(self.request(endpoint + "/retry", method="POST", headers=self.headers(), payload={})[0], 200)
+        retry.assert_called_once_with(store, run["run_id"], retry=True)
+        status, page = self.request(f"/koda/runs/{run['run_id']}", headers=self.headers())
+        self.assertEqual(status, 200)
+        self.assertIn("GitLab 취약점 이슈 등록", page)
+        self.assertIn("GitLab 이슈", page)
+        self.assertIn("실패 항목 재시도", page)
+        self.assertIn("KODA-SBOM-Tracker 전송", page)
+        self.assertIn("Tracker 실행 화면", page)
+        self.assertIn("GitLab 결과 등록 재시도", page)
+        self.assertIn("요약 이슈에 포함", page)
+        self.assertIn("https://gitlab.example/group/issues/-/issues/10", page)
+        self.assertIn("json(`/koda/api/v1/runs/${runId}/gitlab/result/retry`", page)
 
     def test_scope_menus_render_independent_scan_pages(self):
         project = self.server.portal_store.create_project("scope pages", self.admin)

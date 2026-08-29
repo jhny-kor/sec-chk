@@ -52,7 +52,16 @@ Environment:
   KODA_DASHBOARD_BIND   dashboard bind address, default 127.0.0.1
   KODA_PORTAL_DATA_DIR  durable portal database/input directory
   KODA_PUBLISH_DASHBOARD set 0 when a gateway reaches the private Docker network
-  KODA_SSBOM_TRACKER_URL optional http(s) URL shown as an SBOM Tracker button
+  KODA_GITLAB_URL        GitLab HTTPS base URL
+  KODA_GITLAB_TOKEN_FILE host path to the GitLab service-account token
+  KODA_GITLAB_WRITE_TOKEN_FILE host path to the GitLab result-write API token
+  KODA_GITLAB_CA_FILE    optional private CA bundle for GitLab
+  KODA_GITLAB_NETWORK    optional pre-created Docker network with GitLab reachability
+  KODA_TRACKER_URL       optional KODA-SBOM-Tracker base URL
+  KODA_TRACKER_TOKEN_DIR host directory for per-repository Tracker token files
+  KODA_TRACKER_PROVISIONING_TOKEN_FILE shared Tracker provisioning token file
+  KODA_TRACKER_RESULT_TIMEOUT_SECONDS analysis-result wait limit, default 900
+  KODA_TRACKER_CA_FILE   optional private CA bundle for Tracker
   KODA_DOCKER_EXTRA_ARGS extra docker run options, whitespace-separated
 EOF
 }
@@ -246,11 +255,46 @@ dashboard_start() {
   portal_data="$(realpath "$portal_data")"
   filtered+=(
     -v "$portal_data:/var/lib/koda:rw"
+    -e KODA_PORTAL_DATA_DIR=/var/lib/koda
     -e KODA_PORTAL_DB=/var/lib/koda/portal.sqlite3
     -e KODA_PORTAL_INPUT_DIR=/var/lib/koda/inputs
   )
   if [ -n "${KODA_SSBOM_TRACKER_URL:-}" ]; then
     filtered+=(-e "KODA_SSBOM_TRACKER_URL=${KODA_SSBOM_TRACKER_URL}")
+  fi
+  [ -z "${KODA_GITLAB_URL:-}" ] || filtered+=(-e "KODA_GITLAB_URL=${KODA_GITLAB_URL}")
+  [ -z "${KODA_TRACKER_URL:-}" ] || filtered+=(-e "KODA_TRACKER_URL=${KODA_TRACKER_URL}")
+  [ -z "${KODA_TRACKER_RESULT_TIMEOUT_SECONDS:-}" ] || filtered+=(-e "KODA_TRACKER_RESULT_TIMEOUT_SECONDS=${KODA_TRACKER_RESULT_TIMEOUT_SECONDS}")
+  local source_path
+  if [ -n "${KODA_GITLAB_TOKEN_FILE:-}" ]; then
+    source_path="$(realpath "$KODA_GITLAB_TOKEN_FILE")"
+    [ -f "$source_path" ] && [ -r "$source_path" ] || { echo "error: GitLab token file is not readable by uid $(id -u)" >&2; exit 2; }
+    filtered+=(-v "$source_path:/run/secrets/koda-gitlab-token:ro" -e KODA_GITLAB_TOKEN_FILE=/run/secrets/koda-gitlab-token)
+  fi
+  if [ -n "${KODA_GITLAB_WRITE_TOKEN_FILE:-}" ]; then
+    source_path="$(realpath "$KODA_GITLAB_WRITE_TOKEN_FILE")"
+    [ -f "$source_path" ] && [ -r "$source_path" ] || { echo "error: GitLab write token file is not readable by uid $(id -u)" >&2; exit 2; }
+    filtered+=(-v "$source_path:/run/secrets/koda-gitlab-write-token:ro" -e KODA_GITLAB_WRITE_TOKEN_FILE=/run/secrets/koda-gitlab-write-token)
+  fi
+  if [ -n "${KODA_TRACKER_TOKEN_DIR:-}" ]; then
+    source_path="$(realpath "$KODA_TRACKER_TOKEN_DIR")"
+    [ -d "$source_path" ] && [ -r "$source_path" ] && [ -w "$source_path" ] && [ -x "$source_path" ] || { echo "error: Tracker token directory is not private and writable by uid $(id -u)" >&2; exit 2; }
+    filtered+=(-v "$source_path:/run/koda/tracker-tokens:rw" -e KODA_TRACKER_TOKEN_DIR=/run/koda/tracker-tokens)
+  fi
+  if [ -n "${KODA_TRACKER_PROVISIONING_TOKEN_FILE:-}" ]; then
+    source_path="$(realpath "$KODA_TRACKER_PROVISIONING_TOKEN_FILE")"
+    [ -f "$source_path" ] && [ -r "$source_path" ] || { echo "error: Tracker provisioning token file is not readable by uid $(id -u)" >&2; exit 2; }
+    filtered+=(-v "$source_path:/run/secrets/koda-tracker-provisioning:ro" -e KODA_TRACKER_PROVISIONING_TOKEN_FILE=/run/secrets/koda-tracker-provisioning)
+  fi
+  if [ -n "${KODA_GITLAB_CA_FILE:-}" ]; then
+    source_path="$(realpath "$KODA_GITLAB_CA_FILE")"
+    [ -f "$source_path" ] || { echo "error: GitLab CA file not found" >&2; exit 2; }
+    filtered+=(-v "$source_path:/run/secrets/koda-gitlab-ca.pem:ro" -e KODA_GITLAB_CA_FILE=/run/secrets/koda-gitlab-ca.pem)
+  fi
+  if [ -n "${KODA_TRACKER_CA_FILE:-}" ]; then
+    source_path="$(realpath "$KODA_TRACKER_CA_FILE")"
+    [ -f "$source_path" ] || { echo "error: Tracker CA file not found" >&2; exit 2; }
+    filtered+=(-v "$source_path:/run/secrets/koda-tracker-ca.pem:ro" -e KODA_TRACKER_CA_FILE=/run/secrets/koda-tracker-ca.pem)
   fi
   if [ -n "$reports" ]; then
     mkdir -p "$reports"
@@ -263,6 +307,11 @@ dashboard_start() {
   fi
   docker run "${docker_opts[@]}" "$image" \
     serve --host 0.0.0.0 --port 8765 >/dev/null
+  if [ -n "${KODA_GITLAB_NETWORK:-}" ] && ! docker network connect "$KODA_GITLAB_NETWORK" "$dashboard_name"; then
+    docker rm -f "$dashboard_name" >/dev/null
+    echo "error: could not connect dashboard to KODA_GITLAB_NETWORK" >&2
+    exit 2
+  fi
   if [ "${KODA_PUBLISH_DASHBOARD:-1}" = 1 ]; then
     echo "dashboard started: http://$bind:$port/koda/"
   else

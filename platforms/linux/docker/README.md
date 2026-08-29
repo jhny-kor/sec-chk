@@ -132,6 +132,14 @@ masquerade를 비활성화해 컨테이너 발신 트래픽을 차단합니다. 
 `com.docker.network.bridge.enable_ip_masquerade` 옵션을 확인해야 합니다.
 (`--internal` 네트워크는 포트 공개까지 차단하므로 사용하지 않습니다.)
 
+GitLab 서비스 계정으로 접근 가능한 저장소를 포털에서 선택해 점검하려면
+[GitLab 저장소 연동 지침](../../../docs/gitlab-integration-ko.md)에 따라 관리자 화면에서
+URL·조회용 PAT·결과 저장용 PAT·선택적 CA를 저장합니다. 운영자가 웹 변경을 잠글 때만
+`read_api` 조회 토큰과 같은 계정의 `api` 쓰기 토큰 파일, CA 파일을 읽기 전용으로
+마운트합니다. KODA는 Tracker가 발급한
+저장소별 전송 토큰을 전용 읽기·쓰기 디렉터리에 저장합니다. 허용 목적지만 도달하는 별도 Docker 네트워크는
+`KODA_GITLAB_NETWORK`로 연결합니다.
+
 ### KODA SBOM Tracker 통합
 
 운영에서는 KODA·Tracker·Dependency-Track을 한 압축파일로 묶은 통합 gateway를

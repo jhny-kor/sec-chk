@@ -18,6 +18,7 @@ class LinuxSuiteContractTests(unittest.TestCase):
         cls.docker_wrapper = (ROOT / "platforms/linux/docker/koda-docker.sh").read_text()
         cls.compose = (ROOT / "platforms/linux/suite/compose.integration.yaml").read_text()
         cls.gateway = (ROOT / "platforms/linux/suite/gateway.conf.template").read_text()
+        cls.suite_env = (ROOT / "platforms/linux/suite/koda-suite.env.example").read_text()
 
     def test_all_three_products_are_routed_and_health_checked(self) -> None:
         self.assertIn('/koda/live', self.launcher)
@@ -38,6 +39,19 @@ class LinuxSuiteContractTests(unittest.TestCase):
 
     def test_lifecycle_uses_one_integrated_offline_compose_contract(self) -> None:
         self.assertIn('suite_compose "$prefix" up -d --no-build --pull never', self.launcher)
+
+    def test_tracker_transfer_uses_gateway_only_koda_network(self) -> None:
+        self.assertIn("KODA_TRACKER_URL=http://koda-sbom-gateway:8080", self.suite_env)
+        self.assertIn("KODA_TRACKER_PROVISIONING_TOKEN_FILE=", self.suite_env)
+        self.assertIn("TRACKER_KODA_PROVISIONING_TOKEN_FILE", self.compose)
+        self.assertIn("ensure_tracker_integration_secrets", self.launcher)
+        self.assertIn("os.chmod(secret_file, 0o444)", self.launcher)
+        self.assertIn("os.chmod(token_dir, 0o733)", self.launcher)
+        self.assertIn("custom integration secret parent must be private", self.launcher)
+        self.assertIn("/run/koda/tracker-tokens:rw", self.docker_wrapper)
+        self.assertIn("/run/secrets/koda-tracker-provisioning:ro", self.docker_wrapper)
+        self.assertNotIn("KODA_TRACKER_NETWORK", self.suite_env + self.launcher + self.docker_wrapper)
+        self.assertIn("- koda_dashboard", self.compose)
         self.assertIn(
             'suite_compose "$prefix" up -d --no-build --pull never --force-recreate',
             self.launcher,
@@ -272,6 +286,7 @@ DTRACK_APISERVER_IMAGE=dependencytrack/apiserver:5.0.3
             (tracker_root / 'compose.yaml').write_text('services: {}\n')
             (tracker_root / 'compose.airgap.yaml').write_text('services: {}\n')
             (tracker_root / 'metadata.env').write_text('VULNERABILITY_BUNDLE=absent\n')
+            (tracker_root / 'manifest.sha256').write_text('')
             (tracker_root / 'config/.env.example').write_text('NGINX_IMAGE=nginx:2\n')
             (tracker_root / 'images/nginx_2.tar').write_bytes(b'not-loaded')
             tracker_bundle = release / 'bundles/tracker.tar.gz'
@@ -422,7 +437,9 @@ KODA_RBAC_CATALOG_VERSION=koda-rbac-v1
         self.assertIn('tar --no-xattrs', packager)
         self.assertIn('TROUBLESHOOTING.ko.md', packager)
         self.assertIn('"$script_dir/TROUBLESHOOTING.ko.md"', self.launcher)
-        self.assertEqual(packager.count('status --porcelain --untracked-files=no'), 2)
+        self.assertIn('status --porcelain --untracked-files=all', packager)
+        self.assertIn('KODA bundle provenance does not match', packager)
+        self.assertIn('Tracker bundle provenance does not match', packager)
 
     def test_vulnerability_seed_reuses_koda_offline_datasets(self) -> None:
         builder = (ROOT / 'platforms/linux/build-suite-vuln-bundle.sh').read_text()
@@ -437,8 +454,16 @@ KODA_RBAC_CATALOG_VERSION=koda-rbac-v1
             release = Path(temp)
             (release / 'bundles').mkdir()
             (release / 'gateway').mkdir()
-            (release / 'bundles/koda.tar.gz').write_bytes(b'koda')
-            (release / 'bundles/tracker.tar.gz').write_bytes(b'tracker')
+            for archive_path, root_name in (
+                (release / 'bundles/koda.tar.gz', 'koda'),
+                (release / 'bundles/tracker.tar.gz', ''),
+            ):
+                with tarfile.open(archive_path, 'w:gz') as archive:
+                    info = tarfile.TarInfo(
+                        f'{root_name + "/" if root_name else ""}manifest.sha256'
+                    )
+                    info.size = 0
+                    archive.addfile(info)
             (release / 'compose.integration.yaml').write_text('services: {}\n')
             (release / 'gateway/gateway.conf.template').write_text('server {}\n')
             (release / '.env.example').write_text('COMPOSE_PROJECT_NAME=koda-sbom\n')

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import hashlib
 import io
 import json
@@ -17,6 +18,29 @@ from urllib.parse import parse_qs, urlparse
 
 from .grype_adapter import inspect_grype
 from .portal_identity import IdentityError, IdentityUnavailable, identity_from_headers
+from .portal_integrations import (
+    IntegrationError,
+    add_gitlab_issue_note,
+    create_gitlab_issue,
+    download_gitlab_archive,
+    fetch_tracker_result,
+    find_gitlab_issue,
+    find_gitlab_issue_note,
+    get_gitlab_issue,
+    gitlab_configuration,
+    gitlab_status,
+    list_gitlab_projects,
+    list_gitlab_refs,
+    provision_tracker_repository,
+    publish_tracker_result,
+    remove_gitlab_configuration,
+    resolve_gitlab_configuration_tokens,
+    resolve_gitlab_ref,
+    save_gitlab_configuration,
+    send_tracker_sbom,
+    test_gitlab_configuration,
+    test_gitlab_write_configuration,
+)
 from .portal_store import SCREEN_PERMISSIONS, PortalStore, VersionConflict
 from .portal_views import (
     PERMISSION_METADATA,
@@ -27,6 +51,7 @@ from .portal_views import (
     esc,
     format_portal_time,
     guide_page,
+    gitlab_admin_page,
     login_page,
     new_scan_page,
     page,
@@ -39,6 +64,8 @@ from .portal_views import (
 
 MAX_JSON_BYTES = 36 * 1024 * 1024
 MAX_INPUT_BYTES = 1024 * 1024 * 1024
+MAX_ARCHIVE_FILES = 200_000
+MAX_EXTRACTED_BYTES = 4 * 1024 * 1024 * 1024
 _KODA_ICON = Path(__file__).with_name("assets") / "KODA.ico"
 
 
@@ -63,11 +90,16 @@ def _run_scan(store: PortalStore, run_id: str) -> None:
         snapshot = run["snapshot"]
         if not store.set_run_progress(run_id, "preparing", 15):
             return store.complete_run(run_id)
-        with tempfile.TemporaryDirectory(prefix="koda-portal-") as extraction:
+        work_root = Path(source["path"]).parent.parent / "work"
+        work_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="koda-portal-", dir=work_root) as extraction:
             from .archive_input import prepare_input_target
             from .server import scan_directory_payload
 
-            target = prepare_input_target(Path(source["path"]), Path(extraction))
+            target = prepare_input_target(
+                Path(source["path"]), Path(extraction),
+                max_files=MAX_ARCHIVE_FILES, max_bytes=MAX_EXTRACTED_BYTES,
+            )
             if not store.set_run_progress(run_id, "scanning", 35):
                 return store.complete_run(run_id)
             scan_scope = str(snapshot.get("scan_scope") or "all")
@@ -87,8 +119,217 @@ def _run_scan(store: PortalStore, run_id: str) -> None:
             if not store.set_run_progress(run_id, "finalizing", 90):
                 return store.complete_run(run_id)
         store.complete_run(run_id, result=result)
+        if snapshot.get("gitlab_mapping_id"):
+            try:
+                _deliver_tracker(store, run_id)
+            except Exception as exc:  # Tracker failure must not change the KODA result.
+                if (store.tracker_delivery(run_id) or {}).get("status") == "sending":
+                    store.finish_tracker_delivery(run_id, "failed", error=str(exc))
+            try:
+                _deliver_gitlab_issues(store, run_id)
+            except Exception as exc:  # GitLab issue failure must not change KODA or Tracker results.
+                if (store.gitlab_issue_delivery(run_id) or {}).get("status") == "sending":
+                    store.finish_gitlab_issue_delivery(run_id, error=str(exc))
     except Exception as exc:  # worker errors are durable and visible per round
         store.complete_run(run_id, error=str(exc)[:2000])
+
+
+def _deliver_tracker(store: PortalStore, run_id: str, *, retry: bool = False) -> dict:
+    run = store.run(run_id)
+    snapshot = run.get("snapshot") or {}
+    mapping_id = str(snapshot.get("gitlab_mapping_id") or "")
+    if run.get("status") != "completed" or not mapping_id:
+        raise ValueError("completed GitLab run required")
+    mapping = {
+        "gitlab_project_id": snapshot.get("gitlab_project_id"),
+        "path_with_namespace": snapshot.get("gitlab_path_with_namespace"),
+        "default_branch": snapshot.get("gitlab_default_branch"),
+        "tracker_service_id": snapshot.get("tracker_service_id"),
+        "tracker_environment_id": snapshot.get("tracker_environment_id"),
+        "tracker_token_ref": snapshot.get("tracker_token_ref"),
+    }
+    if not all(mapping.values()):
+        raise ValueError("Tracker destination snapshot is missing")
+    store.claim_tracker_delivery(run_id, retry=retry)
+    tracker_run_id = ""
+    try:
+        tracker_run_id = send_tracker_sbom(mapping, run)
+        tracker_result = fetch_tracker_result(mapping, tracker_run_id)
+    except Exception as exc:
+        return store.finish_tracker_delivery(run_id, "failed", tracker_run_id=tracker_run_id, error=str(exc))
+    tracker_run = tracker_result.get("run") if isinstance(tracker_result, dict) else {}
+    tracker_run_url = str((tracker_run or {}).get("runUrl") or "") if isinstance(tracker_run, dict) else ""
+    store.finish_tracker_delivery(run_id, "completed", tracker_run_id=tracker_run_id, tracker_run_url=tracker_run_url)
+    return _deliver_gitlab_result(store, run_id, tracker_result=tracker_result, mapping=mapping, run=run)
+
+
+def _deliver_gitlab_result(store: PortalStore, run_id: str, *, tracker_result: dict | None = None, mapping: dict | None = None, run: dict | None = None, retry: bool = False) -> dict:
+    run = run or store.run(run_id)
+    delivery = store.tracker_delivery(run_id) or {}
+    tracker_run_id = str(delivery.get("tracker_run_id") or "")
+    if not tracker_run_id or delivery.get("status") != "completed":
+        raise ValueError("completed Tracker delivery required")
+    snapshot = run.get("snapshot") or {}
+    mapping = mapping or {
+        "gitlab_project_id": snapshot.get("gitlab_project_id"),
+        "default_branch": snapshot.get("gitlab_default_branch"),
+        "tracker_token_ref": snapshot.get("tracker_token_ref"),
+    }
+    store.claim_gitlab_result(run_id, retry=retry)
+    try:
+        if tracker_result is None:
+            tracker_result = fetch_tracker_result(mapping, tracker_run_id)
+        settings_dir = Path(os.environ.get("KODA_PORTAL_DATA_DIR") or Path(store.path).parent) / "integrations"
+        published = publish_tracker_result(mapping, run, tracker_run_id, tracker_result, settings_dir=settings_dir)
+    except Exception as exc:
+        return store.finish_gitlab_result(run_id, "failed", error=str(exc))
+    return store.finish_gitlab_result(run_id, "completed", merge_request_url=str(published.get("mergeRequestUrl") or ""), issue_urls=[str(item) for item in published.get("issueUrls") or []])
+
+
+_GITLAB_ISSUE_CATEGORIES = frozenset({"secrets", "configuration", "code", "prevention"})
+
+
+def _gitlab_finding_key(finding: dict) -> str:
+    issue_key = str(finding.get("issue_key") or "").strip()
+    if issue_key:
+        return issue_key
+    stable = [
+        finding.get("rule_id"), finding.get("target"), finding.get("path"), finding.get("line"),
+        finding.get("resource"), finding.get("evidence_id"),
+    ]
+    return hashlib.sha256(json.dumps(stable, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def _eligible_gitlab_findings(run: dict) -> list[dict]:
+    result = run.get("result") if isinstance(run.get("result"), dict) else {}
+    findings = result.get("findings") if isinstance(result.get("findings"), list) else []
+    eligible, seen = [], set()
+    for index, finding in enumerate(findings):
+        if not isinstance(finding, dict) or str(finding.get("category") or "").lower() not in _GITLAB_ISSUE_CATEGORIES or finding.get("verification_status") != "confirmed":
+            continue
+        key = _gitlab_finding_key(finding)
+        if key in seen:
+            continue
+        seen.add(key)
+        eligible.append({"finding_index": index, "finding_key": key, "finding": finding})
+    return eligible
+
+
+def _issue_marker(finding_key: str) -> str:
+    return hashlib.sha256(str(finding_key).encode()).hexdigest()
+
+
+def _markdown(value, limit: int = 4000) -> str:
+    return str(value or "—").replace("`", "'")[:limit]
+
+
+def _gitlab_issue_description(run: dict, finding: dict, stable_marker: str, delivery_marker: str) -> str:
+    snapshot = run.get("snapshot") or {}
+    standards = finding.get("standard_mappings") if isinstance(finding.get("standard_mappings"), list) else []
+    cves = sorted(set(re.findall(r"CVE-\d{4}-\d{4,}", " ".join(str(finding.get(key) or "") for key in ("title", "evidence", "description")), re.I)))
+    cwes = finding.get("cwe_ids") if isinstance(finding.get("cwe_ids"), list) else []
+    evidence = "\n".join(f"    {line}" for line in _markdown(finding.get("evidence")).splitlines())
+    return "\n".join((
+        stable_marker, delivery_marker,
+        "KODA가 확정한 보안 취약점입니다.", "",
+        f"- 규칙 ID: `{_markdown(finding.get('rule_id'), 300)}`",
+        f"- 심각도: `{_markdown(finding.get('severity'), 30)}`",
+        f"- 분류: `{_markdown(finding.get('category'), 80)}`",
+        f"- CVE: {_markdown(', '.join(cves))}",
+        f"- CWE: {_markdown(', '.join(map(str, cwes)))}" if cwes else "- CWE: —",
+        f"- 파일: `{_markdown(finding.get('path'), 1000)}`",
+        f"- 줄: `{_markdown(finding.get('line'), 40)}`",
+        f"- 패키지/대상: `{_markdown(finding.get('target') or finding.get('resource'), 1000)}`",
+        f"- 기준 매핑: {_markdown(json.dumps(standards, ensure_ascii=False, separators=(',', ':')), 4000)}",
+        "", "## 설명", _markdown(finding.get("description")),
+        "", "## 증거", evidence,
+        "", "## 권장 조치", _markdown(finding.get("recommendation")),
+        "", "## 점검 회차",
+        f"- KODA 회차: `{_markdown(run.get('run_id'), 100)}` (#{int(run.get('round_number') or 0)})",
+        f"- Ref: `{_markdown(snapshot.get('gitlab_ref_type'), 30)}` / `{_markdown(snapshot.get('gitlab_ref_name'), 500)}`",
+        f"- Commit SHA: `{_markdown(snapshot.get('gitlab_commit_sha'), 80)}`",
+    ))
+
+
+def _gitlab_issue_note(run: dict, marker: str) -> str:
+    snapshot = run.get("snapshot") or {}
+    return "\n".join((
+        marker, "동일 취약점이 새 KODA 점검 회차에서 다시 확인되었습니다.", "",
+        f"- KODA 회차: `{_markdown(run.get('run_id'), 100)}` (#{int(run.get('round_number') or 0)})",
+        f"- Ref: `{_markdown(snapshot.get('gitlab_ref_type'), 30)}` / `{_markdown(snapshot.get('gitlab_ref_name'), 500)}`",
+        f"- Commit SHA: `{_markdown(snapshot.get('gitlab_commit_sha'), 80)}`",
+    ))
+
+
+def _deliver_gitlab_issues(store: PortalStore, run_id: str, *, retry: bool = False) -> dict:
+    run = store.run(run_id)
+    snapshot = run.get("snapshot") or {}
+    project_id = int(snapshot.get("gitlab_project_id") or 0)
+    if run.get("status") != "completed" or not snapshot.get("gitlab_mapping_id") or project_id <= 0:
+        raise ValueError("completed GitLab run required")
+    store.claim_gitlab_issue_delivery(run_id, retry=retry)
+    items = _eligible_gitlab_findings(run)
+    rows = store.prepare_gitlab_issue_items(run_id, project_id, items)
+    findings = {item["finding_key"]: item["finding"] for item in items}
+    settings_dir = Path(os.environ.get("KODA_PORTAL_DATA_DIR") or Path(store.path).parent) / "integrations"
+    batch_error = ""
+    for row in rows:
+        key = str(row["finding_key"])
+        finding = findings.get(key)
+        if not finding or row["status"] in {"created", "reused"}:
+            continue
+        marker_id = _issue_marker(key)
+        stable_marker = f"<!-- koda-finding:{marker_id} -->"
+        delivery_marker = f"<!-- koda-delivery:{run_id}:{marker_id} -->"
+        try:
+            claimed = store.claim_gitlab_issue_item(run_id, key)
+            issue = find_gitlab_issue(project_id, delivery_marker, settings_dir=settings_dir) if claimed["previous_status"] == "creating" else None
+            status = "created"
+            if issue is None:
+                previous = store.previous_gitlab_issue(project_id, key, run_id)
+                issue = get_gitlab_issue(project_id, int(previous["issue_iid"]), settings_dir=settings_dir) if previous else None
+                if not previous:
+                    issue = find_gitlab_issue(project_id, stable_marker, settings_dir=settings_dir)
+                if issue:
+                    iid = int(issue["iid"])
+                    if not find_gitlab_issue_note(project_id, iid, delivery_marker, settings_dir=settings_dir):
+                        add_gitlab_issue_note(project_id, iid, _gitlab_issue_note(run, delivery_marker), settings_dir=settings_dir)
+                    status = "reused"
+                else:
+                    severity = str(finding.get("severity") or "info").upper()
+                    issue = create_gitlab_issue(
+                        project_id, f"[KODA][{severity}] {finding.get('title') or finding.get('rule_id') or '보안 취약점'}",
+                        _gitlab_issue_description(run, finding, stable_marker, delivery_marker), settings_dir=settings_dir,
+                    )
+            store.finish_gitlab_issue_item(
+                run_id, key, status, issue_iid=int(issue["iid"]), issue_url=str(issue.get("web_url") or ""),
+            )
+        except Exception as exc:
+            store.finish_gitlab_issue_item(run_id, key, "failed", error=str(exc))
+            status = exc.status if isinstance(exc, IntegrationError) else 0
+            if status in {0, 401, 403, 429} or status >= 500:
+                batch_error = str(exc)
+                break
+    return store.finish_gitlab_issue_delivery(run_id, error=batch_error)
+
+
+def _run_delivery(store: PortalStore, kind: str, run_id: str, *, retry: bool = False) -> dict:
+    try:
+        if kind == "tracker":
+            return _deliver_tracker(store, run_id, retry=retry)
+        if kind == "gitlab_result":
+            return _deliver_gitlab_result(store, run_id, retry=retry)
+        if kind == "issues":
+            return _deliver_gitlab_issues(store, run_id, retry=retry)
+        raise ValueError("unknown delivery kind")
+    except Exception as exc:
+        if kind == "tracker" and (store.tracker_delivery(run_id) or {}).get("status") == "sending":
+            store.finish_tracker_delivery(run_id, "failed", error=str(exc))
+        elif kind == "gitlab_result" and (store.tracker_delivery(run_id) or {}).get("gitlab_result_status") == "sending":
+            store.finish_gitlab_result(run_id, "failed", error=str(exc))
+        elif kind == "issues" and (store.gitlab_issue_delivery(run_id) or {}).get("status") == "sending":
+            store.finish_gitlab_issue_delivery(run_id, error=str(exc))
+        raise
 
 
 def _analysis_stages(result: dict, scan_scope: str = "all") -> dict[str, dict[str, object]]:
@@ -123,11 +364,17 @@ def _analysis_stages(result: dict, scan_scope: str = "all") -> dict[str, dict[st
 class _PortalWorker:
     def __init__(self, store: PortalStore):
         self.store = store
-        self.jobs: queue.Queue[str | None] = queue.Queue()
+        self.jobs: queue.Queue[tuple[str, str] | None] = queue.Queue()
         self.thread = threading.Thread(target=self._work, name="koda-portal-worker", daemon=True)
         self.thread.start()
         for run_id in store.recover_incomplete_runs():
-            self.jobs.put(run_id)
+            self.jobs.put(("scan", run_id))
+        for run_id in store.recover_tracker_deliveries():
+            self.jobs.put(("tracker", run_id))
+        for run_id in store.recover_gitlab_results():
+            self.jobs.put(("gitlab_result", run_id))
+        for run_id in store.recover_gitlab_issue_deliveries():
+            self.jobs.put(("issues", run_id))
 
     @property
     def available(self) -> bool:
@@ -136,11 +383,18 @@ class _PortalWorker:
     def enqueue(self, run_id: str) -> None:
         if not self.available:
             raise RuntimeError("scan worker unavailable")
-        self.jobs.put(run_id)
+        self.jobs.put(("scan", run_id))
 
     def _work(self) -> None:
-        while (run_id := self.jobs.get()) is not None:
-            _run_scan(self.store, run_id)
+        while (job := self.jobs.get()) is not None:
+            kind, run_id = job
+            if kind == "scan":
+                _run_scan(self.store, run_id)
+            elif kind in {"tracker", "gitlab_result", "issues"}:
+                try:
+                    _run_delivery(self.store, kind, run_id)
+                except Exception:
+                    pass
 
     def close(self) -> None:
         if self.available:
@@ -160,6 +414,8 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
     store = PortalStore(db_path or os.environ.get("KODA_PORTAL_DB", "koda-portal.sqlite3"))
     uploads = Path(input_dir or os.environ.get("KODA_PORTAL_INPUT_DIR", "koda-portal-inputs")).expanduser()
     uploads.mkdir(parents=True, exist_ok=True)
+    portal_data = Path(os.environ.get("KODA_PORTAL_DATA_DIR") or Path(store.path).parent).expanduser()
+    gitlab_settings_dir = portal_data / "integrations"
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "KODA-Portal/1"
@@ -423,7 +679,11 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 project = self._project(identity, run["project_id"], "runs.view")
                 if not project:
                     return self._html(404, page("찾을 수 없음", "<p>분석 회차가 없습니다.</p>", admin=admin, nav_permissions=nav_permissions))
-                return self._html(200, run_page(run, project_name=project["name"], admin=admin, nav_permissions=nav_permissions))
+                return self._html(200, run_page(
+                    run, project_name=project["name"], tracker=store.tracker_delivery(run["run_id"]),
+                    gitlab_issues=store.gitlab_issue_delivery(run["run_id"]),
+                    admin=admin, nav_permissions=nav_permissions,
+                ))
             if path == "/koda/compare":
                 visible = self._screen_projects(identity, subject, projects, "compare.view")
                 if not admin and not visible:
@@ -439,6 +699,24 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 if "scan.library.view" not in nav_permissions:
                     return self._deny_screen(admin, nav_permissions, api=True)
                 return self._json(200, _vulnerability_database_status())
+            if path == "/koda/api/v1/admin/gitlab/status":
+                if not admin:
+                    return self._json(403, {"code": "forbidden"})
+                try:
+                    return self._json(200, gitlab_status(gitlab_settings_dir))
+                except IntegrationError as exc:
+                    return self._json(503, {"code": "gitlab_unavailable", "detail": str(exc)})
+            if path == "/koda/api/v1/admin/gitlab/configuration":
+                if not admin:
+                    return self._json(403, {"code": "forbidden"})
+                return self._json(200, gitlab_configuration(gitlab_settings_dir))
+            if path == "/koda/api/v1/admin/gitlab/projects":
+                if not admin:
+                    return self._json(403, {"code": "forbidden"})
+                try:
+                    return self._json(200, list_gitlab_projects(gitlab_settings_dir))
+                except IntegrationError as exc:
+                    return self._json(502, {"code": "gitlab_unavailable", "detail": str(exc)})
             if path == "/koda/api/v1/compare":
                 if "compare.view" not in nav_permissions:
                     return self._deny_screen(admin, nav_permissions, api=True)
@@ -466,6 +744,30 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 if not admin and not visible:
                     return self._deny_screen(admin, nav_permissions, api=True)
                 return self._json(200, visible)
+            match = re.fullmatch(r"/koda/api/v1/projects/([0-9a-f-]+)/gitlab/repositories", path)
+            if match:
+                project = self._project(identity, match.group(1), "scan.create")
+                if not project:
+                    return self._json(404, {"code": "not_found"})
+                rows = store.gitlab_repositories(project["project_id"])
+                return self._json(200, [{
+                    "mapping_id": row["mapping_id"], "name": row["name"],
+                    "path_with_namespace": row["path_with_namespace"],
+                    "default_branch": row["default_branch"],
+                } for row in rows])
+            match = re.fullmatch(r"/koda/api/v1/projects/([0-9a-f-]+)/gitlab/repositories/([0-9a-f-]+)/refs", path)
+            if match:
+                project_id, mapping_id = match.groups()
+                if not self._project(identity, project_id, "scan.create"):
+                    return self._json(404, {"code": "not_found"})
+                try:
+                    mapping = store.gitlab_repository(mapping_id, project_id)
+                    ref_type = parse_qs(parsed.query).get("type", ["branch"])[0]
+                    return self._json(200, list_gitlab_refs(mapping["gitlab_project_id"], ref_type, gitlab_settings_dir))
+                except IntegrationError as exc:
+                    return self._json(502, {"code": "gitlab_unavailable", "detail": str(exc)})
+                except ValueError as exc:
+                    return self._json(422, {"code": "invalid_request", "detail": str(exc)})
             match = re.fullmatch(r"/koda/api/v1/projects/([0-9a-f-]+)/inputs", path)
             if match:
                 return self._json(200, store.list_inputs(match.group(1))) if self._project(identity, match.group(1), "projects.view") else self._json(404, {"code": "not_found"})
@@ -479,6 +781,33 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 except KeyError:
                     return self._json(404, {"code": "not_found"})
                 return self._json(200, run) if self._project(identity, run["project_id"], "runs.view") else self._json(404, {"code": "not_found"})
+            match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/tracker", path)
+            if match:
+                try:
+                    run = store.run(match.group(1))
+                except KeyError:
+                    return self._json(404, {"code": "not_found"})
+                if not self._project(identity, run["project_id"], "runs.view"):
+                    return self._json(404, {"code": "not_found"})
+                delivery = store.tracker_delivery(run["run_id"])
+                if not delivery:
+                    return self._json(200, {"status": "not_applicable"})
+                return self._json(200, {
+                    **delivery,
+                    "trackerRunUrl": delivery.get("tracker_run_url"),
+                    "gitlabResultStatus": delivery.get("gitlab_result_status", "pending"),
+                    "gitlabResultAttempts": delivery.get("gitlab_result_attempts", 0),
+                    "gitlabResultLastError": delivery.get("gitlab_result_last_error"),
+                })
+            match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/gitlab/issues", path)
+            if match:
+                try:
+                    run = store.run(match.group(1))
+                except KeyError:
+                    return self._json(404, {"code": "not_found"})
+                if not self._project(identity, run["project_id"], "runs.view"):
+                    return self._json(404, {"code": "not_found"})
+                return self._json(200, store.gitlab_issue_delivery(run["run_id"]) or {"status": "not_applicable", "items": []})
             match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/sbom", path)
             if match:
                 try:
@@ -600,6 +929,11 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
 
         def _admin_get(self, path, parsed, identity, nav_permissions):
             projects = store.list_projects(identity.subject_id)
+            if path == "/koda/admin/gitlab":
+                return self._html(200, gitlab_admin_page(
+                    projects, store.gitlab_repositories(), configuration=gitlab_configuration(gitlab_settings_dir),
+                    nav_permissions=nav_permissions,
+                ))
             if path in {"/koda/admin", "/koda/admin/subjects"}:
                 subjects = store.list_subjects()
                 subject_options = "".join(f"<option value='{esc(s['subject_id'])}' data-status='{esc(s['status'])}' data-admin='{int(s['system_admin'])}'>{esc(s['display'] or s['subject_id'])}</option>" for s in subjects if s["status"] in {"enabled", "disabled"})
@@ -733,7 +1067,10 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 if match:
                     return self._json(415, {"code": "binary_upload_required", "detail": "Content-Type application/octet-stream이 필요합니다"})
                 if path == "/koda/api/v1/scans":
-                    fields = {"project_id", "input_id", "standard", "standard_category"}
+                    common = {"project_id", "standard", "standard_category"}
+                    file_fields = common | {"input_id"}
+                    gitlab_fields = common | {"gitlab_repository_id", "ref_type", "ref_name"}
+                    fields = gitlab_fields if "gitlab_repository_id" in payload else file_fields
                     if not self._exact(payload, fields | ({"scan_scope"} if "scan_scope" in payload else set())):
                         return
                     payload.setdefault("scan_scope", "all")
@@ -749,9 +1086,125 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                         return self._json(404, {"code": "not_found"})
                     if not self.server.portal_worker.available:
                         return self._json(503, {"code": "worker_unavailable"})
-                    run = store.create_scan(identity.subject_id, **payload)
+                    if "gitlab_repository_id" in payload:
+                        mapping = store.gitlab_repository(payload.pop("gitlab_repository_id"), payload["project_id"])
+                        ref_type, ref_name = payload.pop("ref_type"), payload.pop("ref_name")
+                        commit_sha = resolve_gitlab_ref(mapping["gitlab_project_id"], ref_type, ref_name, gitlab_settings_dir)
+                        target = uploads / f"{os.urandom(16).hex()}.tar.gz"
+                        input_id = ""
+                        try:
+                            digest, _ = download_gitlab_archive(
+                                mapping["gitlab_project_id"], commit_sha, target, max_bytes=MAX_INPUT_BYTES,
+                                settings_dir=gitlab_settings_dir,
+                            )
+                            input_id = store.add_input(
+                                payload["project_id"], f"{mapping['name']}-{commit_sha[:12]}.tar.gz",
+                                target, identity.subject_id, digest,
+                            )
+                        except Exception:
+                            target.unlink(missing_ok=True)
+                            raise
+                        payload["input_id"] = input_id
+                        payload["source_snapshot"] = {
+                            "gitlab_mapping_id": mapping["mapping_id"],
+                            "gitlab_project_id": mapping["gitlab_project_id"],
+                            "gitlab_path_with_namespace": mapping["path_with_namespace"],
+                            "gitlab_ref_type": ref_type, "gitlab_ref_name": ref_name,
+                            "gitlab_commit_sha": commit_sha, "gitlab_archive_sha256": digest,
+                            "gitlab_default_branch": mapping["default_branch"],
+                            "gitlab_fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                            "tracker_service_id": mapping["tracker_service_id"],
+                            "tracker_environment_id": mapping["tracker_environment_id"],
+                            "tracker_token_ref": mapping["tracker_token_ref"],
+                        }
+                        try:
+                            run = store.create_scan(identity.subject_id, **payload)
+                        except Exception:
+                            store.discard_input(input_id)
+                            raise
+                    else:
+                        run = store.create_scan(identity.subject_id, **payload)
                     self.server.portal_worker.enqueue(run["run_id"])
                     return self._json(202, run)
+                match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/tracker/retry", path)
+                if match:
+                    if not self._exact(payload, set()):
+                        return
+                    run = store.run(match.group(1))
+                    if not self._project(identity, run["project_id"], "runs.view") or not self._project(identity, run["project_id"], "scan.create"):
+                        return self._json(404, {"code": "not_found"})
+                    return self._json(200, _run_delivery(store, "tracker", run["run_id"], retry=True))
+                match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/gitlab/result/retry", path)
+                if match:
+                    if not admin:
+                        return self._json(403, {"code": "forbidden"})
+                    if not self._exact(payload, set()):
+                        return
+                    run = store.run(match.group(1))
+                    return self._json(200, _run_delivery(store, "gitlab_result", run["run_id"], retry=True))
+                match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/gitlab/issues/retry", path)
+                if match:
+                    if not admin:
+                        return self._json(403, {"code": "forbidden"})
+                    if not self._exact(payload, set()):
+                        return
+                    run = store.run(match.group(1))
+                    return self._json(200, _run_delivery(store, "issues", run["run_id"], retry=True))
+                if path == "/koda/api/v1/admin/gitlab/mappings":
+                    if not admin:
+                        return self._json(403, {"code": "forbidden"})
+                    if not self._exact(payload, {"project_id", "mappings"}):
+                        return
+                    available = {int(item["id"]): item for item in list_gitlab_projects(gitlab_settings_dir)}
+                    configuration = gitlab_configuration(gitlab_settings_dir)
+                    if not configuration.get("write_configured"):
+                        return self._json(409, {"code": "gitlab_write_token_required", "detail": "GitLab 결과 저장용 API 토큰을 먼저 설정하세요"})
+                    canonical = []
+                    for item in payload["mappings"]:
+                        if not isinstance(item, dict) or set(item) != {"gitlab_project_id"}:
+                            raise ValueError("invalid GitLab repository mapping")
+                        remote = available.get(int(item["gitlab_project_id"]))
+                        if not remote:
+                            raise ValueError("GitLab account cannot access selected project")
+                        canonical.append({
+                            **item, **provision_tracker_repository(str(configuration["url"]), remote),
+                            "path_with_namespace": remote["path_with_namespace"],
+                            "name": remote["name"], "default_branch": remote.get("default_branch") or "",
+                        })
+                    return self._json(200, store.set_gitlab_repositories(
+                        payload["project_id"], canonical, identity.subject_id,
+                    ))
+                if path in {"/koda/api/v1/admin/gitlab/configuration/test", "/koda/api/v1/admin/gitlab/configuration"}:
+                    if not admin:
+                        return self._json(403, {"code": "forbidden"})
+                    if set(payload) not in ({"url", "token", "ca_pem"}, {"url", "token", "write_token", "ca_pem"}):
+                        self._json(422, {"code": "invalid_fields"})
+                        return
+                    if gitlab_configuration(gitlab_settings_dir)["locked"]:
+                        return self._json(409, {"code": "configuration_locked", "detail": "서버 환경변수로 설정되어 웹에서 변경할 수 없습니다"})
+                    existing_ca = gitlab_settings_dir / "gitlab-ca.pem"
+                    read_token, write_token = resolve_gitlab_configuration_tokens(
+                        gitlab_settings_dir, payload.get("token"), payload.get("write_token"),
+                    )
+                    account = (
+                        test_gitlab_write_configuration(
+                            payload["url"], read_token, write_token, payload["ca_pem"], existing_ca_file=existing_ca,
+                        )
+                        if write_token else test_gitlab_configuration(
+                            payload["url"], read_token, payload["ca_pem"], existing_ca_file=existing_ca,
+                        )
+                    )
+                    if path.endswith("/test"):
+                        return self._json(200, {"ok": True, "account": account})
+                    if not write_token:
+                        return self._json(422, {"code": "gitlab_write_token_required", "detail": "GitLab 결과 저장 PAT가 필요합니다"})
+                    configuration = save_gitlab_configuration(
+                        gitlab_settings_dir, payload["url"], read_token, payload["ca_pem"], write_token,
+                    )
+                    store.record_audit(identity.subject_id, "gitlab.configuration.updated", {
+                        "url": configuration["url"], "ca_configured": configuration["ca_configured"],
+                    })
+                    return self._json(200, {**configuration, "account": account})
                 match = re.fullmatch(r"/koda/api/v1/runs/([0-9a-f-]+)/cancel", path)
                 if match:
                     if not self._exact(payload, set()):
@@ -794,9 +1247,40 @@ def create_portal_server(host="127.0.0.1", port=8765, language="ko", db_path=Non
                 return self._json(403, {"code": "forbidden"})
             except KeyError:
                 return self._json(404, {"code": "not_found"})
+            except IntegrationError as exc:
+                return self._json(502, {"code": "integration_unavailable", "detail": str(exc)})
             except (ValueError, TypeError) as exc:
                 return self._json(422, {"code": "invalid_request", "detail": str(exc)})
             self._json(404, {"code": "not_found"})
+
+        def do_DELETE(self):
+            path = urlparse(self.path).path.rstrip("/")
+            authenticated = self._enabled(True)
+            if not authenticated:
+                return
+            identity, subject = authenticated
+            if path == "/koda/api/v1/admin/gitlab/configuration":
+                if not self._admin(subject):
+                    return self._json(403, {"code": "forbidden"})
+                try:
+                    previous = gitlab_configuration(gitlab_settings_dir)
+                    remove_gitlab_configuration(gitlab_settings_dir)
+                    store.record_audit(identity.subject_id, "gitlab.configuration.removed", {
+                        "url": previous["url"], "ca_configured": previous["ca_configured"],
+                    })
+                    return self._json(200, {"ok": True})
+                except IntegrationError as exc:
+                    return self._json(409, {"code": "configuration_locked", "detail": str(exc)})
+            match = re.fullmatch(r"/koda/api/v1/admin/gitlab/mappings/([0-9a-f-]+)", path)
+            if not match:
+                return self._json(404, {"code": "not_found"})
+            if not self._admin(subject):
+                return self._json(403, {"code": "forbidden"})
+            try:
+                store.remove_gitlab_repository(match.group(1), identity.subject_id)
+                return self._json(200, {"ok": True})
+            except KeyError:
+                return self._json(404, {"code": "not_found"})
 
     server = _PortalServer((host, port), Handler)
     server.daemon_threads = True
@@ -863,6 +1347,10 @@ def _comparison_data(store: PortalStore, subject_id: str, left: str, right: str)
         raise ValueError("two different runs are required")
     if before["project_id"] != after["project_id"]:
         raise ValueError("runs must belong to the same project")
+    before_repository = (before.get("snapshot") or {}).get("gitlab_project_id")
+    after_repository = (after.get("snapshot") or {}).get("gitlab_project_id")
+    if (before_repository or after_repository) and before_repository != after_repository:
+        raise ValueError("GitLab runs must belong to the same repository")
     if before["status"] != "completed" or after["status"] != "completed":
         raise ValueError("completed runs are required")
     def mapped(run):

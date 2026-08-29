@@ -1,4 +1,10 @@
 services:
+  portal-api:
+    environment:
+      TRACKER_KODA_PROVISIONING_TOKEN_FILE: /run/secrets/koda-tracker-provisioning
+    volumes:
+      - ${KODA_TRACKER_PROVISIONING_TOKEN_FILE}:/run/secrets/koda-tracker-provisioning:ro
+
   gateway:
     volumes:
       - ./gateway/gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
